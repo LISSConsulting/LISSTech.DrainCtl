@@ -4,7 +4,7 @@
 
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
-![License](https://img.shields.io/badge/License-BSL_1.1-yellow)
+![License](https://img.shields.io/badge/License-Apache_2.0-blue)
 ![Version](https://img.shields.io/badge/Version-26.93.3-green)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
@@ -427,9 +427,8 @@ LISSTech.DrainCtl/
 
 ## 📄 License
 
-**Business Source License 1.1** — see [LICENSE](LICENSE).
+**Apache License 2.0** — see [LICENSE](LICENSE).
 
-You may use LISSTech DrainCtl for internal business operations on systems you own or manage. Production deployment to third-party customer environments requires a commercial license. On 2030-04-03, the license converts to Apache 2.0.
 
 ---
 
