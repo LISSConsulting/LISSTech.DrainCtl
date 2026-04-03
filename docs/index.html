@@ -420,8 +420,8 @@ body {
       </div>
       <div class="feature card">
         <div class="icon">&#128200;</div>
-        <h3>N-central Ready</h3>
-        <p>Structured stdout and exit codes designed for AMP thresholds. Drop it into your monitoring stack.</p>
+        <h3>RMM Ready</h3>
+        <p>Structured stdout and exit codes designed for monitoring thresholds. Drop it into any RMM platform.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128276;</div>
@@ -493,7 +493,7 @@ body {
 
 <span class="c"># When drain mode is active beyond grace period:</span>
 <span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r">Alert</span> connections_allowed=<span class="r">false</span> exit=1
-<span class="c"># Exit code 1 triggers your N-central AMP threshold</span></div>
+<span class="c"># Exit code 1 triggers your RMM monitoring threshold</span></div>
 
     <div class="usage-panel" id="tab1"><span class="c"># Rich status object</span>
 <span class="b">PS&gt;</span> Get-RDSHDrainMode
@@ -512,7 +512,7 @@ body {
 <span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) { <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
 <span class="g">OK</span>
 
-<span class="c"># One-liner for N-central AMP</span>
+<span class="c"># One-liner for monitoring scripts</span>
 <span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status
 <span class="g">Healthy</span></div>
 
@@ -555,7 +555,7 @@ body {
   <div class="wrap">
     <div class="section-label">Installation</div>
     <div class="section-title">One MSI. Zero configuration.</div>
-    <div class="section-desc">Deploy silently via N-central, SCCM, Intune, or GPO. The service starts automatically.</div>
+    <div class="section-desc">Deploy silently via your RMM, SCCM, Intune, or GPO. The service starts automatically.</div>
     <div class="install-grid">
       <div class="install-card card">
         <h3>&#128230; MSI Installer</h3>

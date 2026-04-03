@@ -105,11 +105,8 @@ li { margin-bottom: 6px; }
 strong { font-weight: 800; }
 code {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85em;
-  background: var(--surface);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
+  font-size: 0.84em;
+  color: var(--accent);
 }
 pre {
   background: var(--code-bg);
@@ -193,7 +190,7 @@ th { background: var(--surface); font-weight: 700; }
     <li><a href="#usage">CLI Usage</a></li>
     <li><a href="#powershell">PowerShell Module</a></li>
     <li><a href="#notifications">Notifications</a></li>
-    <li><a href="#ncentral">N-central Integration</a></li>
+    <li><a href="#rmm">RMM Integration</a></li>
     <li><a href="#service">Service Management</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
   </ol>
@@ -202,7 +199,7 @@ th { background: var(--surface); font-weight: 700; }
 <!-- ── Installation ──────────────────────────────────────────────────── -->
 <h2 id="install">1. Installation</h2>
 
-<p>DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; N-central, SCCM, Intune, GPO, or just double-click it.</p>
+<p>DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; your RMM, SCCM, Intune, GPO, or just double-click it.</p>
 
 <h3>Silent install</h3>
 <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn</code></pre>
@@ -307,7 +304,7 @@ Install-RDSHDrainAudit</code></pre>
 <h2 id="usage">5. CLI Usage</h2>
 
 <h3>Check current state</h3>
-<pre><code># Plain text (default &mdash; great for terminal and N-central)
+<pre><code># Plain text (default &mdash; great for terminal and RMM scripts)
 drainctl check
 
 # JSON (great for parsing)
@@ -429,29 +426,36 @@ Get-RDSHDrainNotification</code></pre>
 
 <p>ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and <strong>default</strong> for transitions.</p>
 
-<!-- ── N-central ─────────────────────────────────────────────────────── -->
-<h2 id="ncentral">8. N-central Integration</h2>
+<!-- ── RMM Integration ────────────────────────────────────────────────── -->
+<h2 id="rmm">8. RMM Integration</h2>
 
-<p>DrainCtl was built for N-central. The AMP (Automation Policy) just runs <code>drainctl check</code> and thresholds on the exit code.</p>
+<p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
 
 <h3>How it works</h3>
 <ol>
-  <li>N-central agent runs the AMP at its polling interval</li>
-  <li>AMP executes <code>drainctl check</code></li>
+  <li>Your RMM runs a monitoring script at its polling interval</li>
+  <li>The script executes drainctl check</li>
   <li>DrainCtl connects to the service via named pipe &mdash; <strong>instant response</strong></li>
-  <li>AMP captures stdout (structured key=value lines) and the exit code</li>
-  <li>N-central thresholds: exit code 0 = Normal, 1 = Failed</li>
+  <li>The RMM captures stdout (structured key=value lines) and the exit code</li>
+  <li>Threshold: exit code 0 = Normal, 1 = Alert, 2 = Error</li>
 </ol>
 
 <div class="callout">
-  <strong>&#x1F3AF; Pro tip:</strong> Even if N-central only polls every 15 minutes, the service detected the change in real time. The audit trail has the exact timestamp and attribution. N-central is just sampling the service's state.
+  <strong>&#x1F3AF; Pro tip:</strong> Even if your RMM only polls every 15 minutes, the service detected the change in real time. The audit trail has the exact timestamp and attribution. Your RMM is just sampling the service's state.
 </div>
 
-<h3>Minimal AMP script</h3>
+<h3>Minimal monitoring script</h3>
 <pre><code>drainctl check --quiet
 exit $LASTEXITCODE</code></pre>
 
-<p>That's it. <code>--quiet</code> suppresses intermediate log lines &mdash; only the final status line is emitted, which N-central captures.</p>
+<p>That's it. --quiet suppresses intermediate log lines &mdash; only the final status line is emitted. Works with any RMM that supports PowerShell or CMD scripts with exit code thresholds.</p>
+
+<h3>JSON output for advanced integrations</h3>
+<pre><code># Parse JSON output for custom dashboards or APIs
+$result = drainctl check --format json | ConvertFrom-Json
+if ($result.exit_code -ne 0) {
+    # Send to your ticketing system, dashboard, etc.
+}</code></pre>
 
 <!-- ── Service Management ─────────────────────────────────────────────── -->
 <h2 id="service">9. Service Management</h2>
