@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-BSL_1.1-yellow)
-![Version](https://img.shields.io/badge/Version-26.92.0-green)
+![Version](https://img.shields.io/badge/Version-26.93.0-green)
 
 Replaces legacy PowerShell + LogParser 2.2 scripts with a zero-dependency Go binary that monitors `TSServerDrainMode`, maintains a 90-day JSONL audit trail, and attributes changes to specific users via Windows Security Event Log.
 

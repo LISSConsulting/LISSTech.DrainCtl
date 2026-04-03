@@ -31,7 +31,7 @@ Requires: Go 1.22+, MinGW (`scoop install mingw`), WiX 5 (`dotnet tool install -
 - **Build tag**: every `.go` file in root and cmd packages has `//go:build windows`
 - **No viper**: config is in registry `HKLM\...\Services\DrainCtl\Parameters`, read by `config.go`
 - **Logging**: `LogFunc` callback type, never `log.Println`. Service uses `EventLogLogger`, CLI uses `DefaultLogger`
-- **Version**: CalVer `YY.DOY.patch` (e.g., `26.92.0`). Set in `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `.wxs`
+- **Version**: CalVer `YY.DOY.patch` (e.g., `26.93.0`). Set in `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `.wxs`
 - **Company name**: "LISS Consulting, Corp." in legal contexts, "LISS Technologies" as d/b/a
 - **Linting**: `go vet` + `gofmt` + `golangci-lint` must pass. Pre-commit hooks via `prek`
 - **Branches**: `trunk` (protected, PRs required), `development` (working branch)
