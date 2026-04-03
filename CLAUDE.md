@@ -1,0 +1,27 @@
+# CLAUDE.md
+
+## Build
+```
+just all        # unsigned: CLI + DLL + PS module + MSI
+just release    # signed (needs CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env)
+just lint       # go vet + gofmt + golangci-lint
+just resource   # recompile .syso after icon/version changes
+```
+Requires: Go 1.22+, MinGW, WiX 5, .NET SDK 8+.
+
+## Key Rules
+- Every `.go` file needs `//go:build windows`
+- Version is CalVer `YY.DOY.patch` — update in **8 places**: `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `.wxs`, `README.md`, `CLAUDE.md`, `docs/index.html`
+- After changing `.rc`: run `just resource` to recompile `.syso`
+- Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
+- No viper — config lives in registry `HKLM\...\Services\DrainCtl\Parameters`
+- Retention capped 1–365 days via `ClampRetention()`
+- Branches: `trunk` (protected) ← PR from `development`
+- Pre-commit: `prek` runs gofmt, go vet, golangci-lint, gitleaks
+- Signing order: sign binaries → build MSI → sign MSI (`just release` handles this)
+
+## Architecture
+Root package = public API. `cmd/drainctl/` = CLI (cobra). `cmd/cshared/` = DLL (P/Invoke).
+Service uses `RegNotifyChangeKeyValue` + `EvtSubscribe` + poll ticker.
+CLI/DLL try named pipe to service first, fall back to direct registry read.
+`MemAuditStore` = in-memory + JSONL flush. `AuditStore` = file-only (CLI fallback).
