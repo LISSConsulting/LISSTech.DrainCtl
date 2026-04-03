@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LISSTech.DrainCtl.psm1'
-    ModuleVersion     = '26.93.2'
+    ModuleVersion     = '26.93.3'
     GUID              = 'a3f7c8e1-4b2d-4f9a-8e6c-1d5b3a9f7e2c'
     Author            = 'LISS Consulting, Corp.'
     CompanyName       = 'LISS Consulting, Corp.'
@@ -34,7 +34,7 @@
             Tags         = @('RDSH', 'RemoteDesktop', 'DrainMode', 'TerminalServer', 'NCentral', 'Windows', 'Monitoring')
             LicenseUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl'
-            ReleaseNotes = 'v26.93.2: CalVer versioning, enhanced pipe output, service event log entries.'
+            ReleaseNotes = 'v26.93.3: CalVer versioning, enhanced pipe output, service event log entries.'
         }
     }
 }
