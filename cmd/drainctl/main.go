@@ -35,6 +35,7 @@ func main() {
 	root.AddCommand(historyCmd())
 	root.AddCommand(auditSetupCmd())
 	root.AddCommand(serviceCmd())
+	root.AddCommand(notifyCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "drainctl: %v\n", err)
@@ -215,6 +216,95 @@ by this command for the GPO path to configure.`,
 
 func runAuditSetup(cmd *cobra.Command, args []string) error {
 	return dc.RunAuditSetup(dc.DefaultLogger(os.Stdout, cfg.Quiet))
+}
+
+// ── notify ────────────────────────────────────────────────────────────────
+
+func notifyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "notify",
+		Short: "Manage notification settings",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show current notification configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			ncfg := dc.ReadNotifyConfig(log)
+			log(dc.LvlINF, fmt.Sprintf("webhook_url=%q", ncfg.WebhookURL))
+			log(dc.LvlINF, fmt.Sprintf("ntfy_url=%q", ncfg.NtfyURL))
+			log(dc.LvlINF, fmt.Sprintf("on_transition=%t", ncfg.OnTransition))
+			log(dc.LvlINF, fmt.Sprintf("on_grace_exceeded=%t", ncfg.OnGraceExceeded))
+			log(dc.LvlINF, fmt.Sprintf("repeat_interval=%s", ncfg.RepeatInterval))
+			if ncfg.Enabled() {
+				log(dc.LvlOK, "notifications=enabled")
+			} else {
+				log(dc.LvlWRN, "notifications=disabled (no backends configured)")
+			}
+			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set-webhook [url]",
+		Short: "Set webhook URL (empty to disable)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			ncfg := dc.ReadNotifyConfig(log)
+			if len(args) > 0 {
+				ncfg.WebhookURL = args[0]
+			} else {
+				ncfg.WebhookURL = ""
+			}
+			if err := dc.WriteNotifyConfig(ncfg, log); err != nil {
+				return err
+			}
+			if ncfg.WebhookURL != "" {
+				log(dc.LvlOK, fmt.Sprintf("webhook_url=%q", ncfg.WebhookURL))
+			} else {
+				log(dc.LvlINF, "webhook=disabled")
+			}
+			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set-ntfy [url]",
+		Short: "Set ntfy URL (empty to disable)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			ncfg := dc.ReadNotifyConfig(log)
+			if len(args) > 0 {
+				ncfg.NtfyURL = args[0]
+			} else {
+				ncfg.NtfyURL = ""
+			}
+			if err := dc.WriteNotifyConfig(ncfg, log); err != nil {
+				return err
+			}
+			if ncfg.NtfyURL != "" {
+				log(dc.LvlOK, fmt.Sprintf("ntfy_url=%q", ncfg.NtfyURL))
+			} else {
+				log(dc.LvlINF, "ntfy=disabled")
+			}
+			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Send a test notification to all configured backends",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			ncfg := dc.ReadNotifyConfig(log)
+			return dc.SendTestNotification(ncfg, log)
+		},
+	})
+
+	return cmd
 }
 
 // ── service ───────────────────────────────────────────────────────────────

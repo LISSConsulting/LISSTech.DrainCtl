@@ -109,6 +109,67 @@ func DrainCtl_AuditSetup() *C.char {
 	return C.CString(`{"ok":true}`)
 }
 
+//export DrainCtl_GetNotifyConfig
+func DrainCtl_GetNotifyConfig() *C.char {
+	cfg := dc.ReadNotifyConfig(dc.DiscardLogger())
+	out := map[string]any{
+		"webhook_url":       cfg.WebhookURL,
+		"ntfy_url":          cfg.NtfyURL,
+		"on_transition":     cfg.OnTransition,
+		"on_grace_exceeded": cfg.OnGraceExceeded,
+		"repeat_minutes":    int(cfg.RepeatInterval.Minutes()),
+		"enabled":           cfg.Enabled(),
+	}
+	return marshalJSON(out)
+}
+
+//export DrainCtl_SetNotifyConfig
+func DrainCtl_SetNotifyConfig(jsonStr *C.char) *C.char {
+	var input struct {
+		WebhookURL      *string `json:"webhook_url"`
+		NtfyURL         *string `json:"ntfy_url"`
+		OnTransition    *bool   `json:"on_transition"`
+		OnGraceExceeded *bool   `json:"on_grace_exceeded"`
+		RepeatMinutes   *int    `json:"repeat_minutes"`
+	}
+
+	if err := json.Unmarshal([]byte(C.GoString(jsonStr)), &input); err != nil {
+		return marshalError(err)
+	}
+
+	// Read existing config, then overlay provided fields.
+	cfg := dc.ReadNotifyConfig(dc.DiscardLogger())
+	if input.WebhookURL != nil {
+		cfg.WebhookURL = *input.WebhookURL
+	}
+	if input.NtfyURL != nil {
+		cfg.NtfyURL = *input.NtfyURL
+	}
+	if input.OnTransition != nil {
+		cfg.OnTransition = *input.OnTransition
+	}
+	if input.OnGraceExceeded != nil {
+		cfg.OnGraceExceeded = *input.OnGraceExceeded
+	}
+	if input.RepeatMinutes != nil {
+		cfg.RepeatInterval = time.Duration(*input.RepeatMinutes) * time.Minute
+	}
+
+	if err := dc.WriteNotifyConfig(cfg, dc.DiscardLogger()); err != nil {
+		return marshalError(err)
+	}
+	return C.CString(`{"ok":true}`)
+}
+
+//export DrainCtl_TestNotify
+func DrainCtl_TestNotify() *C.char {
+	cfg := dc.ReadNotifyConfig(dc.DiscardLogger())
+	if err := dc.SendTestNotification(cfg, dc.DiscardLogger()); err != nil {
+		return marshalError(err)
+	}
+	return C.CString(`{"ok":true}`)
+}
+
 //export DrainCtl_Free
 func DrainCtl_Free(p *C.char) {
 	C.free(unsafe.Pointer(p))

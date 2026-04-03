@@ -55,6 +55,16 @@ public static class DrainCtlNative {
     public static extern IntPtr DrainCtl_AuditSetup();
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_GetNotifyConfig();
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_SetNotifyConfig(
+        [MarshalAs(UnmanagedType.LPStr)] string jsonStr);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_TestNotify();
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
     public static extern void DrainCtl_Free(IntPtr ptr);
 
     /// <summary>
@@ -357,9 +367,147 @@ function Install-RDSHDrainAudit {
     Write-Verbose 'Registry auditing configured. Event ID 4657 will now record TSServerDrainMode changes.'
 }
 
+function Get-RDSHDrainNotification {
+    <#
+    .SYNOPSIS
+    Shows the current notification configuration for DrainCtl.
+
+    .DESCRIPTION
+    Reads notification settings from the service registry parameters and
+    returns them as a structured object. Shows webhook URL, ntfy URL,
+    transition/grace notification toggles, and repeat interval.
+
+    .EXAMPLE
+    PS> Get-RDSHDrainNotification
+
+    WebhookURL      : https://hooks.example.com/drainctl
+    NtfyURL         :
+    OnTransition    : True
+    OnGraceExceeded : True
+    RepeatMinutes   : 0
+    Enabled         : True
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param()
+
+    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $raw = Invoke-DrainCtlNative -Ptr $ptr
+
+    [PSCustomObject]@{
+        PSTypeName      = 'DrainCtl.NotifyConfig'
+        WebhookURL      = Get-SafeProperty $raw 'webhook_url' ''
+        NtfyURL         = Get-SafeProperty $raw 'ntfy_url' ''
+        OnTransition    = [bool](Get-SafeProperty $raw 'on_transition' $true)
+        OnGraceExceeded = [bool](Get-SafeProperty $raw 'on_grace_exceeded' $true)
+        RepeatMinutes   = [int](Get-SafeProperty $raw 'repeat_minutes' 0)
+        Enabled         = [bool](Get-SafeProperty $raw 'enabled' $false)
+    }
+}
+
+function Set-RDSHDrainNotification {
+    <#
+    .SYNOPSIS
+    Updates notification settings for DrainCtl.
+
+    .DESCRIPTION
+    Writes notification configuration to the service registry parameters.
+    Only specified parameters are changed; unspecified parameters retain
+    their current values.
+
+    .PARAMETER WebhookURL
+    Webhook URL for HTTP POST JSON notifications. Set to empty string to disable.
+
+    .PARAMETER NtfyURL
+    ntfy.sh topic URL (e.g. "https://ntfy.sh/drainctl-alerts"). Set to empty string to disable.
+
+    .PARAMETER OnTransition
+    Enable or disable notifications on state transitions.
+
+    .PARAMETER OnGraceExceeded
+    Enable or disable notifications when drain exceeds grace period.
+
+    .PARAMETER RepeatMinutes
+    Minutes between repeated alert notifications (0 = notify once only).
+
+    .EXAMPLE
+    PS> Set-RDSHDrainNotification -WebhookURL 'https://hooks.example.com/drainctl'
+
+    .EXAMPLE
+    PS> Set-RDSHDrainNotification -NtfyURL 'https://ntfy.sh/my-alerts' -RepeatMinutes 30
+
+    .EXAMPLE
+    PS> Set-RDSHDrainNotification -WebhookURL '' -NtfyURL ''
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([void])]
+    param(
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$WebhookURL,
+
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$NtfyURL,
+
+        [Parameter()]
+        [bool]$OnTransition,
+
+        [Parameter()]
+        [bool]$OnGraceExceeded,
+
+        [Parameter()]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$RepeatMinutes
+    )
+
+    if (-not $PSCmdlet.ShouldProcess('DrainCtl notification configuration', 'Update')) {
+        return
+    }
+
+    $payload = @{}
+    if ($PSBoundParameters.ContainsKey('WebhookURL'))      { $payload['webhook_url']       = $WebhookURL }
+    if ($PSBoundParameters.ContainsKey('NtfyURL'))          { $payload['ntfy_url']          = $NtfyURL }
+    if ($PSBoundParameters.ContainsKey('OnTransition'))     { $payload['on_transition']     = $OnTransition }
+    if ($PSBoundParameters.ContainsKey('OnGraceExceeded'))  { $payload['on_grace_exceeded'] = $OnGraceExceeded }
+    if ($PSBoundParameters.ContainsKey('RepeatMinutes'))    { $payload['repeat_minutes']    = $RepeatMinutes }
+
+    $jsonStr = $payload | ConvertTo-Json -Compress
+    $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+    $null = Invoke-DrainCtlNative -Ptr $ptr
+
+    Write-Verbose 'Notification configuration updated.'
+}
+
+function Test-RDSHDrainNotification {
+    <#
+    .SYNOPSIS
+    Sends a test notification to all configured backends.
+
+    .DESCRIPTION
+    Reads the current notification configuration and sends a test message
+    to each configured backend (webhook and/or ntfy). Returns an error
+    if no backends are configured or if sending fails.
+
+    .EXAMPLE
+    PS> Test-RDSHDrainNotification
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param()
+
+    $ptr = [DrainCtlNative]::DrainCtl_TestNotify()
+    $null = Invoke-DrainCtlNative -Ptr $ptr
+
+    Write-Host 'Test notification sent successfully.'
+}
+
 Export-ModuleMember -Function @(
     'Get-RDSHDrainMode'
     'Test-RDSHDrainMode'
     'Get-RDSHDrainHistory'
     'Install-RDSHDrainAudit'
+    'Get-RDSHDrainNotification'
+    'Set-RDSHDrainNotification'
+    'Test-RDSHDrainNotification'
 )

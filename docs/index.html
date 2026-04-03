@@ -10,34 +10,34 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #fafaf8;
-  --fg: #0a0a0a;
-  --accent: #2563eb;
-  --green: #16a34a;
-  --amber: #d97706;
-  --red: #dc2626;
-  --border: #0a0a0a;
-  --shadow: #0a0a0a;
-  --card: #ffffff;
-  --muted: #52525b;
-  --subtle: #a1a1aa;
-  --code-bg: #0c0c0c;
-  --code-fg: #d4d4d8;
-  --surface: #f0efeb;
+  --bg: #fdfbf5;
+  --fg: #1a1407;
+  --accent: #b8860b;
+  --green: #5d8a3c;
+  --amber: #c67f17;
+  --red: #b91c1c;
+  --border: #1a1407;
+  --shadow: #1a1407;
+  --card: #fffef9;
+  --muted: #6b5f4a;
+  --subtle: #9e9279;
+  --code-bg: #0f0e0a;
+  --code-fg: #d8d2c4;
+  --surface: #f3efe4;
   --r: 10px;
   --bw: 2.5px;
   --so: 4px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #09090b;
-    --fg: #fafafa;
-    --card: #18181b;
-    --border: #3f3f46;
+    --bg: #0e0d09;
+    --fg: #f5f0e4;
+    --card: #1c1a14;
+    --border: #4a4535;
     --shadow: #000;
-    --muted: #a1a1aa;
-    --subtle: #52525b;
-    --surface: #18181b;
+    --muted: #b8ae98;
+    --subtle: #6b6050;
+    --surface: #1c1a14;
     --code-bg: #09090b;
   }
 }
@@ -140,8 +140,8 @@ body {
   content: '';
   position: absolute; inset: 0;
   background:
-    radial-gradient(circle at 20% 50%, rgba(37,99,235,0.06) 0%, transparent 50%),
-    radial-gradient(circle at 80% 50%, rgba(22,163,74,0.05) 0%, transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(184,134,11,0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 50%, rgba(198,127,23,0.06) 0%, transparent 50%);
   pointer-events: none;
 }
 .hero-icon {
@@ -162,7 +162,7 @@ body {
 }
 .hero h1 em {
   font-style: normal;
-  background: linear-gradient(135deg, var(--accent), var(--green));
+  background: linear-gradient(135deg, #b8860b, #daa520, #c67f17);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -513,7 +513,7 @@ body {
     <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.93.0"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.93.1"</span>,
   <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
