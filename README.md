@@ -20,6 +20,7 @@ Replaces legacy PowerShell + LogParser 2.2 scripts with a zero-dependency Go bin
 - [⌨️ CLI Reference](#️-cli-reference)
 - [🐚 PowerShell Module](#-powershell-module)
 - [⚙️ Service](#️-service)
+- [🔔 Notifications](#-notifications)
 - [🔧 Configuration](#-configuration)
 - [🔒 Audit Setup](#-audit-setup)
 - [🛠️ Building from Source](#️-building-from-source)
@@ -43,6 +44,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | ⚡ **Named pipe IPC** | CLI and PowerShell query the service instantly via `\\.\pipe\drainctl` |
 | 📊 **N-central ready** | Exit codes + structured stdout for AMP threshold monitoring |
 | 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` |
+| 🔔 **Notifications** | Webhook + ntfy.sh alerts on state transitions and grace period exceedances |
 
 ---
 
@@ -203,6 +205,9 @@ Import-Module LISSTech.DrainCtl
 | `Test-RDSHDrainMode` | `bool` | `$true` if connections allowed, `$false` if alert |
 | `Get-RDSHDrainHistory` | `PSObject[]` | Audit trail records |
 | `Install-RDSHDrainAudit` | — | Configure registry auditing (one-time) |
+| `Get-RDSHDrainNotification` | `PSObject` | Current notification configuration |
+| `Set-RDSHDrainNotification` | — | Update notification settings |
+| `Test-RDSHDrainNotification` | — | Send test notification to configured backends |
 
 ### Examples
 
@@ -252,6 +257,56 @@ Events are written to `Application` log under source `DrainCtl`:
 
 ---
 
+## 🔔 Notifications
+
+DrainCtl can send alerts via **webhook** (HTTP POST JSON) and **ntfy.sh** when drain mode changes.
+
+### Setup
+
+```powershell
+# CLI
+drainctl notify set-webhook https://hooks.example.com/drainctl
+drainctl notify set-ntfy https://ntfy.sh/my-drainctl-alerts
+drainctl notify test   # send a test notification
+
+# PowerShell
+Set-RDSHDrainNotification -WebhookURL "https://hooks.example.com/drainctl"
+Set-RDSHDrainNotification -NtfyURL "https://ntfy.sh/my-alerts"
+Test-RDSHDrainNotification
+
+# Check current config
+drainctl notify status
+Get-RDSHDrainNotification
+```
+
+### Notification Triggers
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `NotifyOnTransition` | `1` (enabled) | Alert on any state change (drain on/off) |
+| `NotifyOnGraceExceeded` | `1` (enabled) | Alert when drain mode exceeds grace period |
+| `NotifyRepeatMinutes` | `0` (once) | Re-alert interval while in alert state (0 = notify once) |
+
+### Webhook Payload
+
+```json
+{
+  "event": "transition",
+  "host": "RDSH01",
+  "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
+  "previous_mode": "ALLOW_ALL_CONNECTIONS",
+  "status": "Grace",
+  "message": "Drain mode active, within grace period (45m remaining).",
+  "changed_by": "DOMAIN\\admin",
+  "state_duration_seconds": 900,
+  "timestamp": "2026-04-03T14:30:00-04:00"
+}
+```
+
+ntfy messages use priority `high` for alerts, `default` for transitions.
+
+---
+
 ## 🔧 Configuration
 
 Configuration is stored in the registry and hot-reloaded when changed:
@@ -263,7 +318,12 @@ Configuration is stored in the registry and hot-reloaded when changed:
 | `GracePeriod` | REG_DWORD | `60` | Minutes before alerting |
 | `RetentionDays` | REG_DWORD | `90` | Days to keep audit records (1-365) |
 | `PollInterval` | REG_DWORD | `300` | Seconds between safety-net polls |
-| `AuditPath` | REG_SZ | `%ProgramData%\LISS Technologies\LISSTech DrainCtl\audit.jsonl` | Audit file path |
+| `AuditPath` | REG_SZ | `%ProgramData%\...\audit.jsonl` | Audit file path |
+| `WebhookURL` | REG_SZ | *(empty)* | Webhook endpoint for notifications |
+| `NtfyURL` | REG_SZ | *(empty)* | ntfy.sh topic URL for notifications |
+| `NotifyOnTransition` | REG_DWORD | `1` | Notify on state transitions |
+| `NotifyOnGraceExceeded` | REG_DWORD | `1` | Notify when grace period exceeded |
+| `NotifyRepeatMinutes` | REG_DWORD | `0` | Re-notify interval in alert (0 = once) |
 
 Changes are picked up automatically — no service restart needed.
 
@@ -331,6 +391,7 @@ LISSTech.DrainCtl/
 ├── evtsubscribe.go        # EvtSubscribe for real-time Event ID 4657
 ├── audit.go               # AuditStore (file-based, CLI fallback)
 ├── memstore.go            # MemAuditStore (in-memory, service mode)
+├── notify.go              # Webhook + ntfy.sh notification client
 ├── check.go               # Check() — core monitoring logic
 ├── history.go             # GetHistory() — audit trail query
 ├── audit_setup.go         # RunAuditSetup() — auditpol + SACL
