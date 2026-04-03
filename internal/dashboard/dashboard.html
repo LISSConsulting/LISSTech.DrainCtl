@@ -107,6 +107,33 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .empty{text-align:center;padding:50px 20px;color:var(--muted)}
 .empty h2{font-family:'DM Serif Display',serif;font-size:1.3rem;font-weight:400;margin-bottom:4px;color:var(--fg)}
 
+/* Gear button */
+.btn-gear{font-size:1.2rem;background:none;border:none;cursor:pointer;padding:4px 8px;color:var(--muted);transition:color .15s,transform .15s;line-height:1}
+.btn-gear:hover{color:var(--accent);transform:rotate(30deg)}
+
+/* Settings drawer */
+.settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:150}
+.settings-overlay.open{display:block}
+.settings-drawer{position:fixed;top:0;right:-420px;width:400px;max-width:90vw;height:100vh;background:var(--card);border-left:var(--bw) solid var(--border);box-shadow:-6px 0 24px rgba(0,0,0,.15);z-index:160;transition:right .25s ease;overflow-y:auto;padding:28px 24px}
+.settings-drawer.open{right:0}
+.settings-title{font-family:'DM Serif Display',serif;font-size:1.15rem;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
+.settings-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);padding:4px}
+.settings-close:hover{color:var(--fg)}
+.settings-group{margin-bottom:18px}
+.settings-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-bottom:6px}
+.settings-input{width:100%;font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:10px 12px;background:var(--surface);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none}
+.settings-input:focus{box-shadow:0 0 0 2px var(--accent)}
+.settings-input::placeholder{color:var(--subtle)}
+.settings-check{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;font-size:.85rem;font-weight:600}
+.settings-check input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+.settings-num{width:100px;font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:8px 12px;background:var(--surface);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none}
+.settings-num:focus{box-shadow:0 0 0 2px var(--accent)}
+.btn-save{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;background:var(--accent);color:#fff;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s}
+.btn-save:hover{transform:translate(-2px,-2px);box-shadow:calc(var(--so)+2px) calc(var(--so)+2px) 0 var(--shadow)}
+.btn-save:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--shadow)}
+.settings-status{font-size:.78rem;margin-top:10px;font-weight:600}
+.settings-status.ok{color:var(--green)}.settings-status.err{color:var(--red)}
+
 @media(max-width:768px){.counters{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.chart-host{width:80px;font-size:.65rem}}
 @media(max-width:480px){.nav-right span{display:none}.nav-right::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--green)}}
 </style>
@@ -115,6 +142,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 <nav class="nav"><div class="nav-in">
   <div class="nav-brand">🚰 DrainCtl Dashboard</div>
   <div class="nav-right" id="ns"></div>
+  <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings">&#9881;&#65039;</button>
 </div></nav>
 
 <div class="main">
@@ -146,6 +174,31 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
       <div id="log-entries"><div class="evt-empty">Watching for transitions...</div></div>
     </div>
   </div>
+</div>
+
+<div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
+<div class="settings-drawer" id="settings-drawer">
+  <div class="settings-title"><span>Notification Settings</span><button class="settings-close" onclick="toggleSettings()">&times;</button></div>
+  <div class="settings-group">
+    <div class="settings-label">Webhook URL</div>
+    <input class="settings-input" id="cfg-webhook" type="text" placeholder="https://hooks.example.com/...">
+  </div>
+  <div class="settings-group">
+    <div class="settings-label">ntfy.sh URL</div>
+    <input class="settings-input" id="cfg-ntfy" type="text" placeholder="https://ntfy.sh/drainctl-alerts">
+  </div>
+  <div class="settings-group">
+    <div class="settings-label">Triggers</div>
+    <label class="settings-check"><input type="checkbox" id="cfg-transition" checked> On Transition</label>
+    <label class="settings-check"><input type="checkbox" id="cfg-grace" checked> On Grace Exceeded</label>
+  </div>
+  <div class="settings-group">
+    <div class="settings-label">Repeat Minutes</div>
+    <input class="settings-num" id="cfg-repeat" type="number" min="0" value="0" placeholder="0">
+    <div style="font-size:.72rem;color:var(--muted);margin-top:4px">0 = notify once per event</div>
+  </div>
+  <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
+  <div class="settings-status" id="cfg-status"></div>
 </div>
 
 <footer class="footer">
@@ -282,8 +335,45 @@ async function refresh(){
   }
 }
 async function rm(h){if(!confirm('Remove '+h+'?'))return;try{const r=await fetch('/api/v1/servers/'+encodeURIComponent(h),{method:'DELETE'});if(r.ok)refresh();else alert('HTTP '+r.status)}catch(e){alert(e.message)}}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&logExpanded)toggleExpand()});
-setInterval(refresh,30000);refresh();
+function toggleSettings(){
+  document.getElementById('settings-overlay').classList.toggle('open');
+  document.getElementById('settings-drawer').classList.toggle('open');
+}
+async function loadNotifyConfig(){
+  try{
+    const r=await fetch('/api/v1/notify-config');
+    if(!r.ok)return;
+    const c=await r.json();
+    document.getElementById('cfg-webhook').value=c.webhook_url||'';
+    document.getElementById('cfg-ntfy').value=c.ntfy_url||'';
+    document.getElementById('cfg-transition').checked=!!c.on_transition;
+    document.getElementById('cfg-grace').checked=!!c.on_grace_exceeded;
+    document.getElementById('cfg-repeat').value=c.repeat_minutes||0;
+  }catch(e){console.error('loadNotifyConfig:',e)}
+}
+async function saveNotifyConfig(){
+  const st=document.getElementById('cfg-status');
+  st.textContent='';st.className='settings-status';
+  try{
+    const body=JSON.stringify({
+      webhook_url:document.getElementById('cfg-webhook').value,
+      ntfy_url:document.getElementById('cfg-ntfy').value,
+      on_transition:document.getElementById('cfg-transition').checked,
+      on_grace_exceeded:document.getElementById('cfg-grace').checked,
+      repeat_minutes:parseInt(document.getElementById('cfg-repeat').value)||0
+    });
+    const r=await fetch('/api/v1/notify-config',{method:'PUT',headers:{'Content-Type':'application/json'},body});
+    if(r.ok){st.textContent='Saved successfully.';st.className='settings-status ok';}
+    else{st.textContent='Error: HTTP '+r.status;st.className='settings-status err';}
+  }catch(e){st.textContent='Error: '+e.message;st.className='settings-status err';}
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(document.getElementById('settings-drawer').classList.contains('open'))toggleSettings();
+    else if(logExpanded)toggleExpand();
+  }
+});
+setInterval(refresh,30000);refresh();loadNotifyConfig();
 </script>
 </body>
 </html>
