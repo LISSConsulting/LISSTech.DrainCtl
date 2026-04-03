@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue)
-![Version](https://img.shields.io/badge/Version-26.93.8-green)
+![Version](https://img.shields.io/badge/Version-27.93.0-green)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
 Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, maintains a 90-day audit trail, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
@@ -45,7 +45,10 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | ⚡ **Named pipe IPC** | CLI and PowerShell query the service instantly via `\\.\pipe\drainctl` |
 | 📊 **N-central ready** | Exit codes + structured stdout for AMP threshold monitoring |
 | 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` |
-| 🔔 **Notifications** | Webhook + ntfy.sh alerts on state transitions and grace period exceedances |
+| 🔔 **Multi-target notifications** | N webhook + M ntfy.sh targets, each with individual triggers and repeat intervals |
+| 🎯 **Granular triggers** | Per-event notification control: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, and more |
+| 📈 **Session tracking** | WTS session enumeration — active, disconnected, and total counts with utilization percentage |
+| ⚠️ **Session utilization alerts** | Configurable threshold fires `session_warning` when utilization is too high |
 
 ---
 
@@ -58,8 +61,14 @@ graph TB
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
         EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
         POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
-        CHECK --> STORE["MemAuditStore"]
+        CFG["config.json Watcher 5s"] -->|"config changed"| RELOAD["ReloadConfig()"]
+        CHECK --> SESS["WTS Session Enum"]
+        SESS --> STORE["MemAuditStore"]
+        CHECK --> STORE
         CHECK --> ELOG["Event Log"]
+        CHECK --> NOTIFY["Multi-Target Dispatch"]
+        NOTIFY --> WH["Webhook 1..N"]
+        NOTIFY --> NTFY["ntfy 1..M"]
         STORE --> PIPE["Named Pipe"]
     end
 
@@ -114,7 +123,9 @@ The MSI installs:
 | Windows Service | `DrainCtl` — auto-start as LocalSystem |
 | System PATH | `bin\` folder added |
 | Event Log source | `DrainCtl` with custom message file |
-| Registry config | `HKLM\...\Services\DrainCtl\Parameters` with defaults |
+| JSON config | `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` |
+
+> **Upgrading from v26?** The first run auto-migrates your registry configuration to `config.json`. Existing installs upgrade seamlessly — no manual steps required.
 
 ### PowerShell Gallery (module only)
 
@@ -140,6 +151,7 @@ PS> drainctl check
 2026-04-02T20:08:56-04:00 [INF] drain_mode=ALLOW_ALL_CONNECTIONS value=0
 2026-04-02T20:08:56-04:00 [INF] state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
 2026-04-02T20:08:56-04:00 [INF] grace_period=1h0m0s
+2026-04-02T20:08:56-04:00 [INF] sessions=12 active / 3 disconnected / 15 total (60% of 25)
 2026-04-02T20:08:56-04:00 [OK ] status=Healthy connections_allowed=true exit=0
 
 # JSON output
@@ -166,6 +178,10 @@ drainctl service install    Install Windows service
 drainctl service uninstall  Remove Windows service
 drainctl service start      Start the service
 drainctl service stop       Stop the service
+drainctl notify add         Add a notification target
+drainctl notify remove      Remove a notification target
+drainctl notify list        List configured notification targets
+drainctl notify test        Send a test notification to all targets
 ```
 
 ### Global Flags
@@ -189,6 +205,17 @@ drainctl service stop       Stop the service
 |------|---------|-------------|
 | `--limit` | `50` | Maximum records to display |
 | `--changes-only` | `false` | Show only state transitions |
+
+### Notify Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `drainctl notify add <type> <url> [--triggers ...] [--repeat N]` | Add a webhook or ntfy target with optional trigger filter and repeat interval |
+| `drainctl notify remove <url>` | Remove a notification target by URL |
+| `drainctl notify list` | List all configured notification targets and their settings |
+| `drainctl notify test` | Send a test notification to all configured targets |
+| `drainctl notify set-webhook <url>` | Convenience: add/update a single webhook target |
+| `drainctl notify set-ntfy <url>` | Convenience: add/update a single ntfy target |
 
 ### Exit Codes
 
@@ -245,9 +272,11 @@ The `DrainCtl` Windows Service provides:
 - **Instant detection** via `RegNotifyChangeKeyValue` (~0ms)
 - **Change attribution** via `EvtSubscribe` on Security Event ID 4657 (~200ms)
 - **Safety-net polling** every 5 minutes (configurable)
+- **Session tracking** via `WTSEnumerateSessionsW` — active, disconnected, and total counts
 - **Exclusive audit file** ownership — no corruption from concurrent access
 - **In-memory store** — CLI/PS queries are instant (named pipe, no file I/O)
 - **Event Log entries** — warnings for grace, errors for alerts, info for transitions
+- **Auto-registration** with dashboard on startup when `dashboard.url` is set (idempotent)
 
 ### Event Log
 
@@ -268,39 +297,76 @@ Events are written to `Application` log under source `DrainCtl`:
 
 ## 🔔 Notifications
 
-DrainCtl can send alerts via **webhook** (HTTP POST JSON) and **ntfy.sh** when drain mode changes.
+DrainCtl supports **multi-target notifications** — configure any number of webhook and ntfy.sh targets, each with its own trigger filter and repeat interval.
 
 ### Setup
 
 ```powershell
-# CLI
+# Add notification targets
+drainctl notify add webhook https://hooks.slack.com/services/T.../B.../xxx --triggers drain_on,drain_off,alert,healthy --repeat 30
+drainctl notify add ntfy https://ntfy.sh/my-drainctl-alerts --triggers alert,session_warning --repeat 0
+
+# List configured targets
+drainctl notify list
+
+# Remove a target
+drainctl notify remove https://hooks.slack.com/services/T.../B.../xxx
+
+# Test all targets
+drainctl notify test
+
+# Convenience shortcuts (add/update a single target)
 drainctl notify set-webhook https://hooks.example.com/drainctl
-drainctl notify set-ntfy https://ntfy.sh/my-drainctl-alerts
-drainctl notify test   # send a test notification
+drainctl notify set-ntfy https://ntfy.sh/my-alerts
 
 # PowerShell
-Set-RDSHDrainNotification -WebhookURL "https://hooks.example.com/drainctl"
-Set-RDSHDrainNotification -NtfyURL "https://ntfy.sh/my-alerts"
-Test-RDSHDrainNotification
-
-# Check current config
-drainctl notify status
 Get-RDSHDrainNotification
+Test-RDSHDrainNotification
 ```
 
-### Notification Triggers
+### Granular Triggers
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `NotifyOnTransition` | `1` (enabled) | Alert on any state change (drain on/off) |
-| `NotifyOnGraceExceeded` | `1` (enabled) | Alert when drain mode exceeds grace period |
-| `NotifyRepeatMinutes` | `0` (once) | Re-alert interval while in alert state (0 = notify once) |
+Each notification target can subscribe to specific event types:
+
+| Trigger | Description |
+|---------|-------------|
+| `drain_on` | Drain mode activated (new connections blocked) |
+| `drain_off` | Drain mode deactivated (connections restored) |
+| `grace_entered` | Drain mode entered grace period |
+| `alert` | Drain mode exceeded grace period |
+| `healthy` | Returned to healthy state |
+| `session_warning` | Session utilization threshold exceeded |
+
+If no triggers are specified, the target receives all events.
+
+### Config Example
+
+Notification targets are defined in `config.json`:
+
+```json
+{
+  "notifications": [
+    {
+      "type": "webhook",
+      "url": "https://hooks.slack.com/services/T.../B.../xxx",
+      "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+      "repeat_minutes": 30
+    },
+    {
+      "type": "ntfy",
+      "url": "https://ntfy.sh/my-alerts",
+      "triggers": ["alert", "session_warning"],
+      "repeat_minutes": 0
+    }
+  ]
+}
+```
 
 ### Webhook Payload
 
 ```json
 {
-  "event": "transition",
+  "event": "drain_on",
   "host": "RDSH01",
   "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
   "previous_mode": "ALLOW_ALL_CONNECTIONS",
@@ -308,33 +374,80 @@ Get-RDSHDrainNotification
   "message": "Drain mode active, within grace period (45m remaining).",
   "changed_by": "DOMAIN\\admin",
   "state_duration_seconds": 900,
-  "timestamp": "2026-04-03T14:30:00-04:00"
+  "timestamp": "2026-04-03T14:30:00-04:00",
+  "sessions": {
+    "active_sessions": 12,
+    "disconnected_sessions": 3,
+    "total_sessions": 15,
+    "max_sessions": 25,
+    "utilization_pct": 60
+  }
 }
 ```
 
-ntfy messages use priority `high` for alerts, `default` for transitions.
+The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered`, `alert`, `healthy`, `session_warning`). ntfy messages use priority `high` for alerts, `default` for other events.
 
 ---
 
 ## 🔧 Configuration
 
-Configuration is stored in the registry and hot-reloaded when changed:
+Configuration lives in a JSON file, hot-reloaded every 5 seconds:
 
-**Key:** `HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters`
+**Path:** `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json`
 
-| Value | Type | Default | Description |
-|-------|------|---------|-------------|
-| `GracePeriod` | REG_DWORD | `60` | Minutes before alerting |
-| `RetentionDays` | REG_DWORD | `90` | Days to keep audit records (1-365) |
-| `PollInterval` | REG_DWORD | `300` | Seconds between safety-net polls |
-| `AuditPath` | REG_SZ | `%ProgramData%\...\audit.jsonl` | Audit file path |
-| `WebhookURL` | REG_SZ | *(empty)* | Webhook endpoint for notifications |
-| `NtfyURL` | REG_SZ | *(empty)* | ntfy.sh topic URL for notifications |
-| `NotifyOnTransition` | REG_DWORD | `1` | Notify on state transitions |
-| `NotifyOnGraceExceeded` | REG_DWORD | `1` | Notify when grace period exceeded |
-| `NotifyRepeatMinutes` | REG_DWORD | `0` | Re-notify interval in alert (0 = once) |
+- Atomic writes with cross-process mutex — safe for concurrent access
+- Auto-migrates from registry on first run (existing v26 installs upgrade seamlessly)
+- No service restart needed — changes are picked up automatically
 
-Changes are picked up automatically — no service restart needed.
+### Full config.json Example
+
+```json
+{
+  "grace_period_minutes": 60,
+  "retention_days": 90,
+  "poll_interval_seconds": 300,
+  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
+  "session_warning_threshold": 80,
+  "dashboard": {
+    "url": ""
+  },
+  "notifications": [
+    {
+      "type": "webhook",
+      "url": "https://hooks.slack.com/services/T.../B.../xxx",
+      "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+      "repeat_minutes": 30
+    },
+    {
+      "type": "ntfy",
+      "url": "https://ntfy.sh/my-alerts",
+      "triggers": ["alert", "session_warning"],
+      "repeat_minutes": 0
+    }
+  ]
+}
+```
+
+### Config Reference
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `grace_period_minutes` | int | `60` | Minutes before alerting on drain mode |
+| `retention_days` | int | `90` | Days to keep audit records (1–365) |
+| `poll_interval_seconds` | int | `300` | Seconds between safety-net polls |
+| `audit_path` | string | `%ProgramData%\...\audit.jsonl` | Audit file path |
+| `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled) |
+| `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration on service startup |
+| `notifications` | array | `[]` | Notification targets (see below) |
+
+### Notification Target Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | yes | `"webhook"` or `"ntfy"` |
+| `url` | string | yes | Endpoint URL |
+| `triggers` | string[] | no | Event types to notify on (omit for all) |
+| `repeat_minutes` | int | no | Re-alert interval while condition persists (0 = notify once) |
 
 ---
 
@@ -403,8 +516,9 @@ LISSTech.DrainCtl/
 ├── audit_setup.go           # RunAuditSetup() — auditpol + SACL
 ├── format.go                # Output formatting (plain/table/csv/json)
 ├── log.go                   # LogFunc, DefaultLogger, DiscardLogger
-├── config.go                # ServiceConfig, NotifyConfig, registry parameters
-├── notify.go                # Webhook + ntfy.sh notification client
+├── config.go                # ServiceConfig, NotifyConfig, JSON file with atomic writes
+├── notify.go                # Multi-target webhook + ntfy.sh notification dispatch
+├── sessions.go              # WTS session enumeration via wtsapi32.dll
 ├── internal/
 │   ├── svc/                 # Windows Service handler + install/uninstall
 │   ├── pipe/                # Named pipe IPC server + client

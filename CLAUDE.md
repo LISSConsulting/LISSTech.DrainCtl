@@ -14,7 +14,7 @@ Requires: Go 1.22+, MinGW, WiX 5, .NET SDK 8+.
 - Version is CalVer `YY.DOY.patch` — update in **8 places**: `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `.wxs`, `README.md`, `CLAUDE.md`, `docs/index.html`
 - After changing `.rc`: run `just resource` to recompile `.syso`
 - Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
-- No viper — config lives in registry `HKLM\...\Services\DrainCtl\Parameters`
+- No viper — config lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` (encoding/json)
 - Retention capped 1–365 days via `ClampRetention()`
 - Branches: `trunk` (protected) ← PR from `development`
 - Pre-commit: `prek` runs gofmt, go vet, golangci-lint, gitleaks
@@ -22,6 +22,10 @@ Requires: Go 1.22+, MinGW, WiX 5, .NET SDK 8+.
 
 ## Architecture
 Root package = public API. `cmd/drainctl/` = CLI (cobra). `cmd/cshared/` = DLL (P/Invoke).
-Service uses `RegNotifyChangeKeyValue` + `EvtSubscribe` + poll ticker.
+Service uses `RegNotifyChangeKeyValue` + `EvtSubscribe` + poll ticker + config file watcher.
 CLI/DLL try named pipe to service first, fall back to direct registry read.
 `MemAuditStore` = in-memory + JSONL flush. `AuditStore` = file-only (CLI fallback).
+Config: JSON file with atomic writes (named mutex + MoveFileEx). Scoped updaters for dashboard API.
+Notifications: multi-target (N webhook + M ntfy), granular triggers, per-target repeat intervals.
+Sessions: `WTSEnumerateSessionsW` via wtsapi32.dll, utilization alerts at configurable threshold.
+Dashboard chart: uPlot (inline ~50KB). Session gauges per server card.
