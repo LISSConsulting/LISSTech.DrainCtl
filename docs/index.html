@@ -57,22 +57,26 @@ body {
   position: sticky; top: 0; z-index: 100;
   background: var(--bg);
   border-bottom: var(--bw) solid var(--border);
-  padding: 14px 0;
+  padding: 0;
+  height: 56px;
 }
 .nav .wrap {
   display: flex; align-items: center; justify-content: space-between;
+  height: 100%;
 }
 .nav-brand {
   font-weight: 800; font-size: 1.1rem;
   text-decoration: none; color: var(--fg);
   display: flex; align-items: center; gap: 8px;
+  line-height: 56px;
 }
+.nav-brand .emoji { font-size: 1.1em; vertical-align: middle; }
 .nav-brand span { opacity: 0.4; font-weight: 400; }
-.nav-links { display: flex; gap: 24px; list-style: none; }
+.nav-links { display: flex; align-items: center; gap: 28px; list-style: none; height: 100%; }
 .nav-links a {
   text-decoration: none; color: var(--muted);
   font-weight: 600; font-size: 0.9rem;
-  transition: color 0.15s;
+  line-height: 56px; transition: color 0.15s;
 }
 .nav-links a:hover { color: var(--fg); }
 @media (max-width: 640px) {
@@ -344,7 +348,7 @@ body {
 
 <nav class="nav">
   <div class="wrap">
-    <a href="#" class="nav-brand">🚰 DrainCtl <span>by LISS Technologies</span></a>
+    <a href="#" class="nav-brand"><span class="emoji">🚰</span> DrainCtl <span>by LISS Technologies</span></a>
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How It Works</a></li>
