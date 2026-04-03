@@ -7,44 +7,44 @@
 <meta name="description" content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #fdfbf5;
-  --fg: #1a1407;
-  --accent: #b8860b;
-  --green: #5d8a3c;
-  --amber: #c67f17;
-  --red: #b91c1c;
-  --border: #1a1407;
-  --shadow: #1a1407;
-  --card: #fffef9;
-  --muted: #6b5f4a;
-  --subtle: #9e9279;
-  --code-bg: #0f0e0a;
-  --code-fg: #d8d2c4;
-  --surface: #f3efe4;
+  --bg: #fdf8f6;
+  --fg: #2d1a1a;
+  --accent: #a3475b;
+  --green: #5d8a6e;
+  --amber: #b87843;
+  --red: #9e2a3b;
+  --border: #2d1a1a;
+  --shadow: #2d1a1a;
+  --card: #fffaf8;
+  --muted: #7a5a5a;
+  --subtle: #a68e8e;
+  --code-bg: #1a0e0e;
+  --code-fg: #e8d5d5;
+  --surface: #f5ebe8;
   --r: 10px;
   --bw: 2.5px;
   --so: 4px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e0d09;
-    --fg: #f5f0e4;
-    --card: #1c1a14;
-    --border: #4a4535;
+    --bg: #110a0a;
+    --fg: #f5e8e8;
+    --card: #1f1414;
+    --border: #4a3535;
     --shadow: #000;
-    --muted: #b8ae98;
-    --subtle: #6b6050;
-    --surface: #1c1a14;
-    --code-bg: #09090b;
+    --muted: #c4a8a8;
+    --subtle: #6b5050;
+    --surface: #1f1414;
+    --code-bg: #0d0808;
   }
 }
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   background: var(--bg);
   color: var(--fg);
   line-height: 1.65;
@@ -74,7 +74,7 @@ a { color: var(--accent); }
 
 /* Content */
 .hero-sm { padding: 60px 0 40px; }
-.hero-sm h1 { font-size: 2.4rem; font-weight: 900; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 12px; }
+.hero-sm h1 { font-size: 2.4rem; font-family: 'DM Serif Display', serif; font-weight: 400; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 12px; }
 .hero-sm p { font-size: 1.05rem; color: var(--muted); }
 
 .toc {
@@ -91,8 +91,9 @@ a { color: var(--accent); }
 .toc a:hover { text-decoration: underline; }
 
 h2 {
-  font-size: 1.6rem; font-weight: 900;
-  letter-spacing: -0.02em;
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.6rem; font-weight: 400;
+  letter-spacing: -0.01em;
   margin: 56px 0 8px;
   padding-top: 24px;
   border-top: var(--bw) solid var(--border);
