@@ -53,14 +53,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 
 /* Chart */
 .chart-wrap{margin-bottom:24px}
-.chart{border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);background:var(--card);padding:16px 18px;overflow-x:auto}
-.chart-row{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.chart-row:last-child{margin-bottom:0}
-.chart-host{font-family:'JetBrains Mono',monospace;font-size:.72rem;font-weight:700;width:140px;flex-shrink:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chart-bar{flex:1;height:22px;display:flex;border:1.5px solid var(--border);border-radius:4px;overflow:hidden;background:var(--surface)}
-.chart-fill{height:100%;transition:width .5s}
-.chart-fill.ok{background:var(--green)}.chart-fill.grace{background:var(--amber)}.chart-fill.alert{background:var(--red)}.chart-fill.off{background:var(--subtle)}
-.chart-dur{font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--muted);width:60px;flex-shrink:0}
+.chart{border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);background:var(--card);padding:16px 18px;position:relative}
+.chart svg{display:block;width:100%;height:140px}
+.chart-legend{display:flex;gap:16px;justify-content:center;margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--muted)}
+.chart-legend span{display:flex;align-items:center;gap:4px}
+.chart-legend .dot{width:8px;height:8px;border-radius:2px;border:1px solid var(--border)}
+.dot.ok{background:var(--green)}.dot.grace{background:var(--amber)}.dot.alert{background:var(--red)}.dot.off{background:var(--subtle)}
 
 /* Server grid */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:24px}
@@ -89,11 +87,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .btn-expand:hover{transform:translate(-1px,-1px);box-shadow:calc(var(--so)+1px) calc(var(--so)+1px) 0 var(--shadow)}
 .log{background:var(--code-bg);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);height:280px;overflow-y:auto;padding:14px 16px}
 .log.expanded{position:fixed;inset:0;z-index:200;height:100vh;border-radius:0;box-shadow:none;border:none}
-.log-title{font-family:'DM Serif Display',serif;font-size:.9rem;color:var(--code-fg);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
-.evt{font-family:'JetBrains Mono',monospace;font-size:.72rem;line-height:1.7;color:var(--code-fg);padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03);animation:fadeIn .3s}
+.log-title{font-family:'DM Serif Display',serif;font-size:.9rem;color:#f0d8d8;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,200,200,.12)}
+.evt{font-family:'JetBrains Mono',monospace;font-size:.74rem;line-height:1.8;color:#efe0e0;padding:4px 0;border-bottom:1px solid rgba(255,200,200,.08);animation:fadeIn .3s}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-.evt-time{color:var(--subtle)}.evt-host{color:var(--accent);font-weight:700}
-.evt-g{color:var(--green)}.evt-r{color:var(--red)}.evt-w{color:var(--amber)}.evt-d{color:var(--subtle)}
+.evt-time{color:#c0a8a8}.evt-host{color:#e8a0b0;font-weight:700}
+.evt-g{color:#7dc09a}.evt-r{color:#e87080}.evt-w{color:#e0a060}.evt-d{color:#a08888}
 .evt-empty{color:var(--subtle);font-style:italic;font-family:'DM Sans',sans-serif;font-size:.82rem;padding:20px 0;text-align:center}
 .evt.hidden{display:none}
 
@@ -156,8 +154,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
   <div class="sbar" id="sbar"></div>
 
   <div class="chart-wrap">
-    <div class="section-label">State Duration by Server</div>
-    <div class="chart" id="chart"><div class="empty"><h2>Loading...</h2></div></div>
+    <div class="section-label">Server State History</div>
+    <div class="chart" id="chart">
+      <svg id="chart-svg" viewBox="0 0 600 140" preserveAspectRatio="none"></svg>
+      <div class="chart-legend">
+        <span><span class="dot ok"></span>Healthy</span>
+        <span><span class="dot grace"></span>Grace</span>
+        <span><span class="dot alert"></span>Alert</span>
+        <span><span class="dot off"></span>Offline</span>
+      </div>
+    </div>
   </div>
 
   <div class="log-section">
@@ -208,7 +214,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 </footer>
 
 <script>
-const STALE=600000,MAX_EVT=100;let prev={},evts=[],logExpanded=false;
+const STALE=600000,MAX_EVT=100,MAX_HIST=60;let prev={},evts=[],logExpanded=false,history=[];
 const ML={'ALLOW_ALL_CONNECTIONS':'All Connections','ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS':'Drain (No New Logons)','ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART':'Drain (Until Restart)'};
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
 function mode(m){return ML[m]||m||'—'}
@@ -247,19 +253,10 @@ function render(servers){
     sb.innerHTML=h;
   }
 
-  // Chart - horizontal bars showing state duration
-  const ch=document.getElementById('chart');
-  if(!servers||!servers.length){ch.innerHTML='<div class="empty"><h2>No data</h2></div>';return;}
-  const maxDur=Math.max(...servers.map(s=>s.last_result?s.last_result.state_duration_seconds||0:0),1);
-  let chartHtml='';
-  servers.forEach(srv=>{
-    const s=st(srv),r=srv.last_result,d=r?r.state_duration_seconds||0:0;
-    const pct=Math.max(Math.round(d/maxDur*100),2);
-    chartHtml+='<div class="chart-row"><span class="chart-host">'+esc(srv.hostname.split('.')[0])+'</span>';
-    chartHtml+='<div class="chart-bar"><div class="chart-fill '+s+'" style="width:'+pct+'%"></div></div>';
-    chartHtml+='<span class="chart-dur">'+dur(d)+'</span></div>';
-  });
-  ch.innerHTML=chartHtml;
+  // Area chart — track state proportions over time
+  history.push({ok:c.ok,grace:c.grace,alert:c.alert,off:c.off,t:t});
+  if(history.length>MAX_HIST)history.shift();
+  renderChart();
 
   // Detect transitions
   if(servers)servers.forEach(srv=>{
@@ -295,6 +292,48 @@ function render(servers){
   document.getElementById('status-pill').textContent='Live';
   document.getElementById('status-pill').style.borderColor='var(--green)';
   document.getElementById('status-pill').style.color='var(--green)';
+}
+
+function renderChart(){
+  const svg=document.getElementById('chart-svg');
+  if(!history.length||!history[0].t){svg.innerHTML='';return;}
+  const W=600,H=140,n=history.length;
+  const cs=getComputedStyle(document.documentElement);
+  const colors={ok:cs.getPropertyValue('--green').trim(),grace:cs.getPropertyValue('--amber').trim(),alert:cs.getPropertyValue('--red').trim(),off:cs.getPropertyValue('--subtle').trim()};
+  // Stacked area: bottom to top: ok, grace, alert, off
+  const layers=['ok','grace','alert','off'];
+  let paths={};
+  layers.forEach(l=>{paths[l]=[];});
+  for(let i=0;i<n;i++){
+    const x=n===1?W/2:Math.round(i/(n-1)*W);
+    const d=history[i],total=d.t||1;
+    let cum=0;
+    layers.forEach(l=>{
+      cum+=d[l]||0;
+      paths[l].push({x:x,y:H-Math.round(cum/total*H)});
+    });
+  }
+  let svgH='';
+  // Draw areas bottom-up (reverse so ok is on top visually)
+  for(let li=layers.length-1;li>=0;li--){
+    const l=layers[li],pts=paths[l];
+    if(!pts.length)continue;
+    // Build path: top line, then bottom (previous layer or baseline)
+    const prev2=li>0?paths[layers[li-1]]:null;
+    let d='M'+pts[0].x+','+pts[0].y;
+    for(let i=1;i<pts.length;i++)d+=' L'+pts[i].x+','+pts[i].y;
+    // Close: go back along previous layer (or bottom)
+    if(prev2){for(let i=pts.length-1;i>=0;i--)d+=' L'+prev2[i].x+','+prev2[i].y;}
+    else{d+=' L'+W+','+H+' L0,'+H;}
+    d+=' Z';
+    svgH+='<path d="'+d+'" fill="'+colors[l]+'" opacity=".7" stroke="'+colors[l]+'" stroke-width="1.5"/>';
+  }
+  // Grid lines
+  for(let i=1;i<4;i++){
+    const y=Math.round(i/4*H);
+    svgH+='<line x1="0" y1="'+y+'" x2="'+W+'" y2="'+y+'" stroke="var(--border)" stroke-opacity=".15" stroke-dasharray="4,4"/>';
+  }
+  svg.innerHTML=svgH;
 }
 
 function renderLog(){
