@@ -19,6 +19,9 @@ import (
 //go:embed dashboard.html
 var dashboardHTML []byte
 
+//go:embed favicon.png
+var faviconPNG []byte
+
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
 	state  *ServerState
@@ -57,6 +60,11 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleServers), log), log))
 	mux.Handle("DELETE /api/v1/servers/{host}", NegotiateMiddleware(
 		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleDeleteServer), log), log))
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(faviconPNG)
+	})
 	mux.Handle("GET /", NegotiateMiddleware(
 		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleUI), log), log))
 
