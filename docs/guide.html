@@ -220,6 +220,19 @@ th { background: var(--surface); font-weight: 700; }
   The service starts immediately. Open a new terminal and <code>drainctl check</code> will work right away.
 </div>
 
+<h3>PowerShell module only (no service)</h3>
+
+<p>If you just want the PowerShell cmdlets without the Windows Service, install directly from <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>:</p>
+
+<pre><code>Install-Module -Name LISSTech.DrainCtl -Scope AllUsers</code></pre>
+
+<p>This gives you Get-RDSHDrainMode, Test-RDSHDrainMode, and friends &mdash; but without the service, queries go directly to the registry instead of the named pipe (slightly slower, no persistent audit store).</p>
+
+<div class="callout">
+  <strong>&#x1F4E6; PSGallery vs MSI</strong>
+  The MSI is the full package: service + CLI + PowerShell module + Event Log + notifications. PSGallery is the module alone &mdash; great for quick checks, scripting, or machines where you don't need continuous monitoring.
+</div>
+
 <h3>Silent uninstall</h3>
 <pre><code>msiexec /x LISSTech.DrainCtl.msi /qn</code></pre>
 <p>This stops the service, removes all files, cleans up PATH, and deregisters the Event Log source. Your audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).</p>
