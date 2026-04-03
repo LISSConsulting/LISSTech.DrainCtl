@@ -314,7 +314,7 @@ function Get-RDSHDrainHistory {
     $ptr = [DrainCtlNative]::DrainCtl_History($DBPath, $Limit, $co)
     $records = Invoke-DrainCtlNative -Ptr $ptr
 
-    if ($null -eq $records -or $records.Count -eq 0) {
+    if ($null -eq $records -or @($records).Count -eq 0) {
         return
     }
 
