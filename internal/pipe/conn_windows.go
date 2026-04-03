@@ -1,6 +1,6 @@
 //go:build windows
 
-package drainctl
+package pipe
 
 import (
 	"context"

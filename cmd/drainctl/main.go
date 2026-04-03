@@ -8,6 +8,8 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
 )
 
@@ -72,7 +74,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try the service pipe first.
-	if result, err := dc.CheckViaPipe(); err == nil {
+	if result, err := pipe.CheckViaPipe(); err == nil {
 		if format == dc.FormatPlain {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			log(dc.LvlINF, "source=service")
@@ -167,7 +169,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	changesOnly, _ := cmd.Flags().GetBool("changes-only")
 
 	// Try the service pipe first.
-	if histRecs, err := dc.HistoryViaPipe(limit, changesOnly); err == nil {
+	if histRecs, err := pipe.HistoryViaPipe(limit, changesOnly); err == nil {
 		if len(histRecs) == 0 {
 			fmt.Println("No records found.")
 			return nil
@@ -324,7 +326,7 @@ func serviceCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get executable path: %w", err)
 			}
-			return dc.InstallService(exePath, log)
+			return svc.InstallService(exePath, log)
 		},
 	})
 
@@ -333,7 +335,7 @@ func serviceCmd() *cobra.Command {
 		Short: "Uninstall the DrainCtl Windows service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, false)
-			return dc.UninstallService(log)
+			return svc.UninstallService(log)
 		},
 	})
 
@@ -360,7 +362,7 @@ func serviceCmd() *cobra.Command {
 		Short:  "Run as a Windows service (invoked by SCM)",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return dc.RunService()
+			return svc.RunService()
 		},
 	})
 
