@@ -378,19 +378,19 @@ setInterval(refresh,30000);refresh();loadNotifyConfig();
 </script>
 <script>
 const mockServers = [
-  {hostname:"CONTOSO-RDS01",registered_at:ago(86400000),last_seen:ago(15000),last_result:{host:"CONTOSO-RDS01",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:86400,connections_allowed:true,changed_by:"CONTOSO\svc.monitor",exit_code:0}},
-  {hostname:"CONTOSO-RDS02",registered_at:ago(86400000),last_seen:ago(30000),last_result:{host:"CONTOSO-RDS02",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART",status:"Alert",state_duration_seconds:7200,connections_allowed:false,changed_by:"CONTOSO\admin.jones",exit_code:1}},
-  {hostname:"CONTOSO-RDS03",registered_at:ago(86400000),last_seen:ago(20000),last_result:{host:"CONTOSO-RDS03",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",status:"Grace",state_duration_seconds:1800,connections_allowed:false,changed_by:"CONTOSO\admin.smith",exit_code:0}},
+  {hostname:"CONTOSO-RDS01",registered_at:ago(86400000),last_seen:ago(15000),last_result:{host:"CONTOSO-RDS01",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:86400,connections_allowed:true,changed_by:"CONTOSO\\svc.monitor",exit_code:0}},
+  {hostname:"CONTOSO-RDS02",registered_at:ago(86400000),last_seen:ago(30000),last_result:{host:"CONTOSO-RDS02",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART",status:"Alert",state_duration_seconds:7200,connections_allowed:false,changed_by:"CONTOSO\\admin.jones",exit_code:1}},
+  {hostname:"CONTOSO-RDS03",registered_at:ago(86400000),last_seen:ago(20000),last_result:{host:"CONTOSO-RDS03",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",status:"Grace",state_duration_seconds:1800,connections_allowed:false,changed_by:"CONTOSO\\admin.smith",exit_code:0}},
   {hostname:"CONTOSO-RDS04",registered_at:ago(86400000),last_seen:ago(10000),last_result:{host:"CONTOSO-RDS04",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:172800,connections_allowed:true,exit_code:0}},
-  {hostname:"CONTOSO-RDS05",registered_at:ago(86400000),last_seen:ago(5000),last_result:{host:"CONTOSO-RDS05",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:43200,connections_allowed:true,changed_by:"CONTOSO\svc.monitor",exit_code:0}},
+  {hostname:"CONTOSO-RDS05",registered_at:ago(86400000),last_seen:ago(5000),last_result:{host:"CONTOSO-RDS05",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:43200,connections_allowed:true,changed_by:"CONTOSO\\svc.monitor",exit_code:0}},
   {hostname:"CONTOSO-RDS06",registered_at:ago(86400000),last_seen:ago(3600000),last_result:null}
 ];
 evts=[
-  {time:"18:29:14",host:"CONTOSO-RDS02",from:"Grace",to:"Alert",cls:"evt-r",by:" \u00b7 CONTOSO\admin.jones"},
-  {time:"18:15:02",host:"CONTOSO-RDS03",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\admin.smith"},
-  {time:"17:45:33",host:"CONTOSO-RDS02",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\admin.jones"},
+  {time:"18:29:14",host:"CONTOSO-RDS02",from:"Grace",to:"Alert",cls:"evt-r",by:" \u00b7 CONTOSO\\admin.jones"},
+  {time:"18:15:02",host:"CONTOSO-RDS03",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\\admin.smith"},
+  {time:"17:45:33",host:"CONTOSO-RDS02",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\\admin.jones"},
   {time:"14:00:00",host:"CONTOSO-RDS06",from:"Healthy",to:"Offline",cls:"evt-d",by:""},
-  {time:"12:30:15",host:"CONTOSO-RDS01",from:"Grace",to:"Healthy",cls:"evt-g",by:" \u00b7 CONTOSO\svc.monitor"},
+  {time:"12:30:15",host:"CONTOSO-RDS01",from:"Grace",to:"Healthy",cls:"evt-g",by:" \u00b7 CONTOSO\\svc.monitor"},
 ];
 window.refresh=function(){render(mockServers)};
 window.loadNotifyConfig=function(){
