@@ -19,6 +19,68 @@ psgallery_key := env("PSGALLERY_API_KEY", "")
 default:
     @just --list
 
+# ── Version ──────────────────────────────────────────────────────────────────
+
+# Bump patch version (CalVer YY.DOY.patch) across all 8 files + recompile .syso
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+bump:
+    $exePath = "{{bin_dir}}/drainctl.exe"
+
+    # Determine current version from source
+    $src = Get-Content "drainctl.go" -Raw
+    if ($src -match 'Version\s*=\s*"([^"]+)"') {
+        $current = $Matches[1]
+    } else {
+        Write-Error "Could not read version from drainctl.go"
+        exit 1
+    }
+
+    # Parse and bump patch
+    $parts = $current -split '\.'
+    $yy = (Get-Date).Year % 100
+    $doy = (Get-Date).DayOfYear
+    if ([int]$parts[0] -eq $yy -and [int]$parts[1] -eq $doy) {
+        $patch = [int]$parts[2] + 1
+    } else {
+        $patch = 0
+    }
+    $new = "$yy.$doy.$patch"
+
+    Write-Host "`n🔖 Bumping version: $current → $new" -ForegroundColor Cyan
+
+    # Update all 8 files
+    $files = @(
+        "drainctl.go",
+        "installer/LISSTech.DrainCtl.wxs",
+        "installer/LISSTech.DrainCtl.wixproj",
+        "powershell/LISSTech.DrainCtl.psd1",
+        "README.md",
+        "CLAUDE.md",
+        "docs/index.html"
+    )
+    foreach ($f in $files) {
+        (Get-Content $f -Raw) -replace [regex]::Escape($current), $new | Set-Content $f -NoNewline
+        Write-Host "   $f" -ForegroundColor DarkGray
+    }
+
+    # RC file has comma-separated version too
+    $rc = Get-Content "cmd/drainctl/drainctl.rc" -Raw
+    $oldComma = $current -replace '\.', ','
+    $newComma = $new -replace '\.', ','
+    $rc = $rc -replace [regex]::Escape("$oldComma,0"), "$newComma,0"
+    $rc = $rc -replace [regex]::Escape($current), $new
+    $rc | Set-Content "cmd/drainctl/drainctl.rc" -NoNewline
+    Write-Host "   cmd/drainctl/drainctl.rc" -ForegroundColor DarkGray
+
+    # Recompile .syso
+    & windres cmd/drainctl/drainctl.rc -o cmd/drainctl/drainctl.syso
+    if ($LASTEXITCODE -ne 0) { Write-Error "windres failed"; exit $LASTEXITCODE }
+    Write-Host "   cmd/drainctl/drainctl.syso (recompiled)" -ForegroundColor DarkGray
+
+    Write-Host "   ✅ Version is now $new" -ForegroundColor Green
+    Write-Host ""
+
 # ── Build ────────────────────────────────────────────────────────────────────
 
 # Compile Windows resource file (icon + version info)
