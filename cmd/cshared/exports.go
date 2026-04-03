@@ -13,6 +13,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
+	"golang.org/x/sys/windows/registry"
 )
 
 func marshalJSON(v any) *C.char {
@@ -168,6 +169,41 @@ func DrainCtl_TestNotify() *C.char {
 	if err := dc.SendTestNotification(cfg, dc.DiscardLogger()); err != nil {
 		return marshalError(err)
 	}
+	return C.CString(`{"ok":true}`)
+}
+
+//export DrainCtl_EnableDashboard
+func DrainCtl_EnableDashboard(port C.int, group *C.char) *C.char {
+	g := C.GoString(group)
+	if g == "" {
+		g = dc.DefaultDashboardGroup
+	}
+	p := int(port)
+	if p == 0 {
+		p = dc.DefaultDashboardPort
+	}
+
+	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+	if err != nil {
+		return marshalError(err)
+	}
+	defer func() { _ = key.Close() }()
+
+	_ = key.SetDWordValue("DashboardEnabled", 1)
+	_ = key.SetDWordValue("DashboardPort", uint32(p))
+	_ = key.SetStringValue("DashboardGroup", g)
+
+	return marshalJSON(map[string]any{"ok": true, "port": p, "group": g})
+}
+
+//export DrainCtl_DisableDashboard
+func DrainCtl_DisableDashboard() *C.char {
+	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+	if err != nil {
+		return marshalError(err)
+	}
+	defer func() { _ = key.Close() }()
+	_ = key.SetDWordValue("DashboardEnabled", 0)
 	return C.CString(`{"ok":true}`)
 }
 
