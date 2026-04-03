@@ -88,7 +88,99 @@ func WriteDefaultParameters(log LogFunc) error {
 		_ = key.SetStringValue("AuditPath", DefaultAuditPath())
 	}
 
+	// Notification defaults.
+	if _, _, err := key.GetStringValue("WebhookURL"); err != nil {
+		_ = key.SetStringValue("WebhookURL", "")
+	}
+	if _, _, err := key.GetStringValue("NtfyURL"); err != nil {
+		_ = key.SetStringValue("NtfyURL", "")
+	}
+	if _, _, err := key.GetIntegerValue("NotifyOnTransition"); err != nil {
+		_ = key.SetDWordValue("NotifyOnTransition", 1)
+	}
+	if _, _, err := key.GetIntegerValue("NotifyOnGraceExceeded"); err != nil {
+		_ = key.SetDWordValue("NotifyOnGraceExceeded", 1)
+	}
+	if _, _, err := key.GetIntegerValue("NotifyRepeatMinutes"); err != nil {
+		_ = key.SetDWordValue("NotifyRepeatMinutes", 0)
+	}
+
 	log(LvlINF, "parameters=defaults_written", "path="+ParametersKeyPath)
+	return nil
+}
+
+// ReadNotifyConfig reads notification configuration from the service's
+// Parameters registry key. Missing values get defaults.
+func ReadNotifyConfig(log LogFunc) NotifyConfig {
+	cfg := NotifyConfig{
+		OnTransition:    true,
+		OnGraceExceeded: true,
+		RepeatInterval:  0,
+	}
+
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, ParametersKeyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return cfg
+	}
+	defer func() { _ = key.Close() }()
+
+	if v, _, err := key.GetStringValue("WebhookURL"); err == nil {
+		cfg.WebhookURL = v
+	}
+	if v, _, err := key.GetStringValue("NtfyURL"); err == nil {
+		cfg.NtfyURL = v
+	}
+	if v, _, err := key.GetIntegerValue("NotifyOnTransition"); err == nil {
+		cfg.OnTransition = v != 0
+	}
+	if v, _, err := key.GetIntegerValue("NotifyOnGraceExceeded"); err == nil {
+		cfg.OnGraceExceeded = v != 0
+	}
+	if v, _, err := key.GetIntegerValue("NotifyRepeatMinutes"); err == nil {
+		cfg.RepeatInterval = time.Duration(v) * time.Minute
+	}
+
+	return cfg
+}
+
+// WriteNotifyConfig writes notification configuration to the service's
+// Parameters registry key.
+func WriteNotifyConfig(cfg NotifyConfig, log LogFunc) error {
+	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, ParametersKeyPath, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open parameters key: %w", err)
+	}
+	defer func() { _ = key.Close() }()
+
+	if err := key.SetStringValue("WebhookURL", cfg.WebhookURL); err != nil {
+		return fmt.Errorf("set WebhookURL: %w", err)
+	}
+	if err := key.SetStringValue("NtfyURL", cfg.NtfyURL); err != nil {
+		return fmt.Errorf("set NtfyURL: %w", err)
+	}
+
+	onTransition := uint32(0)
+	if cfg.OnTransition {
+		onTransition = 1
+	}
+	if err := key.SetDWordValue("NotifyOnTransition", onTransition); err != nil {
+		return fmt.Errorf("set NotifyOnTransition: %w", err)
+	}
+
+	onGrace := uint32(0)
+	if cfg.OnGraceExceeded {
+		onGrace = 1
+	}
+	if err := key.SetDWordValue("NotifyOnGraceExceeded", onGrace); err != nil {
+		return fmt.Errorf("set NotifyOnGraceExceeded: %w", err)
+	}
+
+	repeatMin := uint32(cfg.RepeatInterval.Minutes())
+	if err := key.SetDWordValue("NotifyRepeatMinutes", repeatMin); err != nil {
+		return fmt.Errorf("set NotifyRepeatMinutes: %w", err)
+	}
+
+	LogMsg(log, LvlINF, "notification config written", "path="+ParametersKeyPath)
 	return nil
 }
 
