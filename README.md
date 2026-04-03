@@ -48,44 +48,47 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 
 ## 🏗️ Architecture
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │        DrainCtl Windows Service              │
-                    │                                              │
-                    │  RegNotifyChangeKeyValue ──┐                │
-                    │                            ├──► runCheck()  │
-                    │  Poll Ticker (5 min) ──────┘       │        │
-                    │                                    ▼        │
-                    │  EvtSubscribe (4657) ─── attribution        │
-                    │                                    │        │
-                    │              MemAuditStore ◄───────┘        │
-                    │                    │                         │
-                    │  Named Pipe ◄──────┴──► Event Log           │
-                    └────────┬────────────────────────────────────┘
-                             │
-            ┌────────────────┼────────────────────┐
-            │ pipe (instant) │                    │
-      drainctl.exe    PowerShell         fallback: direct
-      N-central AMP   Module            registry read
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333', 'primaryColor': '#dbeafe', 'primaryTextColor': '#000', 'secondaryColor': '#dcfce7', 'tertiaryColor': '#fef3c7'}}}%%
+graph TB
+    subgraph SVC["DrainCtl Windows Service"]
+        RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
+        EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
+        POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
+        CHECK --> STORE["MemAuditStore"]
+        CHECK --> ELOG["Event Log"]
+        STORE --> PIPE["Named Pipe"]
+    end
+
+    CLI["drainctl.exe"] -->|"pipe"| PIPE
+    PS["PowerShell Module"] -->|"pipe"| PIPE
+    NC["N-central AMP"] --> CLI
+
+    CLI -.->|"fallback"| REG["Registry"]
+    PS -.->|"fallback"| REG
 ```
 
 ### How Detection Works
 
-```
-  Admin runs: chglogon /drain
-     │
-     ├──► Registry write ──► RegNotifyChangeKeyValue fires (~0ms)
-     │                              │
-     │                              ▼
-     │                        Service detects transition
-     │                              │
-     └──► Security Event 4657 ──► EvtSubscribe pushes "DOMAIN\admin" (~200ms)
-                                    │
-                                    ▼
-                              Service records:
-                              • AuditRecord (who, what, when)
-                              • Event Log entry (Warning/Error)
-                              • Named pipe state update
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333'}}}%%
+sequenceDiagram
+    participant Admin
+    participant Registry
+    participant RegNotify
+    participant EventLog
+    participant EvtSubscribe
+    participant Service
+
+    Admin->>Registry: chglogon /drain
+    Registry-->>RegNotify: value changed (~0ms)
+    Registry-->>EventLog: Event 4657 (~200ms)
+    RegNotify->>Service: trigger check
+    EventLog-->>EvtSubscribe: push attribution
+    Service->>Service: ReadDrainMode()
+    Service->>EvtSubscribe: WaitAttribution(3s)
+    EvtSubscribe-->>Service: DOMAIN\admin
+    Service->>Service: Record audit + Event Log
 ```
 
 ---
