@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue)
-![Version](https://img.shields.io/badge/Version-26.93.4-green)
+![Version](https://img.shields.io/badge/Version-26.93.5-green)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
 Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, maintains a 90-day audit trail, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
@@ -52,7 +52,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 ## 🏗️ Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333', 'primaryColor': '#dbeafe', 'primaryTextColor': '#000', 'secondaryColor': '#dcfce7', 'tertiaryColor': '#fef3c7'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#2d1a1a', 'lineColor': '#7a5a5a', 'primaryColor': '#f5e0e4', 'primaryTextColor': '#2d1a1a', 'secondaryColor': '#e8f0eb', 'tertiaryColor': '#fce8df'}}}%%
 graph TB
     subgraph SVC["DrainCtl Windows Service"]
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
@@ -74,7 +74,7 @@ graph TB
 ### How Detection Works
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#2d1a1a', 'lineColor': '#7a5a5a'}}}%%
 sequenceDiagram
     participant Admin
     participant Registry
