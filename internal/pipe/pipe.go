@@ -1,6 +1,6 @@
 //go:build windows
 
-package drainctl
+package pipe
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // PipeName is the named pipe path the service listens on.
@@ -29,34 +31,24 @@ type PipeResponse struct {
 
 // PipeHandler provides the data the pipe server needs to answer requests.
 type PipeHandler interface {
-	HandleStatus(gracePeriod time.Duration) *CheckResult
-	HandleHistory(limit int, changesOnly bool) []AuditRecord
+	HandleStatus(gracePeriod time.Duration) *dc.CheckResult
+	HandleHistory(limit int, changesOnly bool) []dc.AuditRecord
 }
 
-// ServePipe runs the named pipe server using Go's built-in net.Pipe
-// via the "npipe" convention (net.Listen on the pipe path won't work
-// natively, so we use a FileListener approach). For simplicity and
-// zero dependencies, we use a TCP-style listener on a named pipe via
-// the net package's support for Windows named pipes in Go 1.24+.
-//
-// Actually, Go's net.Listen does NOT support named pipes. We'll use
-// a simple loop with net.Dial-compatible I/O by using the winio package...
-// but we said no new dependencies. So we'll use raw Windows API.
-//
-// Revised approach: use a simple goroutine-per-connection model with
-// the Windows named pipe API.
-func ServePipe(ctx context.Context, handler PipeHandler, log LogFunc) {
+// ServePipe runs the named pipe server using a simple goroutine-per-connection
+// model with the Windows named pipe API.
+func ServePipe(ctx context.Context, handler PipeHandler, log dc.LogFunc) {
 	if log == nil {
-		log = DiscardLogger()
+		log = dc.DiscardLogger()
 	}
 
-	log(LvlINF, "pipe_server=starting", "pipe="+PipeName)
+	log(dc.LvlINF, "pipe_server=starting", "pipe="+PipeName)
 
 	for {
 		// Check for cancellation before creating a new pipe instance.
 		select {
 		case <-ctx.Done():
-			log(LvlINF, "pipe_server=stopped")
+			log(dc.LvlINF, "pipe_server=stopped")
 			return
 		default:
 		}
@@ -66,10 +58,10 @@ func ServePipe(ctx context.Context, handler PipeHandler, log LogFunc) {
 		conn, err := acceptPipeConn(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log(LvlINF, "pipe_server=stopped")
+				log(dc.LvlINF, "pipe_server=stopped")
 				return
 			}
-			LogMsg(log, LvlERR, "pipe accept failed", fmt.Sprintf("error=%q", err))
+			dc.LogMsg(log, dc.LvlERR, "pipe accept failed", fmt.Sprintf("error=%q", err))
 			time.Sleep(time.Second)
 			continue
 		}
@@ -78,7 +70,7 @@ func ServePipe(ctx context.Context, handler PipeHandler, log LogFunc) {
 	}
 }
 
-func handlePipeConn(conn net.Conn, handler PipeHandler, log LogFunc) {
+func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 	defer func() { _ = conn.Close() }()
 
 	// Set a deadline to prevent slow clients from blocking.
@@ -116,10 +108,10 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log LogFunc) {
 			limit = 50
 		}
 		records := handler.HandleHistory(limit, req.ChangesOnly)
-		durations := ComputeStateDurations(records)
-		out := make([]HistoryRecord, len(records))
+		durations := dc.ComputeStateDurations(records)
+		out := make([]dc.HistoryRecord, len(records))
 		for i, r := range records {
-			out[i] = AuditToHistory(r, &durations[i])
+			out[i] = dc.AuditToHistory(r, &durations[i])
 		}
 		raw, _ := json.Marshal(out)
 		resp = PipeResponse{OK: true, Data: raw}
@@ -134,12 +126,12 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log LogFunc) {
 
 // CheckViaPipe sends a status request to the service and returns the result.
 // Returns an error if the service is not running.
-func CheckViaPipe() (*CheckResult, error) {
+func CheckViaPipe() (*dc.CheckResult, error) {
 	resp, err := pipeRPC(PipeRequest{Cmd: "status"})
 	if err != nil {
 		return nil, err
 	}
-	var result CheckResult
+	var result dc.CheckResult
 	if err := json.Unmarshal(resp.Data, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal status: %w", err)
 	}
@@ -148,12 +140,12 @@ func CheckViaPipe() (*CheckResult, error) {
 
 // HistoryViaPipe sends a history request to the service.
 // Returns an error if the service is not running.
-func HistoryViaPipe(limit int, changesOnly bool) ([]HistoryRecord, error) {
+func HistoryViaPipe(limit int, changesOnly bool) ([]dc.HistoryRecord, error) {
 	resp, err := pipeRPC(PipeRequest{Cmd: "history", Limit: limit, ChangesOnly: changesOnly})
 	if err != nil {
 		return nil, err
 	}
-	var records []HistoryRecord
+	var records []dc.HistoryRecord
 	if err := json.Unmarshal(resp.Data, &records); err != nil {
 		return nil, fmt.Errorf("unmarshal history: %w", err)
 	}

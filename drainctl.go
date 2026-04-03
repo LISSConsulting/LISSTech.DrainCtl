@@ -7,7 +7,7 @@ package drainctl
 import "os"
 
 // Version is the library version. Overridable via ldflags.
-var Version = "26.93.1"
+var Version = "26.93.2"
 
 // DefaultDataDir returns the default directory for drainctl data files.
 func DefaultDataDir() string {

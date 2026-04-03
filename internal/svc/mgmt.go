@@ -1,22 +1,34 @@
 //go:build windows
 
-package drainctl
+package svc
 
 import (
 	"fmt"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-func installServiceImpl(exePath string, log LogFunc) error {
+// InstallService registers the service with SCM.
+func InstallService(exePath string, log dc.LogFunc) error {
+	return installServiceImpl(exePath, log)
+}
+
+// UninstallService removes the service from SCM.
+func UninstallService(log dc.LogFunc) error {
+	return uninstallServiceImpl(log)
+}
+
+func installServiceImpl(exePath string, log dc.LogFunc) error {
 	// Register event log source.
-	err := eventlog.InstallAsEventCreate(ServiceName,
+	err := eventlog.InstallAsEventCreate(dc.ServiceName,
 		eventlog.Info|eventlog.Warning|eventlog.Error)
 	if err != nil {
 		// Ignore "already exists" — not a real error.
-		log(LvlINF, fmt.Sprintf("eventlog_source=%s (may already exist)", ServiceName))
+		log(dc.LvlINF, fmt.Sprintf("eventlog_source=%s (may already exist)", dc.ServiceName))
 	}
 
 	m, err := mgr.Connect()
@@ -25,9 +37,9 @@ func installServiceImpl(exePath string, log LogFunc) error {
 	}
 	defer func() { _ = m.Disconnect() }()
 
-	s, err := m.CreateService(ServiceName, exePath, mgr.Config{
-		DisplayName:  ServiceDisplayName,
-		Description:  ServiceDescription,
+	s, err := m.CreateService(dc.ServiceName, exePath, mgr.Config{
+		DisplayName:  dc.ServiceDisplayName,
+		Description:  dc.ServiceDescription,
 		StartType:    mgr.StartAutomatic,
 		ErrorControl: mgr.ErrorNormal,
 		ServiceType:  windows.SERVICE_WIN32_OWN_PROCESS,
@@ -45,22 +57,22 @@ func installServiceImpl(exePath string, log LogFunc) error {
 	}, 86400) // reset failure count after 24 hours
 
 	// Write default parameters.
-	if err := WriteDefaultParameters(log); err != nil {
-		log(LvlWRN, fmt.Sprintf("write_defaults_failed=%q", err))
+	if err := dc.WriteDefaultParameters(log); err != nil {
+		log(dc.LvlWRN, fmt.Sprintf("write_defaults_failed=%q", err))
 	}
 
-	log(LvlOK, "service=installed", fmt.Sprintf("name=%s", ServiceName))
+	log(dc.LvlOK, "service=installed", fmt.Sprintf("name=%s", dc.ServiceName))
 	return nil
 }
 
-func uninstallServiceImpl(log LogFunc) error {
+func uninstallServiceImpl(log dc.LogFunc) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
 	}
 	defer func() { _ = m.Disconnect() }()
 
-	s, err := m.OpenService(ServiceName)
+	s, err := m.OpenService(dc.ServiceName)
 	if err != nil {
 		return fmt.Errorf("open service: %w", err)
 	}
@@ -70,7 +82,7 @@ func uninstallServiceImpl(log LogFunc) error {
 		return fmt.Errorf("delete service: %w", err)
 	}
 
-	_ = eventlog.Remove(ServiceName)
-	log(LvlOK, "service=uninstalled", fmt.Sprintf("name=%s", ServiceName))
+	_ = eventlog.Remove(dc.ServiceName)
+	log(dc.LvlOK, "service=uninstalled", fmt.Sprintf("name=%s", dc.ServiceName))
 	return nil
 }

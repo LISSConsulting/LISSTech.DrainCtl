@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-BSL_1.1-yellow)
-![Version](https://img.shields.io/badge/Version-26.93.1-green)
+![Version](https://img.shields.io/badge/Version-26.93.2-green)
 
 Replaces legacy PowerShell + LogParser 2.2 scripts with a zero-dependency Go binary that monitors `TSServerDrainMode`, maintains a 90-day JSONL audit trail, and attributes changes to specific users via Windows Security Event Log.
 
@@ -385,41 +385,33 @@ cp .env.example .env
 
 ```
 LISSTech.DrainCtl/
-├── drainctl.go            # Package root: version, defaults
-├── registry.go            # ReadDrainMode(), WatchDrainModeKey()
-├── eventlog.go            # QueryRegistryChangeUser() (wevtutil fallback)
-├── evtsubscribe.go        # EvtSubscribe for real-time Event ID 4657
-├── audit.go               # AuditStore (file-based, CLI fallback)
-├── memstore.go            # MemAuditStore (in-memory, service mode)
-├── notify.go              # Webhook + ntfy.sh notification client
-├── check.go               # Check() — core monitoring logic
-├── history.go             # GetHistory() — audit trail query
-├── audit_setup.go         # RunAuditSetup() — auditpol + SACL
-├── format.go              # Output formatting (plain/table/csv/json)
-├── log.go                 # LogFunc, DefaultLogger, DiscardLogger
-├── config.go              # ServiceConfig, registry parameters, hot-reload
-├── service.go             # Windows Service handler (svc.Handler)
-├── service_mgmt.go        # Service install/uninstall via SCM
-├── pipe.go                # Named pipe IPC protocol
-├── pipe_windows.go        # Named pipe Win32 API (accept/dial)
+├── drainctl.go              # Package root: version, defaults
+├── registry.go              # ReadDrainMode(), DrainMode, RegistryState
+├── eventlog.go              # QueryRegistryChangeUser() (wevtutil fallback)
+├── audit.go                 # AuditRecord, AuditStore (file-based)
+├── check.go                 # Check() — core monitoring logic
+├── history.go               # GetHistory() — audit trail query
+├── audit_setup.go           # RunAuditSetup() — auditpol + SACL
+├── format.go                # Output formatting (plain/table/csv/json)
+├── log.go                   # LogFunc, DefaultLogger, DiscardLogger
+├── config.go                # ServiceConfig, NotifyConfig, registry parameters
+├── notify.go                # Webhook + ntfy.sh notification client
+├── internal/
+│   ├── svc/                 # Windows Service handler + install/uninstall
+│   ├── pipe/                # Named pipe IPC server + client
+│   ├── store/               # MemAuditStore (in-memory + JSONL flush)
+│   └── watcher/             # RegNotifyChangeKeyValue + EvtSubscribe
 ├── cmd/
-│   ├── drainctl/          # CLI entry point (cobra)
-│   └── cshared/           # C-shared DLL exports
+│   ├── drainctl/            # CLI entry point (cobra)
+│   └── cshared/             # C-shared DLL exports
 ├── powershell/
 │   ├── LISSTech.DrainCtl.psd1
 │   └── LISSTech.DrainCtl.psm1
-├── installer/
-│   ├── LISSTech.DrainCtl.wixproj
-│   ├── LISSTech.DrainCtl.wxs
-│   └── LISSTech.DrainCtl.wxl
-├── assets/
-│   ├── drainctl.ico       # Application icon
-│   ├── drainctl.mc        # Event log message definitions
-│   └── drainctl-msg.dll   # Compiled message file
-├── docs/
-│   └── index.html         # Landing page
-├── justfile               # Build recipes
-└── .env.example           # Signing configuration template
+├── installer/               # WiX 5 MSI project
+├── assets/                  # Icon, event log message file
+├── docs/                    # Landing page (GitHub Pages)
+├── justfile                 # Build recipes
+└── .env.example             # Signing configuration template
 ```
 
 ---
