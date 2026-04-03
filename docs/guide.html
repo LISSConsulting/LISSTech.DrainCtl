@@ -702,18 +702,25 @@ const fontPairs = [
   { body: "'Lato', sans-serif", heading: "'Playfair Display', serif", label: "Lato + Playfair" },
   { body: "'Source Sans 3', sans-serif", heading: "'Playfair Display', serif", label: "Source Sans + Playfair" },
 ];
-let fontIdx = 0;
+let fontIdx = parseInt(localStorage.getItem('drainctl-font-idx') || '0', 10);
+
+function applyFont(idx) {
+  const pair = fontPairs[idx];
+  document.body.style.fontFamily = pair.body;
+  document.querySelectorAll('h1, h2').forEach(el => {
+    if (!el.closest('.toc')) el.style.fontFamily = pair.heading;
+  });
+  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + pair.label;
+}
 
 function cycleFont() {
   fontIdx = (fontIdx + 1) % fontPairs.length;
-  const pair = fontPairs[fontIdx];
-  document.body.style.fontFamily = pair.body;
-  document.querySelectorAll('h1, h2, .toc h2').forEach(el => {
-    if (!el.closest('.toc')) el.style.fontFamily = pair.heading;
-  });
-  document.querySelectorAll('h1').forEach(el => el.style.fontFamily = pair.heading);
-  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + pair.label;
+  localStorage.setItem('drainctl-font-idx', fontIdx);
+  applyFont(fontIdx);
 }
+
+// Restore saved font on load
+if (fontIdx > 0) applyFont(fontIdx);
 </script>
 
 </body>
