@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LISSTech DrainCtl - RDSH Drain Mode Monitor</title>
+<style>
+:root {
+  --bg: #fffdf7;
+  --fg: #1a1a1a;
+  --accent: #3b82f6;
+  --accent2: #10b981;
+  --warn: #f59e0b;
+  --err: #ef4444;
+  --border: #1a1a1a;
+  --shadow: #1a1a1a;
+  --card: #fff;
+  --muted: #6b7280;
+  --code-bg: #1e293b;
+  --code-fg: #e2e8f0;
+  --radius: 12px;
+  --border-w: 3px;
+  --shadow-offset: 5px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #f1f5f9;
+    --card: #1e293b;
+    --border: #475569;
+    --shadow: #000;
+    --muted: #94a3b8;
+    --code-bg: #0d1117;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.6;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.hero {
+  text-align: center;
+  padding: 80px 0 60px;
+}
+.hero-emoji {
+  font-size: 72px;
+  display: block;
+  margin-bottom: 16px;
+  filter: drop-shadow(var(--shadow-offset) var(--shadow-offset) 0 var(--shadow));
+}
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+.hero h1 span { color: var(--accent); }
+.hero p {
+  font-size: 1.25rem;
+  color: var(--muted);
+  max-width: 600px;
+  margin: 0 auto 32px;
+}
+.hero-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 28px;
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: none;
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--shadow);
+  transition: transform 0.1s, box-shadow 0.1s;
+  cursor: pointer;
+}
+.btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: calc(var(--shadow-offset) + 2px) calc(var(--shadow-offset) + 2px) 0 var(--shadow);
+}
+.btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--shadow);
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--card); color: var(--fg); }
+
+/* ── Features ─────────────────────────────────────────────── */
+.features {
+  padding: 60px 0;
+}
+.features h2 {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 40px;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+}
+.feature-card {
+  background: var(--card);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--shadow);
+  padding: 28px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.feature-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: calc(var(--shadow-offset) + 3px) calc(var(--shadow-offset) + 3px) 0 var(--shadow);
+}
+.feature-card .icon { font-size: 2rem; margin-bottom: 12px; display: block; }
+.feature-card h3 { font-size: 1.15rem; font-weight: 800; margin-bottom: 8px; }
+.feature-card p { color: var(--muted); font-size: 0.95rem; }
+
+/* ── Quick Start ──────────────────────────────────────────── */
+.quickstart {
+  padding: 60px 0;
+}
+.quickstart h2 {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 32px;
+}
+.code-block {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--shadow);
+  padding: 24px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  white-space: pre;
+}
+.code-block .comment { color: #6b7280; }
+.code-block .cmd { color: #7dd3fc; }
+.code-block .ok { color: #4ade80; }
+.code-block .warn { color: #fbbf24; }
+
+/* ── Architecture ─────────────────────────────────────────── */
+.arch {
+  padding: 60px 0;
+}
+.arch h2 {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 32px;
+}
+.arch-diagram {
+  background: var(--card);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--shadow);
+  padding: 32px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  text-align: center;
+}
+
+/* ── Footer ───────────────────────────────────────────────── */
+.footer {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  border-top: var(--border-w) solid var(--border);
+  margin-top: 40px;
+}
+.footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <span class="hero-emoji">🚰</span>
+    <h1>LISSTech <span>DrainCtl</span></h1>
+    <p>Real-time Remote Desktop Session Host drain mode monitoring. Know the instant someone flips the switch &mdash; and who did it.</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-primary">
+        View on GitHub
+      </a>
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-secondary">
+        Download MSI
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features">
+  <div class="container">
+    <h2>Why DrainCtl?</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="icon">🔔</span>
+        <h3>Real-time Detection</h3>
+        <p>RegNotifyChangeKeyValue fires the instant TSServerDrainMode changes. No polling delay.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📋</span>
+        <h3>90-Day Audit Trail</h3>
+        <p>Every state observation logged to JSONL. Track transitions, durations, and patterns over time.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">👤</span>
+        <h3>Change Attribution</h3>
+        <p>EvtSubscribe on Event ID 4657 identifies who changed drain mode, delivered in under a second.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🐚</span>
+        <h3>PowerShell Native</h3>
+        <p>Get-RDSHDrainMode, Test-RDSHDrainMode, Get-RDSHDrainHistory. Pipeline-friendly objects.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Quick Start -->
+<section class="quickstart">
+  <div class="container">
+    <h2>Quick Start</h2>
+    <div class="code-block"><span class="comment"># Install (silent)</span>
+<span class="cmd">msiexec /i LISSTech.DrainCtl.msi /qn</span>
+
+<span class="comment"># Check drain mode (instant via service pipe)</span>
+<span class="cmd">drainctl check</span>
+<span class="ok">[OK ] status=Healthy connections_allowed=true exit=0</span>
+
+<span class="comment"># PowerShell</span>
+<span class="cmd">Get-RDSHDrainMode</span>
+<span class="cmd">if (Test-RDSHDrainMode) { "OK" } else { "ALERT" }</span>
+
+<span class="comment"># View audit history</span>
+<span class="cmd">Get-RDSHDrainHistory -ChangesOnly -Limit 5</span></div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section class="arch">
+  <div class="container">
+    <h2>How It Works</h2>
+    <div class="arch-diagram">
+  ┌─────────────────────────────────────────────────┐
+  │            DrainCtl Windows Service              │
+  │                                                  │
+  │  🔔 RegNotify ──┐                               │
+  │                  ├──▶ runCheck() ──▶ 📋 Audit    │
+  │  ⏱️ Poll Timer ──┘        │           Store     │
+  │                           │                      │
+  │  👤 EvtSubscribe ─── attribution                 │
+  │                                                  │
+  │  🔌 Named Pipe ◀──── CLI / PowerShell / DLL     │
+  └─────────────────────────────────────────────────┘
+         ▲                              ▲
+         │ pipe (instant)               │ fallback
+    drainctl.exe                   direct registry
+    PowerShell                     read (no service)
+    N-central AMP</div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container">
+    <p>
+      Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">BSL 1.1</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
