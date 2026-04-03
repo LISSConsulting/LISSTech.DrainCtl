@@ -18,23 +18,19 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Install MinGW
-        run: choco install mingw -y
-
-      - name: Install WiX 5
-        run: dotnet tool install -g wix
-
-      - name: Install just
-        run: choco install just -y
-
-      - name: Build
-        run: just all
+      - name: Install tools
+        run: |
+          choco install mingw just -y
+          dotnet tool install -g wix
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
         shell: pwsh
 
       - name: Lint
-        run: |
-          go vet ./...
-          golangci-lint run ./...
+        run: just lint
+        shell: pwsh
+
+      - name: Build
+        run: just all
         shell: pwsh
 
       - name: Get version
