@@ -142,6 +142,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Load config.
 	cfg := ReadServiceConfig(s.log)
+	notifyCfg := ReadNotifyConfig(s.log)
+	notifyState := &NotifyState{}
 	s.log(LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
 		Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
 
@@ -195,7 +197,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(store, &cfg, evtSub, s.log, s.elog)
+	svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -225,11 +227,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(LvlINF, "trigger=registry_change")
-			svcRunCheck(store, &cfg, evtSub, s.log, s.elog)
+			svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
 			_ = store.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
-			svcRunCheck(store, &cfg, evtSub, s.log, s.elog)
+			svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
 
 		case <-paramCh:
 			newCfg := ReadServiceConfig(s.log)
@@ -238,6 +240,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			cfg = newCfg
 			handler.cfg = &cfg
+			notifyCfg = ReadNotifyConfig(s.log)
 			s.log(LvlINF, "config=reloaded")
 
 		case <-flushTicker.C:
@@ -247,7 +250,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 }
 
 // svcRunCheck performs a single check cycle in service mode.
-func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, evtSub *EventSubscriber, log LogFunc, elog *eventlog.Log) {
+func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConfig, notifyState *NotifyState, evtSub *EventSubscriber, log LogFunc, elog *eventlog.Log) {
 	state, err := ReadDrainMode()
 	if err != nil {
 		LogMsg(log, LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
@@ -348,6 +351,41 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, evtSub *EventSubscrib
 		_ = elog.Info(EvtCheckHealthy, fmt.Sprintf(
 			"Drain mode check: %s on %s. All connections allowed. State duration: %s.",
 			state.Mode, state.Host, stateDur))
+	}
+
+	// Send notifications if configured.
+	if notifyCfg != nil && notifyCfg.Enabled() {
+		// Build a CheckResult for the notification system.
+		status := "Healthy"
+		message := "All connections allowed."
+		if drainActive && exitCode == 1 {
+			status = "Alert"
+			message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
+				stateDur, cfg.GracePeriod)
+		} else if drainActive {
+			remaining := cfg.GracePeriod - stateDur
+			status = "Grace"
+			message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
+		}
+
+		dur := stateDur.Seconds()
+		connAllowed := !drainActive
+		notifyResult := &CheckResult{
+			Timestamp:            time.Now(),
+			Host:                 state.Host,
+			DrainModeLabel:       state.Mode.String(),
+			DrainModeValue:       uint32(state.Mode),
+			GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
+			StateDurationSeconds: &dur,
+			Status:               status,
+			ConnectionsAllowed:   &connAllowed,
+			Transition:           transition,
+			TransitionFrom:       transitionFrom,
+			ChangedBy:            changedBy,
+			Message:              message,
+			ExitCode:             exitCode,
+		}
+		SendNotification(*notifyCfg, notifyState, notifyResult, transition, changedBy, log)
 	}
 }
 
