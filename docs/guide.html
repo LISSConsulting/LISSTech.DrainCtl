@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DrainCtl Guide — Installation, Configuration &amp; Usage</title>
+<meta name="description" content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fdfbf5;
+  --fg: #1a1407;
+  --accent: #b8860b;
+  --green: #5d8a3c;
+  --amber: #c67f17;
+  --red: #b91c1c;
+  --border: #1a1407;
+  --shadow: #1a1407;
+  --card: #fffef9;
+  --muted: #6b5f4a;
+  --subtle: #9e9279;
+  --code-bg: #0f0e0a;
+  --code-fg: #d8d2c4;
+  --surface: #f3efe4;
+  --r: 10px;
+  --bw: 2.5px;
+  --so: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0d09;
+    --fg: #f5f0e4;
+    --card: #1c1a14;
+    --border: #4a4535;
+    --shadow: #000;
+    --muted: #b8ae98;
+    --subtle: #6b6050;
+    --surface: #1c1a14;
+    --code-bg: #09090b;
+  }
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 780px; margin: 0 auto; padding: 0 28px; }
+a { color: var(--accent); }
+
+/* Nav */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg);
+  border-bottom: var(--bw) solid var(--border);
+  padding: 14px 0;
+}
+.nav .wrap { display: flex; align-items: center; justify-content: space-between; max-width: 780px; }
+.nav-brand {
+  font-weight: 800; font-size: 1.1rem;
+  text-decoration: none; color: var(--fg);
+  display: flex; align-items: center; gap: 8px;
+}
+.nav-brand span { opacity: 0.4; font-weight: 400; }
+.nav-links { display: flex; gap: 24px; list-style: none; }
+.nav-links a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 0.9rem; transition: color 0.15s; }
+.nav-links a:hover { color: var(--fg); }
+@media (max-width: 640px) { .nav-links { display: none; } }
+
+/* Content */
+.hero-sm { padding: 60px 0 40px; }
+.hero-sm h1 { font-size: 2.4rem; font-weight: 900; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 12px; }
+.hero-sm p { font-size: 1.05rem; color: var(--muted); }
+
+.toc {
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r);
+  padding: 24px 28px;
+  margin: 32px 0 48px;
+}
+.toc h2 { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 12px; }
+.toc ol { padding-left: 20px; }
+.toc li { margin-bottom: 6px; }
+.toc a { text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+.toc a:hover { text-decoration: underline; }
+
+h2 {
+  font-size: 1.6rem; font-weight: 900;
+  letter-spacing: -0.02em;
+  margin: 56px 0 8px;
+  padding-top: 24px;
+  border-top: var(--bw) solid var(--border);
+}
+h2:first-of-type { border-top: none; margin-top: 0; }
+h3 { font-size: 1.15rem; font-weight: 800; margin: 28px 0 8px; }
+p { margin-bottom: 14px; }
+ul, ol { margin-bottom: 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+strong { font-weight: 800; }
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--so) var(--so) 0 var(--shadow);
+  padding: 20px 24px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  margin: 16px 0 24px;
+}
+pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0 24px;
+  font-size: 0.9rem;
+}
+th, td {
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+}
+th { background: var(--surface); font-weight: 700; }
+
+.callout {
+  background: var(--surface);
+  border-left: 4px solid var(--accent);
+  padding: 16px 20px;
+  margin: 20px 0;
+  border-radius: 0 var(--r) var(--r) 0;
+  font-size: 0.92rem;
+}
+.callout.warn { border-left-color: var(--amber); }
+.callout strong { display: block; margin-bottom: 4px; }
+
+.footer {
+  border-top: var(--bw) solid var(--border);
+  padding: 40px 0;
+  text-align: center;
+  margin-top: 60px;
+}
+.footer p { font-size: 0.85rem; color: var(--subtle); }
+.footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a href="index.html" class="nav-brand">&#x1F6B0; DrainCtl <span>Guide</span></a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#configure">Configure</a></li>
+      <li><a href="#usage">Usage</a></li>
+      <li><a href="#notifications">Notifications</a></li>
+      <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<div class="hero-sm">
+  <h1>The Guide</h1>
+  <p>Everything you need to deploy DrainCtl, configure it for your environment, and start getting real-time drain mode visibility across your RDSH farm.</p>
+</div>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#install">Installation</a></li>
+    <li><a href="#first-run">First Run</a></li>
+    <li><a href="#configure">Configuration</a></li>
+    <li><a href="#audit-setup">Audit Setup (Change Attribution)</a></li>
+    <li><a href="#usage">CLI Usage</a></li>
+    <li><a href="#powershell">PowerShell Module</a></li>
+    <li><a href="#notifications">Notifications</a></li>
+    <li><a href="#ncentral">N-central Integration</a></li>
+    <li><a href="#service">Service Management</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ol>
+</nav>
+
+<!-- ── Installation ──────────────────────────────────────────────────── -->
+<h2 id="install">1. Installation</h2>
+
+<p>DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; N-central, SCCM, Intune, GPO, or just double-click it.</p>
+
+<h3>Silent install</h3>
+<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn</code></pre>
+
+<h3>What the MSI does</h3>
+<ul>
+  <li>Installs <code>drainctl.exe</code> and <code>drainctl.dll</code> to <code>C:\Program Files\LISS Technologies\LISSTech DrainCtl\bin\</code></li>
+  <li>Adds the bin folder to <strong>system PATH</strong> &mdash; <code>drainctl</code> is available immediately in any terminal</li>
+  <li>Registers the <strong>LISSTech.DrainCtl</strong> PowerShell module in <code>C:\Program Files\WindowsPowerShell\Modules\</code></li>
+  <li>Creates the data directory at <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\</code></li>
+  <li>Installs and <strong>auto-starts</strong> the <strong>DrainCtl</strong> Windows Service (runs as LocalSystem)</li>
+  <li>Registers the Event Log source with a custom message file</li>
+  <li>Writes default configuration to the registry</li>
+</ul>
+
+<div class="callout">
+  <strong>&#x1F4A1; No reboot required.</strong>
+  The service starts immediately. Open a new terminal and <code>drainctl check</code> will work right away.
+</div>
+
+<h3>Silent uninstall</h3>
+<pre><code>msiexec /x LISSTech.DrainCtl.msi /qn</code></pre>
+<p>This stops the service, removes all files, cleans up PATH, and deregisters the Event Log source. Your audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).</p>
+
+<!-- ── First Run ─────────────────────────────────────────────────────── -->
+<h2 id="first-run">2. First Run</h2>
+
+<p>After installation, verify everything is working:</p>
+
+<pre><code># Is the service running?
+Get-Service DrainCtl
+
+# Quick status check (instant &mdash; talks to the service via named pipe)
+drainctl check
+
+# PowerShell way
+Get-RDSHDrainMode | Format-List</code></pre>
+
+<p>You should see <code>status=Healthy</code> and <code>connections_allowed=true</code>. If drain mode is active on this server, you'll see the current state and how long it's been active.</p>
+
+<div class="callout">
+  <strong>&#x26A1; Instant response?</strong>
+  If <code>drainctl check</code> responds in under 100ms, it's talking to the service over the named pipe. If it takes a second or two, the service isn't running and it's falling back to a direct registry read. Check <code>Get-Service DrainCtl</code>.
+</div>
+
+<!-- ── Configuration ─────────────────────────────────────────────────── -->
+<h2 id="configure">3. Configuration</h2>
+
+<p>All settings live in the registry and <strong>hot-reload automatically</strong> when you change them. No service restart needed.</p>
+
+<pre><code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code></pre>
+
+<table>
+  <thead>
+    <tr><th>Value</th><th>Type</th><th>Default</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>GracePeriod</code></td><td>DWORD</td><td>60</td><td>Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the grace period, the status is "Grace" and exit code is 0.</td></tr>
+    <tr><td><code>RetentionDays</code></td><td>DWORD</td><td>90</td><td>Days to keep audit records. Maximum 365. Older records are pruned daily.</td></tr>
+    <tr><td><code>PollInterval</code></td><td>DWORD</td><td>300</td><td>Seconds between safety-net polls. The service also uses real-time registry notifications, so this is a fallback.</td></tr>
+    <tr><td><code>AuditPath</code></td><td>SZ</td><td><em>ProgramData path</em></td><td>Full path to the JSONL audit trail file.</td></tr>
+    <tr><td><code>WebhookURL</code></td><td>SZ</td><td><em>empty</em></td><td>Webhook endpoint for push notifications.</td></tr>
+    <tr><td><code>NtfyURL</code></td><td>SZ</td><td><em>empty</em></td><td>ntfy.sh topic URL for push notifications.</td></tr>
+    <tr><td><code>NotifyOnTransition</code></td><td>DWORD</td><td>1</td><td>Send notification when drain mode changes (on or off).</td></tr>
+    <tr><td><code>NotifyOnGraceExceeded</code></td><td>DWORD</td><td>1</td><td>Send notification when drain mode exceeds the grace period.</td></tr>
+    <tr><td><code>NotifyRepeatMinutes</code></td><td>DWORD</td><td>0</td><td>Re-send alert notifications every N minutes while in alert state. 0 = notify once.</td></tr>
+  </tbody>
+</table>
+
+<p>You can edit these with <code>regedit</code>, <code>reg.exe</code>, GPO preferences, or PowerShell:</p>
+
+<pre><code># Set grace period to 2 hours via PowerShell
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters" `
+    -Name "GracePeriod" -Value 120 -Type DWord</code></pre>
+
+<p>The service picks up the change within seconds (it watches the Parameters key with <code>RegNotifyChangeKeyValue</code>).</p>
+
+<!-- ── Audit Setup ───────────────────────────────────────────────────── -->
+<h2 id="audit-setup">4. Audit Setup (Change Attribution)</h2>
+
+<p>DrainCtl can tell you <strong>who</strong> changed drain mode &mdash; but it needs Windows to record that information first. Run this once (as admin):</p>
+
+<pre><code>drainctl audit-setup
+# or
+Install-RDSHDrainAudit</code></pre>
+
+<p>This does two things:</p>
+<ol>
+  <li>Enables the <strong>Registry</strong> audit subcategory via <code>auditpol</code></li>
+  <li>Sets a <strong>SACL</strong> on the Terminal Server registry key so that Windows writes Event ID 4657 whenever <code>TSServerDrainMode</code> is modified</li>
+</ol>
+
+<div class="callout warn">
+  <strong>&#x26A0;&#xFE0F; Domain-joined machines</strong>
+  On domain-joined servers, Group Policy refresh (~90 min) can overwrite local <code>auditpol</code> settings. For persistence, configure the equivalent GPO:<br><br>
+  <code>Computer Configuration &gt; Policies &gt; Windows Settings &gt; Security Settings &gt; Advanced Audit Policy Configuration &gt; Object Access &gt; Audit Registry &gt; Success</code>
+</div>
+
+<p>Without audit setup, DrainCtl still detects changes instantly &mdash; it just can't tell you who made them. The <code>changed_by</code> field will be empty.</p>
+
+<!-- ── CLI Usage ──────────────────────────────────────────────────────── -->
+<h2 id="usage">5. CLI Usage</h2>
+
+<h3>Check current state</h3>
+<pre><code># Plain text (default &mdash; great for terminal and N-central)
+drainctl check
+
+# JSON (great for parsing)
+drainctl check --format json
+
+# Table
+drainctl check --format table
+
+# Quiet mode (only final status line)
+drainctl --quiet check</code></pre>
+
+<h3>View audit history</h3>
+<pre><code># Last 50 records (table format)
+drainctl history
+
+# Only state transitions
+drainctl history --changes-only
+
+# Last 10 records as JSON
+drainctl history --limit 10 --format json</code></pre>
+
+<h3>Exit codes</h3>
+<table>
+  <thead><tr><th>Code</th><th>Meaning</th><th>When</th></tr></thead>
+  <tbody>
+    <tr><td><strong>0</strong></td><td>Healthy / Grace</td><td>Connections allowed, or drain mode active but within grace period</td></tr>
+    <tr><td><strong>1</strong></td><td>Alert</td><td>Drain mode active beyond grace period &mdash; new connections are blocked</td></tr>
+    <tr><td><strong>2</strong></td><td>Error</td><td>Registry unreadable or other failure</td></tr>
+  </tbody>
+</table>
+
+<h3>Output formats</h3>
+<p><code>--format plain</code> (default for <code>check</code>), <code>table</code> (default for <code>history</code>), <code>csv</code>, <code>json</code>.</p>
+
+<!-- ── PowerShell ─────────────────────────────────────────────────────── -->
+<h2 id="powershell">6. PowerShell Module</h2>
+
+<p>The module is auto-registered by the MSI. It works on both PowerShell 5.1 and 7+.</p>
+
+<pre><code># Rich status object
+Get-RDSHDrainMode
+
+# Boolean check &mdash; perfect for scripts and alerts
+if (Test-RDSHDrainMode) { "All good" } else { "ALERT: drain mode active!" }
+
+# Audit history
+Get-RDSHDrainHistory -Limit 20
+
+# Only transitions (who changed what, when)
+Get-RDSHDrainHistory -ChangesOnly | Format-Table Timestamp, DrainMode, ChangedBy
+
+# Pipeline magic
+Get-RDSHDrainHistory -ChangesOnly |
+    Where-Object { $_.DrainMode -ne "ALLOW_ALL_CONNECTIONS" } |
+    Select-Object Timestamp, ChangedBy, DrainMode</code></pre>
+
+<h3>All cmdlets</h3>
+<table>
+  <thead><tr><th>Cmdlet</th><th>Returns</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>Get-RDSHDrainMode</code></td><td>PSObject</td><td>Full drain mode state with audit data</td></tr>
+    <tr><td><code>Test-RDSHDrainMode</code></td><td>bool</td><td><code>$true</code> if connections allowed</td></tr>
+    <tr><td><code>Get-RDSHDrainHistory</code></td><td>PSObject[]</td><td>Audit trail records</td></tr>
+    <tr><td><code>Install-RDSHDrainAudit</code></td><td>&mdash;</td><td>One-time audit configuration</td></tr>
+    <tr><td><code>Get-RDSHDrainNotification</code></td><td>PSObject</td><td>Current notification config</td></tr>
+    <tr><td><code>Set-RDSHDrainNotification</code></td><td>&mdash;</td><td>Update notification settings</td></tr>
+    <tr><td><code>Test-RDSHDrainNotification</code></td><td>&mdash;</td><td>Send test notification</td></tr>
+  </tbody>
+</table>
+
+<!-- ── Notifications ──────────────────────────────────────────────────── -->
+<h2 id="notifications">7. Notifications</h2>
+
+<p>Get pushed when something happens. DrainCtl supports <strong>webhooks</strong> (any HTTP endpoint that accepts JSON) and <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> (open-source push notifications for your phone).</p>
+
+<h3>Setup</h3>
+<pre><code># Webhook (Slack, Teams, PagerDuty, custom endpoint, etc.)
+drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx
+
+# ntfy.sh (get push notifications on your phone!)
+drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts
+
+# Check what's configured
+drainctl notify status
+
+# Send a test to make sure it works
+drainctl notify test</code></pre>
+
+<h3>PowerShell way</h3>
+<pre><code>Set-RDSHDrainNotification -WebhookURL "https://hooks.example.com/drainctl"
+Set-RDSHDrainNotification -NtfyURL "https://ntfy.sh/my-alerts"
+Test-RDSHDrainNotification
+
+# See current config
+Get-RDSHDrainNotification</code></pre>
+
+<h3>What triggers notifications?</h3>
+<table>
+  <thead><tr><th>Event</th><th>Registry value</th><th>Default</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>State transition</td><td><code>NotifyOnTransition</code></td><td>On</td><td>Admin runs <code>chglogon /drain</code> &mdash; you get pinged</td></tr>
+    <tr><td>Grace exceeded</td><td><code>NotifyOnGraceExceeded</code></td><td>On</td><td>Drain mode active for 61 minutes (grace=60) &mdash; alert fires</td></tr>
+    <tr><td>Repeat alerts</td><td><code>NotifyRepeatMinutes</code></td><td>0 (once)</td><td>Set to 30 to get re-alerted every 30 min while in alert</td></tr>
+  </tbody>
+</table>
+
+<h3>Webhook payload</h3>
+<pre><code>{
+  "event": "transition",
+  "host": "MDS-LDC1-RDS5",
+  "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
+  "previous_mode": "ALLOW_ALL_CONNECTIONS",
+  "status": "Grace",
+  "message": "Drain mode active, within grace period (45m remaining).",
+  "changed_by": "MDS\\lissadmin",
+  "state_duration_seconds": 900,
+  "timestamp": "2026-04-03T14:30:00-04:00"
+}</code></pre>
+
+<p>ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and <strong>default</strong> for transitions.</p>
+
+<!-- ── N-central ─────────────────────────────────────────────────────── -->
+<h2 id="ncentral">8. N-central Integration</h2>
+
+<p>DrainCtl was built for N-central. The AMP (Automation Policy) just runs <code>drainctl check</code> and thresholds on the exit code.</p>
+
+<h3>How it works</h3>
+<ol>
+  <li>N-central agent runs the AMP at its polling interval</li>
+  <li>AMP executes <code>drainctl check</code></li>
+  <li>DrainCtl connects to the service via named pipe &mdash; <strong>instant response</strong></li>
+  <li>AMP captures stdout (structured key=value lines) and the exit code</li>
+  <li>N-central thresholds: exit code 0 = Normal, 1 = Failed</li>
+</ol>
+
+<div class="callout">
+  <strong>&#x1F3AF; Pro tip:</strong> Even if N-central only polls every 15 minutes, the service detected the change in real time. The audit trail has the exact timestamp and attribution. N-central is just sampling the service's state.
+</div>
+
+<h3>Minimal AMP script</h3>
+<pre><code>drainctl check --quiet
+exit $LASTEXITCODE</code></pre>
+
+<p>That's it. <code>--quiet</code> suppresses intermediate log lines &mdash; only the final status line is emitted, which N-central captures.</p>
+
+<!-- ── Service Management ─────────────────────────────────────────────── -->
+<h2 id="service">9. Service Management</h2>
+
+<p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
+
+<pre><code># Check service status
+Get-Service DrainCtl
+
+# Stop / Start / Restart
+Stop-Service DrainCtl
+Start-Service DrainCtl
+Restart-Service DrainCtl
+
+# Manual install (if not using MSI)
+drainctl service install
+drainctl service start
+
+# Manual uninstall
+drainctl service stop
+drainctl service uninstall</code></pre>
+
+<h3>What the service does</h3>
+<ul>
+  <li><strong>Subscribes</strong> to registry changes on <code>TSServerDrainMode</code> via <code>RegNotifyChangeKeyValue</code> &mdash; instant detection</li>
+  <li><strong>Subscribes</strong> to Security Event ID 4657 via <code>EvtSubscribe</code> &mdash; knows who made the change</li>
+  <li><strong>Polls</strong> every 5 minutes as a safety net</li>
+  <li><strong>Maintains</strong> an in-memory audit store (flushed to JSONL every 30 seconds)</li>
+  <li><strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant CLI/PS responses</li>
+  <li><strong>Writes</strong> to the Windows Event Log (Application/DrainCtl) on state changes</li>
+  <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
+  <li><strong>Hot-reloads</strong> configuration when registry parameters change</li>
+</ul>
+
+<h3>Event Log</h3>
+<p>Check <code>Application</code> log, source <code>DrainCtl</code>:</p>
+<table>
+  <thead><tr><th>ID</th><th>Level</th><th>What happened</th></tr></thead>
+  <tbody>
+    <tr><td>1000</td><td>Info</td><td>Service started</td></tr>
+    <tr><td>1001</td><td>Info</td><td>Service stopped</td></tr>
+    <tr><td>1002</td><td>Info</td><td>Check: healthy</td></tr>
+    <tr><td>1004</td><td>Info</td><td>State transition detected</td></tr>
+    <tr><td>2000</td><td>Warning</td><td>Drain mode in grace period</td></tr>
+    <tr><td>3000</td><td>Error</td><td>Drain mode alert (grace exceeded)</td></tr>
+  </tbody>
+</table>
+
+<!-- ── Troubleshooting ────────────────────────────────────────────────── -->
+<h2 id="troubleshooting">10. Troubleshooting</h2>
+
+<h3>"changed_by" is empty</h3>
+<p>Run <code>drainctl audit-setup</code> as admin. On domain-joined machines, also configure the GPO (see <a href="#audit-setup">Audit Setup</a>).</p>
+
+<h3>Service won't start</h3>
+<p>Check the Application Event Log for DrainCtl errors (Event ID 3002). Common causes:</p>
+<ul>
+  <li>Another instance holds the audit file lock &mdash; restart the machine or find the process</li>
+  <li>Permissions on the ProgramData directory</li>
+</ul>
+
+<h3>CLI is slow (1-2 seconds instead of instant)</h3>
+<p>The service isn't running. <code>drainctl check</code> falls back to direct registry read + file-based audit. Start the service: <code>Start-Service DrainCtl</code>.</p>
+
+<h3>Notifications not arriving</h3>
+<ol>
+  <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
+  <li><code>drainctl notify test</code> &mdash; sends a test message</li>
+  <li>Check the Application Event Log for "webhook notification failed" or "ntfy notification failed" warnings</li>
+  <li>Verify network connectivity from the RDSH server to the webhook/ntfy endpoint</li>
+</ol>
+
+<h3>Need help?</h3>
+<p><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/issues">Open an issue on GitHub</a> or contact <a href="https://lisstech.com">LISS Technologies</a> support.</p>
+
+</div>
+
+<footer class="footer">
+  <div class="wrap">
+    <p>
+      <a href="index.html">Home</a> &middot;
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a> &middot;
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a> &middot;
+      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">BSL 1.1</a>
+    </p>
+    <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
+  </div>
+</footer>
+
+</body>
+</html>
