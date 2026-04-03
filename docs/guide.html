@@ -7,7 +7,7 @@
 <meta name="description" content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Source+Sans+3:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #fdf8f6;
@@ -58,48 +58,56 @@ a { color: var(--accent); }
   position: sticky; top: 0; z-index: 100;
   background: var(--bg);
   border-bottom: var(--bw) solid var(--border);
-  padding: 14px 0;
+  padding: 0;
+  height: 52px;
 }
-.nav .wrap { display: flex; align-items: center; justify-content: space-between; max-width: 780px; }
+.nav .wrap {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 780px; height: 100%;
+}
 .nav-brand {
   font-weight: 800; font-size: 1.1rem;
   text-decoration: none; color: var(--fg);
   display: flex; align-items: center; gap: 8px;
+  height: 100%;
 }
 .nav-brand span { opacity: 0.4; font-weight: 400; }
-.nav-links { display: flex; gap: 24px; list-style: none; }
+.nav-links {
+  display: flex; align-items: center; gap: 24px;
+  list-style: none; height: 100%;
+}
 .nav-links a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 0.9rem; transition: color 0.15s; }
 .nav-links a:hover { color: var(--fg); }
 @media (max-width: 640px) { .nav-links { display: none; } }
 
 /* Content */
-.hero-sm { padding: 60px 0 40px; }
-.hero-sm h1 { font-size: 2.4rem; font-family: 'DM Serif Display', serif; font-weight: 400; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 12px; }
+.hero-sm { padding: 48px 0 20px; }
+.hero-sm h1 { font-size: 2.4rem; font-family: 'DM Serif Display', serif; font-weight: 400; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 10px; }
 .hero-sm p { font-size: 1.05rem; color: var(--muted); }
 
 .toc {
   background: var(--surface);
   border: var(--bw) solid var(--border);
   border-radius: var(--r);
-  padding: 24px 28px;
-  margin: 32px 0 48px;
+  padding: 18px 24px;
+  margin: 20px 0 36px;
 }
-.toc h2 { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 12px; }
-.toc ol { padding-left: 20px; }
-.toc li { margin-bottom: 6px; }
-.toc a { text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+.toc h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 10px; border: none; padding: 0; }
+.toc ol { padding-left: 20px; margin-bottom: 0; }
+.toc li { margin-bottom: 4px; }
+.toc a { text-decoration: none; font-weight: 600; font-size: 0.92rem; }
 .toc a:hover { text-decoration: underline; }
 
 h2 {
   font-family: 'DM Serif Display', serif;
   font-size: 1.6rem; font-weight: 400;
   letter-spacing: -0.01em;
-  margin: 56px 0 8px;
-  padding-top: 24px;
+  margin: 40px 0 8px;
+  padding-top: 20px;
   border-top: var(--bw) solid var(--border);
 }
 h2:first-of-type { border-top: none; margin-top: 0; }
-h3 { font-size: 1.15rem; font-weight: 800; margin: 28px 0 8px; }
+h3 { font-size: 1.15rem; font-weight: 800; margin: 24px 0 8px; }
 p { margin-bottom: 14px; }
 ul, ol { margin-bottom: 14px; padding-left: 22px; }
 li { margin-bottom: 6px; }
@@ -122,7 +130,7 @@ pre {
   overflow-x: auto;
   margin: 16px 0 24px;
 }
-pre code { background: none; border: none; padding: 0; font-size: inherit; }
+pre code { background: none; border: none; padding: 0; font-size: inherit; color: #f0e0e0; }
 
 table {
   width: 100%;
@@ -558,6 +566,44 @@ drainctl service uninstall</code></pre>
     <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
   </div>
 </footer>
+
+<!-- Font Switcher -->
+<button id="font-switcher" style="
+  position: fixed; bottom: 20px; right: 20px; z-index: 999;
+  background: var(--accent); color: #fff;
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--so) var(--so) 0 var(--shadow);
+  padding: 10px 16px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem; font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+" onclick="cycleFont()">&#x1F3A8; DM Sans + DM Serif</button>
+
+<script>
+const fontPairs = [
+  { body: "'DM Sans', sans-serif", heading: "'DM Serif Display', serif", label: "DM Sans + DM Serif" },
+  { body: "'Fraunces', serif", heading: "'Fraunces', serif", label: "Fraunces" },
+  { body: "'Work Sans', sans-serif", heading: "'Fraunces', serif", label: "Work Sans + Fraunces" },
+  { body: "'Literata', serif", heading: "'Literata', serif", label: "Literata" },
+  { body: "'Source Sans 3', sans-serif", heading: "'Literata', serif", label: "Source Sans + Literata" },
+  { body: "'Lato', sans-serif", heading: "'Playfair Display', serif", label: "Lato + Playfair" },
+  { body: "'Source Sans 3', sans-serif", heading: "'Playfair Display', serif", label: "Source Sans + Playfair" },
+];
+let fontIdx = 0;
+
+function cycleFont() {
+  fontIdx = (fontIdx + 1) % fontPairs.length;
+  const pair = fontPairs[fontIdx];
+  document.body.style.fontFamily = pair.body;
+  document.querySelectorAll('h1, h2, .toc h2').forEach(el => {
+    if (!el.closest('.toc')) el.style.fontFamily = pair.heading;
+  });
+  document.querySelectorAll('h1').forEach(el => el.style.fontFamily = pair.heading);
+  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + pair.label;
+}
+</script>
 
 </body>
 </html>
