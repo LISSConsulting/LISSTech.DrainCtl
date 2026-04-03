@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/favicon.ico" type="image/png">
 <title>DrainCtl Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -109,8 +109,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .empty h2{font-family:'DM Serif Display',serif;font-size:1.3rem;font-weight:400;margin-bottom:4px;color:var(--fg)}
 
 /* Gear button */
-.btn-gear{font-size:1.2rem;background:none;border:none;cursor:pointer;padding:4px 8px;color:var(--muted);transition:color .15s,transform .15s;line-height:1}
-.btn-gear:hover{color:var(--accent);transform:rotate(30deg)}
+.btn-gear{font-family:'JetBrains Mono',monospace;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;background:var(--card);color:var(--muted);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);padding:6px 14px;cursor:pointer;transition:transform .1s,box-shadow .1s,color .15s}
+.btn-gear:hover{transform:translate(-1px,-1px);box-shadow:calc(var(--so)+1px) calc(var(--so)+1px) 0 var(--shadow);color:var(--accent)}
 
 /* Settings drawer */
 .settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:150}
@@ -143,7 +143,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 <nav class="nav"><div class="nav-in">
   <div class="nav-brand">🚰 DrainCtl Dashboard</div>
   <div class="nav-right" id="ns"></div>
-  <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings">&#9881;&#65039;</button>
+  <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings">CONFIG</button>
 </div></nav>
 
 <div class="main">
@@ -161,9 +161,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
     <div class="chart" id="chart"><div class="empty"><h2>Loading...</h2></div></div>
   </div>
 
-  <div class="section-label">Servers</div>
-  <div class="grid" id="grid"><div class="empty"><h2>Connecting...</h2></div></div>
-
   <div class="log-section">
     <div class="section-label">Event Log</div>
     <div class="log-bar">
@@ -175,6 +172,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
       <div id="log-entries"><div class="evt-empty">Watching for transitions...</div></div>
     </div>
   </div>
+
+  <div class="section-label">Servers</div>
+  <div class="grid" id="grid"><div class="empty"><h2>Connecting...</h2></div></div>
 </div>
 
 <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
@@ -340,16 +340,33 @@ function toggleSettings(){
   document.getElementById('settings-overlay').classList.toggle('open');
   document.getElementById('settings-drawer').classList.toggle('open');
 }
-function loadNotifyConfig(){
-  document.getElementById('cfg-webhook').value='https://hooks.slack.com/services/T00/B00/xxxx';
-  document.getElementById('cfg-ntfy').value='https://ntfy.sh/drainctl-prod';
-  document.getElementById('cfg-transition').checked=true;
-  document.getElementById('cfg-grace').checked=true;
-  document.getElementById('cfg-repeat').value=15;
+async function loadNotifyConfig(){
+  try{
+    const r=await fetch('/api/v1/notify-config');
+    if(!r.ok)return;
+    const c=await r.json();
+    document.getElementById('cfg-webhook').value=c.webhook_url||'';
+    document.getElementById('cfg-ntfy').value=c.ntfy_url||'';
+    document.getElementById('cfg-transition').checked=!!c.on_transition;
+    document.getElementById('cfg-grace').checked=!!c.on_grace_exceeded;
+    document.getElementById('cfg-repeat').value=c.repeat_minutes||0;
+  }catch(e){console.error('loadNotifyConfig:',e)}
 }
-function saveNotifyConfig(){
+async function saveNotifyConfig(){
   const st=document.getElementById('cfg-status');
-  st.textContent='Saved successfully.';st.className='settings-status ok';
+  st.textContent='';st.className='settings-status';
+  try{
+    const body=JSON.stringify({
+      webhook_url:document.getElementById('cfg-webhook').value,
+      ntfy_url:document.getElementById('cfg-ntfy').value,
+      on_transition:document.getElementById('cfg-transition').checked,
+      on_grace_exceeded:document.getElementById('cfg-grace').checked,
+      repeat_minutes:parseInt(document.getElementById('cfg-repeat').value)||0
+    });
+    const r=await fetch('/api/v1/notify-config',{method:'PUT',headers:{'Content-Type':'application/json'},body});
+    if(r.ok){st.textContent='Saved successfully.';st.className='settings-status ok';}
+    else{st.textContent='Error: HTTP '+r.status;st.className='settings-status err';}
+  }catch(e){st.textContent='Error: '+e.message;st.className='settings-status err';}
 }
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
@@ -361,21 +378,32 @@ setInterval(refresh,30000);refresh();loadNotifyConfig();
 </script>
 <script>
 const mockServers = [
-  {hostname:"MDS-LDC1-RDS1.domain.com",registered_at:ago(86400000),last_seen:ago(15000),last_result:{host:"MDS-LDC1-RDS1",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:86400,connections_allowed:true,changed_by:"MDS\svcaccount",exit_code:0}},
-  {hostname:"MDS-LDC1-RDS2.domain.com",registered_at:ago(86400000),last_seen:ago(30000),last_result:{host:"MDS-LDC1-RDS2",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART",status:"Alert",state_duration_seconds:7200,connections_allowed:false,changed_by:"MDS\lissadmin",exit_code:1}},
-  {hostname:"MDS-LDC1-RDS3.domain.com",registered_at:ago(86400000),last_seen:ago(20000),last_result:{host:"MDS-LDC1-RDS3",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",status:"Grace",state_duration_seconds:1800,connections_allowed:false,changed_by:"MDS\jdoe",exit_code:0}},
-  {hostname:"MDS-LDC1-RDS4.domain.com",registered_at:ago(86400000),last_seen:ago(10000),last_result:{host:"MDS-LDC1-RDS4",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:172800,connections_allowed:true,exit_code:0}},
-  {hostname:"MDS-LDC1-RDS5.domain.com",registered_at:ago(86400000),last_seen:ago(5000),last_result:{host:"MDS-LDC1-RDS5",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:43200,connections_allowed:true,exit_code:0}},
-  {hostname:"MDS-LDC1-RDS6.domain.com",registered_at:ago(86400000),last_seen:ago(3600000),last_result:null}
+  {hostname:"CONTOSO-RDS01",registered_at:ago(86400000),last_seen:ago(15000),last_result:{host:"CONTOSO-RDS01",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:86400,connections_allowed:true,changed_by:"CONTOSO\svc.monitor",exit_code:0}},
+  {hostname:"CONTOSO-RDS02",registered_at:ago(86400000),last_seen:ago(30000),last_result:{host:"CONTOSO-RDS02",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART",status:"Alert",state_duration_seconds:7200,connections_allowed:false,changed_by:"CONTOSO\admin.jones",exit_code:1}},
+  {hostname:"CONTOSO-RDS03",registered_at:ago(86400000),last_seen:ago(20000),last_result:{host:"CONTOSO-RDS03",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",status:"Grace",state_duration_seconds:1800,connections_allowed:false,changed_by:"CONTOSO\admin.smith",exit_code:0}},
+  {hostname:"CONTOSO-RDS04",registered_at:ago(86400000),last_seen:ago(10000),last_result:{host:"CONTOSO-RDS04",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:172800,connections_allowed:true,exit_code:0}},
+  {hostname:"CONTOSO-RDS05",registered_at:ago(86400000),last_seen:ago(5000),last_result:{host:"CONTOSO-RDS05",drain_mode:"ALLOW_ALL_CONNECTIONS",status:"Healthy",state_duration_seconds:43200,connections_allowed:true,changed_by:"CONTOSO\svc.monitor",exit_code:0}},
+  {hostname:"CONTOSO-RDS06",registered_at:ago(86400000),last_seen:ago(3600000),last_result:null}
 ];
 evts=[
-  {time:"18:29:14",host:"MDS-LDC1-RDS2.domain.com",from:"Grace",to:"Alert",cls:"evt-r",by:" · MDS\lissadmin"},
-  {time:"18:15:02",host:"MDS-LDC1-RDS3.domain.com",from:"Healthy",to:"Grace",cls:"evt-w",by:" · MDS\jdoe"},
-  {time:"17:45:33",host:"MDS-LDC1-RDS2.domain.com",from:"Healthy",to:"Grace",cls:"evt-w",by:" · MDS\lissadmin"},
-  {time:"14:00:00",host:"MDS-LDC1-RDS6.domain.com",from:"Healthy",to:"Offline",cls:"evt-d",by:""},
-  {time:"12:30:15",host:"MDS-LDC1-RDS1.domain.com",from:"Grace",to:"Healthy",cls:"evt-g",by:" · MDS\svcaccount"},
+  {time:"18:29:14",host:"CONTOSO-RDS02",from:"Grace",to:"Alert",cls:"evt-r",by:" \u00b7 CONTOSO\admin.jones"},
+  {time:"18:15:02",host:"CONTOSO-RDS03",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\admin.smith"},
+  {time:"17:45:33",host:"CONTOSO-RDS02",from:"Healthy",to:"Grace",cls:"evt-w",by:" \u00b7 CONTOSO\admin.jones"},
+  {time:"14:00:00",host:"CONTOSO-RDS06",from:"Healthy",to:"Offline",cls:"evt-d",by:""},
+  {time:"12:30:15",host:"CONTOSO-RDS01",from:"Grace",to:"Healthy",cls:"evt-g",by:" \u00b7 CONTOSO\svc.monitor"},
 ];
 window.refresh=function(){render(mockServers)};
-render(mockServers);renderLog();
+window.loadNotifyConfig=function(){
+  document.getElementById('cfg-webhook').value='https://hooks.slack.com/services/T00/B00/xxx';
+  document.getElementById('cfg-ntfy').value='https://ntfy.sh/contoso-rdsh';
+  document.getElementById('cfg-transition').checked=true;
+  document.getElementById('cfg-grace').checked=true;
+  document.getElementById('cfg-repeat').value=15;
+};
+window.saveNotifyConfig=async function(){
+  document.getElementById('cfg-status').textContent='Saved';
+  document.getElementById('cfg-status').className='settings-status ok';
+};
+render(mockServers);renderLog();loadNotifyConfig();
 </script>
 </body></html>
