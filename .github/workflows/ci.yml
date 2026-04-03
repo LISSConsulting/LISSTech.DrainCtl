@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [trunk, development]
+  pull_request:
+    branches: [trunk]
+
+jobs:
+  lint-and-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install tools
+        run: |
+          choco install mingw just -y
+          dotnet tool install -g wix
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        shell: pwsh
+
+      - name: Lint
+        run: just lint
+        shell: pwsh
+
+      - name: Build
+        run: just all
+        shell: pwsh
+
+      - name: Verify version
+        run: .\dist\LISSTech.DrainCtl\bin\drainctl.exe --version
+        shell: pwsh

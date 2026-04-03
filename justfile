@@ -161,6 +161,44 @@ release: psmodule sign-binaries msi sign-msi
     Write-Host "   Version       $($vi.FileVersion)" -ForegroundColor DarkGray
     Write-Host ""
 
+# Tag, create GH release, and upload signed MSI (run after `just release`)
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+publish:
+    $msiPath = "{{dist_dir}}/LISSTech.DrainCtl.msi"
+    $exePath = "{{bin_dir}}/drainctl.exe"
+
+    if (-not (Test-Path $msiPath)) {
+        Write-Error "MSI not found. Run 'just release' first."
+        exit 1
+    }
+
+    # Verify the MSI is signed
+    $sig = Get-AuthenticodeSignature $msiPath
+    if ($sig.Status -ne 'Valid') {
+        Write-Error "MSI is not signed. Run 'just release' first."
+        exit 1
+    }
+
+    $version = (& $exePath --version 2>&1) -replace 'drainctl version ', ''
+    $tag = "v$version"
+
+    Write-Host "`n📤 Publishing $tag" -ForegroundColor Cyan
+
+    # Tag and push
+    & git tag -a $tag -m "Release $tag"
+    if ($LASTEXITCODE -ne 0) { Write-Error "git tag failed"; exit $LASTEXITCODE }
+    & git push origin $tag
+    if ($LASTEXITCODE -ne 0) { Write-Error "git push tag failed"; exit $LASTEXITCODE }
+    Write-Host "   ✅ Tag $tag pushed" -ForegroundColor Green
+
+    # Create release with signed MSI
+    & gh release create $tag $msiPath --title "LISSTech DrainCtl $version" --generate-notes
+    if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
+    Write-Host "   ✅ Release created with signed MSI" -ForegroundColor Green
+    Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
+    Write-Host ""
+
 # ── Lint ─────────────────────────────────────────────────────────────────────
 
 # Run all Go linters
