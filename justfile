@@ -83,6 +83,17 @@ bump:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
+# Dev build with auth bypass (NEVER deploy to production)
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+dev:
+    Write-Host "`n⚠️  Building DEV mode (auth bypassed)" -ForegroundColor Yellow
+    & go build -tags devmode -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
+    Write-Host "   drainctl.exe ($size) — SSPI auth DISABLED" -ForegroundColor Yellow
+
+
 # Compile Windows resource file (icon + version info)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]

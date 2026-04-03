@@ -49,24 +49,27 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 
 	mux := http.NewServeMux()
 
+	// wrapAuth/wrapGroup are determined at compile time via build tags.
+	// Production builds (default) use SSPI Negotiate middleware.
+	// Dev builds (-tags devmode) bypass auth entirely.
+	wa := func(h http.Handler) http.Handler { return wrapAuth(h, cfg.Group, log) }
+	wg := func(h http.Handler) http.Handler { return wrapGroup(h, cfg.Group, log) }
+
 	// Agent routes — any authenticated domain identity.
-	mux.Handle("POST /api/v1/register", NegotiateMiddleware(
-		http.HandlerFunc(ds.handleRegister), log))
-	mux.Handle("POST /api/v1/report", NegotiateMiddleware(
-		http.HandlerFunc(ds.handleReport), log))
+	mux.Handle("POST /api/v1/register", wa(http.HandlerFunc(ds.handleRegister)))
+	mux.Handle("POST /api/v1/report", wa(http.HandlerFunc(ds.handleReport)))
 
 	// Management / UI routes — require group membership.
-	mux.Handle("GET /api/v1/servers", NegotiateMiddleware(
-		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleServers), log), log))
-	mux.Handle("DELETE /api/v1/servers/{host}", NegotiateMiddleware(
-		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleDeleteServer), log), log))
+	mux.Handle("GET /api/v1/servers", wg(http.HandlerFunc(ds.handleServers)))
+	mux.Handle("DELETE /api/v1/servers/{host}", wg(http.HandlerFunc(ds.handleDeleteServer)))
+	mux.Handle("GET /api/v1/notify-config", wg(http.HandlerFunc(ds.handleGetNotifyConfig)))
+	mux.Handle("PUT /api/v1/notify-config", wg(http.HandlerFunc(ds.handlePutNotifyConfig)))
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
 	})
-	mux.Handle("GET /", NegotiateMiddleware(
-		RequireGroup(cfg.Group, http.HandlerFunc(ds.handleUI), log), log))
+	mux.Handle("GET /", wg(http.HandlerFunc(ds.handleUI)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	ln, err := net.Listen("tcp", addr)
@@ -202,6 +205,80 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	}
 	ds.log(dc.LvlINF, "dashboard=removed",
 		fmt.Sprintf("host=%s user=%s", host, user))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleGetNotifyConfig returns the current notification config as JSON.
+func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.Request) {
+	cfg := dc.ReadNotifyConfig(ds.log)
+
+	type notifyJSON struct {
+		WebhookURL      string `json:"webhook_url"`
+		NtfyURL         string `json:"ntfy_url"`
+		OnTransition    bool   `json:"on_transition"`
+		OnGraceExceeded bool   `json:"on_grace_exceeded"`
+		RepeatMinutes   int    `json:"repeat_minutes"`
+	}
+
+	out := notifyJSON{
+		WebhookURL:      cfg.WebhookURL,
+		NtfyURL:         cfg.NtfyURL,
+		OnTransition:    cfg.OnTransition,
+		OnGraceExceeded: cfg.OnGraceExceeded,
+		RepeatMinutes:   int(cfg.RepeatInterval.Minutes()),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+}
+
+// handlePutNotifyConfig accepts JSON and writes it to the registry.
+func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.Request) {
+	type notifyJSON struct {
+		WebhookURL      string `json:"webhook_url"`
+		NtfyURL         string `json:"ntfy_url"`
+		OnTransition    bool   `json:"on_transition"`
+		OnGraceExceeded bool   `json:"on_grace_exceeded"`
+		RepeatMinutes   int    `json:"repeat_minutes"`
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	var in notifyJSON
+	if err := json.Unmarshal(body, &in); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	cfg := dc.NotifyConfig{
+		WebhookURL:      in.WebhookURL,
+		NtfyURL:         in.NtfyURL,
+		OnTransition:    in.OnTransition,
+		OnGraceExceeded: in.OnGraceExceeded,
+		RepeatInterval:  time.Duration(in.RepeatMinutes) * time.Minute,
+	}
+
+	if err := dc.WriteNotifyConfig(cfg, ds.log); err != nil {
+		dc.LogMsg(ds.log, dc.LvlERR, "write notify config failed", fmt.Sprintf("error=%q", err))
+		http.Error(w, "failed to write config", http.StatusInternalServerError)
+		return
+	}
+
+	auth := GetAuthInfo(r)
+	user := ""
+	if auth != nil {
+		user = auth.Username
+	}
+	ds.log(dc.LvlINF, "dashboard=notify-config-updated", fmt.Sprintf("user=%s", user))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

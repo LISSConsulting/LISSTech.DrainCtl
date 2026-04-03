@@ -353,6 +353,7 @@ body {
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How It Works</a></li>
+      <li><a href="#dashboard">Dashboard</a></li>
       <li><a href="#usage">Usage</a></li>
       <li><a href="#install">Install</a></li>
       <li><a href="guide.html">Guide</a></li>
@@ -478,6 +479,51 @@ body {
   </div>
 </section>
 
+<!-- Dashboard -->
+<section class="section" id="dashboard">
+  <div class="wrap">
+    <div class="section-label">Farm Monitoring</div>
+    <div class="section-title">One dashboard for your entire RDSH farm.</div>
+    <div class="section-desc">Every server self-registers with the dashboard hub. Live status grid shows drain mode, grace period, and change attribution across all hosts &mdash; secured with Kerberos/SSPI authentication and AD group control.</div>
+
+    <div class="install-grid">
+      <div class="install-card card">
+        <h3>&#128215; How It Works</h3>
+        <p>One server runs the dashboard. Others register themselves and report state in real time. The dashboard aggregates everything into a single view.</p>
+        <code class="mono"><span style="color:var(--muted)"># On the dashboard server:</span>
+drainctl dashboard
+
+<span style="color:var(--muted)"># On each RDSH host:</span>
+drainctl register https://dashboard:49470</code>
+        <ul>
+          <li>Live status grid with health, grace, and alert states</li>
+          <li>State duration chart per server</li>
+          <li>Event log with transition history</li>
+          <li>Notification settings panel (webhook &amp; ntfy.sh)</li>
+        </ul>
+      </div>
+      <div class="install-card card">
+        <h3>&#128274; Kerberos Authentication</h3>
+        <p>The dashboard uses Windows Negotiate (SPNEGO/Kerberos) authentication. Only members of the configured AD group can view the dashboard.</p>
+        <code class="mono"><span style="color:var(--muted)"># Registry: HKLM\...\DrainCtl\Parameters</span>
+DashboardEnabled  = 1
+DashboardPort     = 49470
+DashboardGroup    = "Domain Admins"</code>
+        <ul>
+          <li>Agent routes accept any domain identity</li>
+          <li>Management routes require group membership</li>
+          <li>No passwords stored &mdash; pure Kerberos SSO</li>
+        </ul>
+      </div>
+    </div>
+
+    <div style="margin-top:28px;display:flex;gap:14px;flex-wrap:wrap">
+      <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
+      <a href="dashboard-preview.html" class="btn btn-ghost">Live Preview</a>
+    </div>
+  </div>
+</section>
+
 <!-- Usage Guide -->
 <section class="section" id="usage">
   <div class="wrap">
@@ -529,7 +575,7 @@ body {
     <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.93.6"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.93.7"</span>,
   <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
