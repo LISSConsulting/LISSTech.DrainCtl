@@ -72,7 +72,7 @@ body {
 }
 .nav-brand .emoji { font-size: 1.1em; vertical-align: middle; }
 .nav-brand span { opacity: 0.4; font-weight: 400; }
-.nav-links { display: flex; align-items: center; gap: 28px; list-style: none; height: 100%; }
+.nav-links { display: flex; align-items: center; gap: 28px; list-style: none; height: 100%; margin: 0; padding: 0; }
 .nav-links a {
   text-decoration: none; color: var(--muted);
   font-weight: 600; font-size: 0.9rem;
@@ -385,12 +385,12 @@ body {
       <div class="stat-label">Audit retention</div>
     </div>
     <div class="stat">
-      <div class="stat-value">0</div>
-      <div class="stat-label">Dependencies</div>
+      <div class="stat-value">1</div>
+      <div class="stat-label">Go binary</div>
     </div>
     <div class="stat">
-      <div class="stat-value">5 MB</div>
-      <div class="stat-label">Binary size</div>
+      <div class="stat-value">&#x1F512;</div>
+      <div class="stat-label">Kerberos auth</div>
     </div>
   </div>
 </section>
@@ -400,7 +400,7 @@ body {
   <div class="wrap">
     <div class="section-label">Capabilities</div>
     <div class="section-title">Everything you need to monitor drain mode.</div>
-    <div class="section-desc">One binary. One service. Complete visibility into RDSH connection state across your farm.</div>
+    <div class="section-desc">One binary. One service. Real-time visibility across your entire RDSH farm &mdash; with a dashboard to prove it.</div>
     <div class="features-grid">
       <div class="feature card">
         <div class="icon">&#9889;</div>
@@ -409,33 +409,38 @@ body {
       </div>
       <div class="feature card">
         <div class="icon">&#128203;</div>
-        <h3>Audit Trail</h3>
-        <p>90 days of every state observation. Transitions, durations, patterns &mdash; all queryable via CLI or PowerShell.</p>
+        <h3>90-Day Audit Trail</h3>
+        <p>Every state observation logged. Transitions, durations, patterns &mdash; queryable via CLI, PowerShell, or the dashboard.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128100;</div>
         <h3>Change Attribution</h3>
-        <p>Security Event Log subscription identifies who changed drain mode. No more "it just happened."</p>
+        <p>EvtSubscribe on Security Event 4657 tells you exactly who changed drain mode &mdash; in under a second.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#127760;</div>
+        <h3>Multi-Server Dashboard</h3>
+        <p>Aggregated farm view with live status grid. Servers self-register, report state in real time. Kerberos/SSPI auth with AD group control.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128187;</div>
-        <h3>PowerShell Native</h3>
-        <p>Real cmdlets, real objects, real pipeline. <code>Test-RDSHDrainMode</code> returns a boolean. Simple.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128200;</div>
-        <h3>RMM Ready</h3>
-        <p>Structured stdout and exit codes designed for monitoring thresholds. Drop it into any RMM platform.</p>
+        <h3>PowerShell + PSGallery</h3>
+        <p>Native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Pipeline-friendly objects. Works on 5.1 and 7+.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128276;</div>
         <h3>Webhook &amp; ntfy.sh</h3>
-        <p>Push alerts to any webhook or ntfy.sh topic. Configurable triggers, repeat intervals, and grace thresholds.</p>
+        <p>Push alerts on transitions and grace exceedances. Configurable repeat intervals. Phone notifications via ntfy.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128200;</div>
+        <h3>RMM Ready</h3>
+        <p>Exit codes + structured stdout for any RMM. Drop the CLI into your monitoring automation.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128274;</div>
-        <h3>Signed &amp; Sealed</h3>
-        <p>EV code-signed binaries, MSI, and PowerShell module. Enterprise-grade from install to execution.</p>
+        <h3>EV Code-Signed</h3>
+        <p>Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from download to execution.</p>
       </div>
     </div>
   </div>
