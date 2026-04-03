@@ -1,6 +1,6 @@
 //go:build windows
 
-package drainctl
+package store
 
 import (
 	"bufio"
@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // MemAuditStore is the service-mode audit store: in-memory records backed
@@ -19,20 +21,20 @@ import (
 // concurrent pipe clients; writes are serialized.
 type MemAuditStore struct {
 	mu      sync.RWMutex
-	records []AuditRecord
+	records []dc.AuditRecord
 	dirty   int // count of unflushed records
 	file    *os.File
 	handle  windows.Handle
 	path    string
-	log     LogFunc
+	log     dc.LogFunc
 }
 
 // OpenMemAuditStore opens the JSONL file with an exclusive lock, loads all
 // records into memory, and returns the store. If the file doesn't exist it
 // is created. Returns an error if another process holds the lock.
-func OpenMemAuditStore(path string, log LogFunc) (*MemAuditStore, error) {
+func OpenMemAuditStore(path string, log dc.LogFunc) (*MemAuditStore, error) {
 	if log == nil {
-		log = DiscardLogger()
+		log = dc.DiscardLogger()
 	}
 
 	dir := filepath.Dir(path)
@@ -75,7 +77,7 @@ func OpenMemAuditStore(path string, log LogFunc) (*MemAuditStore, error) {
 		return nil, fmt.Errorf("load audit file: %w", err)
 	}
 
-	log(LvlINF, fmt.Sprintf("memstore=open records=%d path=%s", len(m.records), path))
+	log(dc.LvlINF, fmt.Sprintf("memstore=open records=%d path=%s", len(m.records), path))
 	return m, nil
 }
 
@@ -94,7 +96,7 @@ func (m *MemAuditStore) load() error {
 		if len(line) == 0 {
 			continue
 		}
-		var rec AuditRecord
+		var rec dc.AuditRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue // skip corrupted lines
 		}
@@ -104,7 +106,7 @@ func (m *MemAuditStore) load() error {
 }
 
 // Append adds a record to the in-memory store and marks it dirty.
-func (m *MemAuditStore) Append(rec *AuditRecord) {
+func (m *MemAuditStore) Append(rec *dc.AuditRecord) {
 	m.mu.Lock()
 	m.records = append(m.records, *rec)
 	m.dirty++
@@ -112,7 +114,7 @@ func (m *MemAuditStore) Append(rec *AuditRecord) {
 }
 
 // LastObservation returns the most recent record, or nil if empty.
-func (m *MemAuditStore) LastObservation() *AuditRecord {
+func (m *MemAuditStore) LastObservation() *dc.AuditRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if len(m.records) == 0 {
@@ -123,12 +125,12 @@ func (m *MemAuditStore) LastObservation() *AuditRecord {
 }
 
 // History returns the most recent n records, newest first.
-func (m *MemAuditStore) History(n int) []AuditRecord {
+func (m *MemAuditStore) History(n int) []dc.AuditRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	// Copy and reverse.
-	out := make([]AuditRecord, len(m.records))
+	out := make([]dc.AuditRecord, len(m.records))
 	copy(out, m.records)
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -141,11 +143,11 @@ func (m *MemAuditStore) History(n int) []AuditRecord {
 }
 
 // Changes returns only transition records, newest first.
-func (m *MemAuditStore) Changes(n int) []AuditRecord {
+func (m *MemAuditStore) Changes(n int) []dc.AuditRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var changes []AuditRecord
+	var changes []dc.AuditRecord
 	for _, r := range m.records {
 		if r.Changed {
 			changes = append(changes, r)
@@ -164,7 +166,7 @@ func (m *MemAuditStore) Changes(n int) []AuditRecord {
 
 // StateSince returns when the given mode was first observed in a continuous
 // run. Returns nil if the store is empty.
-func (m *MemAuditStore) StateSince(mode DrainMode) *time.Time {
+func (m *MemAuditStore) StateSince(mode dc.DrainMode) *time.Time {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -228,7 +230,7 @@ func (m *MemAuditStore) flushLocked() error {
 	}
 
 	m.dirty = 0
-	m.log(LvlINF, fmt.Sprintf("memstore=flushed records=%d", len(m.records)-start))
+	m.log(dc.LvlINF, fmt.Sprintf("memstore=flushed records=%d", len(m.records)-start))
 	return nil
 }
 
@@ -243,7 +245,7 @@ func (m *MemAuditStore) Prune(retention time.Duration) (int64, error) {
 	}
 
 	cutoff := time.Now().Add(-retention)
-	var kept []AuditRecord
+	var kept []dc.AuditRecord
 	for _, r := range m.records {
 		if !r.Timestamp.Before(cutoff) {
 			kept = append(kept, r)
@@ -274,7 +276,7 @@ func (m *MemAuditStore) Prune(retention time.Duration) (int64, error) {
 
 	m.records = kept
 	m.dirty = 0
-	m.log(LvlINF, fmt.Sprintf("memstore=pruned removed=%d remaining=%d", pruned, len(kept)))
+	m.log(dc.LvlINF, fmt.Sprintf("memstore=pruned removed=%d remaining=%d", pruned, len(kept)))
 	return pruned, nil
 }
 

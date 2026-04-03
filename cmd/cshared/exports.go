@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 )
 
 func marshalJSON(v any) *C.char {
@@ -43,7 +44,7 @@ func DrainCtl_ReadDrainMode() *C.char {
 //export DrainCtl_Check
 func DrainCtl_Check(dbPath *C.char, graceMinutes C.int, retentionDays C.int) *C.char {
 	// Try service pipe first.
-	if result, err := dc.CheckViaPipe(); err == nil {
+	if result, err := pipe.CheckViaPipe(); err == nil {
 		return marshalJSON(result)
 	}
 
@@ -68,7 +69,7 @@ func DrainCtl_Check(dbPath *C.char, graceMinutes C.int, retentionDays C.int) *C.
 //export DrainCtl_History
 func DrainCtl_History(dbPath *C.char, limit C.int, changesOnly C.int) *C.char {
 	// Try service pipe first.
-	if records, err := dc.HistoryViaPipe(int(limit), changesOnly != 0); err == nil {
+	if records, err := pipe.HistoryViaPipe(int(limit), changesOnly != 0); err == nil {
 		if records == nil {
 			return C.CString("[]")
 		}

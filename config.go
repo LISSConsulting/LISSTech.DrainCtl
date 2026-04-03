@@ -3,7 +3,6 @@
 package drainctl
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -203,11 +202,4 @@ func ClampRetention(days int, log LogFunc) int {
 		return MaxRetentionDays
 	}
 	return days
-}
-
-// WatchParametersKey monitors the service's Parameters registry key for
-// changes. Sends on the returned channel when any parameter value changes.
-// Used for hot-reloading configuration. Exits when ctx is cancelled.
-func WatchParametersKey(ctx context.Context, log LogFunc) (<-chan struct{}, error) {
-	return watchRegistryKey(ctx, ParametersKeyPath, log)
 }

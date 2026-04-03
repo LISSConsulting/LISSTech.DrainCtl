@@ -1,6 +1,6 @@
 //go:build windows
 
-package drainctl
+package watcher
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // ── wevtapi.dll bindings ───────────────────────────────────────────────────
@@ -31,6 +33,37 @@ const (
 
 type evtHandle uintptr
 
+// ── XML event types (local copy for parsing) ──────────────────────────────
+
+type eventRec struct {
+	System    eventSystem    `xml:"System"`
+	EventData eventDataItems `xml:"EventData"`
+}
+
+type eventSystem struct {
+	TimeCreated struct {
+		SystemTime string `xml:"SystemTime,attr"`
+	} `xml:"TimeCreated"`
+}
+
+type eventDataItems struct {
+	Data []eventDataItem `xml:"Data"`
+}
+
+type eventDataItem struct {
+	Name  string `xml:"Name,attr"`
+	Value string `xml:",chardata"`
+}
+
+func (e *eventRec) dataValue(name string) string {
+	for _, d := range e.EventData.Data {
+		if d.Name == name {
+			return d.Value
+		}
+	}
+	return ""
+}
+
 // ── Attribution record ─────────────────────────────────────────────────────
 
 // RegistryChangeAttribution holds info about who changed a registry value.
@@ -47,7 +80,7 @@ type RegistryChangeAttribution struct {
 type EventSubscriber struct {
 	mu     sync.RWMutex
 	latest *RegistryChangeAttribution
-	log    LogFunc
+	log    dc.LogFunc
 
 	subscription evtHandle
 	signalEvent  windows.Handle
@@ -58,9 +91,9 @@ type EventSubscriber struct {
 // NewEventSubscriber creates a subscription to Security log Event ID 4657.
 // Attribution events matching TSServerDrainMode are stored and retrievable
 // via LatestAttribution. The subscriber runs until ctx is cancelled.
-func NewEventSubscriber(ctx context.Context, log LogFunc) (*EventSubscriber, error) {
+func NewEventSubscriber(ctx context.Context, log dc.LogFunc) (*EventSubscriber, error) {
 	if log == nil {
-		log = DiscardLogger()
+		log = dc.DiscardLogger()
 	}
 
 	signalEvent, err := windows.CreateEvent(nil, 0, 0, nil) // auto-reset
@@ -118,7 +151,7 @@ func NewEventSubscriber(ctx context.Context, log LogFunc) (*EventSubscriber, err
 	}
 
 	go sub.run(ctx)
-	log(LvlINF, "evt_subscriber=started", "event_id=4657")
+	log(dc.LvlINF, "evt_subscriber=started", "event_id=4657")
 	return sub, nil
 }
 
@@ -242,7 +275,7 @@ func (s *EventSubscriber) processEvent(h evtHandle) {
 	s.latest = attr
 	s.mu.Unlock()
 
-	s.log(LvlINF, fmt.Sprintf("evt4657=received user=%s", user))
+	s.log(dc.LvlINF, fmt.Sprintf("evt4657=received user=%s", user))
 }
 
 func (s *EventSubscriber) renderEventXML(h evtHandle) string {

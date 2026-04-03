@@ -1,12 +1,17 @@
 //go:build windows
 
-package drainctl
+package svc
 
 import (
 	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -27,13 +32,13 @@ const (
 
 // EventLogLogger returns a LogFunc that writes to the Windows Event Log
 // using generic event ID 1/2/3 for structured log messages.
-func EventLogLogger(elog *eventlog.Log) LogFunc {
-	return func(l Level, fields ...string) {
+func EventLogLogger(elog *eventlog.Log) dc.LogFunc {
+	return func(l dc.Level, fields ...string) {
 		msg := strings.Join(fields, " ")
 		switch l {
-		case LvlERR:
+		case dc.LvlERR:
 			_ = elog.Error(3, msg)
-		case LvlWRN:
+		case dc.LvlWRN:
 			_ = elog.Warning(2, msg)
 		default:
 			_ = elog.Info(1, msg)
@@ -43,22 +48,22 @@ func EventLogLogger(elog *eventlog.Log) LogFunc {
 
 // drainService implements svc.Handler.
 type drainService struct {
-	log  LogFunc
+	log  dc.LogFunc
 	elog *eventlog.Log
 }
 
 // serviceHandler is the pipe handler bridge between the service state
 // and the named pipe server.
 type serviceHandler struct {
-	store *MemAuditStore
-	cfg   *ServiceConfig
+	store *store.MemAuditStore
+	cfg   *dc.ServiceConfig
 }
 
-func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *CheckResult {
-	state, err := ReadDrainMode()
+func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult {
+	state, err := dc.ReadDrainMode()
 	if err != nil {
-		return &CheckResult{
-			Version:   Version,
+		return &dc.CheckResult{
+			Version:   dc.Version,
 			Timestamp: time.Now(),
 			Status:    "Error",
 			Message:   err.Error(),
@@ -71,8 +76,8 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *CheckResult {
 		gp = gracePeriod
 	}
 
-	res := &CheckResult{
-		Version:            Version,
+	res := &dc.CheckResult{
+		Version:            dc.Version,
 		Timestamp:          time.Now(),
 		Host:               state.Host,
 		DrainModeLabel:     state.Mode.String(),
@@ -80,7 +85,7 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *CheckResult {
 		GracePeriodSeconds: int(gp.Seconds()),
 	}
 
-	drainActive := state.Mode != AllowAll
+	drainActive := state.Mode != dc.AllowAll
 	connAllowed := !drainActive
 	res.ConnectionsAllowed = &connAllowed
 
@@ -123,7 +128,7 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *CheckResult {
 	return res
 }
 
-func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []AuditRecord {
+func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRecord {
 	if changesOnly {
 		return h.store.Changes(limit)
 	}
@@ -138,56 +143,56 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer cancel()
 
 	// Ensure default parameters exist (safety net if MSI didn't create them).
-	_ = WriteDefaultParameters(s.log)
+	_ = dc.WriteDefaultParameters(s.log)
 
 	// Load config.
-	cfg := ReadServiceConfig(s.log)
-	notifyCfg := ReadNotifyConfig(s.log)
-	notifyState := &NotifyState{}
-	s.log(LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
-		Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
+	cfg := dc.ReadServiceConfig(s.log)
+	notifyCfg := dc.ReadNotifyConfig(s.log)
+	notifyState := &dc.NotifyState{}
+	s.log(dc.LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
+		dc.Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
 
 	// Open in-memory audit store.
-	store, err := OpenMemAuditStore(cfg.AuditPath, s.log)
+	st, err := store.OpenMemAuditStore(cfg.AuditPath, s.log)
 	if err != nil {
-		s.log(LvlERR, fmt.Sprintf("service=failed error=%q", err))
+		s.log(dc.LvlERR, fmt.Sprintf("service=failed error=%q", err))
 		return false, 1
 	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = st.Close() }()
 
 	// Prune on startup.
 	retention := time.Duration(cfg.RetentionDays) * 24 * time.Hour
-	if pruned, err := store.Prune(retention); err != nil {
-		LogMsg(s.log, LvlWRN, "startup prune failed", fmt.Sprintf("error=%q", err))
+	if pruned, err := st.Prune(retention); err != nil {
+		dc.LogMsg(s.log, dc.LvlWRN, "startup prune failed", fmt.Sprintf("error=%q", err))
 	} else if pruned > 0 {
-		s.log(LvlINF, fmt.Sprintf("startup_prune=%d", pruned))
+		s.log(dc.LvlINF, fmt.Sprintf("startup_prune=%d", pruned))
 	}
 
 	// Start registry watcher.
-	regCh, err := WatchDrainModeKey(ctx, s.log)
+	regCh, err := watcher.WatchDrainModeKey(ctx, s.log)
 	if err != nil {
-		LogMsg(s.log, LvlWRN, "registry watcher failed, polling only", fmt.Sprintf("error=%q", err))
+		dc.LogMsg(s.log, dc.LvlWRN, "registry watcher failed, polling only", fmt.Sprintf("error=%q", err))
 		regCh = make(chan struct{}) // never fires
 	}
 
 	// Start parameters watcher for hot-reload.
-	paramCh, err := WatchParametersKey(ctx, s.log)
+	paramCh, err := watcher.WatchParametersKey(ctx, s.log)
 	if err != nil {
-		LogMsg(s.log, LvlWRN, "parameters watcher failed", fmt.Sprintf("error=%q", err))
+		dc.LogMsg(s.log, dc.LvlWRN, "parameters watcher failed", fmt.Sprintf("error=%q", err))
 		paramCh = make(chan struct{}) // never fires
 	}
 
 	// Start event log subscriber for change attribution.
-	var evtSub *EventSubscriber
-	if sub, err := NewEventSubscriber(ctx, s.log); err != nil {
-		LogMsg(s.log, LvlWRN, "event subscriber failed, attribution via wevtutil fallback", fmt.Sprintf("error=%q", err))
+	var evtSub *watcher.EventSubscriber
+	if sub, err := watcher.NewEventSubscriber(ctx, s.log); err != nil {
+		dc.LogMsg(s.log, dc.LvlWRN, "event subscriber failed, attribution via wevtutil fallback", fmt.Sprintf("error=%q", err))
 	} else {
 		evtSub = sub
 	}
 
 	// Start pipe server.
-	handler := &serviceHandler{store: store, cfg: &cfg}
-	go ServePipe(ctx, handler, s.log)
+	handler := &serviceHandler{store: st, cfg: &cfg}
+	go pipe.ServePipe(ctx, handler, s.log)
 
 	// Timers.
 	pollTicker := time.NewTicker(cfg.PollInterval)
@@ -197,63 +202,63 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+	svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
 		State:   svc.Running,
 		Accepts: svc.AcceptStop | svc.AcceptShutdown,
 	}
-	s.log(LvlOK, "service=running")
+	s.log(dc.LvlOK, "service=running")
 	_ = s.elog.Info(EvtServiceStarted, fmt.Sprintf(
 		"Service started.\nVersion: %s\nPoll interval: %s\nGrace period: %s\nRetention: %d days",
-		Version, cfg.PollInterval, cfg.GracePeriod, cfg.RetentionDays))
+		dc.Version, cfg.PollInterval, cfg.GracePeriod, cfg.RetentionDays))
 
 	for {
 		select {
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Stop, svc.Shutdown:
-				s.log(LvlINF, "service=stopping")
+				s.log(dc.LvlINF, "service=stopping")
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
-				_ = store.Flush()
+				_ = st.Flush()
 				_ = s.elog.Info(EvtServiceStopped, "Service stopped.")
-				s.log(LvlOK, "service=stopped")
+				s.log(dc.LvlOK, "service=stopped")
 				return false, 0
 			case svc.Interrogate:
 				statusCh <- c.CurrentStatus
 			}
 
 		case <-regCh:
-			s.log(LvlINF, "trigger=registry_change")
-			svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
-			_ = store.Flush() // immediate flush on change
+			s.log(dc.LvlINF, "trigger=registry_change")
+			svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
-			svcRunCheck(store, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
 
 		case <-paramCh:
-			newCfg := ReadServiceConfig(s.log)
+			newCfg := dc.ReadServiceConfig(s.log)
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
 			handler.cfg = &cfg
-			notifyCfg = ReadNotifyConfig(s.log)
-			s.log(LvlINF, "config=reloaded")
+			notifyCfg = dc.ReadNotifyConfig(s.log)
+			s.log(dc.LvlINF, "config=reloaded")
 
 		case <-flushTicker.C:
-			_ = store.FlushIfDirty()
+			_ = st.FlushIfDirty()
 		}
 	}
 }
 
 // svcRunCheck performs a single check cycle in service mode.
-func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConfig, notifyState *NotifyState, evtSub *EventSubscriber, log LogFunc, elog *eventlog.Log) {
-	state, err := ReadDrainMode()
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.NotifyConfig, notifyState *dc.NotifyState, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+	state, err := dc.ReadDrainMode()
 	if err != nil {
-		LogMsg(log, LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
+		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
 		_ = elog.Error(EvtRegistryFailed, fmt.Sprintf("Failed to read drain mode registry value: %s", err))
 		return
 	}
@@ -262,10 +267,10 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 	transitionFrom := ""
 	changedBy := ""
 
-	if last := store.LastObservation(); last != nil && last.DrainMode != state.Mode {
+	if last := st.LastObservation(); last != nil && last.DrainMode != state.Mode {
 		transition = true
 		transitionFrom = last.DrainMode.String()
-		log(LvlWRN,
+		log(dc.LvlWRN,
 			"transition=true",
 			fmt.Sprintf("from=%s", last.DrainMode),
 			fmt.Sprintf("to=%s", state.Mode),
@@ -281,19 +286,19 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 			// Fallback: query wevtutil (covers cases where EvtSubscribe
 			// missed the event or wasn't available).
 			if lookback := time.Since(last.Timestamp); lookback < 24*time.Hour {
-				changedBy = QueryRegistryChangeUser(last.Timestamp)
+				changedBy = dc.QueryRegistryChangeUser(last.Timestamp)
 			}
 		}
 		if changedBy != "" {
-			log(LvlINF, fmt.Sprintf("changed_by=%s", changedBy))
+			log(dc.LvlINF, fmt.Sprintf("changed_by=%s", changedBy))
 		}
 	}
 
 	// Determine exit code and status.
-	drainActive := state.Mode != AllowAll
+	drainActive := state.Mode != dc.AllowAll
 	exitCode := 0
 	stateDur := time.Duration(0)
-	if since := store.StateSince(state.Mode); since != nil {
+	if since := st.StateSince(state.Mode); since != nil {
 		stateDur = time.Since(*since).Truncate(time.Second)
 	}
 	if drainActive {
@@ -302,7 +307,7 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 		}
 	}
 
-	rec := &AuditRecord{
+	rec := &dc.AuditRecord{
 		Timestamp:   time.Now(),
 		Host:        state.Host,
 		DrainMode:   state.Mode,
@@ -312,12 +317,12 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 		ChangedBy:   changedBy,
 		ExitCode:    exitCode,
 	}
-	store.Append(rec)
+	st.Append(rec)
 
-	if state.Mode == AllowAll {
-		log(LvlINF, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
+	if state.Mode == dc.AllowAll {
+		log(dc.LvlINF, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
 	} else {
-		log(LvlWRN, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
+		log(dc.LvlWRN, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
 	}
 
 	// Write state-specific event log entries.
@@ -370,7 +375,7 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 
 		dur := stateDur.Seconds()
 		connAllowed := !drainActive
-		notifyResult := &CheckResult{
+		notifyResult := &dc.CheckResult{
 			Timestamp:            time.Now(),
 			Host:                 state.Host,
 			DrainModeLabel:       state.Mode.String(),
@@ -385,32 +390,19 @@ func svcRunCheck(store *MemAuditStore, cfg *ServiceConfig, notifyCfg *NotifyConf
 			Message:              message,
 			ExitCode:             exitCode,
 		}
-		SendNotification(*notifyCfg, notifyState, notifyResult, transition, changedBy, log)
+		dc.SendNotification(*notifyCfg, notifyState, notifyResult, transition, changedBy, log)
 	}
 }
 
 // RunService starts the Windows service. Called by the CLI's hidden
 // "service run" subcommand.
 func RunService() error {
-	elog, err := eventlog.Open(ServiceName)
+	elog, err := eventlog.Open(dc.ServiceName)
 	if err != nil {
 		return fmt.Errorf("open event log: %w", err)
 	}
 	defer func() { _ = elog.Close() }()
 
 	log := EventLogLogger(elog)
-	return svc.Run(ServiceName, &drainService{log: log, elog: elog})
-}
-
-// InstallService registers the service with SCM.
-func InstallService(exePath string, log LogFunc) error {
-	// Imported here to avoid pulling in mgr for non-service builds.
-	// Actually, we need mgr. Import is at package level already via svc.
-	// We'll use a helper that imports mgr.
-	return installServiceImpl(exePath, log)
-}
-
-// UninstallService removes the service from SCM.
-func UninstallService(log LogFunc) error {
-	return uninstallServiceImpl(log)
+	return svc.Run(dc.ServiceName, &drainService{log: log, elog: elog})
 }
