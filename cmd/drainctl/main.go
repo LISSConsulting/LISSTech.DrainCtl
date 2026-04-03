@@ -3,14 +3,18 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/windows/registry"
 )
 
 var cfg struct {
@@ -38,6 +42,8 @@ func main() {
 	root.AddCommand(auditSetupCmd())
 	root.AddCommand(serviceCmd())
 	root.AddCommand(notifyCmd())
+	root.AddCommand(registerCmd())
+	root.AddCommand(dashboardCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "drainctl: %v\n", err)
@@ -367,4 +373,101 @@ func serviceCmd() *cobra.Command {
 	})
 
 	return cmd
+}
+
+// ── register ──────────────────────────────────────────────────────────────
+
+func registerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "register <dashboard-url>",
+		Short: "Register this server with a DrainCtl dashboard",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			dashURL := args[0]
+
+			// Write DashboardURL to local registry.
+			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			if err != nil {
+				return fmt.Errorf("open registry: %w", err)
+			}
+			if err := key.SetStringValue("DashboardURL", dashURL); err != nil {
+				_ = key.Close()
+				return fmt.Errorf("set DashboardURL: %w", err)
+			}
+			_ = key.Close()
+			log(dc.LvlINF, fmt.Sprintf("registry=DashboardURL set to %q", dashURL))
+
+			// Register with the dashboard.
+			if err := dashboard.Register(dashURL, log); err != nil {
+				dc.LogMsg(log, dc.LvlWRN, "registration failed (service will retry on next check)", fmt.Sprintf("error=%q", err))
+				return nil
+			}
+			log(dc.LvlOK, "registered with dashboard")
+			return nil
+		},
+	}
+}
+
+// ── dashboard ─────────────────────────────────────────────────────────────
+
+func dashboardCmd() *cobra.Command {
+	dcmd := &cobra.Command{
+		Use:   "dashboard",
+		Short: "Open the DrainCtl dashboard in your browser",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
+			if !dashCfg.Enabled {
+				fmt.Println("Dashboard is not enabled on this server.")
+				fmt.Println("Set DashboardEnabled=1 in HKLM\\...\\Services\\DrainCtl\\Parameters")
+				return nil
+			}
+			url := fmt.Sprintf("http://localhost:%d", dashCfg.Port)
+			fmt.Printf("Opening %s ...\n", url)
+			return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		},
+	}
+
+	dcmd.AddCommand(&cobra.Command{
+		Use:   "list-servers",
+		Short: "List registered servers",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
+			if !dashCfg.Enabled {
+				return fmt.Errorf("dashboard not enabled on this server")
+			}
+			url := fmt.Sprintf("http://localhost:%d/api/v1/servers", dashCfg.Port)
+			resp, err := dashboard.FetchServers(url)
+			if err != nil {
+				return fmt.Errorf("fetch servers: %w", err)
+			}
+			if len(resp) == 0 {
+				fmt.Println("No registered servers.")
+				return nil
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(resp)
+		},
+	})
+
+	dcmd.AddCommand(&cobra.Command{
+		Use:   "remove-server <hostname>",
+		Short: "Remove a server from the dashboard",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
+			if !dashCfg.Enabled {
+				return fmt.Errorf("dashboard not enabled on this server")
+			}
+			url := fmt.Sprintf("http://localhost:%d/api/v1/servers/%s", dashCfg.Port, args[0])
+			if err := dashboard.RemoveServer(url); err != nil {
+				return fmt.Errorf("remove server: %w", err)
+			}
+			fmt.Printf("Server %s removed.\n", args[0])
+			return nil
+		},
+	})
+
+	return dcmd
 }

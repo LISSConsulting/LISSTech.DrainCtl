@@ -15,11 +15,13 @@ const (
 	ServiceDescription = "Monitors Remote Desktop Session Host drain mode (TSServerDrainMode) and maintains an audit trail of state changes."
 	ParametersKeyPath  = `SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters`
 
-	DefaultGracePeriod   = 60 // minutes
-	DefaultRetentionDays = 90
-	MaxRetentionDays     = 365
-	MinRetentionDays     = 1
-	DefaultPollInterval  = 300 // seconds
+	DefaultGracePeriod    = 60 // minutes
+	DefaultRetentionDays  = 90
+	MaxRetentionDays      = 365
+	MinRetentionDays      = 1
+	DefaultPollInterval   = 300 // seconds
+	DefaultDashboardPort  = 49470
+	DefaultDashboardGroup = "Domain Admins"
 )
 
 // ServiceConfig holds all tunable parameters read from the registry.
@@ -104,6 +106,20 @@ func WriteDefaultParameters(log LogFunc) error {
 		_ = key.SetDWordValue("NotifyRepeatMinutes", 0)
 	}
 
+	// Dashboard defaults.
+	if _, _, err := key.GetIntegerValue("DashboardEnabled"); err != nil {
+		_ = key.SetDWordValue("DashboardEnabled", 0)
+	}
+	if _, _, err := key.GetIntegerValue("DashboardPort"); err != nil {
+		_ = key.SetDWordValue("DashboardPort", DefaultDashboardPort)
+	}
+	if _, _, err := key.GetStringValue("DashboardGroup"); err != nil {
+		_ = key.SetStringValue("DashboardGroup", DefaultDashboardGroup)
+	}
+	if _, _, err := key.GetStringValue("DashboardURL"); err != nil {
+		_ = key.SetStringValue("DashboardURL", "")
+	}
+
 	log(LvlINF, "parameters=defaults_written", "path="+ParametersKeyPath)
 	return nil
 }
@@ -181,6 +197,43 @@ func WriteNotifyConfig(cfg NotifyConfig, log LogFunc) error {
 
 	LogMsg(log, LvlINF, "notification config written", "path="+ParametersKeyPath)
 	return nil
+}
+
+// DashboardConfig holds dashboard-related parameters.
+type DashboardConfig struct {
+	Enabled bool
+	Port    int
+	Group   string
+	URL     string // agent-side: dashboard URL to report to
+}
+
+// ReadDashboardConfig reads dashboard configuration from the registry.
+func ReadDashboardConfig(log LogFunc) DashboardConfig {
+	cfg := DashboardConfig{
+		Port:  DefaultDashboardPort,
+		Group: DefaultDashboardGroup,
+	}
+
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, ParametersKeyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return cfg
+	}
+	defer func() { _ = key.Close() }()
+
+	if v, _, err := key.GetIntegerValue("DashboardEnabled"); err == nil {
+		cfg.Enabled = v != 0
+	}
+	if v, _, err := key.GetIntegerValue("DashboardPort"); err == nil {
+		cfg.Port = int(v)
+	}
+	if v, _, err := key.GetStringValue("DashboardGroup"); err == nil && v != "" {
+		cfg.Group = v
+	}
+	if v, _, err := key.GetStringValue("DashboardURL"); err == nil {
+		cfg.URL = v
+	}
+
+	return cfg
 }
 
 // ClampRetention enforces the retention boundary (1–365 days). Values
