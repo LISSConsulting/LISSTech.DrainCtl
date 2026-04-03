@@ -227,3 +227,24 @@ setInterval(refresh,30000);refresh();
 </script>
 </body>
 </html>
+<script>
+// Mock data for preview - override the real fetch
+const mockServers = [
+  {hostname:"MDS-LDC1-RDS1",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-03T18:30:00Z",last_result:{host:"MDS-LDC1-RDS1",drain_mode:"ALLOW_ALL_CONNECTIONS",drain_mode_value:0,status:"Healthy",state_duration_seconds:86400,connections_allowed:true,changed_by:"MDS\svcaccount",exit_code:0}},
+  {hostname:"MDS-LDC1-RDS2",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-03T18:29:00Z",last_result:{host:"MDS-LDC1-RDS2",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART",drain_mode_value:2,status:"Alert",state_duration_seconds:7200,connections_allowed:false,changed_by:"MDS\lissadmin",exit_code:1}},
+  {hostname:"MDS-LDC1-RDS3",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-03T18:28:00Z",last_result:{host:"MDS-LDC1-RDS3",drain_mode:"ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",drain_mode_value:1,status:"Grace",state_duration_seconds:1800,connections_allowed:false,changed_by:"MDS\jdoe",exit_code:0}},
+  {hostname:"MDS-LDC1-RDS4",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-03T18:30:00Z",last_result:{host:"MDS-LDC1-RDS4",drain_mode:"ALLOW_ALL_CONNECTIONS",drain_mode_value:0,status:"Healthy",state_duration_seconds:172800,connections_allowed:true,exit_code:0}},
+  {hostname:"MDS-LDC1-RDS5",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-03T18:30:00Z",last_result:{host:"MDS-LDC1-RDS5",drain_mode:"ALLOW_ALL_CONNECTIONS",drain_mode_value:0,status:"Healthy",state_duration_seconds:43200,connections_allowed:true,exit_code:0}},
+  {hostname:"MDS-LDC1-RDS6",registered_at:"2026-04-01T10:00:00Z",last_seen:"2026-04-02T10:00:00Z",last_result:null}
+];
+// Add mock transitions for event log
+events = [
+  {time:"18:29:00",host:"MDS-LDC1-RDS2",from:"grace",to:"alert",cls:"evt-r",by:" · MDS\lissadmin"},
+  {time:"18:15:00",host:"MDS-LDC1-RDS3",from:"healthy",to:"grace",cls:"evt-w",by:" · MDS\jdoe"},
+  {time:"17:45:00",host:"MDS-LDC1-RDS2",from:"healthy",to:"grace",cls:"evt-w",by:" · MDS\lissadmin"},
+  {time:"14:00:00",host:"MDS-LDC1-RDS6",from:"healthy",to:"offline",cls:"evt-d",by:""},
+];
+// Override refresh to use mock data
+window.refresh = function(){ render(mockServers); };
+render(mockServers); renderLog();
+</script>
