@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DrainCtl Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fdfbf5;
+  --fg: #1a1407;
+  --accent: #b8860b;
+  --green: #5d8a3c;
+  --amber: #c67f17;
+  --red: #b91c1c;
+  --border: #1a1407;
+  --shadow: #1a1407;
+  --card: #fffef9;
+  --muted: #6b5f4a;
+  --subtle: #9e9279;
+  --surface: #f3efe4;
+  --r: 10px;
+  --bw: 2.5px;
+  --so: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0d09;
+    --fg: #f5f0e4;
+    --card: #1c1a14;
+    --border: #4a4535;
+    --shadow: #000;
+    --muted: #b8ae98;
+    --subtle: #6b6050;
+    --surface: #1c1a14;
+  }
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Nav */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg);
+  border-bottom: var(--bw) solid var(--border);
+  padding: 14px 0;
+}
+.nav-inner {
+  max-width: 1200px; margin: 0 auto; padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.nav-brand {
+  font-weight: 800; font-size: 1.1rem;
+  display: flex; align-items: center; gap: 8px;
+}
+.nav-stats {
+  font-size: 0.85rem; color: var(--muted); font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+.nav-stats .healthy { color: var(--green); }
+.nav-stats .alert { color: var(--red); }
+.nav-stats .grace { color: var(--amber); }
+
+/* Main */
+.main {
+  max-width: 1200px; margin: 0 auto; padding: 32px 28px;
+}
+
+/* Grid */
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+/* Card */
+.server-card {
+  background: var(--card);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--so) var(--so) 0 var(--shadow);
+  padding: 22px 24px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  border-left: 5px solid var(--border);
+}
+.server-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+}
+.server-card.healthy { border-left-color: var(--green); }
+.server-card.grace   { border-left-color: var(--amber); }
+.server-card.alert   { border-left-color: var(--red); }
+.server-card.offline { border-left-color: var(--subtle); opacity: 0.7; }
+
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.card-hostname {
+  font-size: 1rem; font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -0.02em;
+}
+.card-badge {
+  display: inline-block;
+  font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+}
+.card-badge.healthy { background: var(--green); color: #fff; border-color: var(--green); }
+.card-badge.grace   { background: var(--amber); color: #fff; border-color: var(--amber); }
+.card-badge.alert   { background: var(--red); color: #fff; border-color: var(--red); }
+.card-badge.offline { background: var(--subtle); color: #fff; border-color: var(--subtle); }
+
+.card-rows { display: flex; flex-direction: column; gap: 6px; }
+.card-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.85rem;
+}
+.card-label { color: var(--muted); font-weight: 600; }
+.card-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem; font-weight: 500;
+  text-align: right;
+}
+
+.card-actions {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--surface);
+  display: flex; justify-content: flex-end;
+}
+.btn-remove {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.75rem; font-weight: 700;
+  padding: 5px 14px;
+  background: var(--card);
+  color: var(--red);
+  border: 1.5px solid var(--red);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.btn-remove:hover { background: var(--red); color: #fff; }
+
+/* Empty state */
+.empty {
+  text-align: center; padding: 80px 20px;
+  color: var(--muted);
+}
+.empty-icon { font-size: 48px; margin-bottom: 16px; display: block; }
+.empty h2 { font-size: 1.4rem; font-weight: 800; margin-bottom: 8px; color: var(--fg); }
+.empty p { font-size: 0.95rem; max-width: 400px; margin: 0 auto; }
+
+/* Loading */
+.loading {
+  text-align: center; padding: 80px 20px;
+  color: var(--muted); font-weight: 600;
+}
+
+/* Footer */
+.footer {
+  border-top: var(--bw) solid var(--border);
+  padding: 24px 0; text-align: center;
+  margin-top: 40px;
+}
+.footer p { font-size: 0.8rem; color: var(--subtle); }
+
+@media (max-width: 480px) {
+  .server-grid { grid-template-columns: 1fr; }
+  .nav-stats { display: none; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="nav-brand">&#128688; DrainCtl Dashboard</div>
+    <div class="nav-stats" id="nav-stats"></div>
+  </div>
+</nav>
+
+<div class="main">
+  <div id="content">
+    <div class="loading">Loading servers...</div>
+  </div>
+</div>
+
+<footer class="footer">
+  <p>DrainCtl &mdash; LISS Technologies &middot; Auto-refresh every 30s</p>
+</footer>
+
+<script>
+const STALE_THRESHOLD_MS = 2 * 300 * 1000; // 2x default poll interval (600s)
+
+function relativeTime(iso) {
+  if (!iso) return 'never';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return 'never';
+  const diff = Date.now() - d.getTime();
+  if (diff < 0) return 'just now';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return sec + 's ago';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + ' min ago';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + 'h ago';
+  const days = Math.floor(hr / 24);
+  return days + 'd ago';
+}
+
+function formatDuration(seconds) {
+  if (!seconds && seconds !== 0) return '-';
+  const s = Math.floor(seconds);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + (s % 60) + 's';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ' + (m % 60) + 'm';
+  const d = Math.floor(h / 24);
+  return d + 'd ' + (h % 24) + 'h';
+}
+
+function serverStatus(srv) {
+  if (!srv.last_seen || (Date.now() - new Date(srv.last_seen).getTime()) > STALE_THRESHOLD_MS) {
+    return 'offline';
+  }
+  if (!srv.last_result) return 'offline';
+  const s = srv.last_result.status;
+  if (s === 'Healthy') return 'healthy';
+  if (s === 'Grace') return 'grace';
+  if (s === 'Alert') return 'alert';
+  return 'offline';
+}
+
+function renderGrid(servers) {
+  const el = document.getElementById('content');
+  const stats = document.getElementById('nav-stats');
+
+  if (!servers || servers.length === 0) {
+    el.innerHTML =
+      '<div class="empty">' +
+        '<span class="empty-icon">&#128688;</span>' +
+        '<h2>No servers registered</h2>' +
+        '<p>Servers will appear here once they register with the dashboard via the DrainCtl service.</p>' +
+      '</div>';
+    stats.textContent = '0 servers';
+    return;
+  }
+
+  let counts = { healthy: 0, grace: 0, alert: 0, offline: 0 };
+  servers.forEach(function(s) { counts[serverStatus(s)]++; });
+
+  var parts = [servers.length + ' servers'];
+  if (counts.healthy > 0) parts.push('<span class="healthy">' + counts.healthy + ' healthy</span>');
+  if (counts.grace > 0)   parts.push('<span class="grace">' + counts.grace + ' grace</span>');
+  if (counts.alert > 0)   parts.push('<span class="alert">' + counts.alert + ' alert</span>');
+  if (counts.offline > 0) parts.push(counts.offline + ' offline');
+  stats.innerHTML = parts.join(' &middot; ');
+
+  var html = '<div class="server-grid">';
+  servers.forEach(function(srv) {
+    var status = serverStatus(srv);
+    var r = srv.last_result;
+    var drainMode = r ? (r.drain_mode || '-') : '-';
+    var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+    var duration = '-';
+    if (r && r.state_duration_seconds != null) {
+      duration = formatDuration(r.state_duration_seconds);
+    }
+    var changedBy = (r && r.changed_by) ? r.changed_by : '-';
+    var lastSeen = status === 'offline' ? 'offline' : relativeTime(srv.last_seen);
+
+    html += '<div class="server-card ' + status + '">';
+    html +=   '<div class="card-header">';
+    html +=     '<span class="card-hostname">' + escapeHtml(srv.hostname) + '</span>';
+    html +=     '<span class="card-badge ' + status + '">' + statusLabel + '</span>';
+    html +=   '</div>';
+    html +=   '<div class="card-rows">';
+    html +=     '<div class="card-row"><span class="card-label">Drain Mode</span><span class="card-value">' + escapeHtml(drainMode) + '</span></div>';
+    html +=     '<div class="card-row"><span class="card-label">Duration</span><span class="card-value">' + duration + '</span></div>';
+    html +=     '<div class="card-row"><span class="card-label">Changed By</span><span class="card-value">' + escapeHtml(changedBy) + '</span></div>';
+    html +=     '<div class="card-row"><span class="card-label">Last Seen</span><span class="card-value">' + lastSeen + '</span></div>';
+    html +=   '</div>';
+    html +=   '<div class="card-actions">';
+    html +=     '<button class="btn-remove" onclick="removeServer(\'' + escapeHtml(srv.hostname) + '\')">Remove</button>';
+    html +=   '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function refresh() {
+  try {
+    var resp = await fetch('/api/v1/servers');
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) {
+        document.getElementById('content').innerHTML =
+          '<div class="empty"><h2>Access Denied</h2><p>You do not have permission to view the dashboard. Ensure your account is a member of the required group.</p></div>';
+        return;
+      }
+      throw new Error('HTTP ' + resp.status);
+    }
+    var servers = await resp.json();
+    renderGrid(servers);
+  } catch (err) {
+    console.error('refresh failed:', err);
+  }
+}
+
+async function removeServer(hostname) {
+  if (!confirm('Remove ' + hostname + ' from the dashboard?')) return;
+  try {
+    var resp = await fetch('/api/v1/servers/' + encodeURIComponent(hostname), { method: 'DELETE' });
+    if (resp.ok) {
+      refresh();
+    } else {
+      alert('Failed to remove: HTTP ' + resp.status);
+    }
+  } catch (err) {
+    alert('Failed to remove: ' + err.message);
+  }
+}
+
+setInterval(refresh, 30000);
+refresh();
+</script>
+</body>
+</html>

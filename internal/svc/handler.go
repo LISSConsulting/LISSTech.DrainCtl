@@ -9,6 +9,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -194,6 +195,17 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	handler := &serviceHandler{store: st, cfg: &cfg}
 	go pipe.ServePipe(ctx, handler, s.log)
 
+	// Start dashboard if enabled.
+	dashCfg := dc.ReadDashboardConfig(s.log)
+	if dashCfg.Enabled {
+		_, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), s.log)
+		if err != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start", fmt.Sprintf("error=%q", err))
+		} else {
+			s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d", dashCfg.Port))
+		}
+	}
+
 	// Timers.
 	pollTicker := time.NewTicker(cfg.PollInterval)
 	defer pollTicker.Stop()
@@ -202,7 +214,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+	svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -232,11 +244,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(dc.LvlINF, "trigger=registry_change")
-			svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
-			svcRunCheck(st, &cfg, &notifyCfg, notifyState, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
 
 		case <-paramCh:
 			newCfg := dc.ReadServiceConfig(s.log)
@@ -255,7 +267,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 }
 
 // svcRunCheck performs a single check cycle in service mode.
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.NotifyConfig, notifyState *dc.NotifyState, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.NotifyConfig, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
 	state, err := dc.ReadDrainMode()
 	if err != nil {
 		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
@@ -391,6 +403,32 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.N
 			ExitCode:             exitCode,
 		}
 		dc.SendNotification(*notifyCfg, notifyState, notifyResult, transition, changedBy, log)
+	}
+
+	// Report to dashboard if configured.
+	if dashCfg != nil && dashCfg.URL != "" {
+		dur := stateDur.Seconds()
+		connAllowed := !drainActive
+		reportResult := &dc.CheckResult{
+			Timestamp:            time.Now(),
+			Host:                 state.Host,
+			DrainModeLabel:       state.Mode.String(),
+			DrainModeValue:       uint32(state.Mode),
+			GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
+			StateDurationSeconds: &dur,
+			Status:               "Healthy",
+			ConnectionsAllowed:   &connAllowed,
+			Transition:           transition,
+			TransitionFrom:       transitionFrom,
+			ChangedBy:            changedBy,
+			ExitCode:             exitCode,
+		}
+		if drainActive && exitCode == 1 {
+			reportResult.Status = "Alert"
+		} else if drainActive {
+			reportResult.Status = "Grace"
+		}
+		dashboard.ReportState(dashCfg.URL, reportResult, log)
 	}
 }
 
