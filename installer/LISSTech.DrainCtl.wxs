@@ -10,6 +10,16 @@
         <!-- Hide from Programs and Features -->
         <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
 
+        <!--
+            Prevent Restart Manager from cascading service shutdowns during uninstall.
+            The Event Log service holds drainctl-msg.dll loaded (via EventMessageFile),
+            so RM tries to stop EventLog + all its dependents just to release a file lock.
+            Our own ServiceControl handles DrainCtl; if the msg DLL is still locked,
+            Windows Installer schedules it for deletion on reboot automatically.
+        -->
+        <SetProperty Id="MSIRMSHUTDOWN" Value="2" Before="InstallValidate"
+            Sequence="execute" Condition="REMOVE=&quot;ALL&quot;" />
+
         <Media Id="1"
             Cabinet="LISSTech.DrainCtl.cab"
             EmbedCab="yes" />
