@@ -59,7 +59,7 @@ a { color: var(--accent); }
   background: var(--bg);
   border-bottom: var(--bw) solid var(--border);
   padding: 0;
-  height: 52px;
+  height: 56px;
 }
 .nav .wrap {
   display: flex; align-items: center; justify-content: space-between;
@@ -69,14 +69,18 @@ a { color: var(--accent); }
   font-weight: 800; font-size: 1.1rem;
   text-decoration: none; color: var(--fg);
   display: flex; align-items: center; gap: 8px;
-  height: 100%;
+  line-height: 56px;
 }
+.nav-brand .emoji { font-size: 1.1em; vertical-align: middle; }
 .nav-brand span { opacity: 0.4; font-weight: 400; }
 .nav-links {
-  display: flex; align-items: center; gap: 24px;
+  display: flex; align-items: center; gap: 28px;
   list-style: none; height: 100%;
 }
-.nav-links a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 0.9rem; transition: color 0.15s; }
+.nav-links a {
+  text-decoration: none; color: var(--muted); font-weight: 600;
+  font-size: 0.9rem; line-height: 56px; transition: color 0.15s;
+}
 .nav-links a:hover { color: var(--fg); }
 @media (max-width: 640px) { .nav-links { display: none; } }
 
@@ -170,7 +174,7 @@ th { background: var(--surface); font-weight: 700; }
 
 <nav class="nav">
   <div class="wrap">
-    <a href="index.html" class="nav-brand">&#x1F6B0; DrainCtl <span>Guide</span></a>
+    <a href="index.html" class="nav-brand"><span class="emoji">&#x1F6B0;</span> DrainCtl <span>Guide</span></a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
       <li><a href="#install">Install</a></li>
