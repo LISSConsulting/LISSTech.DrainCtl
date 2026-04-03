@@ -1,0 +1,14 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputName>LISSTech.DrainCtl</OutputName>
+    <OutputPath>..\dist</OutputPath>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <TargetProfile>Release</TargetProfile>
+    <Cultures>;</Cultures>
+    <SuppressPdbOutput>true</SuppressPdbOutput>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <DefineConstants>ProductVersion=26.92.0</DefineConstants>
+  </PropertyGroup>
+</Project>

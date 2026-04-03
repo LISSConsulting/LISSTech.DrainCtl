@@ -1,0 +1,149 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="LISSTech DrainCtl"
+        Manufacturer="LISS Technologies Inc."
+        Version="26.92.0"
+        UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
+        Scope="perMachine">
+
+        <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
+
+        <!-- Hide from Programs and Features -->
+        <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+
+        <Media Id="1"
+            Cabinet="LISSTech.DrainCtl.cab"
+            EmbedCab="yes" />
+
+        <Feature Id="Main">
+            <ComponentGroupRef Id="AllComponents" />
+        </Feature>
+    </Package>
+
+    <!-- ── Binaries + Service: Program Files\LISS Technologies\LISSTech DrainCtl\bin ── -->
+    <Fragment>
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="LISSTechFolder" Name="LISS Technologies">
+                <Directory Id="INSTALLFOLDER" Name="LISSTech DrainCtl">
+                    <Directory Id="BinFolder" Name="bin" />
+                </Directory>
+            </Directory>
+        </StandardDirectory>
+
+        <!-- drainctl.exe: CLI + service binary, PATH entry -->
+        <Component Id="MainExe" Directory="BinFolder"
+            Guid="d4e2f1a0-8c37-4b5e-9d6a-1f3c7e2b8a4d">
+            <File Id="drainctl.exe"
+                Source="..\dist\LISSTech.DrainCtl\bin\drainctl.exe"
+                KeyPath="yes" />
+            <Environment Id="PATH"
+                Name="PATH"
+                Value="[BinFolder]"
+                Permanent="no"
+                Part="last"
+                Action="set"
+                System="yes" />
+            <ServiceInstall Id="DrainCtlService"
+                Name="DrainCtl"
+                DisplayName="Remote Desktop Drain Mode Monitor"
+                Description="Monitors Remote Desktop Session Host drain mode (TSServerDrainMode) and maintains an audit trail of state changes."
+                Type="ownProcess"
+                Start="auto"
+                ErrorControl="normal"
+                Arguments="service run"
+                Account="LocalSystem" />
+            <ServiceControl Id="DrainCtlServiceControl"
+                Name="DrainCtl"
+                Start="install"
+                Stop="both"
+                Remove="uninstall"
+                Wait="yes" />
+        </Component>
+
+        <!-- drainctl.dll: P/Invoke target for PS module loaded from bin/ -->
+        <Component Id="MainDll" Directory="BinFolder"
+            Guid="5e6ed7b5-73a2-4ed3-ae86-ae1e9eade61c">
+            <File Id="drainctl.dll"
+                Source="..\dist\LISSTech.DrainCtl\bin\drainctl.dll"
+                KeyPath="yes" />
+        </Component>
+
+        <!-- Event Log message file + source registration -->
+        <Component Id="EventLogSource" Directory="BinFolder"
+            Guid="6d88631f-f074-4125-9399-28a349a45bea">
+            <File Id="drainctl_msg.dll"
+                Source="..\assets\drainctl-msg.dll"
+                Name="drainctl-msg.dll"
+                KeyPath="yes" />
+            <RegistryKey Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\DrainCtl">
+                <RegistryValue Name="EventMessageFile" Type="string"
+                    Value="[BinFolder]drainctl-msg.dll" />
+                <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
+            </RegistryKey>
+        </Component>
+    </Fragment>
+
+    <!-- ── ProgramData: LISS Technologies\LISSTech DrainCtl ────────────────── -->
+    <Fragment>
+        <StandardDirectory Id="CommonAppDataFolder">
+            <Directory Id="ProgramDataLISSTech" Name="LISS Technologies">
+                <Directory Id="DATADIRECTORY" Name="LISSTech DrainCtl" />
+            </Directory>
+        </StandardDirectory>
+
+        <Component Id="DataDirectory" Directory="DATADIRECTORY"
+            Guid="0c2afad8-e85a-4a79-b484-d3e51ebd6fea">
+            <CreateFolder />
+        </Component>
+    </Fragment>
+
+    <!-- ── PowerShell Module: WindowsPowerShell\Modules\LISSTech.DrainCtl ── -->
+    <Fragment>
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="WindowsPowerShellFolder" Name="WindowsPowerShell">
+                <Directory Id="PSModulesFolder" Name="Modules">
+                    <Directory Id="DrainCtlModuleFolder" Name="LISSTech.DrainCtl" />
+                </Directory>
+            </Directory>
+        </StandardDirectory>
+
+        <Component Id="PSModule" Directory="DrainCtlModuleFolder"
+            Guid="cef702c3-0c59-4e9a-99c7-cd196ab5db23">
+            <File Id="DrainCtl.psd1"
+                Source="..\dist\LISSTech.DrainCtl\LISSTech.DrainCtl.psd1"
+                KeyPath="yes" />
+            <File Id="DrainCtl.psm1"
+                Source="..\dist\LISSTech.DrainCtl\LISSTech.DrainCtl.psm1" />
+            <File Id="drainctl_ps.dll"
+                Source="..\dist\LISSTech.DrainCtl\bin\drainctl.dll"
+                Name="drainctl.dll" />
+        </Component>
+    </Fragment>
+
+    <!-- ── Service Parameters: default configuration in registry ──────────── -->
+    <Fragment>
+        <Component Id="ServiceParameters" Directory="BinFolder"
+            Guid="39697d17-5164-472b-8a1e-533e93d4e4c9">
+            <RegistryKey Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters">
+                <RegistryValue Name="GracePeriod" Type="integer" Value="60" />
+                <RegistryValue Name="RetentionDays" Type="integer" Value="90" />
+                <RegistryValue Name="PollInterval" Type="integer" Value="300" />
+                <RegistryValue Name="AuditPath" Type="string"
+                    Value="[CommonAppDataFolder]LISS Technologies\LISSTech DrainCtl\audit.jsonl" />
+            </RegistryKey>
+        </Component>
+    </Fragment>
+
+    <!-- ── Component Group ─────────────────────────────────────────────────── -->
+    <Fragment>
+        <ComponentGroup Id="AllComponents">
+            <ComponentRef Id="MainExe" />
+            <ComponentRef Id="MainDll" />
+            <ComponentRef Id="EventLogSource" />
+            <ComponentRef Id="ServiceParameters" />
+            <ComponentRef Id="DataDirectory" />
+            <ComponentRef Id="PSModule" />
+        </ComponentGroup>
+    </Fragment>
+</Wix>

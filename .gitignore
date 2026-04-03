@@ -1,0 +1,28 @@
+# Build artifacts
+dist/
+*.msi
+
+# Go
+*.exe
+*.dll
+!cmd/drainctl/drainctl.syso
+
+# WiX
+installer/obj/
+installer/bin/
+
+# Message compiler intermediates (keep .mc source and .dll output)
+assets/*.h
+assets/*.rc
+assets/MSG*.bin
+assets/*.o
+
+# Environment
+.env
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
