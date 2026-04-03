@@ -1,0 +1,62 @@
+# ── Go formatting ─────────────────────────────────────────────────────
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "gofmt"
+name = "gofmt"
+language = "system"
+entry = "gofmt -l"
+files = "\\.go$"
+pass_filenames = true
+
+# ── Go vet ────────────────────────────────────────────────────────────
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "go-vet"
+name = "go-vet"
+language = "system"
+entry = "go vet ./..."
+pass_filenames = false
+
+# ── golangci-lint ─────────────────────────────────────────────────────
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "golangci-lint"
+name = "golangci-lint"
+language = "system"
+entry = "golangci-lint run ./..."
+pass_filenames = false
+
+# ── Secrets ───────────────────────────────────────────────────────────
+[[repos]]
+repo = "https://github.com/gitleaks/gitleaks"
+rev = "v8.30.0"
+
+[[repos.hooks]]
+id = "gitleaks"
+name = "gitleaks"
+
+# ── Whitespace ────────────────────────────────────────────────────────
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+
+[[repos.hooks]]
+id = "trailing-whitespace"
+exclude = "^(dist/|assets/.*\\.dll)"
+
+[[repos.hooks]]
+id = "end-of-file-fixer"
+exclude = "^(dist/|assets/.*\\.dll)"
+
+[[repos.hooks]]
+id = "mixed-line-ending"
+exclude = "^(dist/|assets/.*\\.dll)"
+
+[[repos.hooks]]
+id = "check-json"

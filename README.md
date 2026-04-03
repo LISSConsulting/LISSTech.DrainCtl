@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-BSL_1.1-yellow)
-![Version](https://img.shields.io/badge/Version-26.92.0-green)
+![Version](https://img.shields.io/badge/Version-26.93.0-green)
 
 Replaces legacy PowerShell + LogParser 2.2 scripts with a zero-dependency Go binary that monitors `TSServerDrainMode`, maintains a 90-day JSONL audit trail, and attributes changes to specific users via Windows Security Event Log.
 
@@ -49,61 +49,46 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 ## 🏗️ Architecture
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333', 'primaryColor': '#dbeafe', 'primaryTextColor': '#000', 'secondaryColor': '#dcfce7', 'tertiaryColor': '#fef3c7'}}}%%
 graph TB
-    subgraph Service["🖥️ DrainCtl Windows Service"]
-        RNK["🔔 RegNotifyChangeKeyValue"]
-        EVT["👤 EvtSubscribe (4657)"]
-        POLL["⏱️ Poll Ticker (5 min)"]
-        CHECK["runCheck()"]
-        STORE["📋 MemAuditStore<br/>(in-memory + JSONL flush)"]
-        PIPE["🔌 Named Pipe Server<br/>\\.\pipe\drainctl"]
-        ELOG["📝 Windows Event Log"]
-        
-        RNK -->|"registry changed"| CHECK
-        EVT -->|"who changed it"| CHECK
-        POLL -->|"safety net"| CHECK
-        CHECK --> STORE
-        CHECK --> ELOG
-        STORE --> PIPE
+    subgraph SVC["DrainCtl Windows Service"]
+        RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
+        EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
+        POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
+        CHECK --> STORE["MemAuditStore"]
+        CHECK --> ELOG["Event Log"]
+        STORE --> PIPE["Named Pipe"]
     end
 
-    CLI["⌨️ drainctl.exe check"]
-    DLL["🐚 LISSTech.DrainCtl<br/>PowerShell Module"]
-    NCENTRAL["📊 N-central AMP"]
+    CLI["drainctl.exe"] -->|"pipe"| PIPE
+    PS["PowerShell Module"] -->|"pipe"| PIPE
+    NC["N-central AMP"] --> CLI
 
-    CLI -->|"pipe first"| PIPE
-    DLL -->|"pipe first"| PIPE
-    NCENTRAL -->|"runs CLI"| CLI
-
-    CLI -.->|"fallback: direct<br/>registry read"| REG["🗂️ Registry<br/>TSServerDrainMode"]
-    DLL -.->|"fallback"| REG
-
-    style Service fill:#f0f7ff,stroke:#0078D4,stroke-width:2px
-    style CLI fill:#fff,stroke:#333,stroke-width:2px
-    style DLL fill:#fff,stroke:#333,stroke-width:2px
-    style NCENTRAL fill:#fff,stroke:#333,stroke-width:2px
+    CLI -.->|"fallback"| REG["Registry"]
+    PS -.->|"fallback"| REG
 ```
 
 ### How Detection Works
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#000', 'lineColor': '#333'}}}%%
 sequenceDiagram
-    participant Admin as 👤 Admin
-    participant Reg as 🗂️ Registry
-    participant RNK as 🔔 RegNotify
-    participant Evt as 📝 Event Log
-    participant Sub as 👤 EvtSubscribe
-    participant Svc as 🖥️ Service
+    participant Admin
+    participant Registry
+    participant RegNotify
+    participant EventLog
+    participant EvtSubscribe
+    participant Service
 
-    Admin->>Reg: chglogon /drain
-    Reg-->>RNK: value changed (~0ms)
-    Reg-->>Evt: Event 4657 (~200ms)
-    RNK->>Svc: trigger check
-    Evt-->>Sub: push attribution
-    Svc->>Svc: ReadDrainMode()
-    Svc->>Sub: WaitAttribution(3s)
-    Sub-->>Svc: "DOMAIN\admin"
-    Svc->>Svc: Record audit + Event Log
+    Admin->>Registry: chglogon /drain
+    Registry-->>RegNotify: value changed (~0ms)
+    Registry-->>EventLog: Event 4657 (~200ms)
+    RegNotify->>Service: trigger check
+    EventLog-->>EvtSubscribe: push attribution
+    Service->>Service: ReadDrainMode()
+    Service->>EvtSubscribe: WaitAttribution(3s)
+    EvtSubscribe-->>Service: DOMAIN\admin
+    Service->>Service: Record audit + Event Log
 ```
 
 ---
