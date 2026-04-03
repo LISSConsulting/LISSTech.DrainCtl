@@ -9,6 +9,6 @@
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <DefineConstants>ProductVersion=26.93.5</DefineConstants>
+    <DefineConstants>ProductVersion=26.93.6</DefineConstants>
   </PropertyGroup>
 </Project>

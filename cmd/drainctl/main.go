@@ -469,5 +469,49 @@ func dashboardCmd() *cobra.Command {
 		},
 	})
 
+	enableCmd := &cobra.Command{
+		Use:   "enable",
+		Short: "Enable the dashboard on this server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			port, _ := cmd.Flags().GetInt("port")
+			group, _ := cmd.Flags().GetString("group")
+
+			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			if err != nil {
+				return fmt.Errorf("open registry: %w", err)
+			}
+			defer func() { _ = key.Close() }()
+
+			_ = key.SetDWordValue("DashboardEnabled", 1)
+			_ = key.SetDWordValue("DashboardPort", uint32(port))
+			_ = key.SetStringValue("DashboardGroup", group)
+
+			log(dc.LvlOK, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
+			log(dc.LvlINF, "Restart the DrainCtl service to activate: Restart-Service DrainCtl")
+			return nil
+		},
+	}
+	enableCmd.Flags().Int("port", dc.DefaultDashboardPort, "Dashboard port")
+	enableCmd.Flags().String("group", dc.DefaultDashboardGroup, "AD group for dashboard access")
+	dcmd.AddCommand(enableCmd)
+
+	dcmd.AddCommand(&cobra.Command{
+		Use:   "disable",
+		Short: "Disable the dashboard on this server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			if err != nil {
+				return fmt.Errorf("open registry: %w", err)
+			}
+			defer func() { _ = key.Close() }()
+			_ = key.SetDWordValue("DashboardEnabled", 0)
+			log(dc.LvlOK, "dashboard=disabled")
+			log(dc.LvlINF, "Restart the DrainCtl service to apply: Restart-Service DrainCtl")
+			return nil
+		},
+	})
+
 	return dcmd
 }

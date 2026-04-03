@@ -65,6 +65,12 @@ public static class DrainCtlNative {
     public static extern IntPtr DrainCtl_TestNotify();
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_EnableDashboard(int port, [MarshalAs(UnmanagedType.LPStr)] string group);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_DisableDashboard();
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
     public static extern void DrainCtl_Free(IntPtr ptr);
 
     /// <summary>
@@ -502,6 +508,48 @@ function Test-RDSHDrainNotification {
     Write-Host 'Test notification sent successfully.'
 }
 
+function Enable-RDSHDrainDashboard {
+    <#
+    .SYNOPSIS
+    Enable the DrainCtl multi-server dashboard on this server.
+
+    .PARAMETER Port
+    Port the dashboard listens on. Default: 49470.
+
+    .PARAMETER Group
+    AD group authorized to view the dashboard. Default: Domain Admins.
+
+    .EXAMPLE
+    Enable-RDSHDrainDashboard -Port 49470 -Group "RDS Admins"
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    param(
+        [int]$Port = 49470,
+        [string]$Group = 'Domain Admins'
+    )
+    if (-not $PSCmdlet.ShouldProcess('DrainCtl Dashboard', 'Enable')) { return }
+    $ptr = [DrainCtlNative]::DrainCtl_EnableDashboard($Port, $Group)
+    $result = Invoke-DrainCtlNative -Ptr $ptr
+    Write-Host "Dashboard enabled on port $Port for group '$Group'."
+    Write-Host 'Restart the DrainCtl service to activate: Restart-Service DrainCtl'
+}
+
+function Disable-RDSHDrainDashboard {
+    <#
+    .SYNOPSIS
+    Disable the DrainCtl dashboard on this server.
+
+    .EXAMPLE
+    Disable-RDSHDrainDashboard
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    param()
+    if (-not $PSCmdlet.ShouldProcess('DrainCtl Dashboard', 'Disable')) { return }
+    $ptr = [DrainCtlNative]::DrainCtl_DisableDashboard()
+    Invoke-DrainCtlNative -Ptr $ptr | Out-Null
+    Write-Host 'Dashboard disabled. Restart the DrainCtl service to apply: Restart-Service DrainCtl'
+}
+
 Export-ModuleMember -Function @(
     'Get-RDSHDrainMode'
     'Test-RDSHDrainMode'
@@ -510,4 +558,6 @@ Export-ModuleMember -Function @(
     'Get-RDSHDrainNotification'
     'Set-RDSHDrainNotification'
     'Test-RDSHDrainNotification'
+    'Enable-RDSHDrainDashboard'
+    'Disable-RDSHDrainDashboard'
 )
