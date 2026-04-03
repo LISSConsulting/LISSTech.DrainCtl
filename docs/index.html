@@ -554,29 +554,29 @@ body {
 <section class="section" id="install" style="background: var(--surface); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
   <div class="wrap">
     <div class="section-label">Installation</div>
-    <div class="section-title">One MSI. Zero configuration.</div>
-    <div class="section-desc">Deploy silently via your RMM, SCCM, Intune, or GPO. The service starts automatically.</div>
+    <div class="section-title">Two ways to install. Zero configuration.</div>
+    <div class="section-desc">Full package via MSI, or just the PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a></div>
     <div class="install-grid">
       <div class="install-card card">
         <h3>&#128230; MSI Installer</h3>
+        <p>The full package &mdash; service, CLI, PowerShell module, Event Log, notifications.</p>
         <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
         <ul>
-          <li>Installs service (auto-start, LocalSystem)</li>
-          <li>Adds <code>drainctl.exe</code> to system PATH</li>
-          <li>Registers PowerShell module</li>
-          <li>Creates audit data directory</li>
-          <li>Configures Event Log source</li>
+          <li>Windows Service (auto-start)</li>
+          <li>CLI on system PATH</li>
+          <li>PowerShell module registered</li>
+          <li>Event Log + notifications</li>
         </ul>
       </div>
       <div class="install-card card">
-        <h3>&#9881; Configuration</h3>
-        <p>All settings live in the registry and hot-reload when changed:</p>
-        <code class="mono">HKLM\...\Services\DrainCtl\Parameters</code>
+        <h3>&#128026; PowerShell Gallery</h3>
+        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting.</p>
+        <code class="mono">Install-Module LISSTech.DrainCtl</code>
         <ul>
-          <li><strong>GracePeriod</strong> &mdash; 60 min default</li>
-          <li><strong>RetentionDays</strong> &mdash; 90 days default</li>
-          <li><strong>PollInterval</strong> &mdash; 300 sec default</li>
-          <li><strong>AuditPath</strong> &mdash; ProgramData path</li>
+          <li>Get-RDSHDrainMode</li>
+          <li>Test-RDSHDrainMode</li>
+          <li>Get-RDSHDrainHistory</li>
+          <li><a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">View on PSGallery</a></li>
         </ul>
       </div>
     </div>

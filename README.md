@@ -6,8 +6,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-BSL_1.1-yellow)
 ![Version](https://img.shields.io/badge/Version-26.93.2-green)
+[![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
-Replaces legacy PowerShell + LogParser 2.2 scripts with a zero-dependency Go binary that monitors `TSServerDrainMode`, maintains a 90-day JSONL audit trail, and attributes changes to specific users via Windows Security Event Log.
+Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, maintains a 90-day audit trail, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
 
 ---
 
@@ -114,6 +115,14 @@ The MSI installs:
 | System PATH | `bin\` folder added |
 | Event Log source | `DrainCtl` with custom message file |
 | Registry config | `HKLM\...\Services\DrainCtl\Parameters` with defaults |
+
+### PowerShell Gallery (module only)
+
+```powershell
+Install-Module -Name LISSTech.DrainCtl -Scope AllUsers
+```
+
+Just the cmdlets — no service, no CLI. Queries go directly to the registry. See [PSGallery](https://www.powershellgallery.com/packages/LISSTech.DrainCtl).
 
 ### Manual (CLI only, no service)
 

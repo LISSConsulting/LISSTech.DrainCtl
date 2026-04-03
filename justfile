@@ -12,6 +12,9 @@ signing_thumbprint := env("CODE_SIGNING_CERTIFICATE_THUMBPRINT", "")
 timestamp_url      := "http://timestamp.digicert.com"
 sign_description   := "LISSTech DrainCtl"
 
+# PSGallery (set PSGALLERY_API_KEY in .env or environment)
+psgallery_key := env("PSGALLERY_API_KEY", "")
+
 [private]
 default:
     @just --list
@@ -197,6 +200,17 @@ publish:
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Release created with signed MSI" -ForegroundColor Green
     Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
+
+    # Publish PowerShell module to PSGallery
+    $psKey = "{{psgallery_key}}"
+    $moduleDir = "{{module_dir}}"
+    if ($psKey) {
+        Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
+        Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
+        Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green
+    } else {
+        Write-Host "`n⏭️  Skipping PSGallery (PSGALLERY_API_KEY not set)" -ForegroundColor Yellow
+    }
     Write-Host ""
 
 # ── Lint ─────────────────────────────────────────────────────────────────────
