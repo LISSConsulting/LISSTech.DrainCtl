@@ -286,6 +286,18 @@ publish:
     }
     Write-Host ""
 
+# Publish PS module to PSGallery (standalone, for retries after 500 errors)
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+publish-psgallery:
+    $psKey = "{{psgallery_key}}"
+    $moduleDir = "{{module_dir}}"
+    if (-not $psKey) { Write-Error "PSGALLERY_API_KEY not set in .env"; exit 1 }
+    if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first."; exit 1 }
+    Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
+    Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
+    Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green
+
 # ── Lint ─────────────────────────────────────────────────────────────────────
 
 # Run all Go linters
