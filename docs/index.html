@@ -477,8 +477,8 @@ body {
       </div>
       <div class="feature card">
         <div class="icon">&#128196;</div>
-        <h3>Simple Config</h3>
-        <p>One JSON file. Edit in Notepad, deploy with your RMM, push with GPO. Changes apply instantly &mdash; no service restart.</p>
+        <h3>Zero-Touch Discovery</h3>
+        <p>One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk away &mdash; agents register themselves. No per-machine config.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128274;</div>
@@ -556,7 +556,7 @@ body {
   <div class="wrap">
     <div class="section-label">Farm Monitoring</div>
     <div class="section-title">One dashboard for your entire RDSH farm.</div>
-    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Enable the dashboard on one server, point the others at it, and you're done.</div>
+    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Enable the dashboard, add one DNS SRV record, and every agent discovers it automatically &mdash; zero per-machine configuration.</div>
 
     <div style="margin-bottom:28px">
       <picture>
@@ -568,29 +568,33 @@ body {
     <div class="install-grid">
       <div class="install-card card">
         <h3>&#128215; Quick Setup</h3>
-        <p>Enable the dashboard, register your servers, and open the URL. That's it &mdash; no IIS, no database, no config files to hand-edit.</p>
+        <p>Enable the dashboard, add one DNS record, and every server finds it automatically. No per-machine config, no scripts, no manual registration.</p>
         <code class="mono"><span style="color:var(--muted)"># On the dashboard server:</span>
 drainctl dashboard enable
 Restart-Service DrainCtl
 
-<span style="color:var(--muted)"># On each RDSH host:</span>
-drainctl register https://dashboard:49470</code>
+<span style="color:var(--muted)"># One DNS record &mdash; all agents discover it:</span>
+Add-DnsServerResourceRecord -ZoneName "contoso.com" `
+  -Name "_drainctl._tcp" -Srv `
+  -DomainName "dashboard.contoso.com" `
+  -Port 49470 -Priority 0 -Weight 0</code>
         <ul>
-          <li>Health, grace, and alert status at a glance</li>
-          <li>Session utilization gauges per server</li>
-          <li>State history chart over time</li>
-          <li>Live event log of every transition</li>
-          <li>Notification settings right in the UI</li>
+          <li>Agents auto-discover via DNS SRV &mdash; zero per-machine config</li>
+          <li>HTTPS with auto-generated TLS certificate</li>
+          <li>Health, grace, alert status + session gauges</li>
+          <li>State history chart + live event log</li>
+          <li>Multi-target notification editor in the UI</li>
         </ul>
       </div>
       <div class="install-card card">
         <h3>&#128274; Secure by Default</h3>
-        <p>Uses your existing Active Directory &mdash; no extra passwords, no separate login page. Open the dashboard, and Windows handles the rest.</p>
+        <p>HTTPS out of the box with auto-generated TLS certs. Kerberos SSO via Active Directory &mdash; no extra passwords, no separate login page. Certificate pinning protects agent-to-dashboard traffic.</p>
         <ul>
+          <li>Auto TLS &mdash; self-signed cert on first start, or bring your own</li>
           <li>Kerberos single sign-on (SSO)</li>
+          <li>Certificate pinning for agent traffic</li>
           <li>Restrict access to any AD group</li>
-          <li>Agents authenticate automatically</li>
-          <li>No credentials stored anywhere</li>
+          <li>HSTS enforced on all responses</li>
         </ul>
         <p style="margin-top:14px;font-size:.85rem;color:var(--muted)">Default access group: <strong>Domain Admins</strong>. Change it in the config or with <code style="font-size:.8rem">drainctl dashboard enable --group "RDS Admins"</code></p>
       </div>
