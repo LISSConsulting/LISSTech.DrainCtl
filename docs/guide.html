@@ -12,7 +12,10 @@
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <link
+            href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+            rel="stylesheet"
+        />
         <style>
             :root {
                 --bg: #fdf8f6;
@@ -590,7 +593,10 @@ Get-RDSHDrainMode | Format-List</code></pre>
 
             <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></pre>
 
-            <p>The service picks up changes within seconds (it watches config.json with a file system watcher). No restart needed.</p>
+            <p>
+                The service picks up changes within seconds (it watches config.json with a file system watcher). No
+                restart needed.
+            </p>
 
             <div class="callout">
                 <strong>&#x1F504; Migrating from a previous version?</strong>
@@ -713,9 +719,10 @@ drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
 
             <div class="callout">
                 <strong>&#x1F4A1; Multi-target management.</strong>
-                To add, remove, or configure individual notification targets with granular triggers and repeat intervals,
-                edit <code>config.json</code> directly or use the dashboard UI. The CLI <code>set-webhook</code> and
-                <code>set-ntfy</code> commands are convenience shortcuts for single-target setups.
+                To add, remove, or configure individual notification targets with granular triggers and repeat
+                intervals, edit <code>config.json</code> directly or use the dashboard UI. The CLI
+                <code>set-webhook</code> and <code>set-ntfy</code> commands are convenience shortcuts for single-target
+                setups.
             </div>
 
             <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
@@ -847,9 +854,9 @@ drainctl notify test</code></pre>
 
             <p>
                 To manage multiple targets with per-target triggers and repeat intervals, edit
-                <code>config.json</code> directly or use the
-                <a href="#dashboard">dashboard UI</a>'s notification settings drawer. See the
-                <a href="#configure">Configuration</a> section for the full <code>config.json</code> structure.
+                <code>config.json</code> directly or use the <a href="#dashboard">dashboard UI</a>'s notification
+                settings drawer. See the <a href="#configure">Configuration</a> section for the full
+                <code>config.json</code> structure.
             </p>
 
             <h3>PowerShell way</h3>
@@ -1508,6 +1515,5 @@ drainctl service uninstall</code></pre>
                 <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
             </div>
         </footer>
-
     </body>
 </html>

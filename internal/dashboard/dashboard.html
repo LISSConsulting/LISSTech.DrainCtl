@@ -7,7 +7,10 @@
         <title>DrainCtl Dashboard</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700;800&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700;800&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&display=swap"
+            rel="stylesheet"
+        />
         <style>
             .uplot,
             .uplot *,
@@ -1085,7 +1088,17 @@
                     background: var(--green);
                 }
             }
-            @media(max-width:640px){.settings-modal{padding:20px 18px}.settings-modal>div[style*="grid-template-columns"]{grid-template-columns:1fr!important}.btn-add-target{width:100%}}
+            @media (max-width: 640px) {
+                .settings-modal {
+                    padding: 20px 18px;
+                }
+                .settings-modal > div[style*="grid-template-columns"] {
+                    grid-template-columns: 1fr !important;
+                }
+                .btn-add-target {
+                    width: 100%;
+                }
+            }
         </style>
     </head>
     <body>
@@ -5212,8 +5225,15 @@
                 });
             })();
 
-            if(location.search==='?mock'){var s=document.createElement('script');s.src='mock.js';document.body.appendChild(s)}
-            else{setInterval(refresh,30000);refresh();loadNotifyConfig();}
+            if (location.search === "?mock") {
+                var s = document.createElement("script");
+                s.src = "mock.js";
+                document.body.appendChild(s);
+            } else {
+                setInterval(refresh, 30000);
+                refresh();
+                loadNotifyConfig();
+            }
         </script>
     </body>
 </html>

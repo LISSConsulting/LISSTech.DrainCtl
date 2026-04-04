@@ -386,6 +386,10 @@ lint:
 fmt:
     gofmt -w . cmd/drainctl/ cmd/cshared/
 
+# Format frontend HTML/CSS/JS with Prettier
+fmt-web:
+    npx --yes prettier --write "docs/**/*.html" "internal/dashboard/*.html" "internal/dashboard/*.js" --print-width 120 --no-bracket-same-line
+
 # ── Test ─────────────────────────────────────────────────────────────────────
 
 # Test the PS module (requires psmodule built)
