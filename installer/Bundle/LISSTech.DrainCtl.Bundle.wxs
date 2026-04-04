@@ -3,7 +3,7 @@
 
   <Bundle Name="LISSTech DrainCtl"
     Manufacturer="LISS Consulting, Corp."
-    Version="26.94.2"
+    Version="26.94.3"
     HelpUrl="https://github.com/LISSConsulting/LISSTech.DrainCtl"
     AboutUrl="https://github.com/LISSConsulting/LISSTech.DrainCtl"
     DisableModify="yes"
