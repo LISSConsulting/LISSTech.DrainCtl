@@ -560,7 +560,7 @@ func dashboardCmd() *cobra.Command {
 			if !fileCfg.Dashboard.Enabled {
 				return fmt.Errorf("dashboard not enabled on this server")
 			}
-			url := fmt.Sprintf("http://localhost:%d/api/v1/servers", fileCfg.Dashboard.Port)
+			url := fmt.Sprintf("https://localhost:%d/api/v1/servers", fileCfg.Dashboard.Port)
 			resp, err := dashboard.FetchServers(url)
 			if err != nil {
 				return fmt.Errorf("fetch servers: %w", err)
@@ -587,7 +587,7 @@ func dashboardCmd() *cobra.Command {
 			if !fileCfg.Dashboard.Enabled {
 				return fmt.Errorf("dashboard not enabled on this server")
 			}
-			url := fmt.Sprintf("http://localhost:%d/api/v1/servers/%s", fileCfg.Dashboard.Port, args[0])
+			url := fmt.Sprintf("https://localhost:%d/api/v1/servers/%s", fileCfg.Dashboard.Port, args[0])
 			if err := dashboard.RemoveServer(url); err != nil {
 				return fmt.Errorf("remove server: %w", err)
 			}
