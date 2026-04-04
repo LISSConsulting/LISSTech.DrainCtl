@@ -1,0 +1,488 @@
+//go:build windows
+
+package dashboard
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+)
+
+// ── NewServerState ────────────────────────────────────────────────────────────
+
+func TestNewServerState_EmptyDir(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	if got := s.All(); len(got) != 0 {
+		t.Errorf("All() = %d servers, want 0 for empty dir", len(got))
+	}
+}
+
+func TestNewServerState_LoadsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	s1 := NewServerState(dir, nil)
+	s1.Register("SRV01")
+	s1.Register("SRV02")
+
+	// Second instance reads the same file.
+	s2 := NewServerState(dir, nil)
+	all := s2.All()
+	if len(all) != 2 {
+		t.Fatalf("loaded state has %d servers, want 2", len(all))
+	}
+}
+
+func TestNewServerState_IgnoresMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	// Remove any file that might exist.
+	_ = os.Remove(filepath.Join(dir, "servers.json"))
+
+	s := NewServerState(dir, nil)
+	if len(s.All()) != 0 {
+		t.Error("expected empty state when servers.json is absent")
+	}
+}
+
+func TestNewServerState_IgnoresCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "servers.json"), []byte("not json {{{"), 0o644)
+
+	// Must not panic or return an error — simply starts empty.
+	s := NewServerState(dir, nil)
+	if len(s.All()) != 0 {
+		t.Error("expected empty state when servers.json is corrupt")
+	}
+}
+
+// ── Register ──────────────────────────────────────────────────────────────────
+
+func TestRegister_AddsServer(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	if !s.IsRegistered("SRV01") {
+		t.Error("SRV01 should be registered after Register()")
+	}
+}
+
+func TestRegister_SetsRegisteredAt(t *testing.T) {
+	before := time.Now()
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	all := s.All()
+	if len(all) != 1 {
+		t.Fatalf("All() = %d, want 1", len(all))
+	}
+	if all[0].RegisteredAt.Before(before) {
+		t.Error("RegisteredAt should be set to approximately now")
+	}
+}
+
+func TestRegister_Idempotent(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	original := s.All()[0].RegisteredAt
+
+	// Small delay to ensure time.Now() would differ.
+	time.Sleep(time.Millisecond)
+	s.Register("SRV01") // re-register
+
+	all := s.All()
+	if len(all) != 1 {
+		t.Fatalf("All() = %d after re-register, want 1", len(all))
+	}
+	if !all[0].RegisteredAt.Equal(original) {
+		t.Error("RegisteredAt should not change on idempotent re-register")
+	}
+}
+
+// ── Remove ────────────────────────────────────────────────────────────────────
+
+func TestRemove_KnownHostReturnsTrue(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	if !s.Remove("SRV01") {
+		t.Error("Remove() should return true for a registered host")
+	}
+	if s.IsRegistered("SRV01") {
+		t.Error("SRV01 should not be registered after Remove()")
+	}
+}
+
+func TestRemove_UnknownHostReturnsFalse(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+
+	if s.Remove("GHOST") {
+		t.Error("Remove() should return false for an unknown host")
+	}
+}
+
+func TestRemove_OnlyRemovesTargetServer(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	s.Register("SRV02")
+
+	s.Remove("SRV01")
+
+	if s.IsRegistered("SRV01") {
+		t.Error("SRV01 should be removed")
+	}
+	if !s.IsRegistered("SRV02") {
+		t.Error("SRV02 should remain after SRV01 is removed")
+	}
+}
+
+// ── IsRegistered ──────────────────────────────────────────────────────────────
+
+func TestIsRegistered_TrueForRegistered(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	if !s.IsRegistered("SRV01") {
+		t.Error("IsRegistered() should return true for a registered host")
+	}
+}
+
+func TestIsRegistered_FalseForUnknown(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	if s.IsRegistered("NOBODY") {
+		t.Error("IsRegistered() should return false for an unknown host")
+	}
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+func TestUpdate_SetsLastResult(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	result := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
+	s.Update("SRV01", result)
+
+	all := s.All()
+	if all[0].LastResult == nil {
+		t.Fatal("LastResult should be set after Update()")
+	}
+	if all[0].LastResult.Status != "Alert" {
+		t.Errorf("LastResult.Status = %q, want Alert", all[0].LastResult.Status)
+	}
+}
+
+func TestUpdate_SetsLastSeen(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	before := time.Now()
+
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	all := s.All()
+	if all[0].LastSeen.Before(before) {
+		t.Error("LastSeen should be updated to approximately now after Update()")
+	}
+}
+
+func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	// Update a host that was never registered → no panic, All() still empty.
+	s.Update("GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
+
+	if len(s.All()) != 0 {
+		t.Error("Update() on unregistered host should not create a ServerInfo entry")
+	}
+}
+
+// ── HostHistory ───────────────────────────────────────────────────────────────
+
+func TestHostHistory_EmptyForUnknownHost(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	if h := s.HostHistory("GHOST", 10); h != nil {
+		t.Errorf("HostHistory for unknown host = %v, want nil", h)
+	}
+}
+
+func TestHostHistory_EmptyForNoReports(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	if h := s.HostHistory("SRV01", 10); h != nil {
+		t.Errorf("HostHistory with no reports = %v, want nil", h)
+	}
+}
+
+func TestHostHistory_NewestFirst(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	statuses := []string{"Healthy", "Grace", "Alert"}
+	for i, st := range statuses {
+		s.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    st,
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	h := s.HostHistory("SRV01", 10)
+	if len(h) != 3 {
+		t.Fatalf("len(history) = %d, want 3", len(h))
+	}
+	// Newest (Alert, t=1002) should be first.
+	if h[0].Status != "Alert" {
+		t.Errorf("h[0].Status = %q, want Alert", h[0].Status)
+	}
+	if h[1].Status != "Grace" {
+		t.Errorf("h[1].Status = %q, want Grace", h[1].Status)
+	}
+	if h[2].Status != "Healthy" {
+		t.Errorf("h[2].Status = %q, want Healthy", h[2].Status)
+	}
+}
+
+func TestHostHistory_NLimitsResults(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	for i := range 10 {
+		s.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	h := s.HostHistory("SRV01", 3)
+	if len(h) != 3 {
+		t.Errorf("len(history) = %d, want 3 with n=3", len(h))
+	}
+}
+
+func TestHostHistory_NZeroReturnsAll(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	for i := range 5 {
+		s.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	h := s.HostHistory("SRV01", 0)
+	if len(h) != 5 {
+		t.Errorf("len(history) = %d, want 5 with n=0 (return all)", len(h))
+	}
+}
+
+func TestHostHistory_RingCapAtHistoryMax(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	// Insert more than historyMax records.
+	for i := range historyMax + 20 {
+		s.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	h := s.HostHistory("SRV01", 0)
+	if len(h) > historyMax {
+		t.Errorf("len(history) = %d, want <= %d (ring cap)", len(h), historyMax)
+	}
+}
+
+func TestHostHistory_RingRetainsNewest(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	// Insert historyMax Healthy records, then one Alert.
+	for i := range historyMax {
+		s.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+	s.Update("SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Status:    "Alert",
+		Timestamp: time.Unix(int64(2000), 0),
+	})
+
+	h := s.HostHistory("SRV01", 1)
+	if len(h) != 1 {
+		t.Fatalf("len(history) = %d, want 1 with n=1", len(h))
+	}
+	// Newest record (Alert) must be retained.
+	if h[0].Status != "Alert" {
+		t.Errorf("newest record = %q, want Alert (ring must evict oldest)", h[0].Status)
+	}
+}
+
+// ── All ───────────────────────────────────────────────────────────────────────
+
+func TestAll_EmptyStateReturnsEmptySlice(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	all := s.All()
+	if all == nil {
+		t.Error("All() should return a non-nil empty slice, got nil")
+	}
+	if len(all) != 0 {
+		t.Errorf("All() = %d servers, want 0", len(all))
+	}
+}
+
+func TestAll_SortedByHostname(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("ZETA")
+	s.Register("ALPHA")
+	s.Register("MANGO")
+
+	all := s.All()
+	if len(all) != 3 {
+		t.Fatalf("All() = %d, want 3", len(all))
+	}
+	if all[0].Hostname != "ALPHA" || all[1].Hostname != "MANGO" || all[2].Hostname != "ZETA" {
+		t.Errorf("servers not sorted: got [%s %s %s]", all[0].Hostname, all[1].Hostname, all[2].Hostname)
+	}
+}
+
+func TestAll_ReturnsSnapshot(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+
+	snapshot := s.All()
+	// Mutating the snapshot should not affect the internal state.
+	snapshot[0].Hostname = "MUTATED"
+
+	all2 := s.All()
+	if all2[0].Hostname != "SRV01" {
+		t.Error("All() should return a copy, not a reference to internal state")
+	}
+}
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
+func TestPersistence_RegisterSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	s1 := NewServerState(dir, nil)
+	s1.Register("SRV01")
+	s1.Register("SRV02")
+
+	s2 := NewServerState(dir, nil)
+	if !s2.IsRegistered("SRV01") {
+		t.Error("SRV01 should persist across reload")
+	}
+	if !s2.IsRegistered("SRV02") {
+		t.Error("SRV02 should persist across reload")
+	}
+}
+
+func TestPersistence_RemoveSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	s1 := NewServerState(dir, nil)
+	s1.Register("SRV01")
+	s1.Register("SRV02")
+	s1.Remove("SRV01")
+
+	s2 := NewServerState(dir, nil)
+	if s2.IsRegistered("SRV01") {
+		t.Error("removed SRV01 should not persist across reload")
+	}
+	if !s2.IsRegistered("SRV02") {
+		t.Error("SRV02 should remain after SRV01 removal")
+	}
+}
+
+func TestPersistence_LastResultSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	s1 := NewServerState(dir, nil)
+	s1.Register("SRV01")
+	s1.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+
+	s2 := NewServerState(dir, nil)
+	all := s2.All()
+	if len(all) != 1 {
+		t.Fatalf("All() = %d, want 1", len(all))
+	}
+	if all[0].LastResult == nil {
+		t.Fatal("LastResult should persist across reload")
+	}
+	if all[0].LastResult.Status != "Alert" {
+		t.Errorf("LastResult.Status = %q, want Alert", all[0].LastResult.Status)
+	}
+}
+
+func TestPersistence_WritesTmpThenRenames(t *testing.T) {
+	dir := t.TempDir()
+	s := NewServerState(dir, nil)
+	s.Register("SRV01")
+
+	// After save, .tmp file must not exist (it was renamed).
+	tmpPath := filepath.Join(dir, "servers.json.tmp")
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("servers.json.tmp should not exist after successful save")
+	}
+	// But the final file must exist.
+	if _, err := os.Stat(filepath.Join(dir, "servers.json")); os.IsNotExist(err) {
+		t.Error("servers.json should exist after Register()")
+	}
+}
+
+func TestPersistence_FileIsValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	s := NewServerState(dir, nil)
+	s.Register("SRV01")
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	data, err := os.ReadFile(filepath.Join(dir, "servers.json"))
+	if err != nil {
+		t.Fatalf("read servers.json: %v", err)
+	}
+	var list []ServerInfo
+	if err := json.Unmarshal(data, &list); err != nil {
+		t.Errorf("servers.json is not valid JSON: %v", err)
+	}
+}
+
+// ── Concurrent access ─────────────────────────────────────────────────────────
+
+func TestServerState_ConcurrentAccess(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+
+	// Pre-register hosts so Update() can write LastResult.
+	for i := range 5 {
+		s.Register(hostname(i))
+	}
+
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			host := hostname(n % 5)
+			switch n % 4 {
+			case 0:
+				s.Register(host)
+			case 1:
+				s.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"})
+			case 2:
+				s.IsRegistered(host)
+			case 3:
+				_ = s.All()
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// hostname returns a deterministic server name for use in concurrent tests.
+func hostname(n int) string {
+	return "SRV" + string(rune('A'+n))
+}
