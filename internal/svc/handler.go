@@ -18,6 +18,32 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
+// configFetchInterval is the baseline number of poll ticks between dashboard
+// notification-config refreshes (~5 min at the default 30 s poll interval).
+// The actual interval grows exponentially after consecutive failures.
+const (
+	configFetchInterval    = 10  // baseline ticks
+	maxConfigFetchInterval = 320 // ceiling ticks (~160 min at 30 s)
+)
+
+// backoffTicks returns the number of poll ticks to wait before the next
+// dashboard config fetch attempt.  failures is the count of consecutive
+// failures; the interval doubles per failure up to maxConfigFetchInterval.
+func backoffTicks(failures int) int {
+	if failures <= 0 {
+		return configFetchInterval
+	}
+	shift := failures
+	if shift > 5 {
+		shift = 5 // cap doubling at 2^5 = 32×
+	}
+	n := configFetchInterval << shift
+	if n > maxConfigFetchInterval {
+		return maxConfigFetchInterval
+	}
+	return n
+}
+
 // Event IDs matching assets/drainctl.mc message file.
 const (
 	EvtServiceStarted = 1000
@@ -229,7 +255,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// back to local config.json targets if no fetch ever succeeded).
 	var useRemoteConfig bool
 	pollsSinceConfigFetch := 0
-	const configFetchInterval = 10 // re-fetch every 10 polls (~5 min at 30s interval)
+	dashConfigFailures := 0 // consecutive dashboard config-fetch failures
 
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
@@ -257,6 +283,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", err))
 		} else {
+			dashConfigFailures = 0
 			useRemoteConfig = true
 			applyRemoteConfig(remote, &cfg, &notifyTargets)
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=notify-config-fetched targets=%d threshold=%d grace=%d",
@@ -307,14 +334,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-pollTicker.C:
 			// Periodically re-fetch notification config from dashboard.
+			// The interval doubles on each consecutive failure (exponential backoff)
+			// so a downed dashboard does not generate log spam every poll.
 			if dashCfg.URL != "" {
 				pollsSinceConfigFetch++
-				if pollsSinceConfigFetch >= configFetchInterval {
+				if pollsSinceConfigFetch >= backoffTicks(dashConfigFailures) {
 					pollsSinceConfigFetch = 0
 					if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
+						dashConfigFailures++
+						nextIn := backoffTicks(dashConfigFailures)
 						dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
-							fmt.Sprintf("error=%q", err))
+							fmt.Sprintf("error=%q next_retry_polls=%d", err, nextIn))
 					} else {
+						dashConfigFailures = 0
 						useRemoteConfig = true
 						applyRemoteConfig(remote, &cfg, &notifyTargets)
 					}
@@ -341,6 +373,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				if newDashCfg.URL != "" {
 					dashboard.InitDashClient(newDashCfg.TLSFingerprint)
 					pollsSinceConfigFetch = configFetchInterval // force re-fetch next poll
+					dashConfigFailures = 0                      // reset backoff on URL change
 				}
 			}
 
