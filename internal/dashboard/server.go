@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("POST /api/v1/report", wa(http.HandlerFunc(ds.handleReport)))
 
 	// Management / UI routes — require group membership.
+	mux.Handle("GET /api/v1/history/{host}", wg(http.HandlerFunc(ds.handleHistory)))
 	mux.Handle("GET /api/v1/servers", wg(http.HandlerFunc(ds.handleServers)))
 	mux.Handle("DELETE /api/v1/servers/{host}", wg(http.HandlerFunc(ds.handleDeleteServer)))
 	mux.Handle("GET /api/v1/notify-config", wg(http.HandlerFunc(ds.handleGetNotifyConfig)))
@@ -381,6 +383,43 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleHistory serves GET /api/v1/history/{host}.
+// Returns the last N CheckResult records for the named host, newest first.
+// Optional query param: limit (1–100, default 50). Requires group membership.
+// Returns 404 if the host is not registered.
+func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request) {
+	host := r.PathValue("host")
+	if host == "" {
+		http.Error(w, "host parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if !ds.state.IsRegistered(host) {
+		http.Error(w, "host not found", http.StatusNotFound)
+		return
+	}
+
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > historyMax {
+			http.Error(w, fmt.Sprintf("limit must be 1–%d", historyMax), http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+
+	records := ds.state.HostHistory(host, limit)
+	if records == nil {
+		records = []dc.CheckResult{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(records)
 }
 
 // hstsMiddleware adds Strict-Transport-Security headers to all responses.
