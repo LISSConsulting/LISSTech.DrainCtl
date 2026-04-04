@@ -58,6 +58,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	wa := func(h http.Handler) http.Handler { return wrapAuth(h, cfg.Group, log) }
 	wg := func(h http.Handler) http.Handler { return wrapGroup(h, cfg.Group, log) }
 
+	// Public routes — no authentication required.
+	mux.HandleFunc("GET /api/v1/health", ds.handleHealth)
+
 	// Agent routes — any authenticated domain identity.
 	mux.Handle("POST /api/v1/register", wa(http.HandlerFunc(ds.handleRegister)))
 	mux.Handle("POST /api/v1/report", wa(http.HandlerFunc(ds.handleReport)))
@@ -154,6 +157,11 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 	}
 	if err := json.Unmarshal(body, &req); err != nil || req.Hostname == "" {
 		http.Error(w, "hostname required", http.StatusBadRequest)
+		return
+	}
+	req.Hostname = strings.TrimSpace(req.Hostname)
+	if req.Hostname == "" || len(req.Hostname) > 253 {
+		http.Error(w, "hostname invalid", http.StatusBadRequest)
 		return
 	}
 
@@ -333,6 +341,46 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(dashboardHTML)
+}
+
+// handleHealth serves GET /api/v1/health without authentication.
+// Returns version, registered server count, and per-status counts.
+// Useful for load-balancer health checks and external monitoring.
+func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	servers := ds.state.All()
+
+	healthy, alerting, unknown := 0, 0, 0
+	for _, s := range servers {
+		if s.LastResult == nil {
+			unknown++
+			continue
+		}
+		switch s.LastResult.Status {
+		case "Alert":
+			alerting++
+		default:
+			healthy++
+		}
+	}
+
+	resp := struct {
+		OK       bool   `json:"ok"`
+		Version  string `json:"version"`
+		Servers  int    `json:"servers"`
+		Healthy  int    `json:"healthy"`
+		Alerting int    `json:"alerting"`
+		Unknown  int    `json:"unknown"`
+	}{
+		OK:       true,
+		Version:  dc.Version,
+		Servers:  len(servers),
+		Healthy:  healthy,
+		Alerting: alerting,
+		Unknown:  unknown,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // hstsMiddleware adds Strict-Transport-Security headers to all responses.
