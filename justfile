@@ -228,33 +228,57 @@ sign-msi:
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
 
-# ── Aggregate ────────────────────────────────────────────────────────────────
-
-# Build everything (CLI + DLL + PS module + MSI), unsigned
-all: msi
-
-# Build and sign everything: binaries → sign → MSI → sign MSI
+# Sign the Burn bundle EXE (after bundle build)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: psmodule sign-binaries msi sign-msi
+sign-bundle:
+    $thumbprint = "{{signing_thumbprint}}"
+    $timestampUrl = "{{timestamp_url}}"
+    $description = "{{sign_description}}"
+    $exePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
+
+    if (-not $thumbprint) {
+        Write-Host "`n⏭️  Skipping bundle signing (no certificate)" -ForegroundColor Yellow
+        exit 0
+    }
+
+    if (-not (Test-Path $exePath)) { Write-Error "Bundle not found: $exePath"; exit 1 }
+
+    Write-Host "`n🔏 Signing Bundle" -ForegroundColor Cyan
+    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $exePath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.exe`n$out"; exit $LASTEXITCODE }
+    Write-Host "   ✅ LISSTech.DrainCtl.exe" -ForegroundColor Green
+
+# ── Aggregate ────────────────────────────────────────────────────────────────
+
+# Build everything (CLI + DLL + PS module + MSI + Bundle), unsigned
+all: bundle
+
+# Build and sign everything: binaries → sign → MSI → sign MSI → Bundle → sign Bundle
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+release: psmodule sign-binaries msi sign-msi bundle sign-bundle
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
+    $bundle = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.exe"
     $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
     Write-Host ""
     Write-Host "🚀 Release complete" -ForegroundColor Green
     Write-Host ("   drainctl.exe  {0,5:N1} MB" -f ($exe.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   drainctl.dll  {0,5:N1} MB" -f ($dll.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   MSI           {0,5:N1} MB" -f ($msi.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   Bundle        {0,5:N1} MB" -f ($bundle.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host "   Version       $($vi.FileVersion)" -ForegroundColor DarkGray
     Write-Host ""
 
-# Tag, create GH release, and upload signed MSI (run after `just release`)
+# Tag, create GH release, and upload signed MSI + Bundle (run after `just release`)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 publish:
     $msiPath = "{{dist_dir}}/LISSTech.DrainCtl.msi"
-    $exePath = "{{bin_dir}}/drainctl.exe"
+    $bundlePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
+    $cliPath = "{{bin_dir}}/drainctl.exe"
 
     if (-not (Test-Path $msiPath)) {
         Write-Error "MSI not found. Run 'just release' first."
@@ -268,7 +292,7 @@ publish:
         exit 1
     }
 
-    $version = (& $exePath --version 2>&1) -replace 'drainctl version ', ''
+    $version = (& $cliPath --version 2>&1) -replace 'drainctl version ', ''
     $tag = "v$version"
 
     Write-Host "`n📤 Publishing $tag" -ForegroundColor Cyan
@@ -280,10 +304,21 @@ publish:
     if ($LASTEXITCODE -ne 0) { Write-Error "git push tag failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Tag $tag pushed" -ForegroundColor Green
 
-    # Create release with signed MSI
-    & gh release create $tag $msiPath --title "LISSTech DrainCtl $version" --generate-notes
+    # Build asset list: MSI always, bundle if it exists and is signed
+    $assets = @($msiPath)
+    if (Test-Path $bundlePath) {
+        $bsig = Get-AuthenticodeSignature $bundlePath
+        if ($bsig.Status -eq 'Valid') {
+            $assets += $bundlePath
+        } else {
+            Write-Host "   ⚠️  Bundle EXE is not signed, skipping" -ForegroundColor Yellow
+        }
+    }
+
+    # Create release with all assets
+    & gh release create $tag @assets --title "LISSTech DrainCtl $version" --generate-notes
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
-    Write-Host "   ✅ Release created with signed MSI" -ForegroundColor Green
+    Write-Host "   ✅ Release created with $($assets.Count) asset(s)" -ForegroundColor Green
     Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
 
     # Publish PowerShell module to PSGallery
