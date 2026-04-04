@@ -9,7 +9,7 @@
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <DefineConstants>ProductVersion=26.93.13</DefineConstants>
+    <DefineConstants>ProductVersion=26.94.0</DefineConstants>
   </PropertyGroup>
   <PropertyGroup>
     <DefaultItemExcludes>$(DefaultItemExcludes);Bundle\**</DefaultItemExcludes>
