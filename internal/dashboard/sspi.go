@@ -122,6 +122,7 @@ func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler 
 		}
 
 		member, err := isGroupMember(groupSID)
+		_ = revertToSelf() // defensive: undo any SSPI thread impersonation
 		if err != nil {
 			dc.LogMsg(log, dc.LvlWRN, "sspi: group check failed",
 				fmt.Sprintf("user=%s group=%s error=%q", auth.Username, group, err))
@@ -172,6 +173,15 @@ func isGroupMember(groupSID *windows.SID) (bool, error) {
 
 var modAdvapi32 = windows.NewLazySystemDLL("advapi32.dll")
 var procCheckTokenMembership = modAdvapi32.NewProc("CheckTokenMembership")
+var procRevertToSelf = modAdvapi32.NewProc("RevertToSelf")
+
+func revertToSelf() error {
+	r1, _, err := procRevertToSelf.Call()
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
 
 func checkTokenMembership(token windows.Token, sidToCheck *windows.SID, isMember *int32) error {
 	r1, _, err := procCheckTokenMembership.Call(
