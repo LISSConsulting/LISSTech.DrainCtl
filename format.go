@@ -42,21 +42,22 @@ func ParseFormat(s string) (OutputFormat, error) {
 
 // CheckResult holds the complete outcome of a single check run.
 type CheckResult struct {
-	Version              string     `json:"version"`
-	Timestamp            time.Time  `json:"timestamp"`
-	Host                 string     `json:"host"`
-	DrainModeLabel       string     `json:"drain_mode"`
-	DrainModeValue       uint32     `json:"drain_mode_value"`
-	GracePeriodSeconds   int        `json:"grace_period_seconds"`
-	StateSince           *time.Time `json:"state_since"`
-	StateDurationSeconds *float64   `json:"state_duration_seconds"`
-	Status               string     `json:"status"`
-	ConnectionsAllowed   *bool      `json:"connections_allowed"`
-	Transition           bool       `json:"transition"`
-	TransitionFrom       string     `json:"transition_from,omitempty"`
-	ChangedBy            string     `json:"changed_by,omitempty"`
-	Message              string     `json:"message"`
-	ExitCode             int        `json:"exit_code"`
+	Version              string          `json:"version"`
+	Timestamp            time.Time       `json:"timestamp"`
+	Host                 string          `json:"host"`
+	DrainModeLabel       string          `json:"drain_mode"`
+	DrainModeValue       uint32          `json:"drain_mode_value"`
+	GracePeriodSeconds   int             `json:"grace_period_seconds"`
+	StateSince           *time.Time      `json:"state_since"`
+	StateDurationSeconds *float64        `json:"state_duration_seconds"`
+	Status               string          `json:"status"`
+	ConnectionsAllowed   *bool           `json:"connections_allowed"`
+	Transition           bool            `json:"transition"`
+	TransitionFrom       string          `json:"transition_from,omitempty"`
+	ChangedBy            string          `json:"changed_by,omitempty"`
+	Sessions             *SessionSummary `json:"sessions,omitempty"`
+	Message              string          `json:"message"`
+	ExitCode             int             `json:"exit_code"`
 }
 
 // Write renders the check result to w in the specified format.

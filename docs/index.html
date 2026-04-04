@@ -387,8 +387,12 @@ body {
       <div class="stat-label">Audit retention</div>
     </div>
     <div class="stat">
-      <div class="stat-value">1</div>
-      <div class="stat-label">Go binary</div>
+      <div class="stat-value">6</div>
+      <div class="stat-label">Trigger types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">N&times;M</div>
+      <div class="stat-label">Notification targets</div>
     </div>
     <div class="stat">
       <div class="stat-value">&#x1F512;</div>
@@ -432,7 +436,7 @@ body {
       <div class="feature card">
         <div class="icon">&#128276;</div>
         <h3>Webhook &amp; ntfy.sh</h3>
-        <p>Push alerts on transitions and grace exceedances. Configurable repeat intervals. Phone notifications via ntfy.</p>
+        <p>Multiple webhook and ntfy.sh targets with granular triggers &mdash; drain_on, drain_off, alert, session_warning, and more. Each target gets its own trigger filter and repeat interval.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128200;</div>
@@ -443,6 +447,16 @@ body {
         <div class="icon">&#128274;</div>
         <h3>EV Code-Signed</h3>
         <p>Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from download to execution.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128101;</div>
+        <h3>Session Tracking</h3>
+        <p>Know exactly how many users are on each server. Active sessions, disconnected sessions, utilization percentage &mdash; all tracked in real time and displayed on the dashboard.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128680;</div>
+        <h3>Session Alerts</h3>
+        <p>Set a utilization threshold and get notified before your servers hit capacity. Per-target webhook and ntfy.sh with granular trigger control.</p>
       </div>
     </div>
   </div>
@@ -479,47 +493,81 @@ body {
   </div>
 </section>
 
+<!-- What's New -->
+<section class="section" id="new" style="background: linear-gradient(135deg, rgba(163,71,91,0.06), rgba(93,138,110,0.06)); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
+  <div class="wrap">
+    <div class="section-label">What's New in v27</div>
+    <div class="section-title">Sessions, smarter alerts, and more control.</div>
+    <div class="section-desc">The biggest update yet. Now you can see who's connected, get notified exactly the way you want, and manage everything from a single config file.</div>
+    <div class="features-grid">
+      <div class="feature card">
+        <div class="icon">&#128101;</div>
+        <h3>Session Tracking</h3>
+        <p>See active, disconnected, and total sessions on every server. Utilization gauges show capacity at a glance.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128276;</div>
+        <h3>Multi-Target Alerts</h3>
+        <p>Send notifications to multiple webhooks and ntfy channels. Each target gets its own triggers and repeat schedule.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#127919;</div>
+        <h3>Granular Triggers</h3>
+        <p>Choose exactly what fires each alert &mdash; drain on, drain off, grace period, alerts, session warnings, or all of the above.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128196;</div>
+        <h3>JSON Config File</h3>
+        <p>Configuration moved from the registry to a simple JSON file. Edit it in Notepad, deploy it with your RMM. Changes apply instantly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- Dashboard -->
 <section class="section" id="dashboard">
   <div class="wrap">
     <div class="section-label">Farm Monitoring</div>
     <div class="section-title">One dashboard for your entire RDSH farm.</div>
-    <div class="section-desc">Every server self-registers with the dashboard hub. Live status grid shows drain mode, grace period, and change attribution across all hosts &mdash; secured with Kerberos/SSPI authentication and AD group control.</div>
+    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Enable the dashboard on one server, point the others at it, and you're done.</div>
+
+    <div style="margin-bottom:28px">
+      <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard showing server overview, state history chart, and server cards with session gauges" style="width:100%;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow)">
+    </div>
 
     <div class="install-grid">
       <div class="install-card card">
-        <h3>&#128215; How It Works</h3>
-        <p>One server runs the dashboard. Others register themselves and report state in real time. The dashboard aggregates everything into a single view.</p>
+        <h3>&#128215; Quick Setup</h3>
+        <p>Enable the dashboard, register your servers, and open the URL. That's it &mdash; no IIS, no database, no config files to hand-edit.</p>
         <code class="mono"><span style="color:var(--muted)"># On the dashboard server:</span>
-drainctl dashboard
+drainctl dashboard enable
+Restart-Service DrainCtl
 
 <span style="color:var(--muted)"># On each RDSH host:</span>
 drainctl register https://dashboard:49470</code>
         <ul>
-          <li>Live status grid with health, grace, and alert states</li>
-          <li>State duration chart per server</li>
-          <li>Event log with transition history</li>
-          <li>Notification settings panel (webhook &amp; ntfy.sh)</li>
+          <li>Health, grace, and alert status at a glance</li>
+          <li>Session utilization gauges per server</li>
+          <li>State history chart over time</li>
+          <li>Live event log of every transition</li>
+          <li>Notification settings right in the UI</li>
         </ul>
       </div>
       <div class="install-card card">
-        <h3>&#128274; Kerberos Authentication</h3>
-        <p>The dashboard uses Windows Negotiate (SPNEGO/Kerberos) authentication. Only members of the configured AD group can view the dashboard.</p>
-        <code class="mono"><span style="color:var(--muted)"># Registry: HKLM\...\DrainCtl\Parameters</span>
-DashboardEnabled  = 1
-DashboardPort     = 49470
-DashboardGroup    = "Domain Admins"</code>
+        <h3>&#128274; Secure by Default</h3>
+        <p>Uses your existing Active Directory &mdash; no extra passwords, no separate login page. Open the dashboard, and Windows handles the rest.</p>
         <ul>
-          <li>Agent routes accept any domain identity</li>
-          <li>Management routes require group membership</li>
-          <li>No passwords stored &mdash; pure Kerberos SSO</li>
+          <li>Kerberos single sign-on (SSO)</li>
+          <li>Restrict access to any AD group</li>
+          <li>Agents authenticate automatically</li>
+          <li>No credentials stored anywhere</li>
         </ul>
+        <p style="margin-top:14px;font-size:.85rem;color:var(--muted)">Default access group: <strong>Domain Admins</strong>. Change it in the config or with <code style="font-size:.8rem">drainctl dashboard enable --group "RDS Admins"</code></p>
       </div>
     </div>
 
     <div style="margin-top:28px;display:flex;gap:14px;flex-wrap:wrap">
       <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
-      <a href="dashboard-preview.html" class="btn btn-ghost">Live Preview</a>
     </div>
   </div>
 </section>
@@ -575,7 +623,7 @@ DashboardGroup    = "Domain Admins"</code>
     <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.93.8"</span>,
+  <span class="b">"version"</span>: <span class="d">"27.93.0"</span>,
   <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
@@ -585,6 +633,13 @@ DashboardGroup    = "Domain Admins"</code>
   <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
   <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
   <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
+  <span class="b">"sessions"</span>: {
+    <span class="b">"active_sessions"</span>: <span class="d">12</span>,
+    <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
+    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
+    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
+    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
+  },
   <span class="b">"transition"</span>: <span class="d">false</span>,
   <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
   <span class="b">"exit_code"</span>: <span class="d">0</span>
@@ -621,7 +676,7 @@ DashboardGroup    = "Domain Admins"</code>
           <li>Windows Service (auto-start)</li>
           <li>CLI on system PATH</li>
           <li>PowerShell module registered</li>
-          <li>Event Log + notifications</li>
+          <li>Event Log + multi-target notifications</li>
         </ul>
       </div>
       <div class="install-card card">

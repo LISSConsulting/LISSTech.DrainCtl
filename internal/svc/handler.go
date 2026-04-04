@@ -120,6 +120,11 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult
 		res.ExitCode = 0
 	}
 
+	// Session tracking.
+	if sess := dc.GetSessionSummary(); sess != nil {
+		res.Sessions = sess
+	}
+
 	// Check for transition.
 	if last := h.store.LastObservation(); last != nil && last.DrainMode != state.Mode {
 		res.Transition = true
@@ -143,13 +148,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Ensure default parameters exist (safety net if MSI didn't create them).
-	_ = dc.WriteDefaultParameters(s.log)
+	// Load config from config.json (migrates from registry if needed).
+	fullCfg, err := dc.LoadConfig(s.log)
+	if err != nil {
+		s.log(dc.LvlERR, fmt.Sprintf("service=failed error=%q", err))
+		return false, 1
+	}
 
-	// Load config.
-	cfg := dc.ReadServiceConfig(s.log)
-	notifyCfg := dc.ReadNotifyConfig(s.log)
-	notifyState := &dc.NotifyState{}
+	cfg := fullCfg.ToServiceConfig()
+	dashCfg := fullCfg.ToDashboardConfig()
+	notifyTargets := fullCfg.Notifications
+	notifyState := &dc.NotifyState{LastAlertNotify: make(map[string]time.Time)}
+
 	s.log(dc.LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
 		dc.Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
 
@@ -176,11 +186,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		regCh = make(chan struct{}) // never fires
 	}
 
-	// Start parameters watcher for hot-reload.
-	paramCh, err := watcher.WatchParametersKey(ctx, s.log)
+	// Start config file watcher for hot-reload.
+	configCh, err := watcher.WatchConfigFile(ctx, dc.DefaultConfigPath(), s.log)
 	if err != nil {
-		dc.LogMsg(s.log, dc.LvlWRN, "parameters watcher failed", fmt.Sprintf("error=%q", err))
-		paramCh = make(chan struct{}) // never fires
+		dc.LogMsg(s.log, dc.LvlWRN, "config watcher failed", fmt.Sprintf("error=%q", err))
+		configCh = make(chan struct{}) // never fires
 	}
 
 	// Start event log subscriber for change attribution.
@@ -196,13 +206,21 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	go pipe.ServePipe(ctx, handler, s.log)
 
 	// Start dashboard if enabled.
-	dashCfg := dc.ReadDashboardConfig(s.log)
 	if dashCfg.Enabled {
 		_, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), s.log)
 		if err != nil {
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start", fmt.Sprintf("error=%q", err))
 		} else {
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d", dashCfg.Port))
+		}
+	}
+
+	// Auto-register with dashboard if URL is configured.
+	if dashCfg.URL != "" {
+		if err := dashboard.Register(dashCfg.URL, s.log); err != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "dashboard registration failed (will retry on report)", fmt.Sprintf("error=%q", err))
+		} else {
+			s.log(dc.LvlINF, "dashboard=registered")
 		}
 	}
 
@@ -214,7 +232,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -244,21 +262,28 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(dc.LvlINF, "trigger=registry_change")
-			svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
-			svcRunCheck(st, &cfg, &notifyCfg, notifyState, &dashCfg, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
 
-		case <-paramCh:
-			newCfg := dc.ReadServiceConfig(s.log)
+		case <-configCh:
+			newFullCfg, err := dc.LoadConfig(s.log)
+			if err != nil {
+				dc.LogMsg(s.log, dc.LvlWRN, "config reload failed", fmt.Sprintf("error=%q", err))
+				continue
+			}
+			newCfg := newFullCfg.ToServiceConfig()
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
 			handler.cfg = &cfg
-			notifyCfg = dc.ReadNotifyConfig(s.log)
+			dashCfg = newFullCfg.ToDashboardConfig()
+			notifyTargets = newFullCfg.Notifications
 			s.log(dc.LvlINF, "config=reloaded")
+			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
 
 		case <-flushTicker.C:
 			_ = st.FlushIfDirty()
@@ -267,7 +292,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 }
 
 // svcRunCheck performs a single check cycle in service mode.
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.NotifyConfig, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
 	state, err := dc.ReadDrainMode()
 	if err != nil {
 		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
@@ -319,6 +344,9 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.N
 		}
 	}
 
+	// Session tracking.
+	sess := dc.GetSessionSummary()
+
 	rec := &dc.AuditRecord{
 		Timestamp:   time.Now(),
 		Host:        state.Host,
@@ -328,6 +356,11 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.N
 		Changed:     transition,
 		ChangedBy:   changedBy,
 		ExitCode:    exitCode,
+	}
+	if sess != nil {
+		rec.ActiveSessions = sess.ActiveSessions
+		rec.TotalSessions = sess.TotalSessions
+		rec.MaxSessions = sess.MaxSessions
 	}
 	st.Append(rec)
 
@@ -370,65 +403,75 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, notifyCfg *dc.N
 			state.Mode, state.Host, stateDur))
 	}
 
-	// Send notifications if configured.
-	if notifyCfg != nil && notifyCfg.Enabled() {
-		// Build a CheckResult for the notification system.
-		status := "Healthy"
-		message := "All connections allowed."
-		if drainActive && exitCode == 1 {
-			status = "Alert"
-			message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
-				stateDur, cfg.GracePeriod)
-		} else if drainActive {
-			remaining := cfg.GracePeriod - stateDur
-			status = "Grace"
-			message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
+	// Build CheckResult for notifications and dashboard reporting.
+	status := "Healthy"
+	message := "All connections allowed."
+	if drainActive && exitCode == 1 {
+		status = "Alert"
+		message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
+			stateDur, cfg.GracePeriod)
+	} else if drainActive {
+		remaining := cfg.GracePeriod - stateDur
+		status = "Grace"
+		message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
+	}
+
+	dur := stateDur.Seconds()
+	connAllowed := !drainActive
+	result := &dc.CheckResult{
+		Version:              dc.Version,
+		Timestamp:            time.Now(),
+		Host:                 state.Host,
+		DrainModeLabel:       state.Mode.String(),
+		DrainModeValue:       uint32(state.Mode),
+		GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
+		StateDurationSeconds: &dur,
+		Status:               status,
+		ConnectionsAllowed:   &connAllowed,
+		Transition:           transition,
+		TransitionFrom:       transitionFrom,
+		ChangedBy:            changedBy,
+		Sessions:             sess,
+		Message:              message,
+		ExitCode:             exitCode,
+	}
+
+	// Determine triggers and send notifications.
+	if len(targets) > 0 {
+		var triggers []dc.Trigger
+
+		if transition {
+			if state.Mode != dc.AllowAll {
+				triggers = append(triggers, dc.TriggerDrainOn)
+			} else {
+				triggers = append(triggers, dc.TriggerDrainOff)
+			}
+		}
+		if status == "Grace" && transition {
+			triggers = append(triggers, dc.TriggerGraceEntered)
+		}
+		if status == "Alert" {
+			triggers = append(triggers, dc.TriggerAlert)
+		}
+		if status == "Healthy" && transition {
+			triggers = append(triggers, dc.TriggerHealthy)
 		}
 
-		dur := stateDur.Seconds()
-		connAllowed := !drainActive
-		notifyResult := &dc.CheckResult{
-			Timestamp:            time.Now(),
-			Host:                 state.Host,
-			DrainModeLabel:       state.Mode.String(),
-			DrainModeValue:       uint32(state.Mode),
-			GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
-			StateDurationSeconds: &dur,
-			Status:               status,
-			ConnectionsAllowed:   &connAllowed,
-			Transition:           transition,
-			TransitionFrom:       transitionFrom,
-			ChangedBy:            changedBy,
-			Message:              message,
-			ExitCode:             exitCode,
+		// Session utilization warning.
+		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 {
+			if sess.UtilizationPct >= cfg.SessionWarningThreshold {
+				triggers = append(triggers, dc.TriggerSessionWarning)
+			}
 		}
-		dc.SendNotification(*notifyCfg, notifyState, notifyResult, transition, changedBy, log)
+
+		for _, trigger := range triggers {
+			dc.SendNotification(targets, notifyState, result, trigger, changedBy, log)
+		}
 	}
 
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
-		dur := stateDur.Seconds()
-		connAllowed := !drainActive
-		reportResult := &dc.CheckResult{
-			Timestamp:            time.Now(),
-			Host:                 state.Host,
-			DrainModeLabel:       state.Mode.String(),
-			DrainModeValue:       uint32(state.Mode),
-			GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
-			StateDurationSeconds: &dur,
-			Status:               "Healthy",
-			ConnectionsAllowed:   &connAllowed,
-			Transition:           transition,
-			TransitionFrom:       transitionFrom,
-			ChangedBy:            changedBy,
-			ExitCode:             exitCode,
-		}
-		if drainActive && exitCode == 1 {
-			reportResult.Status = "Alert"
-		} else if drainActive {
-			reportResult.Status = "Grace"
-		}
-		dashboard.ReportState(dashCfg.URL, reportResult, log)
+		dashboard.ReportState(dashCfg.URL, result, log)
 	}
 }
 
