@@ -431,6 +431,7 @@
                 border-top: 1px solid var(--surface);
                 display: flex;
                 justify-content: flex-end;
+                gap: 6px;
             }
             .btn-rm {
                 font-family: "Work Sans", sans-serif;
@@ -1075,6 +1076,130 @@
                 opacity: 0.4;
             }
 
+            /* History button */
+            .btn-hist {
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.7rem;
+                font-weight: 700;
+                padding: 3px 10px;
+                background: var(--card);
+                color: var(--accent);
+                border: 1.5px solid var(--accent);
+                border-radius: 4px;
+                cursor: pointer;
+                transition:
+                    background 0.1s,
+                    color 0.1s;
+            }
+            .btn-hist:hover {
+                background: var(--accent);
+                color: #fff;
+            }
+
+            /* History modal */
+            .hist-overlay {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 160;
+                justify-content: center;
+                align-items: center;
+            }
+            .hist-overlay.open {
+                display: flex;
+            }
+            .hist-modal {
+                width: 640px;
+                max-width: 94vw;
+                max-height: 82vh;
+                background: var(--card);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: 8px 8px 0 var(--shadow);
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
+            .hist-head {
+                padding: 20px 24px 16px;
+                border-bottom: 1px solid var(--surface);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-shrink: 0;
+            }
+            .hist-title {
+                font-family: "DM Serif Display", serif;
+                font-size: 1.2rem;
+                margin-bottom: 2px;
+            }
+            .hist-hostname {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.82rem;
+                color: var(--accent);
+            }
+            .hist-body {
+                overflow-y: auto;
+                padding: 8px 24px 20px;
+                flex: 1;
+            }
+            .hist-entry {
+                display: flex;
+                align-items: baseline;
+                gap: 10px;
+                padding: 9px 0;
+                border-bottom: 1px solid var(--surface);
+            }
+            .hist-entry:last-child {
+                border-bottom: none;
+            }
+            .hist-ts {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.7rem;
+                color: var(--muted);
+                white-space: nowrap;
+                min-width: 96px;
+            }
+            .hist-badge {
+                font-size: 0.6rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                padding: 2px 8px;
+                border-radius: 4px;
+                color: #fff;
+                white-space: nowrap;
+                min-width: 54px;
+                text-align: center;
+                flex-shrink: 0;
+            }
+            .hist-badge.ok {
+                background: var(--green);
+            }
+            .hist-badge.grace {
+                background: var(--amber);
+            }
+            .hist-badge.alert {
+                background: var(--red);
+            }
+            .hist-badge.off {
+                background: var(--subtle);
+            }
+            .hist-detail {
+                flex: 1;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.7rem;
+                color: var(--muted);
+                line-height: 1.7;
+            }
+            .hist-empty {
+                text-align: center;
+                padding: 32px 0;
+                color: var(--muted);
+                font-size: 0.82rem;
+            }
+
             /* Scrollbar */
             ::-webkit-scrollbar {
                 width: 8px;
@@ -1286,6 +1411,19 @@
             </div>
         </div>
 
+        <div class="hist-overlay" id="hist-overlay" onclick="closeHistory()">
+            <div class="hist-modal" onclick="event.stopPropagation()">
+                <div class="hist-head">
+                    <div>
+                        <div class="hist-title">Server History</div>
+                        <div class="hist-hostname" id="hist-hostname"></div>
+                    </div>
+                    <button class="settings-close" onclick="closeHistory()">&times;</button>
+                </div>
+                <div class="hist-body" id="hist-body"></div>
+            </div>
+        </div>
+
         <footer class="footer">
             <p
                 style="
@@ -1299,7 +1437,7 @@
                 DrainCtl — LISS Technologies
             </p>
             <span class="status-pill" id="status-pill">Live</span>
-            <p>Auto-refresh 30s</p>
+            <p id="footer-updated">Auto-refresh 30s</p>
         </footer>
 
         <script>
@@ -4538,7 +4676,9 @@
             let prev = {},
                 evts = [],
                 logExpanded = false,
-                stateHistory = [];
+                stateHistory = [],
+                graceMinutes = null,
+                histOpen = false;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -4743,6 +4883,14 @@
                         '<div class="srv-row"><span class="srv-k">Duration</span><span class="srv-v">' +
                         d +
                         "</span></div>";
+                    if (s === "grace" && graceMinutes !== null && r && r.state_duration_seconds != null) {
+                        const remainSec = Math.max(0, graceMinutes * 60 - r.state_duration_seconds);
+                        const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
+                        html +=
+                            '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v" style="color:var(--amber)">' +
+                            remainLabel +
+                            "</span></div>";
+                    }
                     html +=
                         '<div class="srv-row"><span class="srv-k">Changed By</span><span class="srv-v">' +
                         by +
@@ -4775,7 +4923,9 @@
                             " active</span></div>";
                     }
                     html +=
-                        '</div><div class="srv-act"><button class="btn-rm" onclick="rm(\'' +
+                        '</div><div class="srv-act"><button class="btn-hist" onclick="showHistory(\'' +
+                        esc(srv.hostname) +
+                        "')\">\u29c9 History</button><button class=\"btn-rm\" onclick=\"rm('" +
                         esc(srv.hostname) +
                         "')\">Remove</button></div></div>";
                 });
@@ -4953,6 +5103,14 @@
                     }
                     if (!r.ok) throw new Error("HTTP " + r.status);
                     render(await r.json());
+                    document.getElementById("footer-updated").textContent =
+                        "Updated " +
+                        new Date().toLocaleTimeString("en-US", {
+                            hour12: false,
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                        });
                 } catch (e) {
                     console.error("refresh:", e);
                     const pill = document.getElementById("status-pill");
@@ -4973,6 +5131,72 @@
             }
             function toggleSettings() {
                 document.getElementById("settings-overlay").classList.toggle("open");
+            }
+            function closeHistory() {
+                histOpen = false;
+                document.getElementById("hist-overlay").classList.remove("open");
+            }
+            async function showHistory(hostname) {
+                histOpen = true;
+                document.getElementById("hist-hostname").textContent = hostname.split(".")[0];
+                document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
+                document.getElementById("hist-overlay").classList.add("open");
+                try {
+                    const r = await fetch("/api/v1/history/" + encodeURIComponent(hostname) + "?limit=20");
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+                    const entries = await r.json();
+                    renderHistoryModal(entries || []);
+                } catch (e) {
+                    document.getElementById("hist-body").innerHTML =
+                        '<div class="hist-empty">Error: ' + esc(e.message) + "</div>";
+                }
+            }
+            function renderHistoryModal(entries) {
+                const body = document.getElementById("hist-body");
+                if (!entries.length) {
+                    body.innerHTML = '<div class="hist-empty">No history recorded yet.</div>';
+                    return;
+                }
+                let h = "";
+                entries.forEach(function (e) {
+                    const s =
+                        e.status === "Healthy"
+                            ? "ok"
+                            : e.status === "Grace"
+                              ? "grace"
+                              : e.status === "Alert"
+                                ? "alert"
+                                : "off";
+                    const d = new Date(e.time);
+                    const ts = isNaN(d)
+                        ? e.time
+                        : d.toLocaleString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                              hour12: false,
+                          });
+                    let detail = "";
+                    if (e.drain_mode) detail += "mode=" + esc(mode(e.drain_mode));
+                    if (e.state_duration_seconds != null)
+                        detail += (detail ? "  " : "") + "dur=" + dur(e.state_duration_seconds);
+                    if (e.changed_by) detail += (detail ? "  " : "") + "by=" + esc(e.changed_by);
+                    if (e.sessions && e.sessions.total_sessions != null)
+                        detail +=
+                            (detail ? "  " : "") +
+                            "sess=" +
+                            e.sessions.total_sessions +
+                            "/" +
+                            e.sessions.max_sessions;
+                    h += '<div class="hist-entry">';
+                    h += '<div class="hist-ts">' + ts + "</div>";
+                    h += '<div class="hist-badge ' + s + '">' + stLabel(s) + "</div>";
+                    h += '<div class="hist-detail">' + (detail || "\u2014") + "</div>";
+                    h += "</div>";
+                });
+                body.innerHTML = h;
             }
             const ALL_TRIGGERS = ["drain_on", "drain_off", "grace_entered", "alert", "healthy", "session_warning"];
             const TRIGGER_LABELS = {
@@ -5179,6 +5403,7 @@
                     else targets.forEach((t) => addTargetRow(t));
                     var th = c.session_warning_threshold || 80;
                     var gr = c.grace_period || 60;
+                    graceMinutes = gr;
                     document.getElementById("cfg-threshold").value = th;
                     document.getElementById("cfg-grace").value = gr;
                     syncPills("grace-pills", gr, "mins");
@@ -5249,7 +5474,8 @@
             }
             document.addEventListener("keydown", (e) => {
                 if (e.key === "Escape") {
-                    if (document.getElementById("settings-overlay").classList.contains("open")) toggleSettings();
+                    if (histOpen) closeHistory();
+                    else if (document.getElementById("settings-overlay").classList.contains("open")) toggleSettings();
                     else if (logExpanded) toggleExpand();
                 }
             });
