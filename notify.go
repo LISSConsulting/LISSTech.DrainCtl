@@ -16,7 +16,8 @@ import (
 
 // NotifyState tracks per-target notification timing for repeat intervals.
 type NotifyState struct {
-	LastAlertNotify map[string]time.Time // key = target URL
+	LastAlertNotify       map[string]time.Time // key = target URL (alert trigger)
+	LastSessionWarnNotify map[string]time.Time // key = target URL (session_warning trigger)
 }
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
@@ -34,15 +35,17 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	if state.LastAlertNotify == nil {
 		state.LastAlertNotify = make(map[string]time.Time)
 	}
+	if state.LastSessionWarnNotify == nil {
+		state.LastSessionWarnNotify = make(map[string]time.Time)
+	}
 
-	// Reset alert tracking when returning to healthy, but preserve session
-	// warning repeat tracking so it is not re-fired immediately if sessions
-	// are still at high utilization when drain mode turns off.
+	// Reset alert tracking when returning to healthy.
+	// Session-warning tracking is intentionally preserved so that a session_warning
+	// notification is not re-fired immediately if sessions are still at high
+	// utilization when drain mode turns off.
 	if trigger == TriggerHealthy || trigger == TriggerDrainOff {
 		for k := range state.LastAlertNotify {
-			if k != string(TriggerSessionWarning) {
-				delete(state.LastAlertNotify, k)
-			}
+			delete(state.LastAlertNotify, k)
 		}
 	}
 
@@ -72,10 +75,17 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		}
 
 		// For repeating triggers (alert, session_warning), check per-target repeat interval.
+		// alert uses LastAlertNotify; session_warning uses LastSessionWarnNotify so its
+		// suppression window survives healthy/drain_off transitions independently.
 		if trigger == TriggerAlert || trigger == TriggerSessionWarning {
+			trackMap := state.LastAlertNotify
+			if trigger == TriggerSessionWarning {
+				trackMap = state.LastSessionWarnNotify
+			}
+
 			now := time.Now()
 			repeatInterval := time.Duration(target.RepeatMinutes) * time.Minute
-			lastSent := state.LastAlertNotify[target.URL]
+			lastSent := trackMap[target.URL]
 
 			if repeatInterval > 0 {
 				if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
@@ -87,7 +97,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 					continue
 				}
 			}
-			state.LastAlertNotify[target.URL] = now
+			trackMap[target.URL] = now
 		}
 
 		// Dispatch to backend.

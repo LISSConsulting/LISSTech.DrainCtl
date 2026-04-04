@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifteenth roam-mode pass complete.** Dashboard accessibility: ARIA roles/labels on state bar, modals, log, and server card buttons; focus management for settings modal. Landing page: hamburger nav menu for mobile (< 640px).
+> Current state: **Sixteenth roam-mode pass complete.** Bug fix: `session_warning` repeat-tracking now uses `LastSessionWarnNotify` (separate from `LastAlertNotify`) so suppression survives healthy/drain_off transitions. Settings form: client-side webhook URL scheme validation and numeric bounds checks for threshold/grace. Three new tests in `notify_test.go`; three new tests in `config_test.go`.
 
 ## Completed Work
 
@@ -40,10 +40,14 @@
 | Roam #14 | Dashboard UI: safe button delegation — removed `onclick="showHistory('...')"` / `onclick="rm('...')"` inline handlers; server cards carry `data-host` / `data-status` attributes; single delegated listener on `#grid` dispatches History and Remove actions | security, code quality, dashboard |
 | Roam #15 | Dashboard accessibility — `role="img"` + dynamic `aria-label` on state bar; `role="dialog"` + `aria-modal` + `aria-labelledby` on settings and history overlays; `aria-label` on close/expand/gear buttons; `role="log"` + `aria-live="polite"` on event log; `aria-label="View history for {host}"` / `aria-label="Remove {host}"` on server card buttons; focus returns to gear button on settings close | a11y, dashboard |
 | Roam #15 | Landing page mobile nav — hamburger toggle button (`.nav-toggle`) appears at ≤ 640px; click opens full-width dropdown (`nav-links.open`); `aria-expanded` + `aria-controls` wired; links auto-close the menu on click | UX, a11y, docs |
+| Roam #16 | Bug fix: `NotifyState.LastSessionWarnNotify` — `session_warning` repeat-tracking was sharing `LastAlertNotify` (URL-keyed) with `TriggerAlert`; on `TriggerHealthy`/`TriggerDrainOff` the cleanup compared URLs against the literal string `"session_warning"` (always false), deleting all entries. Fixed by splitting into two maps: `LastAlertNotify` (cleared on healthy) and `LastSessionWarnNotify` (persists); `pruneNotifyState` updated to prune both | correctness, svc, notify |
+| Roam #16 | Dashboard settings: client-side validation in `readTargets()` — webhook URLs must pass `new URL()` parse with `http:` or `https:` protocol; invalid URLs get red border and block save with descriptive message | security, UX, dashboard |
+| Roam #16 | Dashboard settings: `saveNotifyConfig()` now validates session threshold (0–100) and grace period (1–1440) before submission — fixes silent bug where `parseInt("0") \|\| 80` silently overrode "Disable session warnings"; out-of-range inputs get red border + inline error | correctness, UX, dashboard |
+| Roam #16 | 5 new tests: `TestSendNotification_SessionWarningPreservedThroughHealthy`, `TestSendNotification_IndependentTargetState` (notify_test.go); `TestValidate_EmptyTriggersDefaulted`, `TestValidate_StripsUnknownTriggers`, `TestValidate_PreservesValidTriggers` (config_test.go) | testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #15.)*
+*(All tracked items complete — nothing pending after Roam #16.)*
 
 ## Key Learnings
 
@@ -81,3 +85,6 @@
 - **Grace remaining calculation is client-side only**: `state_duration_seconds` (from last poll) minus `grace_period * 60` (cached from config fetch) gives remaining grace time at poll time. It does not count down between polls; refreshing gets the latest value. Initialise `graceMinutes = null` so the row hides itself until the config has actually loaded — avoids showing stale "0 left" on first render.
 - **History modal z-index ordering**: Settings overlay is z-index 150; log expanded is z-index 200; history modal uses z-index 160 so it can stack over settings but not over the log fullscreen view. ESC priority matches visual stack: history first, then settings, then log collapse.
 - **`encodeURIComponent` for history hostname**: The `/api/v1/history/{host}` path value accepts hostnames with dots and hyphens; `encodeURIComponent` encodes these safely even for edge cases like hostnames containing `%` or `#`.
+- **`NotifyState` shared-map bug**: Both `TriggerAlert` and `TriggerSessionWarning` originally stored repeat-tracking in `LastAlertNotify[target.URL]`. The cleanup on `TriggerHealthy` tried to preserve entries where `k == "session_warning"`, but `k` is a URL, so the guard was always false and all entries were deleted. Fix: split into `LastAlertNotify` (cleared on healthy) and `LastSessionWarnNotify` (never cleared). Writing a test that expected preservation exposed the bug immediately.
+- **`parseInt("0") || default` is a falsy-zero trap**: In JS, `parseInt("0") || 80` evaluates to `80` because `0` is falsy. The "Disable session warnings" pill sets the input to `"0"`, so saving would silently send `80` instead. Always use explicit NaN/range checks (`isNaN(v) || v < min || v > max`) rather than `|| default` fallbacks for numeric inputs.
+- **Client-side URL validation with `new URL()`**: Wrap `new URL(s)` in a try/catch and check `.protocol === "http:" || "https:"` — this validates both parse correctness and scheme in one step. The server already strips invalid schemes via `Validate()`, but showing the error before the network round-trip is better UX.
