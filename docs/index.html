@@ -424,6 +424,7 @@ body {
 }
 @media (max-width: 640px) {
   .install-grid { grid-template-columns: 1fr; }
+  #install .wrap > div[style*="grid"] { grid-template-columns: 1fr !important; }
 }
 .install-card { padding: 26px; }
 .install-card h3 {
@@ -826,16 +827,27 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
     <div class="section-label">Installation</div>
     <div class="section-title">Three ways to install. Zero guesswork.</div>
     <div class="section-desc">Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a></div>
-    <div class="install-grid">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
       <div class="install-card card">
-        <h3>&#128230; MSI Installer</h3>
-        <p>The full package &mdash; service, CLI, PowerShell module, Event Log, notifications. Run interactively for a configuration wizard, or silent for RMM deployment.</p>
+        <h3>&#128230; EXE Bundle</h3>
+        <p>Branded setup wizard with license, configuration options, and progress UI. The recommended way to install interactively.</p>
+        <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill" style="margin-top:12px;display:inline-flex;text-decoration:none;font-size:.85rem">Download .exe</a>
+        <ul>
+          <li>Configuration wizard</li>
+          <li>License acceptance</li>
+          <li>Installs service + CLI + PS module</li>
+          <li>Branded UI</li>
+        </ul>
+      </div>
+      <div class="install-card card">
+        <h3>&#9881; MSI (Silent)</h3>
+        <p>Direct MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via properties.</p>
         <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
         <ul>
           <li>Windows Service (auto-start)</li>
           <li>CLI on system PATH</li>
           <li>PowerShell module registered</li>
-          <li>Event Log + multi-target notifications</li>
+          <li><a href="guide.html#install">MSI property reference</a></li>
         </ul>
       </div>
       <div class="install-card card">
@@ -843,9 +855,9 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
         <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting.</p>
         <code class="mono">Install-Module LISSTech.DrainCtl</code>
         <ul>
-          <li>Get-RDSHDrainMode</li>
-          <li>Test-RDSHDrainMode</li>
-          <li>Get-RDSHDrainHistory</li>
+          <li>12 cmdlets</li>
+          <li>PS 5.1 + PS 7+</li>
+          <li>No admin required</li>
           <li><a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">View on PSGallery</a></li>
         </ul>
       </div>
