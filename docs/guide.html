@@ -600,8 +600,11 @@ drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
 
 <h3>Register servers</h3>
 <p>On each RDSH server you want to monitor, run this once:</p>
-<pre><code># Register this server with the dashboard
-drainctl register https://dashboard-server:49470</code></pre>
+<pre><code># Register with explicit URL
+drainctl register https://dashboard-server:49470
+
+# Or auto-discover via DNS SRV record
+drainctl register --auto</code></pre>
 
 <p>This does two things:</p>
 <ol>
@@ -609,9 +612,23 @@ drainctl register https://dashboard-server:49470</code></pre>
   <li>Sends a registration request to the dashboard (so it knows about this server)</li>
 </ol>
 
+<h3>Auto-discovery (DNS SRV)</h3>
+<p>Instead of configuring <code>dashboard.url</code> on every agent, create a DNS SRV record and agents will find the dashboard automatically. The service checks for <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.</p>
+
+<pre><code># PowerShell — create the SRV record in AD-integrated DNS
+Add-DnsServerResourceRecord -ZoneName "contoso.com" `
+  -Name "_drainctl._tcp" -Srv `
+  -DomainName "dashboard.contoso.com" `
+  -Port 49470 -Priority 0 -Weight 0
+
+# Verify
+Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
+
+<p>Once the SRV record exists, agents discover the dashboard without any per-machine config. Just install the MSI and the service registers itself.</p>
+
 <div class="callout">
   <strong>&#x1F4A1; Self-maintaining.</strong>
-  After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back.
+  After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back. With SRV discovery, even registration is automatic &mdash; install the MSI and you're done.
 </div>
 
 <h3>View the dashboard</h3>
