@@ -2,13 +2,18 @@
 
 package drainctl
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // HistoryOptions configures a history query.
 type HistoryOptions struct {
 	DBPath      string
 	Limit       int
 	ChangesOnly bool
+	Since       *time.Time
+	Until       *time.Time
 }
 
 // GetHistory returns audit records from the JSONL trail.
@@ -20,7 +25,7 @@ func GetHistory(opts HistoryOptions) ([]AuditRecord, error) {
 	defer func() { _ = store.Close() }()
 
 	if opts.ChangesOnly {
-		return store.Changes(opts.Limit)
+		return store.ChangesFiltered(opts.Limit, opts.Since, opts.Until)
 	}
-	return store.History(opts.Limit)
+	return store.HistoryFiltered(opts.Limit, opts.Since, opts.Until)
 }

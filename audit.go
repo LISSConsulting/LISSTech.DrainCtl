@@ -228,6 +228,80 @@ func (a *AuditStore) StateSince(mode DrainMode) (*time.Time, error) {
 	return &t, nil
 }
 
+// HistoryFiltered returns records in the optional [since, until] window, newest first.
+// When both since and until are nil it behaves identically to History(n).
+// Limit n applies after filtering (n<=0 = unlimited).
+func (a *AuditStore) HistoryFiltered(n int, since, until *time.Time) ([]AuditRecord, error) {
+	var buf []AuditRecord
+	if n > 0 {
+		buf = make([]AuditRecord, 0, n)
+	}
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		if since != nil && rec.Timestamp.Before(*since) {
+			return true
+		}
+		if until != nil && rec.Timestamp.After(*until) {
+			return true
+		}
+		if n <= 0 {
+			buf = append(buf, rec)
+			return true
+		}
+		if len(buf) < n {
+			buf = append(buf, rec)
+		} else {
+			copy(buf, buf[1:])
+			buf[n-1] = rec
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return buf, nil
+}
+
+// ChangesFiltered returns only transition records in the optional [since, until] window,
+// newest first. When both since and until are nil it behaves identically to Changes(n).
+func (a *AuditStore) ChangesFiltered(n int, since, until *time.Time) ([]AuditRecord, error) {
+	var buf []AuditRecord
+	if n > 0 {
+		buf = make([]AuditRecord, 0, n)
+	}
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		if !rec.Changed {
+			return true
+		}
+		if since != nil && rec.Timestamp.Before(*since) {
+			return true
+		}
+		if until != nil && rec.Timestamp.After(*until) {
+			return true
+		}
+		if n <= 0 {
+			buf = append(buf, rec)
+			return true
+		}
+		if len(buf) < n {
+			buf = append(buf, rec)
+		} else {
+			copy(buf, buf[1:])
+			buf[n-1] = rec
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return buf, nil
+}
+
 // Changes returns only records where a state transition occurred, newest first.
 // Uses a rolling window of size n to avoid loading more changes than requested.
 // When n <= 0, all change records are returned.
