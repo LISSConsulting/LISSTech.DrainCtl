@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifth roam-mode pass complete.** SSPI RevertToSelf cleanup; config hot-reload NotifyState pruning; `drainctl history --since/--until` flags.
+> Current state: **Sixth roam-mode pass complete.** `drainctl service start/stop/status` implemented via SCM (replaced stubs); `ServiceStatus()` added to mgmt.go.
 
 ## Completed Work
 
@@ -19,6 +19,7 @@
 | Roam #5 | SSPI `RequireGroup` — `RevertToSelf` called after `isGroupMember` (all paths); `procRevertToSelf` via advapi32.dll | security, dashboard |
 | Roam #5 | Config hot-reload: `pruneNotifyState` removes stale `LastAlertNotify` entries for URLs removed from targets | correctness, svc |
 | Roam #5 | `drainctl history --since`/`--until` — RFC3339 time-bounded queries; `HistoryFiltered`/`ChangesFiltered` on `AuditStore`; post-filter on pipe path; 11 tests | feature, CLI, testing |
+| Roam #6 | `drainctl service start/stop/status` — replaced instruction-printing stubs with real SCM calls via `golang.org/x/sys/windows/svc/mgr`; 30 s timeout polling with 500 ms sleep; `svcStateString` helper; start/stop require admin, status does not | feature, CLI |
 
 ## Remaining Work
 
@@ -39,3 +40,4 @@
 - **SSPI `RevertToSelf` placement**: Calling `RevertToSelf` immediately after `isGroupMember` (before any early return) ensures cleanup in both error and success paths. If no impersonation happened, `RevertToSelf` is a no-op.
 - **`NotifyState.LastAlertNotify` keyed by URL**: On config hot-reload, prune stale entries by building an active-URL set and deleting entries not in it. Only prune when using local config (not dashboard remote), since remote config manages its own targets.
 - **`HistoryFiltered` ring buffer with time filter**: The scan is oldest-first; applying the time predicate before the ring-shift means only matching records count toward the limit. The pipe path returns `[]HistoryRecord` (string timestamps), so time filtering there is done post-fetch with RFC3339 parsing.
+- **SCM start/stop polling pattern**: After calling `s.Start()` or `s.Control(svc.Stop)`, poll `s.Query()` every 500 ms up to 30 s. The initial `Control(svc.Stop)` response already carries the new status, so check it before sleeping. `ServiceStatus()` doesn't require admin — opening a service for `SERVICE_QUERY_STATUS` access is unprivileged on default Windows ACLs.

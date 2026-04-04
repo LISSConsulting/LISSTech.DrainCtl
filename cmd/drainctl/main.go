@@ -474,18 +474,39 @@ func serviceCmd() *cobra.Command {
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "start",
-		Short: "Start the DrainCtl service",
+		Short: "Start the DrainCtl service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Starting service... (use 'sc start DrainCtl' or 'Start-Service DrainCtl')")
-			return nil
+			log := dc.DefaultLogger(os.Stdout, false)
+			return svc.StartService(log)
 		},
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "stop",
-		Short: "Stop the DrainCtl service",
+		Short: "Stop the DrainCtl service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Stopping service... (use 'sc stop DrainCtl' or 'Stop-Service DrainCtl')")
+			log := dc.DefaultLogger(os.Stdout, false)
+			return svc.StopService(log)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show the current state of the DrainCtl service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := svc.ServiceStatus()
+			if err != nil {
+				return err
+			}
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			switch state {
+			case "Running":
+				log(dc.LvlOK, fmt.Sprintf("service=%s", state))
+			case "Stopped":
+				log(dc.LvlWRN, fmt.Sprintf("service=%s", state))
+			default:
+				log(dc.LvlINF, fmt.Sprintf("service=%s", state))
+			}
 			return nil
 		},
 	})
