@@ -42,7 +42,7 @@
         PSData = @{
             Tags         = @('RDSH', 'RemoteDesktop', 'DrainMode', 'TerminalServer', 'RDS', 'Sessions', 'Windows', 'Monitoring', 'Dashboard', 'Notifications')
             LicenseUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE'
-            ProjectUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl'
+            ProjectUri   = 'https://lissconsulting.github.io/LISSTech.DrainCtl/'
             ReleaseNotes = 'v27: JSON config (migrated from registry), multi-target webhook/ntfy notifications with granular triggers (drain_on, drain_off, alert, session_warning, etc.), WTS session tracking with utilization alerts, uPlot dashboard with session gauges, dark mode, EV code-signed.'
         }
     }
