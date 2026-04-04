@@ -379,9 +379,9 @@ function Get-RDSHDrainNotification {
     Shows the current notification configuration for DrainCtl.
 
     .DESCRIPTION
-    Reads notification settings from the service registry parameters and
-    returns them as a structured object. Shows webhook URL, ntfy URL,
-    transition/grace notification toggles, and repeat interval.
+    Reads notification settings from config.json and returns them as a
+    structured object. Shows webhook URL, ntfy URL, transition/grace
+    notification toggles, and repeat interval.
 
     .EXAMPLE
     PS> Get-RDSHDrainNotification
@@ -417,9 +417,9 @@ function Set-RDSHDrainNotification {
     Updates notification settings for DrainCtl.
 
     .DESCRIPTION
-    Writes notification configuration to the service registry parameters.
-    Only specified parameters are changed; unspecified parameters retain
-    their current values.
+    Writes notification configuration to config.json. Only specified
+    parameters are changed; unspecified parameters retain their current
+    values.
 
     .PARAMETER WebhookURL
     Webhook URL for HTTP POST JSON notifications. Set to empty string to disable.

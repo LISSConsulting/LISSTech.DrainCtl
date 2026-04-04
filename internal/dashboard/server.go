@@ -213,22 +213,19 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 
 // handleGetNotifyConfig returns the current notification config as JSON.
 func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.Request) {
-	cfg := dc.ReadNotifyConfig(ds.log)
-
-	type notifyJSON struct {
-		WebhookURL      string `json:"webhook_url"`
-		NtfyURL         string `json:"ntfy_url"`
-		OnTransition    bool   `json:"on_transition"`
-		OnGraceExceeded bool   `json:"on_grace_exceeded"`
-		RepeatMinutes   int    `json:"repeat_minutes"`
+	cfg, err := dc.LoadConfig(ds.log)
+	if err != nil {
+		dc.LogMsg(ds.log, dc.LvlERR, "load config failed", fmt.Sprintf("error=%q", err))
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
 	}
 
-	out := notifyJSON{
-		WebhookURL:      cfg.WebhookURL,
-		NtfyURL:         cfg.NtfyURL,
-		OnTransition:    cfg.OnTransition,
-		OnGraceExceeded: cfg.OnGraceExceeded,
-		RepeatMinutes:   int(cfg.RepeatInterval.Minutes()),
+	out := struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+	}{
+		Notifications:           cfg.Notifications,
+		SessionWarningThreshold: cfg.SessionWarningThreshold,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -237,40 +234,35 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	_ = enc.Encode(out)
 }
 
-// handlePutNotifyConfig accepts JSON and writes it to the registry.
+// handlePutNotifyConfig accepts JSON and updates notification config via scoped updaters.
 func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.Request) {
-	type notifyJSON struct {
-		WebhookURL      string `json:"webhook_url"`
-		NtfyURL         string `json:"ntfy_url"`
-		OnTransition    bool   `json:"on_transition"`
-		OnGraceExceeded bool   `json:"on_grace_exceeded"`
-		RepeatMinutes   int    `json:"repeat_minutes"`
-	}
-
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	var in notifyJSON
+	var in struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold *int                    `json:"session_warning_threshold,omitempty"`
+	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	cfg := dc.NotifyConfig{
-		WebhookURL:      in.WebhookURL,
-		NtfyURL:         in.NtfyURL,
-		OnTransition:    in.OnTransition,
-		OnGraceExceeded: in.OnGraceExceeded,
-		RepeatInterval:  time.Duration(in.RepeatMinutes) * time.Minute,
+	if err := dc.UpdateNotifications(in.Notifications, ds.log); err != nil {
+		dc.LogMsg(ds.log, dc.LvlERR, "update notifications failed", fmt.Sprintf("error=%q", err))
+		http.Error(w, "failed to update notifications", http.StatusInternalServerError)
+		return
 	}
 
-	if err := dc.WriteNotifyConfig(cfg, ds.log); err != nil {
-		dc.LogMsg(ds.log, dc.LvlERR, "write notify config failed", fmt.Sprintf("error=%q", err))
-		http.Error(w, "failed to write config", http.StatusInternalServerError)
-		return
+	if in.SessionWarningThreshold != nil {
+		if err := dc.UpdateSessionThreshold(*in.SessionWarningThreshold, ds.log); err != nil {
+			dc.LogMsg(ds.log, dc.LvlERR, "update session threshold failed", fmt.Sprintf("error=%q", err))
+			http.Error(w, "failed to update session threshold", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	auth := GetAuthInfo(r)

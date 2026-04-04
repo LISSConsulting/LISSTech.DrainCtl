@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -14,7 +15,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/windows/registry"
 )
 
 var cfg struct {
@@ -58,7 +58,7 @@ func getFormat(defaultFmt dc.OutputFormat) (dc.OutputFormat, error) {
 	return dc.ParseFormat(cfg.Format)
 }
 
-// ── check ──────────────────────────────────────────────────────────────────
+// -- check ------------------------------------------------------------------
 
 func checkCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -150,7 +150,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ── history ────────────────────────────────────────────────────────────────
+// -- history ----------------------------------------------------------------
 
 func historyCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -203,7 +203,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ── audit-setup ────────────────────────────────────────────────────────────
+// -- audit-setup ------------------------------------------------------------
 
 func auditSetupCmd() *cobra.Command {
 	return &cobra.Command{
@@ -226,7 +226,7 @@ func runAuditSetup(cmd *cobra.Command, args []string) error {
 	return dc.RunAuditSetup(dc.DefaultLogger(os.Stdout, cfg.Quiet))
 }
 
-// ── notify ────────────────────────────────────────────────────────────────
+// -- notify -----------------------------------------------------------------
 
 func notifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -239,16 +239,26 @@ func notifyCmd() *cobra.Command {
 		Short: "Show current notification configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			ncfg := dc.ReadNotifyConfig(log)
-			log(dc.LvlINF, fmt.Sprintf("webhook_url=%q", ncfg.WebhookURL))
-			log(dc.LvlINF, fmt.Sprintf("ntfy_url=%q", ncfg.NtfyURL))
-			log(dc.LvlINF, fmt.Sprintf("on_transition=%t", ncfg.OnTransition))
-			log(dc.LvlINF, fmt.Sprintf("on_grace_exceeded=%t", ncfg.OnGraceExceeded))
-			log(dc.LvlINF, fmt.Sprintf("repeat_interval=%s", ncfg.RepeatInterval))
-			if ncfg.Enabled() {
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
+				return err
+			}
+			if len(fileCfg.Notifications) == 0 {
+				log(dc.LvlWRN, "notifications=disabled (no targets configured)")
+				return nil
+			}
+			for i, t := range fileCfg.Notifications {
+				triggers := make([]string, len(t.Triggers))
+				for j, tr := range t.Triggers {
+					triggers[j] = string(tr)
+				}
+				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s] repeat_minutes=%d",
+					i, t.Type, t.URL, strings.Join(triggers, ","), t.RepeatMinutes))
+			}
+			if fileCfg.HasTargets() {
 				log(dc.LvlOK, "notifications=enabled")
 			} else {
-				log(dc.LvlWRN, "notifications=disabled (no backends configured)")
+				log(dc.LvlWRN, "notifications=disabled (no targets with URLs configured)")
 			}
 			return nil
 		},
@@ -260,20 +270,52 @@ func notifyCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			ncfg := dc.ReadNotifyConfig(log)
-			if len(args) > 0 {
-				ncfg.WebhookURL = args[0]
-			} else {
-				ncfg.WebhookURL = ""
-			}
-			if err := dc.WriteNotifyConfig(ncfg, log); err != nil {
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
 				return err
 			}
-			if ncfg.WebhookURL != "" {
-				log(dc.LvlOK, fmt.Sprintf("webhook_url=%q", ncfg.WebhookURL))
-			} else {
-				log(dc.LvlINF, "webhook=disabled")
+
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
 			}
+
+			if url == "" {
+				// Remove all webhook targets.
+				filtered := fileCfg.Notifications[:0]
+				for _, t := range fileCfg.Notifications {
+					if t.Type != "webhook" {
+						filtered = append(filtered, t)
+					}
+				}
+				fileCfg.Notifications = filtered
+				if err := dc.SaveConfig(fileCfg, log); err != nil {
+					return err
+				}
+				log(dc.LvlINF, "webhook=disabled")
+				return nil
+			}
+
+			// Find first webhook target or create one.
+			found := false
+			for i := range fileCfg.Notifications {
+				if fileCfg.Notifications[i].Type == "webhook" {
+					fileCfg.Notifications[i].URL = url
+					found = true
+					break
+				}
+			}
+			if !found {
+				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
+					Type: "webhook",
+					URL:  url,
+				})
+			}
+
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return err
+			}
+			log(dc.LvlOK, fmt.Sprintf("webhook_url=%q", url))
 			return nil
 		},
 	})
@@ -284,20 +326,52 @@ func notifyCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			ncfg := dc.ReadNotifyConfig(log)
-			if len(args) > 0 {
-				ncfg.NtfyURL = args[0]
-			} else {
-				ncfg.NtfyURL = ""
-			}
-			if err := dc.WriteNotifyConfig(ncfg, log); err != nil {
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
 				return err
 			}
-			if ncfg.NtfyURL != "" {
-				log(dc.LvlOK, fmt.Sprintf("ntfy_url=%q", ncfg.NtfyURL))
-			} else {
-				log(dc.LvlINF, "ntfy=disabled")
+
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
 			}
+
+			if url == "" {
+				// Remove all ntfy targets.
+				filtered := fileCfg.Notifications[:0]
+				for _, t := range fileCfg.Notifications {
+					if t.Type != "ntfy" {
+						filtered = append(filtered, t)
+					}
+				}
+				fileCfg.Notifications = filtered
+				if err := dc.SaveConfig(fileCfg, log); err != nil {
+					return err
+				}
+				log(dc.LvlINF, "ntfy=disabled")
+				return nil
+			}
+
+			// Find first ntfy target or create one.
+			found := false
+			for i := range fileCfg.Notifications {
+				if fileCfg.Notifications[i].Type == "ntfy" {
+					fileCfg.Notifications[i].URL = url
+					found = true
+					break
+				}
+			}
+			if !found {
+				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
+					Type: "ntfy",
+					URL:  url,
+				})
+			}
+
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return err
+			}
+			log(dc.LvlOK, fmt.Sprintf("ntfy_url=%q", url))
 			return nil
 		},
 	})
@@ -307,15 +381,18 @@ func notifyCmd() *cobra.Command {
 		Short: "Send a test notification to all configured backends",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			ncfg := dc.ReadNotifyConfig(log)
-			return dc.SendTestNotification(ncfg, log)
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
+				return err
+			}
+			return dc.SendTestNotification(fileCfg.Notifications, log)
 		},
 	})
 
 	return cmd
 }
 
-// ── service ───────────────────────────────────────────────────────────────
+// -- service ----------------------------------------------------------------
 
 func serviceCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -375,7 +452,7 @@ func serviceCmd() *cobra.Command {
 	return cmd
 }
 
-// ── register ──────────────────────────────────────────────────────────────
+// -- register ---------------------------------------------------------------
 
 func registerCmd() *cobra.Command {
 	return &cobra.Command{
@@ -386,17 +463,16 @@ func registerCmd() *cobra.Command {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			dashURL := args[0]
 
-			// Write DashboardURL to local registry.
-			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			// Persist DashboardURL to config.json.
+			fileCfg, err := dc.LoadConfig(log)
 			if err != nil {
-				return fmt.Errorf("open registry: %w", err)
+				return fmt.Errorf("load config: %w", err)
 			}
-			if err := key.SetStringValue("DashboardURL", dashURL); err != nil {
-				_ = key.Close()
-				return fmt.Errorf("set DashboardURL: %w", err)
+			fileCfg.Dashboard.URL = dashURL
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return fmt.Errorf("save config: %w", err)
 			}
-			_ = key.Close()
-			log(dc.LvlINF, fmt.Sprintf("registry=DashboardURL set to %q", dashURL))
+			log(dc.LvlINF, fmt.Sprintf("config=DashboardURL set to %q", dashURL))
 
 			// Register with the dashboard.
 			if err := dashboard.Register(dashURL, log); err != nil {
@@ -409,20 +485,24 @@ func registerCmd() *cobra.Command {
 	}
 }
 
-// ── dashboard ─────────────────────────────────────────────────────────────
+// -- dashboard --------------------------------------------------------------
 
 func dashboardCmd() *cobra.Command {
 	dcmd := &cobra.Command{
 		Use:   "dashboard",
 		Short: "Open the DrainCtl dashboard in your browser",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
-			if !dashCfg.Enabled {
+			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !fileCfg.Dashboard.Enabled {
 				fmt.Println("Dashboard is not enabled on this server.")
-				fmt.Println("Set DashboardEnabled=1 in HKLM\\...\\Services\\DrainCtl\\Parameters")
+				fmt.Println("Enable it with: drainctl dashboard enable")
+				fmt.Println("Or edit config.json and set dashboard.enabled = true")
 				return nil
 			}
-			url := fmt.Sprintf("http://localhost:%d", dashCfg.Port)
+			url := fmt.Sprintf("http://localhost:%d", fileCfg.Dashboard.Port)
 			fmt.Printf("Opening %s ...\n", url)
 			return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		},
@@ -432,11 +512,14 @@ func dashboardCmd() *cobra.Command {
 		Use:   "list-servers",
 		Short: "List registered servers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
-			if !dashCfg.Enabled {
+			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !fileCfg.Dashboard.Enabled {
 				return fmt.Errorf("dashboard not enabled on this server")
 			}
-			url := fmt.Sprintf("http://localhost:%d/api/v1/servers", dashCfg.Port)
+			url := fmt.Sprintf("http://localhost:%d/api/v1/servers", fileCfg.Dashboard.Port)
 			resp, err := dashboard.FetchServers(url)
 			if err != nil {
 				return fmt.Errorf("fetch servers: %w", err)
@@ -456,11 +539,14 @@ func dashboardCmd() *cobra.Command {
 		Short: "Remove a server from the dashboard",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dashCfg := dc.ReadDashboardConfig(dc.DiscardLogger())
-			if !dashCfg.Enabled {
+			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !fileCfg.Dashboard.Enabled {
 				return fmt.Errorf("dashboard not enabled on this server")
 			}
-			url := fmt.Sprintf("http://localhost:%d/api/v1/servers/%s", dashCfg.Port, args[0])
+			url := fmt.Sprintf("http://localhost:%d/api/v1/servers/%s", fileCfg.Dashboard.Port, args[0])
 			if err := dashboard.RemoveServer(url); err != nil {
 				return fmt.Errorf("remove server: %w", err)
 			}
@@ -477,15 +563,16 @@ func dashboardCmd() *cobra.Command {
 			port, _ := cmd.Flags().GetInt("port")
 			group, _ := cmd.Flags().GetString("group")
 
-			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			fileCfg, err := dc.LoadConfig(log)
 			if err != nil {
-				return fmt.Errorf("open registry: %w", err)
+				return fmt.Errorf("load config: %w", err)
 			}
-			defer func() { _ = key.Close() }()
-
-			_ = key.SetDWordValue("DashboardEnabled", 1)
-			_ = key.SetDWordValue("DashboardPort", uint32(port))
-			_ = key.SetStringValue("DashboardGroup", group)
+			fileCfg.Dashboard.Enabled = true
+			fileCfg.Dashboard.Port = port
+			fileCfg.Dashboard.Group = group
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
 
 			log(dc.LvlOK, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
 			log(dc.LvlINF, "Restart the DrainCtl service to activate: Restart-Service DrainCtl")
@@ -501,12 +588,14 @@ func dashboardCmd() *cobra.Command {
 		Short: "Disable the dashboard on this server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, dc.ParametersKeyPath, registry.SET_VALUE)
+			fileCfg, err := dc.LoadConfig(log)
 			if err != nil {
-				return fmt.Errorf("open registry: %w", err)
+				return fmt.Errorf("load config: %w", err)
 			}
-			defer func() { _ = key.Close() }()
-			_ = key.SetDWordValue("DashboardEnabled", 0)
+			fileCfg.Dashboard.Enabled = false
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
 			log(dc.LvlOK, "dashboard=disabled")
 			log(dc.LvlINF, "Restart the DrainCtl service to apply: Restart-Service DrainCtl")
 			return nil

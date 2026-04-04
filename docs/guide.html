@@ -204,6 +204,7 @@ th { background: var(--surface); font-weight: 700; }
     <li><a href="#usage">CLI Usage</a></li>
     <li><a href="#powershell">PowerShell Module</a></li>
     <li><a href="#notifications">Notifications</a></li>
+    <li><a href="#sessions">Session Tracking</a></li>
     <li><a href="#dashboard">Multi-Server Dashboard</a></li>
     <li><a href="#rmm">RMM Integration</a></li>
     <li><a href="#service">Service Management</a></li>
@@ -227,7 +228,7 @@ th { background: var(--surface); font-weight: 700; }
   <li>Creates the data directory at <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\</code></li>
   <li>Installs and <strong>auto-starts</strong> the <strong>DrainCtl</strong> Windows Service (runs as LocalSystem)</li>
   <li>Registers the Event Log source with a custom message file</li>
-  <li>Writes default configuration to the registry</li>
+  <li>Writes default configuration to <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></li>
 </ul>
 
 <div class="callout">
@@ -276,34 +277,61 @@ Get-RDSHDrainMode | Format-List</code></pre>
 <!-- ── Configuration ─────────────────────────────────────────────────── -->
 <h2 id="configure">3. Configuration</h2>
 
-<p>All settings live in the registry and <strong>hot-reload automatically</strong> when you change them. No service restart needed.</p>
+<p>All settings live in a single JSON file and <strong>hot-reload automatically</strong> when you save it. No service restart needed.</p>
 
-<pre><code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code></pre>
+<pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></pre>
+
+<h3>Full config.json structure</h3>
+<pre><code>{
+  "grace_period": 60,
+  "retention_days": 90,
+  "poll_interval": 300,
+  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
+  "notifications": [
+    {
+      "type": "webhook",
+      "url": "https://hooks.example.com/drainctl",
+      "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+      "repeat_minutes": 30
+    }
+  ],
+  "dashboard": {
+    "enabled": false,
+    "port": 49470,
+    "group": "Domain Admins"
+  },
+  "session_warning_threshold": 80
+}</code></pre>
 
 <table>
   <thead>
-    <tr><th>Value</th><th>Type</th><th>Default</th><th>What it does</th></tr>
+    <tr><th>Key</th><th>Default</th><th>What it does</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>GracePeriod</code></td><td>DWORD</td><td>60</td><td>Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the grace period, the status is "Grace" and exit code is 0.</td></tr>
-    <tr><td><code>RetentionDays</code></td><td>DWORD</td><td>90</td><td>Days to keep audit records. Maximum 365. Older records are pruned daily.</td></tr>
-    <tr><td><code>PollInterval</code></td><td>DWORD</td><td>300</td><td>Seconds between safety-net polls. The service also uses real-time registry notifications, so this is a fallback.</td></tr>
-    <tr><td><code>AuditPath</code></td><td>SZ</td><td><em>ProgramData path</em></td><td>Full path to the JSONL audit trail file.</td></tr>
-    <tr><td><code>WebhookURL</code></td><td>SZ</td><td><em>empty</em></td><td>Webhook endpoint for push notifications.</td></tr>
-    <tr><td><code>NtfyURL</code></td><td>SZ</td><td><em>empty</em></td><td>ntfy.sh topic URL for push notifications.</td></tr>
-    <tr><td><code>NotifyOnTransition</code></td><td>DWORD</td><td>1</td><td>Send notification when drain mode changes (on or off).</td></tr>
-    <tr><td><code>NotifyOnGraceExceeded</code></td><td>DWORD</td><td>1</td><td>Send notification when drain mode exceeds the grace period.</td></tr>
-    <tr><td><code>NotifyRepeatMinutes</code></td><td>DWORD</td><td>0</td><td>Re-send alert notifications every N minutes while in alert state. 0 = notify once.</td></tr>
+    <tr><td><code>grace_period</code></td><td>60</td><td>Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the grace period, the status is "Grace" and exit code is 0.</td></tr>
+    <tr><td><code>retention_days</code></td><td>90</td><td>Days to keep audit records. Maximum 365. Older records are pruned daily.</td></tr>
+    <tr><td><code>poll_interval</code></td><td>300</td><td>Seconds between safety-net polls. The service also uses real-time registry notifications, so this is a fallback.</td></tr>
+    <tr><td><code>audit_path</code></td><td><em>ProgramData path</em></td><td>Full path to the JSONL audit trail file.</td></tr>
+    <tr><td><code>notifications</code></td><td><em>[]</em></td><td>Array of notification targets (see <a href="#notifications">Notifications</a>).</td></tr>
+    <tr><td><code>dashboard</code></td><td><em>see above</em></td><td>Dashboard settings (see <a href="#dashboard">Dashboard</a>).</td></tr>
+    <tr><td><code>session_warning_threshold</code></td><td>80</td><td>Session utilization percentage that triggers a <code>session_warning</code> notification.</td></tr>
   </tbody>
 </table>
 
-<p>You can edit these with <code>regedit</code>, <code>reg.exe</code>, GPO preferences, or PowerShell:</p>
+<p>Edit the file with any text editor, or use the CLI to change individual settings:</p>
 
-<pre><code># Set grace period to 2 hours via PowerShell
-Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters" `
-    -Name "GracePeriod" -Value 120 -Type DWord</code></pre>
+<pre><code># Set grace period to 2 hours
+drainctl config set grace_period 120
 
-<p>The service picks up the change within seconds (it watches the Parameters key with <code>RegNotifyChangeKeyValue</code>).</p>
+# View current configuration
+drainctl config get</code></pre>
+
+<p>The service picks up changes within seconds (it watches config.json with a file system watcher).</p>
+
+<div class="callout">
+  <strong>&#x1F504; Migrating from a previous version?</strong>
+  On first run, DrainCtl v27 automatically migrates your settings from the registry (<code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code>) into <code>config.json</code>. Your old registry values are left in place but are no longer read. No manual migration needed.
+</div>
 
 <!-- ── Audit Setup ───────────────────────────────────────────────────── -->
 <h2 id="audit-setup">4. Audit Setup (Change Attribution)</h2>
@@ -367,6 +395,21 @@ drainctl history --limit 10 --format json</code></pre>
 <h3>Output formats</h3>
 <p><code>--format plain</code> (default for <code>check</code>), <code>table</code> (default for <code>history</code>), <code>csv</code>, <code>json</code>.</p>
 
+<p>The JSON output from <code>drainctl check --format json</code> includes session data &mdash; active sessions, total capacity, and utilization percentage &mdash; useful for building custom dashboards or feeding into monitoring systems.</p>
+
+<h3>Notification management</h3>
+<pre><code># List all notification targets
+drainctl notify list
+
+# Add a webhook target with specific triggers
+drainctl notify add webhook https://hooks.example.com/drainctl --triggers drain_on,alert
+
+# Add an ntfy target
+drainctl notify add ntfy https://ntfy.sh/my-rdsh-alerts --triggers drain_on,drain_off,alert
+
+# Remove a notification target
+drainctl notify remove https://hooks.example.com/drainctl</code></pre>
+
 <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
 <h2 id="powershell">6. PowerShell Module</h2>
 
@@ -406,17 +449,24 @@ Get-RDSHDrainHistory -ChangesOnly |
 <!-- ── Notifications ──────────────────────────────────────────────────── -->
 <h2 id="notifications">7. Notifications</h2>
 
-<p>Get pushed when something happens. DrainCtl supports <strong>webhooks</strong> (any HTTP endpoint that accepts JSON) and <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> (open-source push notifications for your phone).</p>
+<p>Get pushed when something happens. DrainCtl supports <strong>multiple notification targets</strong> &mdash; any combination of <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints) and <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics. Each target has its own triggers and repeat interval.</p>
 
 <h3>Setup</h3>
-<pre><code># Webhook (Slack, Teams, PagerDuty, custom endpoint, etc.)
-drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx
+<pre><code># Add a webhook (Slack, Teams, PagerDuty, custom endpoint, etc.)
+drainctl notify add webhook https://hooks.slack.com/services/T.../B.../xxx --triggers drain_on,drain_off,alert
 
-# ntfy.sh (get push notifications on your phone!)
+# Add an ntfy target (push notifications on your phone!)
+drainctl notify add ntfy https://ntfy.sh/my-rdsh-alerts --triggers drain_on,alert,healthy
+
+# Convenience shortcuts (add a single target quickly)
+drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx
 drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts
 
-# Check what's configured
-drainctl notify status
+# List all notification targets
+drainctl notify list
+
+# Remove a target
+drainctl notify remove https://hooks.slack.com/services/T.../B.../xxx
 
 # Send a test to make sure it works
 drainctl notify test</code></pre>
@@ -429,15 +479,21 @@ Test-RDSHDrainNotification
 # See current config
 Get-RDSHDrainNotification</code></pre>
 
-<h3>What triggers notifications?</h3>
+<h3>Granular triggers</h3>
+<p>Each notification target can subscribe to specific triggers. Assign them with <code>--triggers</code> when adding a target, or edit <code>config.json</code> directly.</p>
 <table>
-  <thead><tr><th>Event</th><th>Registry value</th><th>Default</th><th>Example</th></tr></thead>
+  <thead><tr><th>Trigger</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>State transition</td><td><code>NotifyOnTransition</code></td><td>On</td><td>Admin runs <code>chglogon /drain</code> &mdash; you get pinged</td></tr>
-    <tr><td>Grace exceeded</td><td><code>NotifyOnGraceExceeded</code></td><td>On</td><td>Drain mode active for 61 minutes (grace=60) &mdash; alert fires</td></tr>
-    <tr><td>Repeat alerts</td><td><code>NotifyRepeatMinutes</code></td><td>0 (once)</td><td>Set to 30 to get re-alerted every 30 min while in alert</td></tr>
+    <tr><td><code>drain_on</code></td><td>Drain mode activated</td></tr>
+    <tr><td><code>drain_off</code></td><td>Drain mode deactivated</td></tr>
+    <tr><td><code>grace_entered</code></td><td>Entered grace period</td></tr>
+    <tr><td><code>alert</code></td><td>Grace period exceeded</td></tr>
+    <tr><td><code>healthy</code></td><td>Returned to healthy</td></tr>
+    <tr><td><code>session_warning</code></td><td>Session utilization threshold exceeded (default 80%)</td></tr>
   </tbody>
 </table>
+
+<p>Each target also has a <code>repeat_minutes</code> setting &mdash; set it to re-send alerts periodically while the condition persists (0 = notify once).</p>
 
 <h3>Webhook payload</h3>
 <pre><code>{
@@ -454,33 +510,55 @@ Get-RDSHDrainNotification</code></pre>
 
 <p>ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and <strong>default</strong> for transitions.</p>
 
+<!-- ── Session Tracking ───────────────────────────────────────────────── -->
+<h2 id="sessions">8. Session Tracking</h2>
+
+<p>DrainCtl monitors active RDS sessions via <code>WTSEnumerateSessionsW</code> and exposes utilization data alongside drain mode state.</p>
+
+<h3>Session data in CLI output</h3>
+<p>Session counts and utilization appear automatically in <code>drainctl check --format json</code> output, including active sessions, total capacity, and utilization percentage. This is useful for feeding into monitoring systems or custom dashboards.</p>
+
+<h3>Session utilization alerts</h3>
+<p>When session utilization exceeds the configured threshold, DrainCtl fires a <code>session_warning</code> notification. The default threshold is <strong>80%</strong> &mdash; change it in <code>config.json</code>:</p>
+
+<pre><code>{
+  "session_warning_threshold": 80
+}</code></pre>
+
+<p>Add <code>session_warning</code> to a notification target's triggers to receive these alerts (see <a href="#notifications">Notifications</a>).</p>
+
+<h3>Dashboard session gauges</h3>
+<p>The <a href="#dashboard">multi-server dashboard</a> displays per-server session gauges showing current utilization at a glance.</p>
+
 <!-- ── Dashboard ──────────────────────────────────────────────────────── -->
-<h2 id="dashboard">8. Multi-Server Dashboard</h2>
+<h2 id="dashboard">9. Multi-Server Dashboard</h2>
 
 <p>Managing multiple RDSH servers? The dashboard gives you a single, live view of drain mode state across your entire farm &mdash; with Windows Authentication so only the right people see it.</p>
 
 <h3>How it works</h3>
 <ol>
-  <li><strong>One server runs the dashboard</strong> &mdash; enable it in the registry, the DrainCtl service serves an HTTP dashboard</li>
+  <li><strong>One server runs the dashboard</strong> &mdash; enable it in <code>config.json</code>, the DrainCtl service serves an HTTP dashboard</li>
   <li><strong>Other servers register</strong> &mdash; run drainctl register once, the agent starts reporting its state automatically</li>
   <li><strong>Dashboard aggregates</strong> &mdash; live grid of all servers, color-coded by status, auto-refreshes every 30 seconds</li>
 </ol>
 
 <h3>Enable the dashboard (on one server)</h3>
-<pre><code># Enable the dashboard server
-Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters `
-    -Name DashboardEnabled -Value 1
+<pre><code># Enable the dashboard server (writes to config.json)
+drainctl dashboard enable --port 49470 --group "Domain Admins"
 
-# Optional: change the port (default: 49470)
-Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters `
-    -Name DashboardPort -Value 49470
+# Or with a custom AD group
+drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
 
-# Optional: set which AD group can view the dashboard (default: Domain Admins)
-Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters `
-    -Name DashboardGroup -Value "RDS Admins"
+<p>You can also edit <code>config.json</code> directly:</p>
+<pre><code>{
+  "dashboard": {
+    "enabled": true,
+    "port": 49470,
+    "group": "Domain Admins"
+  }
+}</code></pre>
 
-# Restart the service to pick up DashboardEnabled
-Restart-Service DrainCtl</code></pre>
+<p>Changes are hot-reloaded &mdash; no service restart needed.</p>
 
 <h3>Register servers</h3>
 <p>On each RDSH server you want to monitor, run this once:</p>
@@ -489,7 +567,7 @@ drainctl register http://dashboard-server:49470</code></pre>
 
 <p>This does two things:</p>
 <ol>
-  <li>Sets DashboardURL in the local registry (so the service starts reporting automatically)</li>
+  <li>Writes <code>dashboard.url</code> to the local <code>config.json</code> (so the service starts reporting automatically on startup)</li>
   <li>Sends a registration request to the dashboard (so it knows about this server)</li>
 </ol>
 
@@ -505,7 +583,7 @@ drainctl dashboard
 # Or navigate directly
 http://dashboard-server:49470</code></pre>
 
-<p>The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for alert, gray for offline.</p>
+<p>The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session trends.</p>
 
 <h3>Manage servers</h3>
 <pre><code># List all registered servers
@@ -523,14 +601,14 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
   <li><strong>Unregistered hosts</strong> &mdash; the dashboard rejects reports from servers that haven't been registered (403).</li>
 </ul>
 
-<h3>Dashboard registry configuration</h3>
+<h3>Dashboard configuration (config.json)</h3>
 <table>
-  <thead><tr><th>Value</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+  <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>DashboardEnabled</td><td>DWORD</td><td>0</td><td>Enable the HTTP dashboard (set to 1)</td></tr>
-    <tr><td>DashboardPort</td><td>DWORD</td><td>49470</td><td>Port the dashboard listens on</td></tr>
-    <tr><td>DashboardGroup</td><td>SZ</td><td>Domain Admins</td><td>AD group authorized to view the dashboard</td></tr>
-    <tr><td>DashboardURL</td><td>SZ</td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to</td></tr>
+    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTP dashboard (set to true)</td></tr>
+    <tr><td><code>dashboard.port</code></td><td>49470</td><td>Port the dashboard listens on</td></tr>
+    <tr><td><code>dashboard.group</code></td><td>Domain Admins</td><td>AD group authorized to view the dashboard</td></tr>
+    <tr><td><code>dashboard.url</code></td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td></tr>
   </tbody>
 </table>
 
@@ -540,7 +618,7 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
 </div>
 
 <!-- ── RMM Integration ────────────────────────────────────────────────── -->
-<h2 id="rmm">9. RMM Integration</h2>
+<h2 id="rmm">10. RMM Integration</h2>
 
 <p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
 
@@ -571,7 +649,7 @@ if ($result.exit_code -ne 0) {
 }</code></pre>
 
 <!-- ── Service Management ─────────────────────────────────────────────── -->
-<h2 id="service">10. Service Management</h2>
+<h2 id="service">11. Service Management</h2>
 
 <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
@@ -600,7 +678,8 @@ drainctl service uninstall</code></pre>
   <li><strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant CLI/PS responses</li>
   <li><strong>Writes</strong> to the Windows Event Log (Application/DrainCtl) on state changes</li>
   <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
-  <li><strong>Hot-reloads</strong> configuration when registry parameters change</li>
+  <li><strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization alerts</li>
+  <li><strong>Hot-reloads</strong> configuration when <code>config.json</code> changes</li>
 </ul>
 
 <h3>Event Log</h3>
@@ -618,7 +697,7 @@ drainctl service uninstall</code></pre>
 </table>
 
 <!-- ── Troubleshooting ────────────────────────────────────────────────── -->
-<h2 id="troubleshooting">11. Troubleshooting</h2>
+<h2 id="troubleshooting">12. Troubleshooting</h2>
 
 <h3>"changed_by" is empty</h3>
 <p>Run <code>drainctl audit-setup</code> as admin. On domain-joined machines, also configure the GPO (see <a href="#audit-setup">Audit Setup</a>).</p>
@@ -645,7 +724,7 @@ drainctl service uninstall</code></pre>
 <p>The server's DrainCtl service isn't reporting. Check:</p>
 <ul>
   <li>Is the service running on that server? <code>Get-Service DrainCtl</code></li>
-  <li>Is DashboardURL set? <code>Get-ItemProperty HKLM:\...\DrainCtl\Parameters -Name DashboardURL</code></li>
+  <li>Is <code>dashboard.url</code> set in <code>config.json</code>? Check with <code>drainctl config get</code></li>
   <li>Can the server reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code></li>
   <li>Check the Application Event Log on the reporting server for DrainCtl errors</li>
 </ul>

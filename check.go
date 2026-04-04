@@ -60,6 +60,11 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 
 	log(LvlINF, fmt.Sprintf("grace_period=%s", opts.GracePeriod))
 
+	// ── Session tracking ───────────────────────────────────────────────
+	if sess := GetSessionSummary(); sess != nil {
+		res.Sessions = sess
+	}
+
 	// ── Open audit store ───────────────────────────────────────────────
 	var store *AuditStore
 	if opts.DBPath != "" {
@@ -144,6 +149,11 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 			Changed:     res.Transition,
 			ChangedBy:   res.ChangedBy,
 			ExitCode:    exitCode,
+		}
+		if res.Sessions != nil {
+			rec.ActiveSessions = res.Sessions.ActiveSessions
+			rec.TotalSessions = res.Sessions.TotalSessions
+			rec.MaxSessions = res.Sessions.MaxSessions
 		}
 		if err := store.Record(rec); err != nil {
 			LogMsg(log, LvlWRN, "failed to record observation", fmt.Sprintf("error=%q", err))

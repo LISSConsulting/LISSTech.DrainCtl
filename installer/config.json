@@ -1,0 +1,13 @@
+{
+  "grace_period": 60,
+  "retention_days": 90,
+  "poll_interval": 300,
+  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
+  "notifications": [],
+  "dashboard": {
+    "enabled": false,
+    "port": 49470,
+    "group": "Domain Admins"
+  },
+  "session_warning_threshold": 80
+}

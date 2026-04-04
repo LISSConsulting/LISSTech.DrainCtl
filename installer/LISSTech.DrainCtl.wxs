@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="LISSTech DrainCtl"
         Manufacturer="LISS Consulting, Corp."
-        Version="26.93.8"
+        Version="26.93.9"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
         Scope="perMachine">
 
@@ -103,7 +103,11 @@
 
         <Component Id="DataDirectory" Directory="DATADIRECTORY"
             Guid="0c2afad8-e85a-4a79-b484-d3e51ebd6fea">
-            <CreateFolder />
+            <CreateFolder>
+                <Permission User="SYSTEM" GenericAll="yes" />
+                <Permission User="Administrators" GenericAll="yes" />
+                <Permission User="Users" GenericRead="yes" GenericExecute="yes" />
+            </CreateFolder>
         </Component>
     </Fragment>
 
@@ -130,18 +134,14 @@
         </Component>
     </Fragment>
 
-    <!-- ── Service Parameters: default configuration in registry ──────────── -->
+    <!-- ── Default config.json in ProgramData ──────────────────────────────── -->
     <Fragment>
-        <Component Id="ServiceParameters" Directory="BinFolder"
-            Guid="39697d17-5164-472b-8a1e-533e93d4e4c9">
-            <RegistryKey Root="HKLM"
-                Key="SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters">
-                <RegistryValue Name="GracePeriod" Type="integer" Value="60" />
-                <RegistryValue Name="RetentionDays" Type="integer" Value="90" />
-                <RegistryValue Name="PollInterval" Type="integer" Value="300" />
-                <RegistryValue Name="AuditPath" Type="string"
-                    Value="[CommonAppDataFolder]LISS Technologies\LISSTech DrainCtl\audit.jsonl" />
-            </RegistryKey>
+        <Component Id="DefaultConfig" Directory="DATADIRECTORY"
+            Guid="39697d17-5164-472b-8a1e-533e93d4e4c9"
+            NeverOverwrite="yes">
+            <File Id="config.json"
+                Source="config.json"
+                KeyPath="yes" />
         </Component>
     </Fragment>
 
@@ -151,7 +151,7 @@
             <ComponentRef Id="MainExe" />
             <ComponentRef Id="MainDll" />
             <ComponentRef Id="EventLogSource" />
-            <ComponentRef Id="ServiceParameters" />
+            <ComponentRef Id="DefaultConfig" />
             <ComponentRef Id="DataDirectory" />
             <ComponentRef Id="PSModule" />
         </ComponentGroup>

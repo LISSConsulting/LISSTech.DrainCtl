@@ -11,88 +11,42 @@ import (
 	"time"
 )
 
-// NotifyConfig holds notification settings read from the registry.
-type NotifyConfig struct {
-	WebhookURL      string        // empty = disabled
-	NtfyURL         string        // e.g. "https://ntfy.sh/drainctl-alerts", empty = disabled
-	OnTransition    bool          // notify on any state transition
-	OnGraceExceeded bool          // notify when drain exceeds grace period
-	RepeatInterval  time.Duration // how often to re-notify while in alert (0 = once)
-}
-
-// NotifyState tracks notification timing to support repeat intervals.
+// NotifyState tracks per-target notification timing for repeat intervals.
 type NotifyState struct {
-	LastAlertNotify time.Time // tracks repeat interval
-}
-
-// Enabled returns true if at least one backend is configured.
-func (c NotifyConfig) Enabled() bool {
-	return c.WebhookURL != "" || c.NtfyURL != ""
+	LastAlertNotify map[string]time.Time // key = target URL
 }
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
-// SendNotification evaluates whether a notification should fire based on
-// config and current state, then dispatches to configured backends.
-// Errors are logged but never returned — notifications must not crash the service.
-func SendNotification(cfg NotifyConfig, state *NotifyState, result *CheckResult, transition bool, changedBy string, log LogFunc) {
+// SendNotification evaluates whether a notification should fire for the
+// given trigger and dispatches to matching targets. Errors are logged but
+// never returned — notifications must not crash the service.
+func SendNotification(targets []NotificationTarget, state *NotifyState, result *CheckResult, trigger Trigger, changedBy string, log LogFunc) {
 	if log == nil {
 		log = DiscardLogger()
 	}
-	if !cfg.Enabled() {
+	if len(targets) == 0 {
 		return
 	}
+	if state.LastAlertNotify == nil {
+		state.LastAlertNotify = make(map[string]time.Time)
+	}
 
-	// Determine event type and whether we should send.
-	var event string
-	var shouldSend bool
-
-	switch {
-	case transition && cfg.OnTransition:
-		event = "transition"
-		shouldSend = true
-	case result.Status == "Alert" && cfg.OnGraceExceeded:
-		event = "alert"
-		now := time.Now()
-		if cfg.RepeatInterval > 0 {
-			if state.LastAlertNotify.IsZero() || now.Sub(state.LastAlertNotify) >= cfg.RepeatInterval {
-				shouldSend = true
-				state.LastAlertNotify = now
-			}
-		} else {
-			// RepeatInterval == 0 means once only.
-			if state.LastAlertNotify.IsZero() {
-				shouldSend = true
-				state.LastAlertNotify = now
-			}
+	// Reset alert tracking when returning to healthy.
+	if trigger == TriggerHealthy || trigger == TriggerDrainOff {
+		for k := range state.LastAlertNotify {
+			delete(state.LastAlertNotify, k)
 		}
-	case result.Status == "Grace" && transition && cfg.OnTransition:
-		event = "grace"
-		shouldSend = true
-	case result.Status == "Healthy" && transition && cfg.OnTransition:
-		event = "healthy"
-		shouldSend = true
-		// Reset alert tracking when returning to healthy.
-		state.LastAlertNotify = time.Time{}
 	}
 
-	// If returning to healthy (even without transition flag), reset alert state.
-	if result.Status == "Healthy" {
-		state.LastAlertNotify = time.Time{}
-	}
-
-	if !shouldSend {
-		return
-	}
-
-	// Build webhook payload.
+	// Build payload.
 	stateDur := 0.0
 	if result.StateDurationSeconds != nil {
 		stateDur = *result.StateDurationSeconds
 	}
 
 	payload := map[string]any{
-		"event":                  event,
+		"event":                  string(trigger),
 		"host":                   result.Host,
 		"drain_mode":             result.DrainModeLabel,
 		"status":                 result.Status,
@@ -101,46 +55,78 @@ func SendNotification(cfg NotifyConfig, state *NotifyState, result *CheckResult,
 		"state_duration_seconds": int(stateDur),
 		"timestamp":              result.Timestamp.Format(time.RFC3339),
 	}
-	if transition && result.TransitionFrom != "" {
+	if result.Transition && result.TransitionFrom != "" {
 		payload["previous_mode"] = result.TransitionFrom
 	}
 
-	// Send to webhook.
-	if cfg.WebhookURL != "" {
-		if err := sendWebhook(cfg.WebhookURL, payload); err != nil {
-			LogMsg(log, LvlWRN, "webhook notification failed", fmt.Sprintf("error=%q url=%s", err, cfg.WebhookURL))
-		} else {
-			log(LvlINF, "notify=webhook", fmt.Sprintf("event=%s", event))
+	for _, target := range targets {
+		if target.URL == "" || !target.HasTrigger(trigger) {
+			continue
 		}
-	}
 
-	// Send to ntfy.
-	if cfg.NtfyURL != "" {
-		title := fmt.Sprintf("DrainCtl: %s on %s", event, result.Host)
-		priority := "default"
-		tags := "white_check_mark"
-		switch result.Status {
-		case "Alert":
-			priority = "high"
-			tags = "warning"
-		case "Grace":
-			tags = "warning"
+		// For repeating triggers (alert, session_warning), check per-target repeat interval.
+		if trigger == TriggerAlert || trigger == TriggerSessionWarning {
+			now := time.Now()
+			repeatInterval := time.Duration(target.RepeatMinutes) * time.Minute
+			lastSent := state.LastAlertNotify[target.URL]
+
+			if repeatInterval > 0 {
+				if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
+					continue
+				}
+			} else {
+				// RepeatMinutes == 0 means fire once only.
+				if !lastSent.IsZero() {
+					continue
+				}
+			}
+			state.LastAlertNotify[target.URL] = now
 		}
-		if err := sendNtfy(cfg.NtfyURL, title, result.Message, priority, tags); err != nil {
-			LogMsg(log, LvlWRN, "ntfy notification failed", fmt.Sprintf("error=%q url=%s", err, cfg.NtfyURL))
-		} else {
-			log(LvlINF, "notify=ntfy", fmt.Sprintf("event=%s", event))
+
+		// Dispatch to backend.
+		switch target.Type {
+		case "webhook":
+			if err := sendWebhook(target.URL, payload); err != nil {
+				LogMsg(log, LvlWRN, "webhook notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+			} else {
+				log(LvlINF, "notify=webhook", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
+			}
+
+		case "ntfy":
+			title := fmt.Sprintf("DrainCtl: %s on %s", trigger, result.Host)
+			priority := "default"
+			tags := "white_check_mark"
+			switch result.Status {
+			case "Alert":
+				priority = "high"
+				tags = "warning"
+			case "Grace":
+				tags = "warning"
+			}
+			if err := sendNtfy(target.URL, title, result.Message, priority, tags); err != nil {
+				LogMsg(log, LvlWRN, "ntfy notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+			} else {
+				log(LvlINF, "notify=ntfy", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
+			}
 		}
 	}
 }
 
-// SendTestNotification sends a test message to all configured backends.
-func SendTestNotification(cfg NotifyConfig, log LogFunc) error {
+// SendTestNotification sends a test message to all configured targets.
+func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 	if log == nil {
 		log = DiscardLogger()
 	}
-	if !cfg.Enabled() {
-		return fmt.Errorf("no notification backends configured")
+
+	hasTargets := false
+	for _, t := range targets {
+		if t.URL != "" {
+			hasTargets = true
+			break
+		}
+	}
+	if !hasTargets {
+		return fmt.Errorf("no notification targets configured")
 	}
 
 	host, _ := os.Hostname()
@@ -161,23 +147,29 @@ func SendTestNotification(cfg NotifyConfig, log LogFunc) error {
 
 	var lastErr error
 
-	if cfg.WebhookURL != "" {
-		if err := sendWebhook(cfg.WebhookURL, payload); err != nil {
-			LogMsg(log, LvlERR, "webhook test failed", fmt.Sprintf("error=%q", err))
-			lastErr = err
-		} else {
-			log(LvlOK, "notify=webhook", "test=sent")
+	for _, target := range targets {
+		if target.URL == "" {
+			continue
 		}
-	}
 
-	if cfg.NtfyURL != "" {
-		title := fmt.Sprintf("DrainCtl Test: %s", host)
-		msg := "This is a test notification from DrainCtl."
-		if err := sendNtfy(cfg.NtfyURL, title, msg, "default", "test_tube"); err != nil {
-			LogMsg(log, LvlERR, "ntfy test failed", fmt.Sprintf("error=%q", err))
-			lastErr = err
-		} else {
-			log(LvlOK, "notify=ntfy", "test=sent")
+		switch target.Type {
+		case "webhook":
+			if err := sendWebhook(target.URL, payload); err != nil {
+				LogMsg(log, LvlERR, "webhook test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				lastErr = err
+			} else {
+				log(LvlOK, "notify=webhook", fmt.Sprintf("test=sent url=%s", target.URL))
+			}
+
+		case "ntfy":
+			title := fmt.Sprintf("DrainCtl Test: %s", host)
+			msg := "This is a test notification from DrainCtl."
+			if err := sendNtfy(target.URL, title, msg, "default", "test_tube"); err != nil {
+				LogMsg(log, LvlERR, "ntfy test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				lastErr = err
+			} else {
+				log(LvlOK, "notify=ntfy", fmt.Sprintf("test=sent url=%s", target.URL))
+			}
 		}
 	}
 
