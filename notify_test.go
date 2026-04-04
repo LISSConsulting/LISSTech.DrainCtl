@@ -298,3 +298,93 @@ func TestSendNotification_EmptyTargets(t *testing.T) {
 	SendNotification(nil, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "", nil)
 	SendNotification([]NotificationTarget{}, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "", nil)
 }
+
+// TestSendNotification_SessionWarningPreservedThroughHealthy verifies that the
+// session_warning repeat-tracking entry is NOT cleared when a TriggerHealthy
+// fires. This matters because drain mode may turn off while sessions are still
+// at high utilisation; we don't want to re-fire the session alert immediately.
+func TestSendNotification_SessionWarningPreservedThroughHealthy(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Target listens for both session_warning and healthy.
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerSessionWarning, TriggerHealthy}, RepeatMinutes: 0},
+	}
+	state := &NotifyState{}
+
+	// Fire session_warning (once-only).
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "", nil)
+	if atomic.LoadInt32(&count) != 1 {
+		t.Fatalf("expected 1 call after session_warning, got %d", atomic.LoadInt32(&count))
+	}
+
+	// Transition to healthy — alert tracking is cleared but session_warning entry must survive.
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerHealthy, "", nil)
+	if atomic.LoadInt32(&count) != 2 {
+		t.Fatalf("expected 2 calls after healthy, got %d", atomic.LoadInt32(&count))
+	}
+
+	// Session_warning fires again — would fire if tracking was cleared, should still be suppressed.
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "", nil)
+	if atomic.LoadInt32(&count) != 2 {
+		t.Errorf("session_warning fired after healthy transition (tracking was cleared); got %d calls, want 2", atomic.LoadInt32(&count))
+	}
+}
+
+// TestSendNotification_IndependentTargetState verifies that repeat-tracking
+// state is keyed per target URL so two targets with different repeat intervals
+// do not interfere with each other.
+func TestSendNotification_IndependentTargetState(t *testing.T) {
+	var count1, count2 int32
+
+	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count1, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv1.Close()
+
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count2, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv2.Close()
+
+	targets := []NotificationTarget{
+		// srv1: fire once only.
+		{Type: "webhook", URL: srv1.URL, Triggers: []Trigger{TriggerAlert}, RepeatMinutes: 0},
+		// srv2: repeat every 60 minutes.
+		{Type: "webhook", URL: srv2.URL, Triggers: []Trigger{TriggerAlert}, RepeatMinutes: 60},
+	}
+	state := &NotifyState{}
+	result := newTestResult("SRV01", "Alert")
+
+	// First call fires both.
+	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
+		t.Fatalf("expected 1+1 after first call, got %d+%d", count1, count2)
+	}
+
+	// Second immediate call: srv1 is suppressed (once-only), srv2 is suppressed (within 60 min).
+	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
+		t.Errorf("expected both suppressed on second call, got count1=%d count2=%d", count1, count2)
+	}
+
+	// Manually backdate srv1's last-sent time so it looks like it was cleared (simulate reset).
+	// srv2 keeps its own timestamp, independent of srv1.
+	delete(state.LastAlertNotify, srv1.URL)
+
+	// Third call: srv1 fires again (tracking deleted), srv2 still suppressed.
+	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	if atomic.LoadInt32(&count1) != 2 {
+		t.Errorf("srv1 should fire after tracking reset, got count1=%d", count1)
+	}
+	if atomic.LoadInt32(&count2) != 1 {
+		t.Errorf("srv2 should remain suppressed independently, got count2=%d", count2)
+	}
+}

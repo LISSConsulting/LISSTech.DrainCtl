@@ -5491,11 +5491,24 @@
                         valid = false;
                         return;
                     }
-                    urlInput.style.borderColor = "";
                     // Reconstruct full ntfy URL from topic name
                     if (type === "ntfy" && !url.match(/^https?:\/\//)) {
                         url = "https://ntfy.sh/" + url;
                     }
+                    // Webhook URLs must be a valid http:// or https:// URL.
+                    if (type === "webhook") {
+                        var schemeOk = false;
+                        try {
+                            var parsed = new URL(url);
+                            schemeOk = parsed.protocol === "http:" || parsed.protocol === "https:";
+                        } catch (_) { /* invalid URL */ }
+                        if (!schemeOk) {
+                            urlInput.style.borderColor = "var(--red)";
+                            valid = false;
+                            return;
+                        }
+                    }
+                    urlInput.style.borderColor = "";
                     const repeat = parseInt(row.querySelector('[data-field="repeat"]').value) || 0;
                     const secretInput = row.querySelector('[data-field="secret"]');
                     const secret = (type === "webhook" && secretInput) ? secretInput.value : "";
@@ -5537,13 +5550,29 @@
                 st.className = "settings-status";
                 const notifications = readTargets();
                 if (notifications === null) {
-                    st.textContent = "Please fill in all target URLs.";
+                    st.textContent = "Please check all target URLs — webhook URLs must start with http:// or https://.";
                     st.className = "settings-status err";
                     return;
                 }
+                const thresholdEl = document.getElementById("cfg-threshold");
+                const graceEl = document.getElementById("cfg-grace");
+                const threshold = parseInt(thresholdEl.value);
+                const grace = parseInt(graceEl.value);
+                if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+                    st.textContent = "Session threshold must be 0–100.";
+                    st.className = "settings-status err";
+                    thresholdEl.style.borderColor = "var(--red)";
+                    return;
+                }
+                thresholdEl.style.borderColor = "";
+                if (isNaN(grace) || grace < 1 || grace > 1440) {
+                    st.textContent = "Grace period must be 1–1440 minutes.";
+                    st.className = "settings-status err";
+                    graceEl.style.borderColor = "var(--red)";
+                    return;
+                }
+                graceEl.style.borderColor = "";
                 try {
-                    const threshold = parseInt(document.getElementById("cfg-threshold").value) || 80;
-                    const grace = parseInt(document.getElementById("cfg-grace").value) || 60;
                     const body = JSON.stringify({
                         notifications,
                         session_warning_threshold: threshold,

@@ -213,6 +213,11 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 			delete(state.LastAlertNotify, k)
 		}
 	}
+	for k := range state.LastSessionWarnNotify {
+		if !active[k] {
+			delete(state.LastSessionWarnNotify, k)
+		}
+	}
 }
 
 // applyRemoteConfig updates service config from dashboard-sourced notification settings.

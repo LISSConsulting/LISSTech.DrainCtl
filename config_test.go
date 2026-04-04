@@ -167,6 +167,84 @@ func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+// ── Validate — trigger handling ───────────────────────────────────────────────
+
+func TestValidate_EmptyTriggersDefaulted(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook", Triggers: []Trigger{}},
+	}
+	cfg.Validate(nil)
+	// Empty trigger list must be replaced by DefaultTriggers.
+	if len(cfg.Notifications[0].Triggers) != len(DefaultTriggers) {
+		t.Errorf("expected %d default triggers after Validate, got %d",
+			len(DefaultTriggers), len(cfg.Notifications[0].Triggers))
+	}
+	for _, want := range DefaultTriggers {
+		found := false
+		for _, got := range cfg.Notifications[0].Triggers {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("default trigger %q missing after Validate", want)
+		}
+	}
+}
+
+func TestValidate_StripsUnknownTriggers(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{
+			Type: "webhook",
+			URL:  "https://example.com/hook",
+			Triggers: []Trigger{
+				TriggerAlert,
+				Trigger("not_a_real_trigger"),
+				TriggerHealthy,
+				Trigger("also_bogus"),
+			},
+		},
+	}
+	var warned bool
+	log := func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warned = true
+		}
+	}
+	cfg.Validate(log)
+
+	triggers := cfg.Notifications[0].Triggers
+	if len(triggers) != 2 {
+		t.Errorf("expected 2 triggers after stripping unknowns, got %d: %v", len(triggers), triggers)
+	}
+	for _, tr := range triggers {
+		if !ValidTriggers[tr] {
+			t.Errorf("unknown trigger %q survived Validate", tr)
+		}
+	}
+	if !warned {
+		t.Error("expected warning log for unknown trigger, got none")
+	}
+}
+
+func TestValidate_PreservesValidTriggers(t *testing.T) {
+	cfg := DefaultConfig()
+	allValid := []Trigger{
+		TriggerDrainOn, TriggerDrainOff, TriggerGraceEntered,
+		TriggerAlert, TriggerHealthy, TriggerSessionWarning,
+	}
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook", Triggers: allValid},
+	}
+	cfg.Validate(nil)
+	if len(cfg.Notifications[0].Triggers) != len(allValid) {
+		t.Errorf("Validate stripped valid triggers: got %v", cfg.Notifications[0].Triggers)
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {
