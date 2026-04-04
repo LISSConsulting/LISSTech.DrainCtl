@@ -225,10 +225,24 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// Auto-register with dashboard if URL is configured (or discovered).
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
-		if err := dashboard.Register(dashCfg.URL, s.log); err != nil {
-			dc.LogMsg(s.log, dc.LvlWRN, "dashboard registration failed (will retry on report)", fmt.Sprintf("error=%q", err))
+		regResult, regErr := dashboard.Register(dashCfg.URL, s.log)
+		if regErr != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "dashboard registration failed (will retry on report)", fmt.Sprintf("error=%q", regErr))
 		} else {
 			s.log(dc.LvlINF, "dashboard=registered")
+			// Auto-pin: save the dashboard's TLS fingerprint if enabled and we don't have one yet.
+			if dashCfg.AutoPin && dashCfg.TLSFingerprint == "" && regResult.TLSFingerprint != "" {
+				dashCfg.TLSFingerprint = regResult.TLSFingerprint
+				dashboard.InitDashClient(dashCfg.TLSFingerprint)
+				s.log(dc.LvlINF, fmt.Sprintf("dashboard=auto-pinned fingerprint=%s", dashCfg.TLSFingerprint))
+				// Persist to config.json so pinning survives restarts.
+				if fileCfg, err := dc.LoadConfig(s.log); err == nil {
+					fileCfg.Dashboard.TLSFingerprint = dashCfg.TLSFingerprint
+					if err := dc.SaveConfig(fileCfg, s.log); err != nil {
+						dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to save fingerprint to config", fmt.Sprintf("error=%q", err))
+					}
+				}
+			}
 		}
 	}
 

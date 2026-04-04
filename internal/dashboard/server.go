@@ -5,6 +5,7 @@ package dashboard
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -25,10 +26,11 @@ var faviconPNG []byte
 
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state  *ServerState
-	cfg    dc.DashboardConfig
-	log    dc.LogFunc
-	server *http.Server
+	state       *ServerState
+	cfg         dc.DashboardConfig
+	log         dc.LogFunc
+	server      *http.Server
+	fingerprint string // SHA-256 fingerprint of the TLS certificate
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -80,6 +82,14 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	if err != nil {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard TLS setup failed, falling back to HTTP", fmt.Sprintf("error=%q", err))
 		tlsCfg = nil
+	}
+
+	// Extract certificate fingerprint for the register response.
+	if tlsCfg != nil && len(tlsCfg.Certificates) > 0 {
+		leaf, parseErr := x509.ParseCertificate(tlsCfg.Certificates[0].Certificate[0])
+		if parseErr == nil {
+			ds.fingerprint = certFingerprint(leaf)
+		}
 	}
 
 	ln, err := net.Listen("tcp", addr)
@@ -157,9 +167,14 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 	ds.log(dc.LvlINF, "dashboard=register",
 		fmt.Sprintf("host=%s user=%s", req.Hostname, user))
 
+	resp := struct {
+		OK             bool   `json:"ok"`
+		TLSFingerprint string `json:"tls_fingerprint,omitempty"`
+	}{OK: true, TLSFingerprint: ds.fingerprint}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true}`))
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // handleReport processes POST /api/v1/report.
@@ -248,9 +263,11 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	out := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+		GracePeriod             int                     `json:"grace_period"`
 	}{
 		Notifications:           cfg.Notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
+		GracePeriod:             cfg.GracePeriod,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -270,6 +287,7 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	var in struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold *int                    `json:"session_warning_threshold,omitempty"`
+		GracePeriod             *int                    `json:"grace_period,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -286,6 +304,14 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		if err := dc.UpdateSessionThreshold(*in.SessionWarningThreshold, ds.log); err != nil {
 			dc.LogMsg(ds.log, dc.LvlERR, "update session threshold failed", fmt.Sprintf("error=%q", err))
 			http.Error(w, "failed to update session threshold", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if in.GracePeriod != nil {
+		if err := dc.UpdateGracePeriod(*in.GracePeriod, ds.log); err != nil {
+			dc.LogMsg(ds.log, dc.LvlERR, "update grace period failed", fmt.Sprintf("error=%q", err))
+			http.Error(w, "failed to update grace period", http.StatusInternalServerError)
 			return
 		}
 	}

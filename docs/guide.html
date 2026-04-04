@@ -8,7 +8,7 @@
 <meta name="description" content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Source+Sans+3:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&family=DM+Serif+Display:ital@0;1&family=Work+Sans:wght@400;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Source+Sans+3:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #fdf8f6;
@@ -45,7 +45,7 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Work Sans', sans-serif;
   background: var(--bg);
   color: var(--fg);
   line-height: 1.65;
@@ -104,7 +104,7 @@ a { color: var(--accent); }
 .toc a:hover { text-decoration: underline; }
 
 h2 {
-  font-family: 'DM Serif Display', serif;
+  font-family: 'Fraunces', serif;
   font-size: 1.6rem; font-weight: 400;
   letter-spacing: -0.01em;
   margin: 40px 0 8px;
@@ -658,6 +658,66 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
   <li><strong>Unregistered hosts</strong> &mdash; the dashboard rejects reports from servers that haven't been registered (403).</li>
 </ul>
 
+<h3 id="tls">HTTPS &amp; TLS Certificates</h3>
+<p>The dashboard always runs over HTTPS. On first start, the service auto-generates a self-signed TLS certificate (ECDSA P-256, valid 1 year). The certificate and private key are stored in the DrainCtl data directory:</p>
+<pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt   # world-readable
+%ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.key   # SYSTEM + Admins only</code></pre>
+
+<p>The private key is ACL-restricted to SYSTEM and Administrators. The certificate auto-renews 24 hours before expiry.</p>
+
+<h4>Certificate fingerprint</h4>
+<p>To view the dashboard's current TLS certificate fingerprint:</p>
+<pre><code>drainctl dashboard fingerprint</code></pre>
+
+<h4>Certificate pinning (optional)</h4>
+<p>Certificate pinning lets agents verify they're talking to the real dashboard, not an impersonator. Pinning is <strong>opt-in</strong> &mdash; without it, agents use trust-on-first-use (TOFU) for TLS, which is fine for most environments.</p>
+
+<p><strong>Auto-pin on registration:</strong> Pass <code>--pin</code> when registering to automatically capture and save the dashboard's certificate fingerprint:</p>
+<pre><code># Register and auto-pin the dashboard's TLS certificate
+drainctl register --auto --pin
+drainctl register https://dashboard:49470 --pin</code></pre>
+<p>The fingerprint is saved to <code>dashboard.tls_fingerprint</code> in the agent's <code>config.json</code>. All subsequent reports will verify the dashboard's certificate matches.</p>
+
+<p><strong>Auto-pin via config (for service auto-registration):</strong> Set <code>"auto_pin": true</code> in <code>config.json</code> and the service will capture the fingerprint on its next registration:</p>
+<pre><code>{
+  "dashboard": {
+    "url": "https://dashboard:49470",
+    "auto_pin": true
+  }
+}</code></pre>
+
+<p><strong>MSI/Bundle deployment:</strong> Pass <code>AUTO_PIN=1</code> as an MSI property:</p>
+<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470 AUTO_PIN=1</code></pre>
+
+<p><strong>Manual pinning:</strong> If you prefer to set the fingerprint yourself (e.g., distributed via GPO), run <code>drainctl dashboard fingerprint</code> on the dashboard server and set <code>dashboard.tls_fingerprint</code> in each agent's config. A manually-set fingerprint is never overwritten by auto-pin.</p>
+
+<div class="callout warn">
+  <strong>&#x26A0;&#xFE0F; Certificate renewal and pinning.</strong>
+  The auto-generated certificate is valid for 1 year and renews automatically. When it renews, the fingerprint changes. Agents with the old fingerprint pinned will silently fail to report until they re-register. To re-pin after renewal, run <code>drainctl register --auto --pin</code> on each agent, or set <code>"auto_pin": true</code> in config and restart the service. Without pinning enabled, cert renewal is seamless.
+</div>
+
+<h4>Trusting the self-signed certificate</h4>
+<p>Browsers will show a certificate warning for self-signed certs. To suppress it, import the certificate into the Trusted Root store:</p>
+<pre><code># On the dashboard server (requires admin):
+drainctl dashboard trust-cert</code></pre>
+<p>This imports <code>dashboard-tls.crt</code> into the local machine's Trusted Root Certification Authorities store using <code>certutil</code>.</p>
+
+<p>For admin workstations that access the dashboard remotely, either copy the <code>.crt</code> file and run <code>trust-cert</code> locally, or use PowerShell:</p>
+<pre><code>$cert = "\\dashboard-server\c$\ProgramData\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt"
+Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Root</code></pre>
+
+<p>For farm-wide trust, distribute the <code>.crt</code> via Group Policy: <strong>Computer Configuration &rarr; Windows Settings &rarr; Security Settings &rarr; Public Key Policies &rarr; Trusted Root Certification Authorities</strong>.</p>
+
+<h4>Bring your own certificate</h4>
+<p>To use a CA-issued or internal PKI certificate instead of the self-signed one, set the paths in <code>config.json</code>:</p>
+<pre><code>{
+  "dashboard": {
+    "tls_cert": "C:\\certs\\dashboard.pem",
+    "tls_key": "C:\\certs\\dashboard-key.pem"
+  }
+}</code></pre>
+<p>Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the event log.</p>
+
 <h3>Dashboard configuration (config.json)</h3>
 <table>
   <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
@@ -668,6 +728,8 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
     <tr><td><code>dashboard.url</code></td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td></tr>
     <tr><td><code>dashboard.tls_cert</code></td><td><em>empty</em></td><td>Path to PEM certificate file. If empty, a self-signed cert is auto-generated.</td></tr>
     <tr><td><code>dashboard.tls_key</code></td><td><em>empty</em></td><td>Path to PEM private key file. Required when <code>tls_cert</code> is set.</td></tr>
+    <tr><td><code>dashboard.tls_fingerprint</code></td><td><em>empty</em></td><td>SHA-256 certificate fingerprint for agent-side pinning. Set manually or via <code>--pin</code>.</td></tr>
+    <tr><td><code>dashboard.auto_pin</code></td><td>false</td><td>Auto-capture dashboard cert fingerprint on service registration.</td></tr>
   </tbody>
 </table>
 
@@ -817,48 +879,47 @@ drainctl service uninstall</code></pre>
   </div>
 </footer>
 
-<!-- Font Switcher -->
-<button id="font-switcher" style="
-  position: fixed; bottom: 20px; right: 20px; z-index: 999;
-  background: var(--accent); color: #fff;
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  padding: 10px 16px;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.82rem; font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.1s;
-" onclick="cycleFont()">&#x1F3A8; DM Sans + DM Serif</button>
+
+<button id="font-switcher" onclick="cycleFont()" style="
+  position:fixed;bottom:20px;right:20px;z-index:999;
+  background:var(--accent);color:#fff;
+  border:var(--bw) solid var(--border);
+  border-radius:var(--r);
+  box-shadow:var(--so) var(--so) 0 var(--shadow);
+  padding:10px 16px;
+  font-family:'Work Sans',sans-serif;
+  font-size:0.82rem;font-weight:700;
+  cursor:pointer;
+  transition:transform 0.1s,box-shadow 0.1s;
+">&#x1F3A8; DM Serif + Fraunces + Work Sans</button>
 
 <script>
-const fontPairs = [
-  { body: "'DM Sans', sans-serif", heading: "'DM Serif Display', serif", label: "DM Sans + DM Serif" },
-  { body: "'Fraunces', serif", heading: "'Fraunces', serif", label: "Fraunces" },
-  { body: "'Work Sans', sans-serif", heading: "'Fraunces', serif", label: "Work Sans + Fraunces" },
-  { body: "'Literata', serif", heading: "'Literata', serif", label: "Literata" },
-  { body: "'Source Sans 3', sans-serif", heading: "'Literata', serif", label: "Source Sans + Literata" },
-  { body: "'Lato', sans-serif", heading: "'Playfair Display', serif", label: "Lato + Playfair" },
-  { body: "'Source Sans 3', sans-serif", heading: "'Playfair Display', serif", label: "Source Sans + Playfair" },
+var fontTriples = [
+  { title: "'DM Serif Display', serif", heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "DM Serif + Fraunces + Work Sans" },
+  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "Fraunces + Work Sans" },
+  { title: "'DM Serif Display', serif", heading: "'DM Serif Display', serif", body: "'DM Sans', sans-serif", label: "DM Serif + DM Sans" },
+  { title: "'Playfair Display', serif", heading: "'Literata', serif", body: "'Source Sans 3', sans-serif", label: "Playfair + Literata + Source Sans" },
+  { title: "'Playfair Display', serif", heading: "'Playfair Display', serif", body: "'Lato', sans-serif", label: "Playfair + Lato" },
+  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Fraunces', serif", label: "Fraunces only" },
 ];
-let fontIdx = parseInt(localStorage.getItem('drainctl-font-idx') || '0', 10);
+var fontIdx = parseInt(localStorage.getItem('drainctl-font-idx') || '0', 10);
 
 function applyFont(idx) {
-  const pair = fontPairs[idx];
-  document.body.style.fontFamily = pair.body;
-  document.querySelectorAll('h1, h2').forEach(el => {
-    if (!el.closest('.toc')) el.style.fontFamily = pair.heading;
+  var t = fontTriples[idx];
+  document.body.style.fontFamily = t.body;
+  document.querySelectorAll('h1').forEach(function(el) { el.style.fontFamily = t.title; });
+  document.querySelectorAll('h2, h3').forEach(function(el) {
+    if (!el.closest('.toc')) el.style.fontFamily = t.heading;
   });
-  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + pair.label;
+  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + t.label;
 }
 
 function cycleFont() {
-  fontIdx = (fontIdx + 1) % fontPairs.length;
+  fontIdx = (fontIdx + 1) % fontTriples.length;
   localStorage.setItem('drainctl-font-idx', fontIdx);
   applyFont(fontIdx);
 }
 
-// Restore saved font on load
 if (fontIdx > 0) applyFont(fontIdx);
 </script>
 

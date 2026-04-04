@@ -728,6 +728,40 @@ function Disable-RDSHDrainDashboard {
     Write-Host 'Dashboard disabled. Restart the DrainCtl service to apply: Restart-Service DrainCtl'
 }
 
+function Install-RDSHDrainCertificate {
+    <#
+    .SYNOPSIS
+    Import the DrainCtl dashboard TLS certificate into the Trusted Root store.
+
+    .DESCRIPTION
+    Imports the dashboard's auto-generated self-signed certificate into the local
+    machine's Trusted Root Certification Authorities store. This suppresses browser
+    certificate warnings when accessing the dashboard. Requires elevation (admin).
+
+    .EXAMPLE
+    Install-RDSHDrainCertificate
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    param()
+
+    $dataDir = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
+    $certPath = Join-Path $dataDir 'dashboard-tls.crt'
+
+    if (-not (Test-Path $certPath)) {
+        throw "Certificate not found at $certPath — is the dashboard enabled?"
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($certPath, 'Import into Trusted Root store')) { return }
+
+    $output = & certutil -addstore Root $certPath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "certutil failed (exit $LASTEXITCODE): $output"
+    }
+
+    Write-Host "Certificate imported into Trusted Root Certification Authorities."
+    Write-Host "Browsers on this machine will now trust the dashboard's HTTPS certificate."
+}
+
 Export-ModuleMember -Function @(
     'Get-RDSHDrainMode'
     'Test-RDSHDrainMode'
@@ -741,4 +775,5 @@ Export-ModuleMember -Function @(
     'Test-RDSHDrainNotification'
     'Enable-RDSHDrainDashboard'
     'Disable-RDSHDrainDashboard'
+    'Install-RDSHDrainCertificate'
 )

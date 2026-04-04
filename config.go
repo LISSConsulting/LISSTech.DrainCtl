@@ -106,6 +106,7 @@ type DashboardJSON struct {
 	TLSCert        string `json:"tls_cert,omitempty"`        // path to PEM certificate file
 	TLSKey         string `json:"tls_key,omitempty"`         // path to PEM private key file
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin        *bool  `json:"auto_pin,omitempty"`        // auto-pin dashboard cert on register (default false)
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -128,6 +129,7 @@ type DashboardConfig struct {
 	TLSCert        string // path to PEM certificate file
 	TLSKey         string // path to PEM private key file
 	TLSFingerprint string // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin        bool   // auto-pin dashboard cert on register (default false)
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -173,6 +175,7 @@ func (c *Config) ToDashboardConfig() DashboardConfig {
 		TLSCert:        c.Dashboard.TLSCert,
 		TLSKey:         c.Dashboard.TLSKey,
 		TLSFingerprint: c.Dashboard.TLSFingerprint,
+		AutoPin:        c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
 	}
 }
 
@@ -370,6 +373,19 @@ func UpdateSessionThreshold(pct int, log LogFunc) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.SessionWarningThreshold = pct
+	return saveConfigToFile(cfg, log)
+}
+
+// UpdateGracePeriod sets the grace period (minutes) in config.json.
+func UpdateGracePeriod(minutes int, log LogFunc) error {
+	if minutes < 1 || minutes > 1440 {
+		return fmt.Errorf("grace period must be 1-1440 minutes, got %d", minutes)
+	}
+	cfg, err := LoadConfig(log)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg.GracePeriod = minutes
 	return saveConfigToFile(cfg, log)
 }
 
