@@ -132,7 +132,8 @@ pre {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.82rem;
   line-height: 1.7;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   margin: 16px 0 24px;
 }
 pre code { background: none; border: none; padding: 0; font-size: inherit; color: #f0e0e0; }
@@ -231,7 +232,7 @@ th { background: var(--surface); font-weight: 700; }
     <tr><td><code>INSTALL_MODE</code></td><td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td><td>Sets the operational mode. <strong>dashboard</strong> enables the web UI, <strong>registration</strong> registers with an existing dashboard, <strong>standalone</strong> runs independently.</td></tr>
     <tr><td><code>WEBHOOK_URL</code></td><td><code>https://hooks.example.com/drain</code></td><td>Adds a webhook notification target</td></tr>
     <tr><td><code>NTFY_URL</code></td><td><code>https://ntfy.sh/drainctl</code></td><td>Adds an ntfy notification target</td></tr>
-    <tr><td><code>DASHBOARD_URL</code></td><td><code>https://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
+    <tr><td><code>DASHBOARD_URL</code></td><td><code>http://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
     <tr><td><code>DASHBOARD_PORT</code></td><td><code>49470</code></td><td>Port for the dashboard listener (used with <code>dashboard</code> mode)</td></tr>
     <tr><td><code>DASHBOARD_GROUP</code></td><td><code>Domain Admins</code></td><td>AD group authorized for dashboard access</td></tr>
     <tr><td><code>GRACE_PERIOD</code></td><td><code>120</code></td><td>Grace period in minutes before drain mode becomes an alert</td></tr>
@@ -239,7 +240,7 @@ th { background: var(--surface); font-weight: 700; }
 </table>
 
 <p>Example &mdash; register with a dashboard, no UI:</p>
-<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470</code></pre>
+<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=http://dash:49470</code></pre>
 
 <h3>What the MSI does</h3>
 <ul>
