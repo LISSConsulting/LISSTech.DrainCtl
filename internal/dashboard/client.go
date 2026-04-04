@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -47,14 +48,18 @@ func newDashClient(fingerprint string) *http.Client {
 	}
 }
 
-// dashClient is the default client (no pinning). Replaced at service start
-// when the config has a tls_fingerprint.
-var dashClient = newDashClient("")
+// dashClientPtr holds the current HTTP client atomically. Replaced at service
+// start when the config has a tls_fingerprint.
+var dashClientPtr atomic.Pointer[http.Client]
+
+func init() {
+	dashClientPtr.Store(newDashClient(""))
+}
 
 // InitDashClient configures the dashboard HTTP client with certificate pinning.
 // Called during service startup when the dashboard URL is configured.
 func InitDashClient(fingerprint string) {
-	dashClient = newDashClient(fingerprint)
+	dashClientPtr.Store(newDashClient(fingerprint))
 }
 
 // RegisterResult holds the response from a successful registration.
@@ -140,7 +145,7 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 
-	resp, err := dashClient.Do(req)
+	resp, err := dashClientPtr.Load().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
@@ -172,7 +177,7 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 	req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
 
-	return dashClient.Do(req)
+	return dashClientPtr.Load().Do(req)
 }
 
 // targetSPN derives the HTTP service SPN from a URL, e.g. "HTTP/server.domain.com".
@@ -223,7 +228,7 @@ func FetchNotifyConfig(dashboardURL string, log dc.LogFunc) (*RemoteNotifyConfig
 // FetchServers queries the dashboard API for all registered servers.
 // Used by the CLI's "dashboard list-servers" command (localhost only, no SSPI needed).
 func FetchServers(url string) ([]ServerInfo, error) {
-	resp, err := dashClient.Get(url)
+	resp, err := dashClientPtr.Load().Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +250,7 @@ func RemoveServer(url string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := dashClient.Do(req)
+	resp, err := dashClientPtr.Load().Do(req)
 	if err != nil {
 		return err
 	}

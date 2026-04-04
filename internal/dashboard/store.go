@@ -5,6 +5,7 @@ package dashboard
 import (
 	"cmp"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,14 +28,19 @@ type ServerState struct {
 	mu      sync.RWMutex
 	servers map[string]*ServerInfo
 	path    string
+	log     dc.LogFunc
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.
 // If the file exists it is loaded; otherwise the state starts empty.
-func NewServerState(dataDir string) *ServerState {
+func NewServerState(dataDir string, log dc.LogFunc) *ServerState {
+	if log == nil {
+		log = dc.DiscardLogger()
+	}
 	s := &ServerState{
 		servers: make(map[string]*ServerInfo),
 		path:    filepath.Join(dataDir, "servers.json"),
+		log:     log,
 	}
 	s.load()
 	return s
@@ -119,8 +125,19 @@ func (s *ServerState) save() {
 	}
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
+		dc.LogMsg(s.log, dc.LvlERR, "dashboard: marshal servers failed", fmt.Sprintf("error=%q", err))
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
-	_ = os.WriteFile(s.path, data, 0o644)
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		dc.LogMsg(s.log, dc.LvlERR, "dashboard: create data dir failed", fmt.Sprintf("error=%q", err))
+		return
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		dc.LogMsg(s.log, dc.LvlERR, "dashboard: write tmp file failed", fmt.Sprintf("error=%q", err))
+		return
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		dc.LogMsg(s.log, dc.LvlERR, "dashboard: rename tmp file failed", fmt.Sprintf("error=%q", err))
+	}
 }
