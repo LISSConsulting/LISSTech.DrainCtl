@@ -126,9 +126,47 @@
             .nav-links a:hover {
                 color: var(--fg);
             }
+            .nav-toggle {
+                display: none;
+                align-items: center;
+                justify-content: center;
+                width: 36px;
+                height: 36px;
+                background: none;
+                border: var(--bw) solid var(--border);
+                border-radius: 6px;
+                font-size: 1.2rem;
+                line-height: 1;
+                cursor: pointer;
+                color: var(--fg);
+                transition: background 0.12s;
+            }
+            .nav-toggle:hover {
+                background: var(--surface);
+            }
             @media (max-width: 640px) {
                 .nav-links {
                     display: none;
+                    flex-direction: column;
+                    position: absolute;
+                    top: 56px;
+                    left: 0;
+                    right: 0;
+                    background: var(--bg);
+                    border-bottom: var(--bw) solid var(--border);
+                    padding: 8px 0;
+                    z-index: 99;
+                    gap: 0;
+                }
+                .nav-links.open {
+                    display: flex;
+                }
+                .nav-links a {
+                    line-height: 1;
+                    padding: 13px 24px;
+                }
+                .nav-toggle {
+                    display: flex;
                 }
             }
 
@@ -706,7 +744,14 @@
                 <a href="#" class="nav-brand"
                     ><span class="emoji">🚰</span> DrainCtl <span>by LISS Technologies</span></a
                 >
-                <ul class="nav-links">
+                <button
+                    class="nav-toggle"
+                    id="nav-toggle"
+                    aria-label="Open navigation menu"
+                    aria-expanded="false"
+                    aria-controls="nav-links"
+                >≡</button>
+                <ul class="nav-links" id="nav-links" role="list">
                     <li><a href="#features">Features</a></li>
                     <li><a href="#how">How It Works</a></li>
                     <li><a href="#dashboard">Dashboard</a></li>
@@ -1339,6 +1384,25 @@
         </footer>
 
         <script>
+            (function () {
+                var toggle = document.getElementById("nav-toggle");
+                var links = document.getElementById("nav-links");
+                toggle.addEventListener("click", function () {
+                    var isOpen = links.classList.toggle("open");
+                    toggle.setAttribute("aria-expanded", isOpen);
+                    toggle.setAttribute("aria-label", isOpen ? "Close navigation menu" : "Open navigation menu");
+                    toggle.textContent = isOpen ? "\u00d7" : "\u2261";
+                });
+                links.querySelectorAll("a").forEach(function (a) {
+                    a.addEventListener("click", function () {
+                        links.classList.remove("open");
+                        toggle.setAttribute("aria-expanded", "false");
+                        toggle.setAttribute("aria-label", "Open navigation menu");
+                        toggle.textContent = "\u2261";
+                    });
+                });
+            })();
+
             function showTab(i) {
                 document.querySelectorAll(".usage-tab").forEach((t, j) => t.classList.toggle("active", j === i));
                 document.querySelectorAll(".usage-panel").forEach((p, j) => p.classList.toggle("active", j === i));

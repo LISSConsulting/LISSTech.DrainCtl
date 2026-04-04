@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fourteenth roam-mode pass complete.** Dashboard UI: server search/filter bar with text search + status pills; event delegation replaces inline onclick on server card buttons.
+> Current state: **Fifteenth roam-mode pass complete.** Dashboard accessibility: ARIA roles/labels on state bar, modals, log, and server card buttons; focus management for settings modal. Landing page: hamburger nav menu for mobile (< 640px).
 
 ## Completed Work
 
@@ -38,10 +38,12 @@
 | Roam #13 | Dashboard UI: last-refresh timestamp in footer — `refresh()` writes "Updated HH:MM:SS" to `#footer-updated` on each successful poll, replacing the static "Auto-refresh 30s" text | UX, dashboard |
 | Roam #14 | Dashboard UI: server filter bar — text search input + status pills (All/Healthy/Grace/Alert/Offline) above server grid; `filterGrid()` shows/hides `.srv` cards client-side; "No servers match" notice when result is empty | feature, UX, dashboard |
 | Roam #14 | Dashboard UI: safe button delegation — removed `onclick="showHistory('...')"` / `onclick="rm('...')"` inline handlers; server cards carry `data-host` / `data-status` attributes; single delegated listener on `#grid` dispatches History and Remove actions | security, code quality, dashboard |
+| Roam #15 | Dashboard accessibility — `role="img"` + dynamic `aria-label` on state bar; `role="dialog"` + `aria-modal` + `aria-labelledby` on settings and history overlays; `aria-label` on close/expand/gear buttons; `role="log"` + `aria-live="polite"` on event log; `aria-label="View history for {host}"` / `aria-label="Remove {host}"` on server card buttons; focus returns to gear button on settings close | a11y, dashboard |
+| Roam #15 | Landing page mobile nav — hamburger toggle button (`.nav-toggle`) appears at ≤ 640px; click opens full-width dropdown (`nav-links.open`); `aria-expanded` + `aria-controls` wired; links auto-close the menu on click | UX, a11y, docs |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #14.)*
+*(All tracked items complete — nothing pending after Roam #15.)*
 
 ## Key Learnings
 
@@ -74,6 +76,8 @@
 - **CSP for embedded SPA**: `default-src 'none'` + per-directive allowlists is more restrictive than `default-src 'self'`. The dashboard's inline uPlot script and `<style>` blocks require `'unsafe-inline'` for both `script-src` and `style-src`; a nonce-based approach would require per-request HTML template rendering. `frame-ancestors 'self'` is redundant with `X-Frame-Options: SAMEORIGIN` but takes precedence in browsers that support CSP Level 2+; both are kept for compatibility.
 - **Server filter bar is purely client-side**: All filtering is done by toggling `.hidden` on `.srv` card divs after each keypress or pill click. No API call needed — `render()` re-runs `filterGrid()` after each refresh so the active filter is reapplied automatically on new data. The "no match" notice is lazily created on first need and reused thereafter.
 - **Event delegation over inline onclick for generated HTML**: Using a single `click` listener on `#grid` with `e.target.closest(".btn-hist")` / `".btn-rm"` avoids JS string interpolation of server-controlled hostnames in attribute context, eliminates one re-registration concern per re-render, and keeps the handler wiring out of the HTML generation loop.
+- **Dashboard accessibility pattern**: `role="dialog" aria-modal="true" aria-labelledby="…"` on overlay divs; `aria-label` on icon-only buttons; `role="log" aria-live="polite"` on the event log; `role="img" aria-label="…"` on the visual-only state bar (updated dynamically from render). Focus management: move focus to the close button on open, return to the trigger on close, using `.focus()` in `toggleSettings()`.
+- **Mobile nav dropdown from sticky parent**: A `position: sticky` element acts as the containing block for `position: absolute` children, so `top: 56px` (nav height) correctly places the dropdown flush below the sticky nav bar without any extra wrapper.
 - **Grace remaining calculation is client-side only**: `state_duration_seconds` (from last poll) minus `grace_period * 60` (cached from config fetch) gives remaining grace time at poll time. It does not count down between polls; refreshing gets the latest value. Initialise `graceMinutes = null` so the row hides itself until the config has actually loaded — avoids showing stale "0 left" on first render.
 - **History modal z-index ordering**: Settings overlay is z-index 150; log expanded is z-index 200; history modal uses z-index 160 so it can stack over settings but not over the log fullscreen view. ESC priority matches visual stack: history first, then settings, then log collapse.
 - **`encodeURIComponent` for history hostname**: The `/api/v1/history/{host}` path value accepts hostnames with dots and hyphens; `encodeURIComponent` encodes these safely even for edge cases like hostnames containing `%` or `#`.
