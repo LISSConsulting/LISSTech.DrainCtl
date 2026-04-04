@@ -1256,6 +1256,62 @@
                     width: 100%;
                 }
             }
+
+            /* Server filter bar */
+            .srv-bar {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .srv-bar .log-search {
+                flex: 1;
+                min-width: 160px;
+                max-width: 260px;
+            }
+            .filter-pills {
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+            .filter-pill {
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.72rem;
+                font-weight: 600;
+                padding: 5px 12px;
+                background: var(--card);
+                color: var(--muted);
+                border: var(--bw) solid var(--border);
+                border-radius: 20px;
+                cursor: pointer;
+                transition: all 0.15s;
+                user-select: none;
+            }
+            .filter-pill:hover {
+                border-color: var(--accent);
+                color: var(--fg);
+            }
+            .filter-pill.active {
+                background: var(--accent);
+                color: #fff;
+                border-color: var(--accent);
+            }
+            .filter-pill.active[data-status="ok"] {
+                background: var(--green);
+                border-color: var(--green);
+            }
+            .filter-pill.active[data-status="grace"] {
+                background: var(--amber);
+                border-color: var(--amber);
+            }
+            .filter-pill.active[data-status="alert"] {
+                background: var(--red);
+                border-color: var(--red);
+            }
+            .srv.hidden {
+                display: none !important;
+            }
         </style>
     </head>
     <body>
@@ -1322,6 +1378,16 @@
             </div>
 
             <div class="section-label">Servers</div>
+            <div class="srv-bar" id="srv-bar" style="display:none">
+                <input class="log-search" id="srv-search" placeholder="Filter servers..." oninput="filterGrid()" />
+                <div class="filter-pills" id="status-filter">
+                    <span class="filter-pill active" data-status="all">All</span>
+                    <span class="filter-pill" data-status="ok">Healthy</span>
+                    <span class="filter-pill" data-status="grace">Grace</span>
+                    <span class="filter-pill" data-status="alert">Alert</span>
+                    <span class="filter-pill" data-status="off">Offline</span>
+                </div>
+            </div>
             <div class="grid" id="grid">
                 <div class="empty"><h2>Connecting...</h2></div>
             </div>
@@ -4678,7 +4744,8 @@
                 logExpanded = false,
                 stateHistory = [],
                 graceMinutes = null,
-                histOpen = false;
+                histOpen = false,
+                activeFilter = "all";
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -4849,6 +4916,7 @@
                 // Show/hide sections based on data
                 document.querySelector(".chart-wrap").style.display = t ? "" : "none";
                 document.querySelector(".log-section").style.display = t ? "" : "none";
+                document.getElementById("srv-bar").style.display = t ? "" : "none";
 
                 if (!servers || !servers.length) {
                     g.innerHTML =
@@ -4867,6 +4935,10 @@
                         seen = s === "off" ? "offline" : rel(srv.last_seen);
                     html +=
                         '<div class="srv card ' +
+                        s +
+                        '" data-host="' +
+                        esc(srv.hostname) +
+                        '" data-status="' +
                         s +
                         '"><div class="srv-h"><span class="srv-host">' +
                         esc(srv.hostname.split(".")[0]) +
@@ -4923,13 +4995,14 @@
                             " active</span></div>";
                     }
                     html +=
-                        '</div><div class="srv-act"><button class="btn-hist" onclick="showHistory(\'' +
+                        '</div><div class="srv-act"><button class="btn-hist" data-host="' +
                         esc(srv.hostname) +
-                        "')\">\u29c9 History</button><button class=\"btn-rm\" onclick=\"rm('" +
+                        '">\u29c9 History</button><button class="btn-rm" data-host="' +
                         esc(srv.hostname) +
-                        "')\">Remove</button></div></div>";
+                        '">Remove</button></div></div>';
                 });
                 g.innerHTML = html;
+                filterGrid();
 
                 // Status pill
                 document.getElementById("status-pill").textContent = "Live";
@@ -5084,6 +5157,32 @@
                 document.querySelectorAll("#log-entries .evt").forEach((el) => {
                     el.classList.toggle("hidden", q && !el.dataset.text.includes(q));
                 });
+            }
+
+            function filterGrid() {
+                const searchEl = document.getElementById("srv-search");
+                const q = searchEl ? searchEl.value.toLowerCase() : "";
+                let visible = 0;
+                document.querySelectorAll("#grid .srv").forEach(function (card) {
+                    const host = (card.dataset.host || "").toLowerCase();
+                    const status = card.dataset.status || "off";
+                    const matchText = !q || host.includes(q);
+                    const matchStatus = activeFilter === "all" || status === activeFilter;
+                    const show = matchText && matchStatus;
+                    card.classList.toggle("hidden", !show);
+                    if (show) visible++;
+                });
+                const total = document.querySelectorAll("#grid .srv").length;
+                let noMatch = document.getElementById("grid-no-match");
+                if (!noMatch && total > 0) {
+                    noMatch = document.createElement("div");
+                    noMatch.id = "grid-no-match";
+                    noMatch.className = "empty";
+                    noMatch.style.cssText = "grid-column:1/-1;padding:32px;text-align:center";
+                    noMatch.textContent = "No servers match the current filter.";
+                    document.getElementById("grid").appendChild(noMatch);
+                }
+                if (noMatch) noMatch.style.display = visible === 0 && total > 0 ? "" : "none";
             }
 
             function toggleExpand() {
@@ -5522,6 +5621,26 @@
                     syncThreshold(parseInt(input.value) || 0);
                 });
             })();
+
+            // Event delegation for server card buttons — avoids inline onclick with interpolated hostnames
+            document.getElementById("grid").addEventListener("click", function (e) {
+                const hist = e.target.closest(".btn-hist");
+                if (hist && hist.dataset.host) { showHistory(hist.dataset.host); return; }
+                const rmBtn = e.target.closest(".btn-rm");
+                if (rmBtn && rmBtn.dataset.host) { rm(rmBtn.dataset.host); }
+            });
+
+            // Status filter pill wiring
+            document.querySelectorAll("#status-filter .filter-pill").forEach(function (pill) {
+                pill.addEventListener("click", function () {
+                    activeFilter = pill.dataset.status;
+                    document.querySelectorAll("#status-filter .filter-pill").forEach(function (p) {
+                        p.classList.remove("active");
+                    });
+                    pill.classList.add("active");
+                    filterGrid();
+                });
+            });
 
             if (location.search === "?mock") {
                 var s = document.createElement("script");
