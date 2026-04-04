@@ -109,7 +109,7 @@ func EnumerateSessions() ([]SessionInfo, error) {
 	entrySize := unsafe.Sizeof(wtsSessionInfoW{})
 	var sessions []SessionInfo
 
-	for i := uint32(0); i < count; i++ {
+	for i := range count {
 		entry := (*wtsSessionInfoW)(unsafe.Add(pSessionInfo, uintptr(i)*entrySize))
 
 		// Skip Services session and listener sessions.

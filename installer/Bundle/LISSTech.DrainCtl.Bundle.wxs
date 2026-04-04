@@ -1,0 +1,53 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+
+  <Bundle Name="LISSTech DrainCtl"
+    Manufacturer="LISS Consulting, Corp."
+    Version="26.93.13"
+    HelpUrl="https://github.com/LISSConsulting/LISSTech.DrainCtl"
+    AboutUrl="https://github.com/LISSConsulting/LISSTech.DrainCtl"
+    DisableModify="yes"
+    IconSourceFile="..\..\assets\drainctl.ico"
+    UpgradeCode="a8f2c1d0-6e39-4b7a-9d5c-2f4e8a1b3c6d">
+
+    <!-- Burn variables bound to MSI properties via MsiProperty -->
+    <Variable Name="InstallMode" Value="standalone" />
+    <Variable Name="WebhookUrl" Value="" />
+    <Variable Name="NtfyUrl" Value="" />
+    <Variable Name="DashboardUrl" Value="" />
+    <Variable Name="DashboardPort" Value="49470" />
+    <Variable Name="DashboardGroup" Value="Domain Admins" />
+    <Variable Name="GracePeriod" Value="60" />
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="rtfLicense"
+        LogoFile="..\..\assets\drainctl.ico"
+        ShowVersion="yes"
+        SuppressOptionsUI="no"
+        LicenseFile="License.rtf"
+        ThemeFile="LISSTech.DrainCtl.Bundle.xml"
+        LocalizationFile="LISSTech.DrainCtl.Bundle.wxl" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <PackageGroupRef Id="DrainCtlPackages" />
+    </Chain>
+  </Bundle>
+
+  <Fragment>
+    <PackageGroup Id="DrainCtlPackages">
+      <MsiPackage Id="DrainCtlMsi"
+        SourceFile="..\..\dist\LISSTech.DrainCtl.msi"
+        Visible="no"
+        Vital="yes">
+        <MsiProperty Name="INSTALL_MODE" Value="[InstallMode]" />
+        <MsiProperty Name="WEBHOOK_URL" Value="[WebhookUrl]" />
+        <MsiProperty Name="NTFY_URL" Value="[NtfyUrl]" />
+        <MsiProperty Name="DASHBOARD_URL" Value="[DashboardUrl]" />
+        <MsiProperty Name="DASHBOARD_PORT" Value="[DashboardPort]" />
+        <MsiProperty Name="DASHBOARD_GROUP" Value="[DashboardGroup]" />
+        <MsiProperty Name="GRACE_PERIOD" Value="[GracePeriod]" />
+      </MsiPackage>
+    </PackageGroup>
+  </Fragment>
+</Wix>

@@ -215,8 +215,16 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
-	// Auto-register with dashboard if URL is configured.
+	// Auto-discover dashboard via SRV if URL is not explicitly configured.
+	if dashCfg.URL == "" {
+		if discovered := dashboard.DiscoverDashboardURL(s.log); discovered != "" {
+			dashCfg.URL = discovered
+		}
+	}
+
+	// Auto-register with dashboard if URL is configured (or discovered).
 	if dashCfg.URL != "" {
+		dashboard.InitDashClient(dashCfg.TLSFingerprint)
 		if err := dashboard.Register(dashCfg.URL, s.log); err != nil {
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard registration failed (will retry on report)", fmt.Sprintf("error=%q", err))
 		} else {
