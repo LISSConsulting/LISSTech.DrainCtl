@@ -325,6 +325,97 @@ body {
 .w { color: #e2e8f0; }
 .d { color: #94a3b8; }
 
+/* ── Comic panels (What's New) ───────────────────────── */
+.comic {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--so) var(--so) 0 var(--shadow);
+  overflow: hidden;
+  background: var(--card);
+}
+.comic-panel {
+  padding: 24px;
+  border: var(--bw) solid var(--border);
+  margin: -1px;
+  position: relative;
+  background: var(--card);
+  transition: background 0.15s;
+}
+.comic-panel:hover { background: var(--surface); }
+.comic-hero  { grid-column: 1 / 5; background: linear-gradient(135deg, rgba(163,71,91,0.08), rgba(93,138,110,0.08)); }
+.comic-tall  { grid-column: 5 / 7; }
+.comic-panel:nth-child(3) { grid-column: 1 / 3; }
+.comic-panel:nth-child(4) { grid-column: 3 / 5; }
+.comic-panel:nth-child(5) { grid-column: 5 / 7; }
+.comic-wide  { grid-column: 1 / 7; }
+
+.comic-caption {
+  font-family: 'DM Serif Display', serif;
+  font-style: italic;
+  font-size: 0.72rem;
+  color: var(--subtle);
+  margin-bottom: 10px;
+  padding: 3px 10px;
+  background: rgba(163,71,91,0.07);
+  border-radius: 4px;
+  display: inline-block;
+}
+.comic-body h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-bottom: 5px;
+}
+.comic-body p {
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.comic-body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+}
+.comic-icon {
+  font-size: 1.8rem;
+  margin-bottom: 8px;
+}
+.comic-code {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+}
+.comic-burst {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 900;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: #fff;
+  background: var(--accent);
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: var(--bw) solid var(--border);
+  box-shadow: 2px 2px 0 var(--shadow);
+  transform: rotate(3deg);
+}
+@media (max-width: 768px) {
+  .comic { grid-template-columns: 1fr; }
+  .comic-hero, .comic-tall, .comic-wide,
+  .comic-panel:nth-child(3),
+  .comic-panel:nth-child(4),
+  .comic-panel:nth-child(5) { grid-column: 1 / -1; }
+}
+
 /* ── Install ──────────────────────────────────────────── */
 .install-grid {
   display: grid;
@@ -521,31 +612,65 @@ body {
 </section>
 
 <!-- What's New -->
-<section class="section" id="new" style="background: linear-gradient(135deg, rgba(163,71,91,0.06), rgba(93,138,110,0.06)); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
+<section class="section" id="new" style="border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
   <div class="wrap">
-    <div class="section-label">What's New in v27</div>
-    <div class="section-title">Sessions, smarter alerts, and more control.</div>
-    <div class="section-desc">The biggest update yet. Now you can see who's connected, get notified exactly the way you want, and manage everything from a single config file.</div>
-    <div class="features-grid">
-      <div class="feature card">
-        <div class="icon">&#128101;</div>
-        <h3>Session Tracking</h3>
-        <p>See active, disconnected, and total sessions on every server. Utilization gauges show capacity at a glance.</p>
+    <div class="section-label">What's New in v28</div>
+    <div class="section-title serif" style="font-style:italic">Previously, on DrainCtl&hellip;</div>
+    <div class="comic">
+      <!-- Row 1: big hero + tall side panel -->
+      <div class="comic-panel comic-hero">
+        <div class="comic-burst">NEW!</div>
+        <div class="comic-caption">Meanwhile, in the server room&hellip;</div>
+        <div class="comic-body">
+          <div class="comic-icon">&#128269;</div>
+          <h3>Zero-Touch Discovery</h3>
+          <p>One DNS SRV record. Every agent finds the dashboard <em>on its own</em>. No scripts, no per-machine config, no manual URLs.</p>
+          <code class="comic-code">_drainctl._tcp.contoso.com</code>
+        </div>
       </div>
-      <div class="feature card">
-        <div class="icon">&#128276;</div>
-        <h3>Multi-Target Alerts</h3>
-        <p>Send notifications to multiple webhooks and ntfy channels. Each target gets its own triggers and repeat schedule.</p>
+      <div class="comic-panel comic-tall">
+        <div class="comic-caption">The lock clicks shut&hellip;</div>
+        <div class="comic-body">
+          <div class="comic-icon">&#128274;</div>
+          <h3>HTTPS<br>Everywhere</h3>
+          <p>Auto TLS on first start. Self-signed cert, or bring your own. Certificate pinning. HSTS. Private key locked to SYSTEM.</p>
+        </div>
       </div>
-      <div class="feature card">
-        <div class="icon">&#127919;</div>
-        <h3>Granular Triggers</h3>
-        <p>Choose exactly what fires each alert &mdash; drain on, drain off, grace period, alerts, session warnings, or all of the above.</p>
+      <!-- Row 2: three equal panels -->
+      <div class="comic-panel">
+        <div class="comic-caption">At the notification desk&hellip;</div>
+        <div class="comic-body">
+          <div class="comic-icon">&#128276;</div>
+          <h3>Target Editor</h3>
+          <p>Add and remove webhook + ntfy targets right in the dashboard. Per-target triggers and repeat intervals.</p>
+        </div>
       </div>
-      <div class="feature card">
-        <div class="icon">&#128196;</div>
-        <h3>JSON Config File</h3>
-        <p>Configuration moved from the registry to a simple JSON file. Edit it in Notepad, deploy it with your RMM. Changes apply instantly.</p>
+      <div class="comic-panel">
+        <div class="comic-caption">The cmdlets assemble&hellip;</div>
+        <div class="comic-body">
+          <div class="comic-icon">&#9889;</div>
+          <h3>12 Cmdlets</h3>
+          <p><code>Add-</code>, <code>Get-</code>, <code>Remove-RDSHDrainNotificationTarget</code>. Full multi-target control from PowerShell.</p>
+        </div>
+      </div>
+      <div class="comic-panel">
+        <div class="comic-caption">A familiar face, modernized&hellip;</div>
+        <div class="comic-body">
+          <div class="comic-icon">&#128640;</div>
+          <h3>Go 1.25</h3>
+          <p>Range-over-int, <code>slices</code>, <code>clear()</code>. Event-based config watcher. Faster, leaner, modern.</p>
+        </div>
+      </div>
+      <!-- Row 3: wide cinematic panel -->
+      <div class="comic-panel comic-wide">
+        <div class="comic-caption">The installer arrives&hellip;</div>
+        <div class="comic-body" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+          <div class="comic-icon" style="font-size:2.5rem">&#128230;</div>
+          <div style="flex:1;min-width:200px">
+            <h3>MSI with Superpowers</h3>
+            <p>Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>, <code>WEBHOOK_URL=...</code> &mdash; configure everything from the command line. Burn bundle with branded UI and RTF license.</p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
