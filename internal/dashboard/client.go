@@ -4,8 +4,11 @@ package dashboard
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,14 +20,41 @@ import (
 	"github.com/alexbrainman/sspi/negotiate"
 )
 
-// dashClient is the HTTP client used for dashboard API calls.
-// The 10s timeout accommodates the SSPI Negotiate round-trip.
-// InsecureSkipVerify is set because the dashboard may use a self-signed cert.
-var dashClient = &http.Client{
-	Timeout: 10 * time.Second,
-	Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // trust internal dashboard self-signed cert
-	},
+// newDashClient creates an HTTP client that pins the dashboard TLS certificate.
+// If fingerprint is empty, it falls back to InsecureSkipVerify (first-use trust).
+func newDashClient(fingerprint string) *http.Client {
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // verified in VerifyPeerCertificate below
+	}
+
+	if fingerprint != "" {
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("dashboard: no TLS certificate presented")
+			}
+			h := sha256.Sum256(rawCerts[0])
+			got := hex.EncodeToString(h[:])
+			if got != fingerprint {
+				return fmt.Errorf("dashboard: certificate fingerprint mismatch (got %s, want %s)", got, fingerprint)
+			}
+			return nil
+		}
+	}
+
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
+	}
+}
+
+// dashClient is the default client (no pinning). Replaced at service start
+// when the config has a tls_fingerprint.
+var dashClient = newDashClient("")
+
+// InitDashClient configures the dashboard HTTP client with certificate pinning.
+// Called during service startup when the dashboard URL is configured.
+func InitDashClient(fingerprint string) {
+	dashClient = newDashClient(fingerprint)
 }
 
 // Register notifies the dashboard server that this host exists.

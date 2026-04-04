@@ -6,14 +6,17 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -47,7 +50,8 @@ func loadOrGenerateTLS(certFile, keyFile, dataDir string, log dc.LogFunc) (*tls.
 	if cert, err := tls.LoadX509KeyPair(autoCert, autoKey); err == nil {
 		if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
 			if time.Now().Before(leaf.NotAfter.Add(-24 * time.Hour)) {
-				log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert reused (expires %s)", leaf.NotAfter.Format("2006-01-02")))
+				fp := certFingerprint(leaf)
+				log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert reused (expires %s fingerprint=%s)", leaf.NotAfter.Format("2006-01-02"), fp))
 				return &tls.Config{
 					Certificates: []tls.Certificate{cert},
 					MinVersion:   tls.VersionTLS12,
@@ -66,6 +70,31 @@ func loadOrGenerateTLS(certFile, keyFile, dataDir string, log dc.LogFunc) (*tls.
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
 	}, nil
+}
+
+// certFingerprint returns the SHA-256 fingerprint of a certificate.
+func certFingerprint(cert *x509.Certificate) string {
+	h := sha256.Sum256(cert.Raw)
+	return hex.EncodeToString(h[:])
+}
+
+// CertFingerprint loads the dashboard's auto-generated cert and returns
+// its SHA-256 fingerprint. Used by agents for certificate pinning.
+func CertFingerprint(dataDir string) (string, error) {
+	certPath := filepath.Join(dataDir, "dashboard-tls.crt")
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", fmt.Errorf("read cert: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block in %s", certPath)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse cert: %w", err)
+	}
+	return certFingerprint(cert), nil
 }
 
 func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certificate, error) {
@@ -101,7 +130,7 @@ func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certifica
 		return tls.Certificate{}, fmt.Errorf("create self-signed cert: %w", err)
 	}
 
-	// Write cert PEM.
+	// Write cert PEM (world-readable is fine — it's the public cert).
 	certOut, err := os.Create(certPath)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("write cert file: %w", err)
@@ -109,19 +138,45 @@ func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certifica
 	_ = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	_ = certOut.Close()
 
-	// Write key PEM.
+	// Write key PEM with restricted ACL (SYSTEM + Administrators only).
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("marshal key: %w", err)
 	}
-	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
+	keyData := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	if err := writeRestrictedFile(keyPath, keyData); err != nil {
 		return tls.Certificate{}, fmt.Errorf("write key file: %w", err)
 	}
-	_ = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	_ = keyOut.Close()
 
-	log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert generated host=%s cert=%s", hostname, certPath))
+	leaf, _ := x509.ParseCertificate(certDER)
+	fp := ""
+	if leaf != nil {
+		fp = certFingerprint(leaf)
+	}
+	log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert generated host=%s fingerprint=%s cert=%s", hostname, fp, certPath))
 
 	return tls.LoadX509KeyPair(certPath, keyPath)
+}
+
+// writeRestrictedFile writes data to path with ACLs that grant access
+// only to SYSTEM and the built-in Administrators group.
+func writeRestrictedFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+
+	// Reset ACL: disable inheritance, remove all inherited ACEs,
+	// then grant only SYSTEM and Administrators full control.
+	cmds := [][]string{
+		{"icacls", path, "/inheritance:r"},
+		{"icacls", path, "/grant", "SYSTEM:(F)"},
+		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators by SID (locale-independent)
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			return fmt.Errorf("%s: %w (%s)", args[0], err, string(out))
+		}
+	}
+
+	return nil
 }
