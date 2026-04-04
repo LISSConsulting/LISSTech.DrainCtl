@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Ninth roam-mode pass complete.** Security headers middleware, `handleHealth` Grace correctness fix, dead code removal, and 11 new tests for `handleServers`, `handleDeleteServer`, and the updated health response.
+> Current state: **Tenth roam-mode pass complete.** 27 unit tests for `internal/dashboard/store.go` (`ServerState`): CRUD operations, history ring buffer, persistence roundtrip, concurrent access under `-race`.
 
 ## Completed Work
 
@@ -26,10 +26,11 @@
 | Roam #9 | `handleHealth` correctness: `Grace` status was miscounted as `healthy`; added separate `grace` field to JSON response (backward-compatible) | correctness, dashboard |
 | Roam #9 | `securityMiddleware`: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` headers added to all responses; HSTS remains TLS-only, chained on top | security, dashboard |
 | Roam #9 | `handleDeleteServer`: removed unreachable URL-path fallback (predated Go 1.22 `ServeMux` `PathValue`); 11 new tests for `handleServers`, `handleDeleteServer`, and Grace health counting | code quality, testing |
+| Roam #10 | 27 tests for `internal/dashboard/store.go` (`ServerState`) — `NewServerState` (empty dir, load existing, corrupt file), `Register` (idempotent, sets `RegisteredAt`), `Remove` (bool return), `IsRegistered`, `Update` (`LastResult`/`LastSeen`, unregistered no-op), `HostHistory` (newest-first, n-limit, n=0 returns all, ring cap at `historyMax`, ring evicts oldest), `All` (empty slice, hostname sort, snapshot isolation), persistence (register/remove/`LastResult` survive reload, tmp→rename pattern, valid JSON), concurrent access under `-race` | testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #9.)*
+*(All tracked items complete — nothing pending after Roam #10.)*
 
 ## Key Learnings
 
@@ -53,3 +54,6 @@
 - **Security headers layering**: `securityMiddleware` (defensive headers: nosniff, SAMEORIGIN, Referrer-Policy, Permissions-Policy) wraps the mux unconditionally; `hstsMiddleware` wraps the result only when TLS is active. This keeps the two concerns separate and lets HSTS remain TLS-gated.
 - **Health endpoint Grace miscounting**: `switch s.LastResult.Status { case "Alert": ... default: healthy++ }` silently lumped Grace, Error, and any unknown status into `healthy`. Fix: add explicit `case "Grace": grace++` and expose a `grace` JSON field. Adding a new field to a JSON response is backward-compatible — existing decoders ignore unknown fields.
 - **PathValue fallback is dead code**: `DELETE /api/v1/servers/{host}` registered via Go 1.22 `http.ServeMux` always populates `r.PathValue("host")` when the route matches; the URL-split fallback can never be reached and should be deleted.
+- **`ServerState` history is separate from `servers` map**: `Update()` appends to `history[hostname]` regardless of whether the host is registered; only the `ServerInfo` side is guarded by `IsRegistered`. Tests for `Update` on an unregistered host must assert that `All()` remains empty (no `ServerInfo` created), while accepting that the ring buffer will have an entry. The ring is always in-memory and not persisted, so this is benign.
+- **`All()` returns value copies**: `ServerState.All()` copies each `*ServerInfo` by value before returning, so mutating the returned slice does not affect internal state. This is worth verifying explicitly (see `TestAll_ReturnsSnapshot`).
+- **`hostname()` helper in store_test.go**: Uses `string(rune('A'+n))` to generate `SRVA`…`SRVE` for concurrent tests. Simple enough to avoid an import; works for up to 26 hosts.
