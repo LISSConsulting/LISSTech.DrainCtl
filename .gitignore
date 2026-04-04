@@ -10,6 +10,8 @@ dist/
 # WiX
 installer/obj/
 installer/bin/
+installer/Bundle/obj/
+installer/Bundle/bin/
 
 # Message compiler intermediates (keep .mc source and .dll output)
 assets/*.h
