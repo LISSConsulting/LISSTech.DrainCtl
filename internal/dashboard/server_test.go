@@ -586,3 +586,243 @@ func TestHandleReport_HealthDashboardReflectsReport(t *testing.T) {
 		}
 	}
 }
+
+// ── handleHealth: Grace counting ──────────────────────────────────────────────
+
+func TestHandleHealth_GraceCountedSeparatelyFromHealthy(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Register("SRV02")
+	ds.state.Register("SRV03")
+	ds.state.Register("SRV04")
+
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
+	ds.state.Update("SRV03", &dc.CheckResult{Host: "SRV03", Status: "Alert"})
+	// SRV04 has no report → unknown
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Servers  int `json:"servers"`
+		Healthy  int `json:"healthy"`
+		Grace    int `json:"grace"`
+		Alerting int `json:"alerting"`
+		Unknown  int `json:"unknown"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Servers != 4 {
+		t.Errorf("servers = %d, want 4", resp.Servers)
+	}
+	if resp.Healthy != 1 {
+		t.Errorf("healthy = %d, want 1 (Grace must not be counted as Healthy)", resp.Healthy)
+	}
+	if resp.Grace != 1 {
+		t.Errorf("grace = %d, want 1", resp.Grace)
+	}
+	if resp.Alerting != 1 {
+		t.Errorf("alerting = %d, want 1", resp.Alerting)
+	}
+	if resp.Unknown != 1 {
+		t.Errorf("unknown = %d, want 1", resp.Unknown)
+	}
+}
+
+func TestHandleHealth_GraceFieldPresentWhenZero(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Grace *int `json:"grace"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Grace == nil {
+		t.Fatal("grace field absent from health response")
+	}
+	if *resp.Grace != 0 {
+		t.Errorf("grace = %d, want 0 when no servers are in Grace", *resp.Grace)
+	}
+}
+
+// ── handleServers ─────────────────────────────────────────────────────────────
+
+func TestHandleServers_EmptyStateReturnsEmptyArray(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	ds.handleServers(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var servers []ServerInfo
+	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(servers) != 0 {
+		t.Errorf("len(servers) = %d, want 0", len(servers))
+	}
+}
+
+func TestHandleServers_ReturnsSortedByHostname(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("ZETA")
+	ds.state.Register("ALPHA")
+	ds.state.Register("MANGO")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	ds.handleServers(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var servers []ServerInfo
+	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(servers) != 3 {
+		t.Fatalf("len(servers) = %d, want 3", len(servers))
+	}
+	if servers[0].Hostname != "ALPHA" || servers[1].Hostname != "MANGO" || servers[2].Hostname != "ZETA" {
+		t.Errorf("servers not sorted: got [%s, %s, %s]", servers[0].Hostname, servers[1].Hostname, servers[2].Hostname)
+	}
+}
+
+func TestHandleServers_IncludesLastResult(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	ds.handleServers(w, r)
+
+	var servers []ServerInfo
+	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("len(servers) = %d, want 1", len(servers))
+	}
+	if servers[0].LastResult == nil {
+		t.Fatal("LastResult should be populated after Update")
+	}
+	if servers[0].LastResult.Status != "Alert" {
+		t.Errorf("LastResult.Status = %q, want Alert", servers[0].LastResult.Status)
+	}
+}
+
+// ── handleDeleteServer ────────────────────────────────────────────────────────
+
+func TestHandleDeleteServer_UnknownHostReturns404(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/GHOST", nil)
+	r.SetPathValue("host", "GHOST")
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d (unknown host should be 404)", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleDeleteServer_KnownHostReturns200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK {
+		t.Error("ok = false, want true")
+	}
+}
+
+func TestHandleDeleteServer_RemovesServerFromState(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Register("SRV02")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ds.state.IsRegistered("SRV01") {
+		t.Error("SRV01 should be removed from state after DELETE")
+	}
+	if !ds.state.IsRegistered("SRV02") {
+		t.Error("SRV02 should remain registered after SRV01 is deleted")
+	}
+}
+
+func TestHandleDeleteServer_MissingHostParamReturns400(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/", nil)
+	// PathValue("host") returns "" — simulates missing param
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (missing host param should be 400)", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleDeleteServer_IdempotentDeleteReturns404(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	deleteOnce := func() int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/SRV01", nil)
+		r.SetPathValue("host", "SRV01")
+		ds.handleDeleteServer(w, r)
+		return w.Code
+	}
+
+	if code := deleteOnce(); code != http.StatusOK {
+		t.Fatalf("first delete: status = %d, want %d", code, http.StatusOK)
+	}
+	if code := deleteOnce(); code != http.StatusNotFound {
+		t.Errorf("second delete: status = %d, want %d (host already gone)", code, http.StatusNotFound)
+	}
+}
