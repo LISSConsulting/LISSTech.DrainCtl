@@ -976,3 +976,360 @@ func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testin
 		t.Errorf("X-DrainCtl-Signature = %q, want sha256=... prefix", gotSig)
 	}
 }
+
+// ── handleGetNotifyConfig ─────────────────────────────────────────────────────
+
+func TestHandleGetNotifyConfig_Returns200WithNotifications(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.Notifications = []dc.NotificationTarget{
+			{Type: "webhook", URL: "https://hooks.example.com/abc", Triggers: dc.DefaultTriggers},
+		}
+		cfg.SessionWarningThreshold = 75
+		cfg.GracePeriod = 45
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var resp struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+		GracePeriod             int                     `json:"grace_period"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Notifications) != 1 {
+		t.Fatalf("len(notifications) = %d, want 1", len(resp.Notifications))
+	}
+	if resp.Notifications[0].URL != "https://hooks.example.com/abc" {
+		t.Errorf("notifications[0].URL = %q, want https://hooks.example.com/abc", resp.Notifications[0].URL)
+	}
+	if resp.SessionWarningThreshold != 75 {
+		t.Errorf("session_warning_threshold = %d, want 75", resp.SessionWarningThreshold)
+	}
+	if resp.GracePeriod != 45 {
+		t.Errorf("grace_period = %d, want 45", resp.GracePeriod)
+	}
+}
+
+func TestHandleGetNotifyConfig_EmptyNotificationsReturnsEmptyArray(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		return dc.DefaultConfig(), nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Notifications []dc.NotificationTarget `json:"notifications"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Must be a JSON array, not null.
+	if resp.Notifications == nil {
+		t.Error("notifications should be an empty array, not null")
+	}
+	if len(resp.Notifications) != 0 {
+		t.Errorf("len(notifications) = %d, want 0", len(resp.Notifications))
+	}
+}
+
+func TestHandleGetNotifyConfig_LoadConfigError_Returns500(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		return nil, fmt.Errorf("config file not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d (load error should yield 500)", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleGetNotifyConfig_MultipleTargets(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.Notifications = []dc.NotificationTarget{
+			{Type: "webhook", URL: "https://hook1.example.com/", Secret: "s3cr3t", Triggers: dc.DefaultTriggers},
+			{Type: "ntfy", URL: "https://ntfy.sh/my-topic", Triggers: dc.DefaultTriggers},
+		}
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Notifications []dc.NotificationTarget `json:"notifications"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Notifications) != 2 {
+		t.Fatalf("len(notifications) = %d, want 2", len(resp.Notifications))
+	}
+	if resp.Notifications[0].Type != "webhook" {
+		t.Errorf("notifications[0].type = %q, want webhook", resp.Notifications[0].Type)
+	}
+	if resp.Notifications[0].Secret != "s3cr3t" {
+		t.Errorf("notifications[0].secret = %q, want s3cr3t", resp.Notifications[0].Secret)
+	}
+	if resp.Notifications[1].Type != "ntfy" {
+		t.Errorf("notifications[1].type = %q, want ntfy", resp.Notifications[1].Type)
+	}
+}
+
+// ── handlePutNotifyConfig ─────────────────────────────────────────────────────
+
+func TestHandlePutNotifyConfig_Success_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+		return nil
+	}
+
+	body := `{"notifications":[{"type":"webhook","url":"https://hooks.example.com/","triggers":["drain_on","drain_off","alert","healthy"],"repeat_minutes":0}],"session_warning_threshold":80,"grace_period":60}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK {
+		t.Error("ok = false, want true")
+	}
+}
+
+func TestHandlePutNotifyConfig_InvalidJSON_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+		return nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader("not json at all"))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (invalid JSON should be 400)", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlePutNotifyConfig_UpdateError_Returns500(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+		return fmt.Errorf("disk full")
+	}
+
+	body := `{"notifications":[],"session_warning_threshold":80,"grace_period":60}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d (update error should be 500)", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T) {
+	ds := newTestServer(t)
+
+	var capturedTargets []dc.NotificationTarget
+	var capturedThreshold *int
+	var capturedGrace *int
+	ds.testPutNotifyConfigFunc = func(notifications []dc.NotificationTarget, threshold *int, grace *int) error {
+		capturedTargets = notifications
+		capturedThreshold = threshold
+		capturedGrace = grace
+		return nil
+	}
+
+	th := 90
+	gp := 30
+	payload := struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+		GracePeriod             int                     `json:"grace_period"`
+	}{
+		Notifications: []dc.NotificationTarget{
+			{Type: "ntfy", URL: "https://ntfy.sh/alerts", Triggers: dc.DefaultTriggers},
+		},
+		SessionWarningThreshold: th,
+		GracePeriod:             gp,
+	}
+	body, _ := json.Marshal(payload)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if len(capturedTargets) != 1 || capturedTargets[0].URL != "https://ntfy.sh/alerts" {
+		t.Errorf("capturedTargets = %v, want 1 entry with URL https://ntfy.sh/alerts", capturedTargets)
+	}
+	if capturedThreshold == nil || *capturedThreshold != 90 {
+		t.Errorf("capturedThreshold = %v, want 90", capturedThreshold)
+	}
+	if capturedGrace == nil || *capturedGrace != 30 {
+		t.Errorf("capturedGrace = %v, want 30", capturedGrace)
+	}
+}
+
+func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing.T) {
+	ds := newTestServer(t)
+
+	var capturedThreshold *int
+	var capturedGrace *int
+	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, threshold *int, grace *int) error {
+		capturedThreshold = threshold
+		capturedGrace = grace
+		return nil
+	}
+
+	// Only notifications — no threshold or grace_period fields.
+	body := `{"notifications":[]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedThreshold != nil {
+		t.Errorf("capturedThreshold = %v, want nil (field omitted from request)", capturedThreshold)
+	}
+	if capturedGrace != nil {
+		t.Errorf("capturedGrace = %v, want nil (field omitted from request)", capturedGrace)
+	}
+}
+
+func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
+	ds := newTestServer(t)
+
+	var capturedTargets []dc.NotificationTarget
+	ds.testPutNotifyConfigFunc = func(notifications []dc.NotificationTarget, _ *int, _ *int) error {
+		capturedTargets = notifications
+		return nil
+	}
+
+	target := dc.NotificationTarget{
+		Type:     "webhook",
+		URL:      "https://hooks.example.com/secret",
+		Secret:   "my-hmac-secret",
+		Triggers: dc.DefaultTriggers,
+	}
+	body, _ := json.Marshal(struct {
+		Notifications []dc.NotificationTarget `json:"notifications"`
+	}{Notifications: []dc.NotificationTarget{target}})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if len(capturedTargets) != 1 {
+		t.Fatalf("len(capturedTargets) = %d, want 1", len(capturedTargets))
+	}
+	if capturedTargets[0].Secret != "my-hmac-secret" {
+		t.Errorf("Secret = %q, want my-hmac-secret", capturedTargets[0].Secret)
+	}
+}
+
+// ── securityMiddleware ────────────────────────────────────────────────────────
+
+func TestSecurityMiddleware_SetsExpectedHeaders(t *testing.T) {
+	handler := securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(w, r)
+
+	headers := map[string]string{
+		"Content-Security-Policy": cspHeader,
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "SAMEORIGIN",
+		"Referrer-Policy":         "strict-origin-when-cross-origin",
+		"Permissions-Policy":      "camera=(), microphone=(), geolocation=()",
+	}
+	for name, want := range headers {
+		if got := w.Header().Get(name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestSecurityMiddleware_DoesNotSetHSTS(t *testing.T) {
+	handler := securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(w, r)
+
+	if hsts := w.Header().Get("Strict-Transport-Security"); hsts != "" {
+		t.Errorf("HSTS header present in non-TLS path: %q (should be set by hstsMiddleware only)", hsts)
+	}
+}
+
+func TestHSTSMiddleware_SetsSTSHeader(t *testing.T) {
+	handler := hstsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler.ServeHTTP(w, r)
+
+	sts := w.Header().Get("Strict-Transport-Security")
+	if sts == "" {
+		t.Fatal("Strict-Transport-Security header missing")
+	}
+	if !strings.Contains(sts, "max-age=") {
+		t.Errorf("Strict-Transport-Security = %q, want max-age= directive", sts)
+	}
+}
