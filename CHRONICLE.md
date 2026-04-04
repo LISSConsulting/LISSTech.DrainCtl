@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Twelfth roam-mode pass complete.** Testable config handlers via injection hooks + Content-Security-Policy header + 13 new tests (4 GET, 6 PUT, 3 middleware).
+> Current state: **Thirteenth roam-mode pass complete.** Dashboard UI improvements: per-host history drill-down modal, grace remaining time in server cards, last-refresh timestamp in footer.
 
 ## Completed Work
 
@@ -33,9 +33,13 @@
 | Roam #12 | `testLoadConfigFunc` + `testPutNotifyConfigFunc` injection hooks on `DashboardServer` — same pattern as `testNotifyFunc`; makes `handleGetNotifyConfig` and `handlePutNotifyConfig` fully unit-testable without ProgramData; 10 handler tests (GET: 200+fields, empty array, 500 on load error, multiple targets; PUT: 200, 400 bad JSON, 500 update error, arg capture, partial update, webhook secret roundtrip) | testing, dashboard |
 | Roam #12 | `Content-Security-Policy` header in `securityMiddleware` — `default-src 'none'`; `script-src 'unsafe-inline'`; `style-src 'unsafe-inline' https://fonts.googleapis.com`; `font-src https://fonts.gstatic.com`; `img-src 'self' data:`; `connect-src 'self'`; `frame-ancestors 'self'`; `base-uri 'self'`; `form-action 'self'`; 3 middleware tests (security headers presence, HSTS absent in plain middleware, HSTS present in hsts wrapper) | security, dashboard |
 
+| Roam #13 | Dashboard UI: per-host history drill-down modal — "History" button on each server card calls `GET /api/v1/history/{host}?limit=20` (existing endpoint); modal shows timestamp, status badge, mode, duration, changed_by, session counts per entry; ESC closes | feature, UX, dashboard |
+| Roam #13 | Dashboard UI: Grace remaining time — server cards in Grace state show "Grace Left: Xm Ys left" (amber) computed from `graceMinutes` (cached from `loadNotifyConfig`) and `state_duration_seconds`; `graceMinutes` initialised to `null` so row is hidden until config loads | feature, UX, dashboard |
+| Roam #13 | Dashboard UI: last-refresh timestamp in footer — `refresh()` writes "Updated HH:MM:SS" to `#footer-updated` on each successful poll, replacing the static "Auto-refresh 30s" text | UX, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #12.)*
+*(All tracked items complete — nothing pending after Roam #13.)*
 
 ## Key Learnings
 
@@ -66,3 +70,6 @@
 - **Webhook secret in settings UI**: The `secret` field is only included in the `PUT /api/v1/notify-config` payload when non-empty (saves bandwidth and avoids accidentally clearing secrets when the user hasn't changed them). The password input uses `autocomplete="new-password"` to prevent browser autofill pollution.
 - **`testLoadConfigFunc` / `testPutNotifyConfigFunc` injection pattern**: Extends the `testNotifyFunc` approach to config handlers. `testLoadConfigFunc func() (*dc.Config, error)` mirrors `dc.LoadConfig`'s signature but drops the `LogFunc` arg (captured by the closure in the real path). `testPutNotifyConfigFunc func([]dc.NotificationTarget, *int, *int) error` collapses the three real update calls (UpdateNotifications, UpdateSessionThreshold, UpdateGracePeriod) into one function — the nil pointer arguments signal "field was absent from request", matching the production nil-check guard.
 - **CSP for embedded SPA**: `default-src 'none'` + per-directive allowlists is more restrictive than `default-src 'self'`. The dashboard's inline uPlot script and `<style>` blocks require `'unsafe-inline'` for both `script-src` and `style-src`; a nonce-based approach would require per-request HTML template rendering. `frame-ancestors 'self'` is redundant with `X-Frame-Options: SAMEORIGIN` but takes precedence in browsers that support CSP Level 2+; both are kept for compatibility.
+- **Grace remaining calculation is client-side only**: `state_duration_seconds` (from last poll) minus `grace_period * 60` (cached from config fetch) gives remaining grace time at poll time. It does not count down between polls; refreshing gets the latest value. Initialise `graceMinutes = null` so the row hides itself until the config has actually loaded — avoids showing stale "0 left" on first render.
+- **History modal z-index ordering**: Settings overlay is z-index 150; log expanded is z-index 200; history modal uses z-index 160 so it can stack over settings but not over the log fullscreen view. ESC priority matches visual stack: history first, then settings, then log collapse.
+- **`encodeURIComponent` for history hostname**: The `/api/v1/history/{host}` path value accepts hostnames with dots and hyphens; `encodeURIComponent` encodes these safely even for edge cases like hostnames containing `%` or `#`.
