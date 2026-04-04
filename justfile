@@ -228,26 +228,47 @@ sign-msi:
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
 
-# Sign the Burn bundle EXE (after bundle build)
+# Sign the Burn bundle EXE (detach engine → sign engine → reattach → sign bundle)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 sign-bundle:
     $thumbprint = "{{signing_thumbprint}}"
     $timestampUrl = "{{timestamp_url}}"
     $description = "{{sign_description}}"
-    $exePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
+    $bundlePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
+    $enginePath = "{{dist_dir}}/engine.exe"
 
     if (-not $thumbprint) {
         Write-Host "`n⏭️  Skipping bundle signing (no certificate)" -ForegroundColor Yellow
         exit 0
     }
 
-    if (-not (Test-Path $exePath)) { Write-Error "Bundle not found: $exePath"; exit 1 }
+    if (-not (Test-Path $bundlePath)) { Write-Error "Bundle not found: $bundlePath"; exit 1 }
 
-    Write-Host "`n🔏 Signing Bundle" -ForegroundColor Cyan
-    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $exePath 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.exe`n$out"; exit $LASTEXITCODE }
-    Write-Host "   ✅ LISSTech.DrainCtl.exe" -ForegroundColor Green
+    Write-Host "`n🔏 Signing Bundle (detach/reattach)" -ForegroundColor Cyan
+
+    # 1. Detach the Burn engine
+    & wix burn detach $bundlePath -engine $enginePath
+    if ($LASTEXITCODE -ne 0) { Write-Error "wix burn detach failed"; exit $LASTEXITCODE }
+    Write-Host "   ✅ Engine detached" -ForegroundColor DarkGray
+
+    # 2. Sign the engine
+    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $enginePath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to sign engine`n$out"; exit $LASTEXITCODE }
+    Write-Host "   ✅ Engine signed" -ForegroundColor DarkGray
+
+    # 3. Reattach the signed engine
+    & wix burn reattach $bundlePath -engine $enginePath -o $bundlePath
+    if ($LASTEXITCODE -ne 0) { Write-Error "wix burn reattach failed"; exit $LASTEXITCODE }
+    Write-Host "   ✅ Engine reattached" -ForegroundColor DarkGray
+
+    # 4. Sign the outer bundle
+    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $bundlePath 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to sign bundle`n$out"; exit $LASTEXITCODE }
+    Write-Host "   ✅ LISSTech.DrainCtl.exe (engine + bundle signed)" -ForegroundColor Green
+
+    # Cleanup
+    Remove-Item $enginePath -ErrorAction SilentlyContinue
 
 # ── Aggregate ────────────────────────────────────────────────────────────────
 
