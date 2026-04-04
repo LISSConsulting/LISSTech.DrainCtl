@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="LISSTech DrainCtl"
         Manufacturer="LISS Consulting, Corp."
-        Version="26.94.1"
+        Version="26.94.2"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
         Scope="perMachine">
 
