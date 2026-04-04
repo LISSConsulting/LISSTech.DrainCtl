@@ -130,7 +130,7 @@ The MSI installs:
 The bundle installer (`LISSTech.DrainCtl.exe`) provides a branded setup wizard with license acceptance and configuration options. For unattended deployment, MSI properties can be passed directly:
 
 ```powershell
-msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=http://dash.example.com:49470 WEBHOOK_URL=https://hooks.example.com/drain
+msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash.example.com:49470 WEBHOOK_URL=https://hooks.example.com/drain
 ```
 
 ### PowerShell Gallery (module only)

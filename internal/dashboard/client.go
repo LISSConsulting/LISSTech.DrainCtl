@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,13 @@ import (
 
 // dashClient is the HTTP client used for dashboard API calls.
 // The 10s timeout accommodates the SSPI Negotiate round-trip.
-var dashClient = &http.Client{Timeout: 10 * time.Second}
+// InsecureSkipVerify is set because the dashboard may use a self-signed cert.
+var dashClient = &http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // trust internal dashboard self-signed cert
+	},
+}
 
 // Register notifies the dashboard server that this host exists.
 // Errors are logged but never returned — registration is non-fatal.

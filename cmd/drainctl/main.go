@@ -503,7 +503,7 @@ func dashboardCmd() *cobra.Command {
 				fmt.Println("Or edit config.json and set dashboard.enabled = true")
 				return nil
 			}
-			url := fmt.Sprintf("http://localhost:%d", fileCfg.Dashboard.Port)
+			url := fmt.Sprintf("https://localhost:%d", fileCfg.Dashboard.Port)
 			fmt.Printf("Opening %s ...\n", url)
 			return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		},

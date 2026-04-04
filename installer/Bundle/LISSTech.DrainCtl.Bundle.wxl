@@ -6,7 +6,7 @@
   <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
   <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
   <String Id="HelpHeader" Value="Setup Help" />
-  <String Id="HelpText" Value="/install | /repair | /uninstall - installs, repairs, or uninstalls.&#xA;&#xA;/passive | /quiet - displays minimal UI or no UI.&#xA;&#xA;/norestart - suppress restart prompts.&#xA;/log log.txt - logs to a specific file.&#xA;&#xA;Configuration properties:&#xA;  InstallMode=dashboard|registration|standalone&#xA;  WebhookUrl=https://hooks.example.com/...&#xA;  NtfyUrl=https://ntfy.sh/alerts&#xA;  DashboardUrl=http://dashboard:49470&#xA;  DashboardPort=49470&#xA;  DashboardGroup=Domain Admins&#xA;  GracePeriod=60" />
+  <String Id="HelpText" Value="/install | /repair | /uninstall - installs, repairs, or uninstalls.&#xA;&#xA;/passive | /quiet - displays minimal UI or no UI.&#xA;&#xA;/norestart - suppress restart prompts.&#xA;/log log.txt - logs to a specific file.&#xA;&#xA;Configuration properties:&#xA;  InstallMode=dashboard|registration|standalone&#xA;  WebhookUrl=https://hooks.example.com/...&#xA;  NtfyUrl=https://ntfy.sh/alerts&#xA;  DashboardUrl=https://dashboard:49470&#xA;  DashboardPort=49470&#xA;  DashboardGroup=Domain Admins&#xA;  GracePeriod=60" />
   <String Id="HelpCloseButton" Value="&amp;Close" />
   <String Id="InstallAcceptCheckbox" Value="I &amp;agree to the license terms and conditions" />
   <String Id="InstallOptionsButton" Value="&amp;Options" />

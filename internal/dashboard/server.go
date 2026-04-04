@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -72,9 +73,23 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("GET /", wg(http.HandlerFunc(ds.handleUI)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
+
+	// Resolve TLS configuration.
+	var tlsCfg *tls.Config
+	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir, log)
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "dashboard TLS setup failed, falling back to HTTP", fmt.Sprintf("error=%q", err))
+		tlsCfg = nil
+	}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard listen %s: %w", addr, err)
+	}
+
+	// Wrap listener with TLS if configured.
+	if tlsCfg != nil {
+		ln = tls.NewListener(ln, tlsCfg)
 	}
 
 	ds.server = &http.Server{
@@ -85,8 +100,12 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	}
 
 	// Start serving in background.
+	scheme := "http"
+	if tlsCfg != nil {
+		scheme = "https"
+	}
 	go func() {
-		log(dc.LvlINF, "dashboard=listening", fmt.Sprintf("addr=%s", addr))
+		log(dc.LvlINF, "dashboard=listening", fmt.Sprintf("addr=%s scheme=%s", addr, scheme))
 		if err := ds.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			dc.LogMsg(log, dc.LvlERR, "dashboard server error", fmt.Sprintf("error=%q", err))
 		}
