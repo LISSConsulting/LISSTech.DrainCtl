@@ -1319,7 +1319,7 @@
             <div class="nav-in">
                 <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div>
                 <div class="nav-right" id="ns"></div>
-                <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings">
+                <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings" aria-label="Open configuration settings" aria-haspopup="dialog">
                     CONFIG
                 </button>
             </div>
@@ -1349,7 +1349,7 @@
                     <div class="ctr-l">Sessions</div>
                 </div>
             </div>
-            <div class="sbar" id="sbar"></div>
+            <div class="sbar" id="sbar" role="img" aria-label="Server status overview"></div>
 
             <div class="chart-wrap">
                 <div class="section-label">Server State History</div>
@@ -1368,9 +1368,9 @@
                 <div class="section-label">Event Log</div>
                 <div class="log-bar">
                     <input class="log-search" id="log-search" placeholder="Search events..." oninput="filterLog()" />
-                    <button class="btn-expand" id="btn-exp" onclick="toggleExpand()">⤢ Expand</button>
+                    <button class="btn-expand" id="btn-exp" onclick="toggleExpand()" aria-label="Expand event log">⤢ Expand</button>
                 </div>
-                <div class="log" id="log">
+                <div class="log" id="log" role="log" aria-live="polite" aria-label="Event log">
                     <div class="log-restore" onclick="toggleExpand()">Click or press ESC to restore</div>
                     <div class="log-title">Events</div>
                     <div id="log-entries"><div class="evt-empty">Waiting for data...</div></div>
@@ -1393,11 +1393,11 @@
             </div>
         </div>
 
-        <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()">
+        <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <div class="settings-modal" id="settings-drawer" onclick="event.stopPropagation()">
                 <div class="settings-title">
-                    <span>Dashboard Configuration</span
-                    ><button class="settings-close" onclick="toggleSettings()">&times;</button>
+                    <span id="settings-title">Dashboard Configuration</span
+                    ><button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">&times;</button>
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 24px">
@@ -1477,14 +1477,14 @@
             </div>
         </div>
 
-        <div class="hist-overlay" id="hist-overlay" onclick="closeHistory()">
+        <div class="hist-overlay" id="hist-overlay" onclick="closeHistory()" role="dialog" aria-modal="true" aria-labelledby="hist-title-label">
             <div class="hist-modal" onclick="event.stopPropagation()">
                 <div class="hist-head">
                     <div>
-                        <div class="hist-title">Server History</div>
+                        <div class="hist-title" id="hist-title-label">Server History</div>
                         <div class="hist-hostname" id="hist-hostname"></div>
                     </div>
-                    <button class="settings-close" onclick="closeHistory()">&times;</button>
+                    <button class="settings-close" onclick="closeHistory()" aria-label="Close history">&times;</button>
                 </div>
                 <div class="hist-body" id="hist-body"></div>
             </div>
@@ -4819,8 +4819,15 @@
                 // State bar
                 const sb = document.getElementById("sbar");
                 if (!t) {
+                    sb.setAttribute("aria-label", "No servers registered");
                     sb.innerHTML = '<div class="sseg off" style="flex:1">No servers</div>';
                 } else {
+                    const parts = [];
+                    if (c.ok) parts.push(c.ok + " healthy");
+                    if (c.grace) parts.push(c.grace + " grace");
+                    if (c.alert) parts.push(c.alert + " alert");
+                    if (c.off) parts.push(c.off + " offline");
+                    sb.setAttribute("aria-label", "Server status: " + parts.join(", ") + " of " + t + " total");
                     let h = "";
                     if (c.ok)
                         h +=
@@ -4997,7 +5004,11 @@
                     html +=
                         '</div><div class="srv-act"><button class="btn-hist" data-host="' +
                         esc(srv.hostname) +
+                        '" aria-label="View history for ' +
+                        esc(srv.hostname) +
                         '">\u29c9 History</button><button class="btn-rm" data-host="' +
+                        esc(srv.hostname) +
+                        '" aria-label="Remove ' +
                         esc(srv.hostname) +
                         '">Remove</button></div></div>';
                 });
@@ -5189,7 +5200,9 @@
                 const log = document.getElementById("log");
                 logExpanded = !logExpanded;
                 log.classList.toggle("expanded", logExpanded);
-                document.getElementById("btn-exp").textContent = logExpanded ? "⤡ Collapse" : "⤢ Expand";
+                const btn = document.getElementById("btn-exp");
+                btn.textContent = logExpanded ? "⤡ Collapse" : "⤢ Expand";
+                btn.setAttribute("aria-label", logExpanded ? "Collapse event log" : "Expand event log");
             }
 
             async function refresh() {
@@ -5229,7 +5242,14 @@
                 }
             }
             function toggleSettings() {
-                document.getElementById("settings-overlay").classList.toggle("open");
+                const overlay = document.getElementById("settings-overlay");
+                const isOpen = overlay.classList.toggle("open");
+                document.getElementById("btn-gear").setAttribute("aria-expanded", isOpen);
+                if (isOpen) {
+                    overlay.querySelector(".settings-close").focus();
+                } else {
+                    document.getElementById("btn-gear").focus();
+                }
             }
             function closeHistory() {
                 histOpen = false;
