@@ -61,7 +61,7 @@ graph TB
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
         EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
         POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
-        CFG["config.json Watcher 5s"] -->|"config changed"| RELOAD["ReloadConfig()"]
+        CFG["config.json Watcher (RDCW+poll)"] -->|"config changed"| RELOAD["ReloadConfig()"]
         CHECK --> SESS["WTS Session Enum"]
         SESS --> STORE["MemAuditStore"]
         CHECK --> STORE
@@ -126,6 +126,12 @@ The MSI installs:
 | JSON config | `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` |
 
 > **Upgrading from v26?** The first run auto-migrates your registry configuration to `config.json`. Existing installs upgrade seamlessly — no manual steps required.
+
+The bundle installer (`LISSTech.DrainCtl.exe`) provides a branded setup wizard with license acceptance and configuration options. For unattended deployment, MSI properties can be passed directly:
+
+```powershell
+msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash.example.com WEBHOOK_URL=https://hooks.example.com/drain
+```
 
 ### PowerShell Gallery (module only)
 
@@ -242,8 +248,11 @@ Import-Module LISSTech.DrainCtl
 | `Get-RDSHDrainHistory` | `PSObject[]` | Audit trail records |
 | `Install-RDSHDrainAudit` | — | Configure registry auditing (one-time) |
 | `Get-RDSHDrainNotification` | `PSObject` | Current notification configuration |
-| `Set-RDSHDrainNotification` | — | Update notification settings |
+| `Set-RDSHDrainNotification` | — | Update notification settings *(deprecated — use target cmdlets below)* |
 | `Test-RDSHDrainNotification` | — | Send test notification to configured backends |
+| `Get-RDSHDrainNotificationTarget` | `PSObject[]` | Lists all configured notification targets with full detail |
+| `Add-RDSHDrainNotificationTarget` | — | Adds a notification target (webhook or ntfy) with per-target triggers |
+| `Remove-RDSHDrainNotificationTarget` | — | Removes a notification target by URL |
 
 ### Examples
 
@@ -391,7 +400,7 @@ The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered
 
 ## 🔧 Configuration
 
-Configuration lives in a JSON file, hot-reloaded every 5 seconds:
+Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryChangesW) with poll fallback:
 
 **Path:** `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json`
 

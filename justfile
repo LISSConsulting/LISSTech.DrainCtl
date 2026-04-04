@@ -49,11 +49,13 @@ bump:
 
     Write-Host "`n🔖 Bumping version: $current → $new" -ForegroundColor Cyan
 
-    # Update all 8 files
+    # Update all version-bearing files
     $files = @(
         "drainctl.go",
         "installer/LISSTech.DrainCtl.wxs",
         "installer/LISSTech.DrainCtl.wixproj",
+        "installer/Bundle/LISSTech.DrainCtl.Bundle.wxs",
+        "installer/Bundle/LISSTech.DrainCtl.Bundle.wixproj",
         "powershell/LISSTech.DrainCtl.psd1",
         "README.md",
         "CLAUDE.md",
@@ -144,6 +146,16 @@ msi: psmodule
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi").Length / 1MB)
     Write-Host "   LISSTech.DrainCtl.msi ($size)" -ForegroundColor DarkGray
+
+# Build Burn bundle (wraps the MSI with branded UI)
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+bundle: msi
+    Write-Host "`n📦 Building Bundle" -ForegroundColor Cyan
+    & dotnet build "{{installer_dir}}/Bundle/LISSTech.DrainCtl.Bundle.wixproj" -c Release -p:Platform=x64 -nologo -v:q
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.exe").Length / 1MB)
+    Write-Host "   LISSTech.DrainCtl.exe ($size)" -ForegroundColor DarkGray
 
 # ── Sign ─────────────────────────────────────────────────────────────────────
 

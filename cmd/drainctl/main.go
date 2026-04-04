@@ -44,6 +44,7 @@ func main() {
 	root.AddCommand(notifyCmd())
 	root.AddCommand(registerCmd())
 	root.AddCommand(dashboardCmd())
+	root.AddCommand(configureCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "drainctl: %v\n", err)
@@ -603,4 +604,86 @@ func dashboardCmd() *cobra.Command {
 	})
 
 	return dcmd
+}
+
+// -- configure ---------------------------------------------------------------
+
+func configureCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "configure",
+		Short:  "Write config.json from flags (used by MSI installer)",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
+				// If config doesn't exist yet, start with defaults.
+				fileCfg = &dc.Config{}
+				fileCfg.Validate(log)
+			}
+
+			mode, _ := cmd.Flags().GetString("mode")
+			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+			ntfyURL, _ := cmd.Flags().GetString("ntfy-url")
+			dashURL, _ := cmd.Flags().GetString("dashboard-url")
+			dashPort, _ := cmd.Flags().GetInt("dashboard-port")
+			dashGroup, _ := cmd.Flags().GetString("dashboard-group")
+			grace, _ := cmd.Flags().GetInt("grace-period")
+
+			if cmd.Flags().Changed("grace-period") {
+				fileCfg.GracePeriod = grace
+			}
+
+			switch mode {
+			case "dashboard":
+				fileCfg.Dashboard.Enabled = true
+				if cmd.Flags().Changed("dashboard-port") {
+					fileCfg.Dashboard.Port = dashPort
+				}
+				if cmd.Flags().Changed("dashboard-group") {
+					fileCfg.Dashboard.Group = dashGroup
+				}
+			case "registration":
+				if dashURL != "" {
+					fileCfg.Dashboard.URL = dashURL
+				}
+			}
+
+			// Add notification targets from flags (only if URLs are provided).
+			if webhookURL != "" {
+				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
+					Type:     "webhook",
+					URL:      webhookURL,
+					Triggers: dc.DefaultTriggers,
+				})
+			}
+			if ntfyURL != "" {
+				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
+					Type:     "ntfy",
+					URL:      ntfyURL,
+					Triggers: dc.DefaultTriggers,
+				})
+			}
+
+			fileCfg.Validate(log)
+
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+
+			log(dc.LvlOK, fmt.Sprintf("configure=done mode=%s", mode))
+			return nil
+		},
+	}
+
+	cmd.Flags().String("mode", "standalone", "Install mode: dashboard, registration, standalone")
+	cmd.Flags().String("webhook-url", "", "Webhook notification URL")
+	cmd.Flags().String("ntfy-url", "", "ntfy.sh notification URL")
+	cmd.Flags().String("dashboard-url", "", "Dashboard URL for agent registration")
+	cmd.Flags().Int("dashboard-port", dc.DefaultDashboardPort, "Dashboard listen port")
+	cmd.Flags().String("dashboard-group", dc.DefaultDashboardGroup, "AD group for dashboard access")
+	cmd.Flags().Int("grace-period", 60, "Grace period in minutes")
+
+	return cmd
 }
