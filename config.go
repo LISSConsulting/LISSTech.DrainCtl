@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -209,15 +210,15 @@ func (c *Config) Validate(log LogFunc) {
 		if len(c.Notifications[i].Triggers) == 0 {
 			c.Notifications[i].Triggers = append([]Trigger{}, DefaultTriggers...)
 		} else {
-			valid := c.Notifications[i].Triggers[:0]
-			for _, tr := range c.Notifications[i].Triggers {
-				if ValidTriggers[tr] {
-					valid = append(valid, tr)
-				} else if log != nil {
-					LogMsg(log, LvlWRN, "unknown trigger ignored", fmt.Sprintf("trigger=%s url=%s", tr, c.Notifications[i].URL))
+			c.Notifications[i].Triggers = slices.DeleteFunc(c.Notifications[i].Triggers, func(tr Trigger) bool {
+				if !ValidTriggers[tr] {
+					if log != nil {
+						LogMsg(log, LvlWRN, "unknown trigger ignored", fmt.Sprintf("trigger=%s url=%s", tr, c.Notifications[i].URL))
+					}
+					return true
 				}
-			}
-			c.Notifications[i].Triggers = valid
+				return false
+			})
 		}
 	}
 }

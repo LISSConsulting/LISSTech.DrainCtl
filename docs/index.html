@@ -462,7 +462,7 @@ body {
       <div class="feature card">
         <div class="icon">&#128276;</div>
         <h3>Smart Alerts</h3>
-        <p>Multiple webhook and ntfy.sh targets. Each gets its own triggers &mdash; drain on/off, grace, alert, session warning &mdash; and repeat interval.</p>
+        <p>Full multi-target notification editor in the dashboard. Add unlimited webhook and ntfy.sh targets, each with individual triggers and repeat intervals.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128203;</div>
@@ -472,7 +472,7 @@ body {
       <div class="feature card">
         <div class="icon">&#128187;</div>
         <h3>PowerShell + CLI</h3>
-        <p>Native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit codes + JSON for any RMM. Works on PS 5.1 and 7+.</p>
+        <p>12 native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit codes + JSON for any RMM. Works on PS 5.1 and 7+.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128196;</div>
@@ -694,12 +694,12 @@ drainctl register https://dashboard:49470</code>
 <section class="section" id="install" style="background: var(--surface); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
   <div class="wrap">
     <div class="section-label">Installation</div>
-    <div class="section-title">Two ways to install. Zero configuration.</div>
-    <div class="section-desc">Full package via MSI, or just the PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a></div>
+    <div class="section-title">Three ways to install. Zero guesswork.</div>
+    <div class="section-desc">Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a></div>
     <div class="install-grid">
       <div class="install-card card">
         <h3>&#128230; MSI Installer</h3>
-        <p>The full package &mdash; service, CLI, PowerShell module, Event Log, notifications.</p>
+        <p>The full package &mdash; service, CLI, PowerShell module, Event Log, notifications. Run interactively for a configuration wizard, or silent for RMM deployment.</p>
         <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
         <ul>
           <li>Windows Service (auto-start)</li>

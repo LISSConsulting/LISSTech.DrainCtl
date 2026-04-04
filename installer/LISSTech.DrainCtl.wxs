@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="LISSTech DrainCtl"
         Manufacturer="LISS Consulting, Corp."
-        Version="26.93.12"
+        Version="26.93.13"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
         Scope="perMachine">
 
@@ -23,6 +23,28 @@
         <Media Id="1"
             Cabinet="LISSTech.DrainCtl.cab"
             EmbedCab="yes" />
+
+        <!-- MSI properties for unattended / bundle-driven install -->
+        <Property Id="INSTALL_MODE" Value="standalone" Secure="yes" />
+        <Property Id="WEBHOOK_URL" Secure="yes" />
+        <Property Id="NTFY_URL" Secure="yes" />
+        <Property Id="DASHBOARD_URL" Secure="yes" />
+        <Property Id="DASHBOARD_PORT" Value="49470" Secure="yes" />
+        <Property Id="DASHBOARD_GROUP" Value="Domain Admins" Secure="yes" />
+        <Property Id="GRACE_PERIOD" Value="60" Secure="yes" />
+
+        <!-- Custom action: run drainctl configure after install commits -->
+        <CustomAction Id="ConfigureAction"
+            FileRef="drainctl.exe"
+            ExeCommand="configure --quiet --mode=[INSTALL_MODE] --webhook-url=&quot;[WEBHOOK_URL]&quot; --ntfy-url=&quot;[NTFY_URL]&quot; --dashboard-url=&quot;[DASHBOARD_URL]&quot; --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --grace-period=[GRACE_PERIOD]"
+            Execute="commit"
+            Impersonate="no"
+            Return="check" />
+        <InstallExecuteSequence>
+            <Custom Action="ConfigureAction"
+                After="InstallFiles"
+                Condition="NOT REMOVE" />
+        </InstallExecuteSequence>
 
         <Feature Id="Main">
             <ComponentGroupRef Id="AllComponents" />

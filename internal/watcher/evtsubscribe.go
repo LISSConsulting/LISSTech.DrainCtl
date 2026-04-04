@@ -226,7 +226,7 @@ func (s *EventSubscriber) run(ctx context.Context) {
 				break // no more events
 			}
 
-			for i := uint32(0); i < returned; i++ {
+			for i := range returned {
 				s.processEvent(evtHandle(evtHandles[i]))
 				_, _, _ = procEvtClose.Call(evtHandles[i])
 			}

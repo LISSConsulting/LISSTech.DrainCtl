@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LISSTech.DrainCtl.psm1'
-    ModuleVersion     = '26.93.12'
+    ModuleVersion     = '26.93.13'
     GUID              = 'a3f7c8e1-4b2d-4f9a-8e6c-1d5b3a9f7e2c'
     Author            = 'LISS Consulting, Corp.'
     CompanyName       = 'LISS Consulting, Corp.'
@@ -18,6 +18,9 @@
         'Install-RDSHDrainAudit'
         'Get-RDSHDrainNotification'
         'Set-RDSHDrainNotification'
+        'Get-RDSHDrainNotificationTarget'
+        'Add-RDSHDrainNotificationTarget'
+        'Remove-RDSHDrainNotificationTarget'
         'Test-RDSHDrainNotification'
         'Enable-RDSHDrainDashboard'
         'Disable-RDSHDrainDashboard'

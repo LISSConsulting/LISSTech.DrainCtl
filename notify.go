@@ -34,9 +34,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 
 	// Reset alert tracking when returning to healthy.
 	if trigger == TriggerHealthy || trigger == TriggerDrainOff {
-		for k := range state.LastAlertNotify {
-			delete(state.LastAlertNotify, k)
-		}
+		clear(state.LastAlertNotify)
 	}
 
 	// Build payload.
