@@ -71,6 +71,11 @@ public static class DrainCtlNative {
     public static extern IntPtr DrainCtl_DisableDashboard();
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_InstallCertificate(
+        [MarshalAs(UnmanagedType.LPStr)] string certPath,
+        [MarshalAs(UnmanagedType.LPStr)] string keyPath);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
     public static extern void DrainCtl_Free(IntPtr ptr);
 
     /// <summary>
@@ -731,35 +736,37 @@ function Disable-RDSHDrainDashboard {
 function Install-RDSHDrainCertificate {
     <#
     .SYNOPSIS
-    Import the DrainCtl dashboard TLS certificate into the Trusted Root store.
+    Install a custom TLS certificate for the DrainCtl dashboard.
 
     .DESCRIPTION
-    Imports the dashboard's auto-generated self-signed certificate into the local
-    machine's Trusted Root Certification Authorities store. This suppresses browser
-    certificate warnings when accessing the dashboard. Requires elevation (admin).
+    Copies a PEM certificate and private key into the DrainCtl data directory
+    and updates config.json so the dashboard uses them instead of the
+    auto-generated self-signed certificate.
+
+    Restart the DrainCtl service after installing a new certificate.
+
+    .PARAMETER CertPath
+    Path to the PEM certificate file.
+
+    .PARAMETER KeyPath
+    Path to the PEM private key file.
 
     .EXAMPLE
-    Install-RDSHDrainCertificate
+    Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\dashboard-key.pem
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
-    param()
+    param(
+        [Parameter(Mandatory)][string]$CertPath,
+        [Parameter(Mandatory)][string]$KeyPath
+    )
 
-    $dataDir = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
-    $certPath = Join-Path $dataDir 'dashboard-tls.crt'
+    if (-not (Test-Path $CertPath)) { throw "Certificate file not found: $CertPath" }
+    if (-not (Test-Path $KeyPath))  { throw "Key file not found: $KeyPath" }
+    if (-not $PSCmdlet.ShouldProcess("$CertPath + $KeyPath", 'Install as dashboard TLS certificate')) { return }
 
-    if (-not (Test-Path $certPath)) {
-        throw "Certificate not found at $certPath — is the dashboard enabled?"
-    }
-
-    if (-not $PSCmdlet.ShouldProcess($certPath, 'Import into Trusted Root store')) { return }
-
-    $output = & certutil -addstore Root $certPath 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "certutil failed (exit $LASTEXITCODE): $output"
-    }
-
-    Write-Host "Certificate imported into Trusted Root Certification Authorities."
-    Write-Host "Browsers on this machine will now trust the dashboard's HTTPS certificate."
+    $ptr = [DrainCtlNative]::DrainCtl_InstallCertificate($CertPath, $KeyPath)
+    $null = Invoke-DrainCtlNative -Ptr $ptr
+    Write-Host "Certificate installed. Restart the DrainCtl service to use the new certificate: Restart-Service DrainCtl"
 }
 
 Export-ModuleMember -Function @(

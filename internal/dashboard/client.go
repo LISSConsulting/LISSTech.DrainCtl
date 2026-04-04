@@ -190,6 +190,36 @@ func hostName() (string, error) {
 	return os.Hostname()
 }
 
+// RemoteNotifyConfig holds notification configuration fetched from the dashboard.
+type RemoteNotifyConfig struct {
+	Notifications           []dc.NotificationTarget `json:"notifications"`
+	SessionWarningThreshold int                     `json:"session_warning_threshold"`
+	GracePeriod             int                     `json:"grace_period"`
+}
+
+// FetchNotifyConfig retrieves the notification configuration from the dashboard.
+// Uses SSPI Negotiate auth and TLS pinning (same as Register/Report).
+func FetchNotifyConfig(dashboardURL string, log dc.LogFunc) (*RemoteNotifyConfig, error) {
+	resp, err := negotiateRequest(http.MethodGet, dashboardURL+"/api/v1/notify-config", nil)
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "dashboard: fetch notify config failed", fmt.Sprintf("error=%q", err))
+		return nil, fmt.Errorf("fetch notify config: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		dc.LogMsg(log, dc.LvlWRN, "dashboard: fetch notify config rejected",
+			fmt.Sprintf("status=%d", resp.StatusCode))
+		return nil, fmt.Errorf("fetch notify config: status %d", resp.StatusCode)
+	}
+
+	var cfg RemoteNotifyConfig
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decode notify config: %w", err)
+	}
+	return &cfg, nil
+}
+
 // FetchServers queries the dashboard API for all registered servers.
 // Used by the CLI's "dashboard list-servers" command (localhost only, no SSPI needed).
 func FetchServers(url string) ([]ServerInfo, error) {

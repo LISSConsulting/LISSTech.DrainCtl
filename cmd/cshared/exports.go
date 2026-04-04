@@ -352,6 +352,16 @@ func DrainCtl_DisableDashboard() *C.char {
 	return C.CString(`{"ok":true}`)
 }
 
+//export DrainCtl_InstallCertificate
+func DrainCtl_InstallCertificate(certPath *C.char, keyPath *C.char) *C.char {
+	cert := C.GoString(certPath)
+	key := C.GoString(keyPath)
+	if err := dc.InstallCertificate(cert, key, dc.DiscardLogger()); err != nil {
+		return marshalError(err)
+	}
+	return C.CString(`{"ok":true}`)
+}
+
 //export DrainCtl_Free
 func DrainCtl_Free(p *C.char) {
 	C.free(unsafe.Pointer(p))
