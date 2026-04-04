@@ -225,7 +225,6 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tEXIT")
 		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t----")
 		for i, r := range records {
-			_ = AuditToHistory(r, &durations[i])
 			ch := ""
 			if r.Changed {
 				ch = "YES"

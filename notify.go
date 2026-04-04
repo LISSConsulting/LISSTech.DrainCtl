@@ -32,9 +32,15 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		state.LastAlertNotify = make(map[string]time.Time)
 	}
 
-	// Reset alert tracking when returning to healthy.
+	// Reset alert tracking when returning to healthy, but preserve session
+	// warning repeat tracking so it is not re-fired immediately if sessions
+	// are still at high utilization when drain mode turns off.
 	if trigger == TriggerHealthy || trigger == TriggerDrainOff {
-		clear(state.LastAlertNotify)
+		for k := range state.LastAlertNotify {
+			if k != string(TriggerSessionWarning) {
+				delete(state.LastAlertNotify, k)
+			}
+		}
 	}
 
 	// Build payload.
