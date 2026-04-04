@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Second roam-mode pass complete.** Dashboard handler tests and streaming audit history shipped.
+> Current state: **Third roam-mode pass complete.** `GET /api/v1/history/{host}` endpoint shipped with 7 tests.
 
 ## Completed Work
 
@@ -13,12 +13,12 @@
 | Roam #1 | gofmt pre-existing violations fixed across all Go source files | code quality |
 | Roam #2 | `internal/dashboard` handler tests — 19 tests for `handleHealth`, `handleRegister`, `handleReport` | testing, dashboard |
 | Roam #2 | `audit.go` streaming refactor — `readAll` replaced with `scanRecords(fn)` + rolling-window `History`/`Changes` | performance, code quality |
+| Roam #3 | `GET /api/v1/history/{host}` — per-host CheckResult ring buffer (cap 100) in `ServerState`; newest-first JSON; `?limit` param; 7 tests | feature, dashboard, testing |
 
 ## Remaining Work
 
 | Priority | Item | Location | Notes |
 |----------|------|----------|-------|
-| Medium | `GET /api/v1/history/{host}` endpoint — expose per-host audit trail from dashboard | `internal/dashboard/server.go` | Currently only accessible via CLI/pipe |
 | Medium | Exponential backoff for dashboard client (currently retries every 10 polls flat) | `internal/svc/handler.go` | Better resilience when dashboard is temporarily unreachable |
 | Medium | `drainctl configure` interactive UX polish — show current value next to each prompt | `cmd/drainctl/main.go` | Quality-of-life for operators |
 | Low | SSPI `RequireGroup` — add explicit `RevertToSelf` in error paths | `internal/dashboard/sspi.go` | Defensive; thread token impersonation cleanup |
@@ -32,5 +32,6 @@
 - **Health endpoint design**: Placed at `GET /api/v1/health` with no auth so load balancers and uptime monitors can probe without Kerberos. Returns `ok`, `version`, `servers`, `healthy`, `alerting`, `unknown` counts.
 - **URL scheme validation**: Added to `Config.Validate` so it applies uniformly on every config load/save path. Empty URLs are preserved (existing behaviour handles them downstream).
 - **`svc/handler.go` is large** (800+ lines) — split into sub-files would improve navigability but isn't blocking anything yet.
+- **History ring is in-memory only** — `ServerState.history` is not persisted to `servers.json`. It resets on service restart. This keeps the implementation simple; records reaccumulate as reports arrive. Persisting 100×N `CheckResult` JSON per host would bloat `servers.json` significantly.
 - **Dashboard handler tests need no `devmode` tag**: handlers are methods on `*DashboardServer`; calling them directly with `httptest.NewRecorder` bypasses all middleware. Auth is only injected by the mux wrappers, not by the handlers themselves.
 - **`audit.go` streaming pattern**: `scanRecords(fn func(AuditRecord) bool) error` replaces `readAll`. `History(n)` uses a copy-shift ring buffer — `O(n)` memory regardless of file size. `Changes(n)` uses the same ring. `StateSince` still collects all records (needs backward walk). `LastObservation` retains a single record.
