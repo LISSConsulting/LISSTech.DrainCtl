@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Eleventh roam-mode pass complete.** Test notification endpoint (`POST /api/v1/notify-test`) + dashboard UI: webhook HMAC secret field + Send Test button. 6 new handler tests.
+> Current state: **Twelfth roam-mode pass complete.** Testable config handlers via injection hooks + Content-Security-Policy header + 13 new tests (4 GET, 6 PUT, 3 middleware).
 
 ## Completed Work
 
@@ -30,10 +30,12 @@
 | Roam #11 | `POST /api/v1/notify-test` — sends a test notification to all configured targets; returns 400 with error message when no targets or webhook fails; `testNotifyFunc` hook on `DashboardServer` for test isolation; 6 handler tests (no-targets→400, success→200, network error, config error, mock webhook call, HMAC signature header) | feature, dashboard, testing |
 | Roam #11 | Dashboard UI: webhook HMAC secret field — password input per notification target row (webhook-only, hidden for ntfy); populated from `loadNotifyConfig`, included in `saveNotifyConfig` payload; shows placeholder "Optional signing secret" | feature, UX, dashboard |
 | Roam #11 | Dashboard UI: "Send Test" button in settings modal — calls `POST /api/v1/notify-test`, shows "Sending…" while in-flight, displays success/error in `cfg-status`, re-enables on completion | feature, UX, dashboard |
+| Roam #12 | `testLoadConfigFunc` + `testPutNotifyConfigFunc` injection hooks on `DashboardServer` — same pattern as `testNotifyFunc`; makes `handleGetNotifyConfig` and `handlePutNotifyConfig` fully unit-testable without ProgramData; 10 handler tests (GET: 200+fields, empty array, 500 on load error, multiple targets; PUT: 200, 400 bad JSON, 500 update error, arg capture, partial update, webhook secret roundtrip) | testing, dashboard |
+| Roam #12 | `Content-Security-Policy` header in `securityMiddleware` — `default-src 'none'`; `script-src 'unsafe-inline'`; `style-src 'unsafe-inline' https://fonts.googleapis.com`; `font-src https://fonts.gstatic.com`; `img-src 'self' data:`; `connect-src 'self'`; `frame-ancestors 'self'`; `base-uri 'self'`; `form-action 'self'`; 3 middleware tests (security headers presence, HSTS absent in plain middleware, HSTS present in hsts wrapper) | security, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #11.)*
+*(All tracked items complete — nothing pending after Roam #12.)*
 
 ## Key Learnings
 
@@ -62,3 +64,5 @@
 - **`hostname()` helper in store_test.go**: Uses `string(rune('A'+n))` to generate `SRVA`…`SRVE` for concurrent tests. Simple enough to avoid an import; works for up to 26 hosts.
 - **`handleNotifyTest` uses `testNotifyFunc` injection**: `handleGetNotifyConfig` and `handlePutNotifyConfig` call `dc.LoadConfig` directly and have no unit tests (they require ProgramData). For `handleNotifyTest`, a `testNotifyFunc func() error` field on `DashboardServer` lets tests inject a fake function without touching the filesystem. The nil check keeps the production path clean.
 - **Webhook secret in settings UI**: The `secret` field is only included in the `PUT /api/v1/notify-config` payload when non-empty (saves bandwidth and avoids accidentally clearing secrets when the user hasn't changed them). The password input uses `autocomplete="new-password"` to prevent browser autofill pollution.
+- **`testLoadConfigFunc` / `testPutNotifyConfigFunc` injection pattern**: Extends the `testNotifyFunc` approach to config handlers. `testLoadConfigFunc func() (*dc.Config, error)` mirrors `dc.LoadConfig`'s signature but drops the `LogFunc` arg (captured by the closure in the real path). `testPutNotifyConfigFunc func([]dc.NotificationTarget, *int, *int) error` collapses the three real update calls (UpdateNotifications, UpdateSessionThreshold, UpdateGracePeriod) into one function — the nil pointer arguments signal "field was absent from request", matching the production nil-check guard.
+- **CSP for embedded SPA**: `default-src 'none'` + per-directive allowlists is more restrictive than `default-src 'self'`. The dashboard's inline uPlot script and `<style>` blocks require `'unsafe-inline'` for both `script-src` and `style-src`; a nonce-based approach would require per-request HTML template rendering. `frame-ancestors 'self'` is redundant with `X-Frame-Options: SAMEORIGIN` but takes precedence in browsers that support CSP Level 2+; both are kept for compatibility.
