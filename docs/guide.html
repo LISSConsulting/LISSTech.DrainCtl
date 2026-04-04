@@ -232,7 +232,7 @@ th { background: var(--surface); font-weight: 700; }
     <tr><td><code>INSTALL_MODE</code></td><td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td><td>Sets the operational mode. <strong>dashboard</strong> enables the web UI, <strong>registration</strong> registers with an existing dashboard, <strong>standalone</strong> runs independently.</td></tr>
     <tr><td><code>WEBHOOK_URL</code></td><td><code>https://hooks.example.com/drain</code></td><td>Adds a webhook notification target</td></tr>
     <tr><td><code>NTFY_URL</code></td><td><code>https://ntfy.sh/drainctl</code></td><td>Adds an ntfy notification target</td></tr>
-    <tr><td><code>DASHBOARD_URL</code></td><td><code>http://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
+    <tr><td><code>DASHBOARD_URL</code></td><td><code>https://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
     <tr><td><code>DASHBOARD_PORT</code></td><td><code>49470</code></td><td>Port for the dashboard listener (used with <code>dashboard</code> mode)</td></tr>
     <tr><td><code>DASHBOARD_GROUP</code></td><td><code>Domain Admins</code></td><td>AD group authorized for dashboard access</td></tr>
     <tr><td><code>GRACE_PERIOD</code></td><td><code>120</code></td><td>Grace period in minutes before drain mode becomes an alert</td></tr>
@@ -240,7 +240,7 @@ th { background: var(--surface); font-weight: 700; }
 </table>
 
 <p>Example &mdash; register with a dashboard, no UI:</p>
-<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=http://dash:49470</code></pre>
+<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470</code></pre>
 
 <h3>What the MSI does</h3>
 <ul>
@@ -601,7 +601,7 @@ drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
 <h3>Register servers</h3>
 <p>On each RDSH server you want to monitor, run this once:</p>
 <pre><code># Register this server with the dashboard
-drainctl register http://dashboard-server:49470</code></pre>
+drainctl register https://dashboard-server:49470</code></pre>
 
 <p>This does two things:</p>
 <ol>
@@ -619,7 +619,7 @@ drainctl register http://dashboard-server:49470</code></pre>
 drainctl dashboard
 
 # Or navigate directly
-http://dashboard-server:49470</code></pre>
+https://dashboard-server:49470</code></pre>
 
 <p>The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session trends.</p>
 
@@ -645,10 +645,12 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
 <table>
   <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTP dashboard (set to true)</td></tr>
+    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTPS dashboard (set to true)</td></tr>
     <tr><td><code>dashboard.port</code></td><td>49470</td><td>Port the dashboard listens on</td></tr>
     <tr><td><code>dashboard.group</code></td><td>Domain Admins</td><td>AD group authorized to view the dashboard</td></tr>
     <tr><td><code>dashboard.url</code></td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td></tr>
+    <tr><td><code>dashboard.tls_cert</code></td><td><em>empty</em></td><td>Path to PEM certificate file. If empty, a self-signed cert is auto-generated.</td></tr>
+    <tr><td><code>dashboard.tls_key</code></td><td><em>empty</em></td><td>Path to PEM private key file. Required when <code>tls_cert</code> is set.</td></tr>
   </tbody>
 </table>
 
@@ -779,7 +781,7 @@ drainctl service uninstall</code></pre>
 </ul>
 
 <h3>Dashboard returns 403 on agent report</h3>
-<p>The reporting server isn't registered. Run <code>drainctl register http://dashboard:49470</code> on that server.</p>
+<p>The reporting server isn't registered. Run <code>drainctl register https://dashboard:49470</code> on that server.</p>
 
 <h3>Need help?</h3>
 <p><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/issues">Open an issue on GitHub</a> or contact <a href="https://lisstech.com">LISS Technologies</a> support.</p>

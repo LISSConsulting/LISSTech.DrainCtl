@@ -103,6 +103,8 @@ type DashboardJSON struct {
 	Port    int    `json:"port"`
 	Group   string `json:"group"`
 	URL     string `json:"url,omitempty"`
+	TLSCert string `json:"tls_cert,omitempty"` // path to PEM certificate file
+	TLSKey  string `json:"tls_key,omitempty"`  // path to PEM private key file
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -122,6 +124,8 @@ type DashboardConfig struct {
 	Port    int
 	Group   string
 	URL     string // agent-side: dashboard URL to report to
+	TLSCert string // path to PEM certificate file
+	TLSKey  string // path to PEM private key file
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -164,6 +168,8 @@ func (c *Config) ToDashboardConfig() DashboardConfig {
 		Port:    c.Dashboard.Port,
 		Group:   c.Dashboard.Group,
 		URL:     c.Dashboard.URL,
+		TLSCert: c.Dashboard.TLSCert,
+		TLSKey:  c.Dashboard.TLSKey,
 	}
 }
 
