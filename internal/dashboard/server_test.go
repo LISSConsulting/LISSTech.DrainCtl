@@ -380,6 +380,168 @@ func TestHandleReport_UpdatesLastSeen(t *testing.T) {
 	}
 }
 
+// ── handleHistory ─────────────────────────────────────────────────────────────
+
+func TestHandleHistory_UnregisteredHostReturns404(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/GHOST", nil)
+	r.SetPathValue("host", "GHOST")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleHistory_RegisteredWithNoReportsReturnsEmptyArray(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("len(records) = %d, want 0", len(records))
+	}
+}
+
+func TestHandleHistory_ReturnsReportsNewestFirst(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	for i, status := range []string{"Healthy", "Grace", "Alert"} {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    status,
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("len(records) = %d, want 3", len(records))
+	}
+	// Newest first: Alert, Grace, Healthy
+	if records[0].Status != "Alert" {
+		t.Errorf("records[0].Status = %q, want Alert", records[0].Status)
+	}
+	if records[1].Status != "Grace" {
+		t.Errorf("records[1].Status = %q, want Grace", records[1].Status)
+	}
+	if records[2].Status != "Healthy" {
+		t.Errorf("records[2].Status = %q, want Healthy", records[2].Status)
+	}
+}
+
+func TestHandleHistory_LimitQueryParam(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	for i := range 10 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01?limit=3", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 3 {
+		t.Errorf("len(records) = %d, want 3", len(records))
+	}
+}
+
+func TestHandleHistory_InvalidLimitReturns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	for _, bad := range []string{"0", "-1", "abc", "101"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01?limit="+bad, nil)
+		r.SetPathValue("host", "SRV01")
+		ds.handleHistory(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("limit=%q: status = %d, want %d", bad, w.Code, http.StatusBadRequest)
+		}
+	}
+}
+
+func TestHandleHistory_RingBufferCapAtHistoryMax(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	// Insert more records than historyMax.
+	for i := range historyMax + 10 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) > historyMax {
+		t.Errorf("len(records) = %d, want <= %d", len(records), historyMax)
+	}
+}
+
+func TestHandleHistory_MissingHostParam(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/", nil)
+	// PathValue("host") returns "" — simulates missing param
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
 func TestHandleReport_HealthDashboardReflectsReport(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")

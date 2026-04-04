@@ -23,10 +23,14 @@ type ServerInfo struct {
 	LastSeen     time.Time       `json:"last_seen,omitempty"`
 }
 
+// historyMax is the maximum number of CheckResult records retained per host.
+const historyMax = 100
+
 // ServerState manages the set of registered servers, persisted to servers.json.
 type ServerState struct {
 	mu      sync.RWMutex
 	servers map[string]*ServerInfo
+	history map[string][]dc.CheckResult
 	path    string
 	log     dc.LogFunc
 }
@@ -39,6 +43,7 @@ func NewServerState(dataDir string, log dc.LogFunc) *ServerState {
 	}
 	s := &ServerState{
 		servers: make(map[string]*ServerInfo),
+		history: make(map[string][]dc.CheckResult),
 		path:    filepath.Join(dataDir, "servers.json"),
 		log:     log,
 	}
@@ -79,7 +84,8 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 	return ok
 }
 
-// Update sets the last result and last-seen time for a registered host.
+// Update sets the last result and last-seen time for a registered host,
+// and appends the result to the per-host history ring (capped at historyMax).
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,6 +94,35 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		info.LastSeen = time.Now()
 		s.save()
 	}
+	buf := s.history[hostname]
+	if len(buf) < historyMax {
+		buf = append(buf, *result)
+	} else {
+		copy(buf, buf[1:])
+		buf[historyMax-1] = *result
+	}
+	s.history[hostname] = buf
+}
+
+// HostHistory returns the last n CheckResult records for hostname, newest first.
+// If n <= 0 or n > historyMax, up to historyMax records are returned.
+func (s *ServerState) HostHistory(hostname string, n int) []dc.CheckResult {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	buf := s.history[hostname]
+	if len(buf) == 0 {
+		return nil
+	}
+	if n <= 0 || n > len(buf) {
+		n = len(buf)
+	}
+	// Return newest-first slice of the ring (buf is oldest-first).
+	src := buf[len(buf)-n:]
+	out := make([]dc.CheckResult, n)
+	for i, r := range src {
+		out[n-1-i] = r
+	}
+	return out
 }
 
 // All returns a snapshot of all servers sorted by hostname.
