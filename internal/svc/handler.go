@@ -381,8 +381,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if newDashCfg.URL == "" && useRemoteConfig {
 				useRemoteConfig = false
 				notifyTargets = newFullCfg.Notifications
+				pruneNotifyState(notifyState, notifyTargets)
 			} else if !useRemoteConfig {
 				notifyTargets = newFullCfg.Notifications
+				pruneNotifyState(notifyState, notifyTargets)
 			}
 
 			dashCfg = newDashCfg
@@ -576,6 +578,23 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
 		dashboard.ReportState(dashCfg.URL, result, log)
+	}
+}
+
+// pruneNotifyState removes per-URL entries from state that no longer correspond
+// to any active notification target, preventing stale rate-limit state from
+// affecting new or renamed targets.
+func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
+	active := make(map[string]bool, len(targets))
+	for _, t := range targets {
+		if t.URL != "" {
+			active[t.URL] = true
+		}
+	}
+	for k := range state.LastAlertNotify {
+		if !active[k] {
+			delete(state.LastAlertNotify, k)
+		}
 	}
 }
 
