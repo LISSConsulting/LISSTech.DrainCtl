@@ -10,6 +10,32 @@ FacilityNames=(
 
 LanguageNames=(English=0x409:MSG00409)
 
+; ── Generic (1–3): used by EventLogLogger for structured log messages ────────
+
+MessageId=1
+Severity=Success
+Facility=System
+SymbolicName=MSG_GENERIC_INFO
+Language=English
+%1
+.
+
+MessageId=2
+Severity=Success
+Facility=System
+SymbolicName=MSG_GENERIC_WARNING
+Language=English
+%1
+.
+
+MessageId=3
+Severity=Success
+Facility=System
+SymbolicName=MSG_GENERIC_ERROR
+Language=English
+%1
+.
+
 ; ── Informational (1xxx) ──────────────────────────────────────────────────────
 ; Go's eventlog.Info() writes these with the raw ID.
 ; Severity=Success + Facility=System = no bit encoding = plain message IDs.
