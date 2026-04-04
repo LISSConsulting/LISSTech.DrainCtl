@@ -24,6 +24,7 @@
         'Test-RDSHDrainNotification'
         'Enable-RDSHDrainDashboard'
         'Disable-RDSHDrainDashboard'
+        'Install-RDSHDrainCertificate'
     )
 
     CmdletsToExport   = @()
