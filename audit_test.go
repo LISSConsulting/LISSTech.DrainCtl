@@ -1,0 +1,557 @@
+//go:build windows
+
+package drainctl
+
+import (
+	"os"
+	"testing"
+	"time"
+)
+
+// writeTestRecords and ptr are defined in audit_filter_test.go.
+
+// ── LastObservation ───────────────────────────────────────────────────────────
+
+func TestLastObservation_Empty(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_lo_empty_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	store, err := OpenAuditStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	rec, err := store.LastObservation()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec != nil {
+		t.Errorf("expected nil for empty store, got %+v", rec)
+	}
+}
+
+func TestLastObservation_SingleRecord(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	store, cleanup := writeTestRecords(t, []AuditRecord{
+		{Timestamp: base, Host: "srv1", DrainMode: AllowAll, DrainLabel: "AllowAll"},
+	})
+	defer cleanup()
+
+	rec, err := store.LastObservation()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected record, got nil")
+	}
+	if rec.Host != "srv1" {
+		t.Errorf("Host = %q, want %q", rec.Host, "srv1")
+	}
+	if !rec.Timestamp.Equal(base) {
+		t.Errorf("Timestamp = %v, want %v", rec.Timestamp, base)
+	}
+}
+
+func TestLastObservation_ReturnsNewest(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, Host: "srv1", DrainMode: AllowAll},
+		{Timestamp: base.Add(time.Hour), Host: "srv1", DrainMode: 1},
+		{Timestamp: base.Add(2 * time.Hour), Host: "srv1", DrainMode: AllowAll},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	rec, err := store.LastObservation()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected record, got nil")
+	}
+	if !rec.Timestamp.Equal(base.Add(2 * time.Hour)) {
+		t.Errorf("Timestamp = %v, want %v", rec.Timestamp, base.Add(2*time.Hour))
+	}
+}
+
+func TestLastObservation_NonexistentFile(t *testing.T) {
+	store, err := OpenAuditStore("/nonexistent/path/audit.jsonl")
+	if err != nil {
+		t.Fatalf("OpenAuditStore: %v", err)
+	}
+
+	// scanRecords returns nil on os.IsNotExist, so LastObservation should return nil, nil.
+	rec, err := store.LastObservation()
+	if err != nil {
+		t.Fatalf("unexpected error for nonexistent path: %v", err)
+	}
+	if rec != nil {
+		t.Errorf("expected nil for nonexistent file, got %+v", rec)
+	}
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+
+func TestHistory_Empty(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_hist_empty_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	store, err := OpenAuditStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	recs, err := store.History(10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected 0 records, got %d", len(recs))
+	}
+}
+
+func TestHistory_NewestFirst(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, Host: "srv1"},
+		{Timestamp: base.Add(time.Hour), Host: "srv1"},
+		{Timestamp: base.Add(2 * time.Hour), Host: "srv1"},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	// Newest first.
+	if !recs[0].Timestamp.Equal(base.Add(2 * time.Hour)) {
+		t.Errorf("recs[0] = %v, want %v", recs[0].Timestamp, base.Add(2*time.Hour))
+	}
+	if !recs[2].Timestamp.Equal(base) {
+		t.Errorf("recs[2] = %v, want %v", recs[2].Timestamp, base)
+	}
+}
+
+func TestHistory_LimitedToN(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	var records []AuditRecord
+	for i := 0; i < 10; i++ {
+		records = append(records, AuditRecord{Timestamp: base.Add(time.Duration(i) * time.Hour), Host: "srv1"})
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.History(3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	// Should be the 3 newest records, newest first.
+	if !recs[0].Timestamp.Equal(base.Add(9 * time.Hour)) {
+		t.Errorf("recs[0] = %v, want newest", recs[0].Timestamp)
+	}
+	if !recs[2].Timestamp.Equal(base.Add(7 * time.Hour)) {
+		t.Errorf("recs[2] = %v, want 3rd-newest", recs[2].Timestamp)
+	}
+}
+
+func TestHistory_LimitZeroReturnsAll(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	var records []AuditRecord
+	for i := 0; i < 5; i++ {
+		records = append(records, AuditRecord{Timestamp: base.Add(time.Duration(i) * time.Hour)})
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 5 {
+		t.Errorf("got %d records, want 5", len(recs))
+	}
+}
+
+func TestHistory_LimitLargerThanTotal(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, Host: "srv1"},
+		{Timestamp: base.Add(time.Hour), Host: "srv1"},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.History(100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("got %d records, want 2", len(recs))
+	}
+}
+
+// ── Changes ───────────────────────────────────────────────────────────────────
+
+func TestChanges_Empty(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, Host: "srv1", Changed: false},
+		{Timestamp: base.Add(time.Hour), Host: "srv1", Changed: false},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.Changes(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("got %d changes, want 0", len(recs))
+	}
+}
+
+func TestChanges_OnlyTransitions(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, Host: "srv1", Changed: false},
+		{Timestamp: base.Add(time.Hour), Host: "srv1", Changed: true},
+		{Timestamp: base.Add(2 * time.Hour), Host: "srv1", Changed: false},
+		{Timestamp: base.Add(3 * time.Hour), Host: "srv1", Changed: true},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.Changes(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("got %d changes, want 2", len(recs))
+	}
+	// Newest first.
+	if !recs[0].Timestamp.Equal(base.Add(3 * time.Hour)) {
+		t.Errorf("recs[0] = %v, want newest transition", recs[0].Timestamp)
+	}
+	if !recs[1].Timestamp.Equal(base.Add(time.Hour)) {
+		t.Errorf("recs[1] = %v, want oldest transition", recs[1].Timestamp)
+	}
+}
+
+func TestChanges_LimitedToN(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	var records []AuditRecord
+	for i := 0; i < 6; i++ {
+		records = append(records, AuditRecord{
+			Timestamp: base.Add(time.Duration(i) * time.Hour),
+			Changed:   i%2 == 1, // transitions at hours 1, 3, 5
+		})
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	recs, err := store.Changes(2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want 2", len(recs))
+	}
+	// Newest 2 transitions are at hours 5 and 3.
+	if !recs[0].Timestamp.Equal(base.Add(5 * time.Hour)) {
+		t.Errorf("recs[0] = %v, want hour 5", recs[0].Timestamp)
+	}
+	if !recs[1].Timestamp.Equal(base.Add(3 * time.Hour)) {
+		t.Errorf("recs[1] = %v, want hour 3", recs[1].Timestamp)
+	}
+}
+
+// ── StateSince ────────────────────────────────────────────────────────────────
+
+func TestStateSince_EmptyStore(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_ss_empty_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	store, err := OpenAuditStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	since, err := store.StateSince(AllowAll)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if since != nil {
+		t.Errorf("expected nil for empty store, got %v", since)
+	}
+}
+
+func TestStateSince_AllSameMode(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{Timestamp: base, DrainMode: AllowAll},
+		{Timestamp: base.Add(time.Hour), DrainMode: AllowAll},
+		{Timestamp: base.Add(2 * time.Hour), DrainMode: AllowAll},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	since, err := store.StateSince(AllowAll)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if since == nil {
+		t.Fatal("expected non-nil since, got nil")
+	}
+	// All records have the same mode → oldest record's timestamp.
+	if !since.Equal(base) {
+		t.Errorf("StateSince = %v, want %v (oldest record)", since, base)
+	}
+}
+
+func TestStateSince_AfterTransition(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	t1 := base
+	t2 := base.Add(time.Hour)
+	t3 := base.Add(2 * time.Hour)
+	t4 := base.Add(3 * time.Hour)
+
+	// Modes: AllowAll, BlockAll, BlockAll, BlockAll
+	// Current mode is BlockAll; it started at t2.
+	records := []AuditRecord{
+		{Timestamp: t1, DrainMode: AllowAll},
+		{Timestamp: t2, DrainMode: 1}, // transition into BlockAll
+		{Timestamp: t3, DrainMode: 1},
+		{Timestamp: t4, DrainMode: 1},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	since, err := store.StateSince(DrainMode(1))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if since == nil {
+		t.Fatal("expected non-nil since, got nil")
+	}
+	if !since.Equal(t2) {
+		t.Errorf("StateSince(BlockAll) = %v, want %v", since, t2)
+	}
+}
+
+func TestStateSince_ModeNotCurrentlyActive(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	// All records in mode AllowAll; asking for mode 1 (never present).
+	records := []AuditRecord{
+		{Timestamp: base, DrainMode: AllowAll},
+		{Timestamp: base.Add(time.Hour), DrainMode: AllowAll},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	since, err := store.StateSince(DrainMode(1))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The requested mode has never been active — no record with a different
+	// mode precedes a record with mode 1, so StateSince returns nil.
+	if since != nil {
+		t.Errorf("StateSince for absent mode = %v, want nil", since)
+	}
+}
+
+func TestStateSince_ReturnsToCurrent(t *testing.T) {
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	t1 := base
+	t2 := base.Add(time.Hour)
+	t3 := base.Add(2 * time.Hour)
+	t4 := base.Add(3 * time.Hour)
+	t5 := base.Add(4 * time.Hour)
+
+	// AllowAll → BlockAll → AllowAll → BlockAll → AllowAll
+	// Current mode (AllowAll) started at t5.
+	records := []AuditRecord{
+		{Timestamp: t1, DrainMode: AllowAll},
+		{Timestamp: t2, DrainMode: 1},
+		{Timestamp: t3, DrainMode: AllowAll},
+		{Timestamp: t4, DrainMode: 1},
+		{Timestamp: t5, DrainMode: AllowAll},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	since, err := store.StateSince(AllowAll)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if since == nil {
+		t.Fatal("expected non-nil since, got nil")
+	}
+	if !since.Equal(t5) {
+		t.Errorf("StateSince(AllowAll) = %v, want %v (last transition into AllowAll)", since, t5)
+	}
+}
+
+// ── Prune ─────────────────────────────────────────────────────────────────────
+
+func TestPrune_RemovesOldRecords(t *testing.T) {
+	now := time.Now().UTC()
+	retention := 7 * 24 * time.Hour
+
+	records := []AuditRecord{
+		{Timestamp: now.Add(-14 * 24 * time.Hour), Host: "srv1"}, // 14 days old — pruned
+		{Timestamp: now.Add(-10 * 24 * time.Hour), Host: "srv1"}, // 10 days old — pruned
+		{Timestamp: now.Add(-3 * 24 * time.Hour), Host: "srv1"},  // 3 days old — kept
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Host: "srv1"},  // 1 day old — kept
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	pruned, err := store.Prune(retention)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("Prune returned %d, want 2", pruned)
+	}
+
+	// Verify only 2 records remain.
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error reading after prune: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("after Prune: %d records remain, want 2", len(recs))
+	}
+}
+
+func TestPrune_KeepsAllRecentRecords(t *testing.T) {
+	now := time.Now().UTC()
+	retention := 7 * 24 * time.Hour
+
+	records := []AuditRecord{
+		{Timestamp: now.Add(-3 * 24 * time.Hour), Host: "srv1"},
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Host: "srv1"},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	pruned, err := store.Prune(retention)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("Prune returned %d, want 0 (nothing to prune)", pruned)
+	}
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error reading after prune: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("after Prune: %d records remain, want 2", len(recs))
+	}
+}
+
+func TestPrune_EmptyStore(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_prune_empty_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	store, err := OpenAuditStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	pruned, err := store.Prune(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("Prune on empty store = %d, want 0", pruned)
+	}
+}
+
+func TestPrune_AllRecordsPruned(t *testing.T) {
+	now := time.Now().UTC()
+	records := []AuditRecord{
+		{Timestamp: now.Add(-30 * 24 * time.Hour), Host: "srv1"},
+		{Timestamp: now.Add(-20 * 24 * time.Hour), Host: "srv1"},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	pruned, err := store.Prune(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("Prune returned %d, want 2", pruned)
+	}
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error reading after full prune: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("after full Prune: %d records remain, want 0", len(recs))
+	}
+}
+
+// ── scanRecords — malformed line handling ─────────────────────────────────────
+
+func TestScanRecords_SkipsMalformedLines(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_malformed_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+
+	// Write a mix of valid JSONL lines and garbage.
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	good := AuditRecord{Timestamp: base, Host: "srv1", DrainMode: AllowAll}
+	good2 := AuditRecord{Timestamp: base.Add(time.Hour), Host: "srv1", DrainMode: 1}
+
+	store := &AuditStore{path: path}
+	_ = store.Record(&good)
+	// Inject a malformed line directly.
+	fh, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = fh.WriteString("THIS IS NOT JSON\n")
+	_ = fh.Close()
+	_ = store.Record(&good2)
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the 2 valid records should be returned.
+	if len(recs) != 2 {
+		t.Errorf("got %d records, want 2 (malformed line should be skipped)", len(recs))
+	}
+}
