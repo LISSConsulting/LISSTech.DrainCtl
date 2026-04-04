@@ -104,7 +104,7 @@ func EnumerateSessions() ([]SessionInfo, error) {
 	if ret == 0 {
 		return nil, fmt.Errorf("WTSEnumerateSessionsW: %w", err)
 	}
-	defer procWTSFreeMemory.Call(uintptr(pSessionInfo))
+	defer func() { _, _, _ = procWTSFreeMemory.Call(uintptr(pSessionInfo)) }()
 
 	entrySize := unsafe.Sizeof(wtsSessionInfoW{})
 	var sessions []SessionInfo
@@ -156,7 +156,7 @@ func querySessionString(sessionID uint32, infoClass uint32) string {
 	if ret == 0 || buf == nil {
 		return ""
 	}
-	defer procWTSFreeMemory.Call(uintptr(unsafe.Pointer(buf)))
+	defer func() { _, _, _ = procWTSFreeMemory.Call(uintptr(unsafe.Pointer(buf))) }()
 
 	return windows.UTF16PtrToString(buf)
 }

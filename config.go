@@ -302,13 +302,13 @@ func saveConfigToFile(cfg *Config, log LogFunc) error {
 	if err != nil {
 		return fmt.Errorf("create config mutex: %w", err)
 	}
-	defer windows.CloseHandle(mutex)
+	defer func() { _ = windows.CloseHandle(mutex) }()
 
 	event, _ := windows.WaitForSingleObject(mutex, 5000) // 5s timeout
 	if event == uint32(windows.WAIT_TIMEOUT) {
 		return fmt.Errorf("config mutex timeout")
 	}
-	defer windows.ReleaseMutex(mutex)
+	defer func() { _ = windows.ReleaseMutex(mutex) }()
 
 	// Marshal with indentation for human readability.
 	data, err := json.MarshalIndent(cfg, "", "  ")

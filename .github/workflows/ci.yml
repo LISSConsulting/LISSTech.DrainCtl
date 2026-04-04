@@ -14,9 +14,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.22'
 
@@ -44,14 +44,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: anchore/sbom-action@v0
         with:
           format: spdx-json
           output-file: sbom.spdx.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.spdx.json
