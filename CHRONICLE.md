@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fourth roam-mode pass complete.** Exponential backoff for dashboard config fetch; interactive `drainctl configure` wizard.
+> Current state: **Fifth roam-mode pass complete.** SSPI RevertToSelf cleanup; config hot-reload NotifyState pruning; `drainctl history --since/--until` flags.
 
 ## Completed Work
 
@@ -16,14 +16,13 @@
 | Roam #3 | `GET /api/v1/history/{host}` — per-host CheckResult ring buffer (cap 100) in `ServerState`; newest-first JSON; `?limit` param; 7 tests | feature, dashboard, testing |
 | Roam #4 | Exponential backoff for dashboard config fetch — `backoffTicks(failures)` doubles interval per failure (10→20→40→80→160→320 polls, cap); resets on success or URL change; 1 test | resilience, svc |
 | Roam #4 | `drainctl configure` interactive wizard — prompts each setting with current value as default; flag-driven path unchanged for MSI installer; command unhidden | feature, UX, CLI |
+| Roam #5 | SSPI `RequireGroup` — `RevertToSelf` called after `isGroupMember` (all paths); `procRevertToSelf` via advapi32.dll | security, dashboard |
+| Roam #5 | Config hot-reload: `pruneNotifyState` removes stale `LastAlertNotify` entries for URLs removed from targets | correctness, svc |
+| Roam #5 | `drainctl history --since`/`--until` — RFC3339 time-bounded queries; `HistoryFiltered`/`ChangesFiltered` on `AuditStore`; post-filter on pipe path; 11 tests | feature, CLI, testing |
 
 ## Remaining Work
 
-| Priority | Item | Location | Notes |
-|----------|------|----------|-------|
-| Low | SSPI `RequireGroup` — add explicit `RevertToSelf` in error paths | `internal/dashboard/sspi.go` | Defensive; thread token impersonation cleanup |
-| Low | Config hot-reload: propagate new notification config to in-flight `NotifyState` | `internal/svc/handler.go` | Currently stale state survives until service restart |
-| Low | `drainctl history` — add `--since` / `--until` flags for time-bounded queries | `cmd/drainctl/main.go` | Convenience for operators |
+*(All tracked items complete — nothing pending.)*
 
 ## Key Learnings
 
@@ -37,3 +36,6 @@
 - **History ring is in-memory only** — `ServerState.history` is not persisted to `servers.json`. It resets on service restart. This keeps the implementation simple; records reaccumulate as reports arrive. Persisting 100×N `CheckResult` JSON per host would bloat `servers.json` significantly.
 - **Dashboard handler tests need no `devmode` tag**: handlers are methods on `*DashboardServer`; calling them directly with `httptest.NewRecorder` bypasses all middleware. Auth is only injected by the mux wrappers, not by the handlers themselves.
 - **`audit.go` streaming pattern**: `scanRecords(fn func(AuditRecord) bool) error` replaces `readAll`. `History(n)` uses a copy-shift ring buffer — `O(n)` memory regardless of file size. `Changes(n)` uses the same ring. `StateSince` still collects all records (needs backward walk). `LastObservation` retains a single record.
+- **SSPI `RevertToSelf` placement**: Calling `RevertToSelf` immediately after `isGroupMember` (before any early return) ensures cleanup in both error and success paths. If no impersonation happened, `RevertToSelf` is a no-op.
+- **`NotifyState.LastAlertNotify` keyed by URL**: On config hot-reload, prune stale entries by building an active-URL set and deleting entries not in it. Only prune when using local config (not dashboard remote), since remote config manages its own targets.
+- **`HistoryFiltered` ring buffer with time filter**: The scan is oldest-first; applying the time predicate before the ring-shift means only matching records count toward the limit. The pipe path returns `[]HistoryRecord` (string timestamps), so time filtering there is done post-fetch with RFC3339 parsing.
