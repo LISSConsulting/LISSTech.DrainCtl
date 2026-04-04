@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Eighth roam-mode pass complete.** 22 new tests for `audit.go` file-based `AuditStore` core methods (`History`, `Changes`, `StateSince`, `LastObservation`, `Prune`, `scanRecords`) — the last untested surface in the root package.
+> Current state: **Ninth roam-mode pass complete.** Security headers middleware, `handleHealth` Grace correctness fix, dead code removal, and 11 new tests for `handleServers`, `handleDeleteServer`, and the updated health response.
 
 ## Completed Work
 
@@ -23,10 +23,13 @@
 | Roam #7 | `internal/svc/handler.go` split into `handler.go` (service lifecycle: `drainService`, `Execute`, `serviceHandler`, `RunService`, `backoffTicks`, event constants) and `check.go` (check cycle: `svcRunCheck`, `pruneNotifyState`, `applyRemoteConfig`); 623 → 411 + 227 lines | code quality |
 | Roam #7 | 20 tests for `internal/store/memstore.go` — covers `LastObservation`, `History` (ordering, limits), `Changes` (filtering, limits), `StateSince` (empty, all-same-mode, after-transition, absent-mode, returns-to-current), `Flush`/`Close` persistence, `Prune`, `FlushIfDirty`, concurrent access | testing |
 | Roam #8 | 22 tests for `audit.go` (`AuditStore`) — `LastObservation` (empty, single, newest-of-many, nonexistent file), `History` (empty, newest-first, limit, limit=0, limit>total), `Changes` (empty store, only transitions, limited to N), `StateSince` (empty, all-same, after transition, absent mode, returns-to-current), `Prune` (removes old, keeps recent, empty store, prunes all), `scanRecords` malformed-line skip | testing |
+| Roam #9 | `handleHealth` correctness: `Grace` status was miscounted as `healthy`; added separate `grace` field to JSON response (backward-compatible) | correctness, dashboard |
+| Roam #9 | `securityMiddleware`: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` headers added to all responses; HSTS remains TLS-only, chained on top | security, dashboard |
+| Roam #9 | `handleDeleteServer`: removed unreachable URL-path fallback (predated Go 1.22 `ServeMux` `PathValue`); 11 new tests for `handleServers`, `handleDeleteServer`, and Grace health counting | code quality, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending.)*
+*(All tracked items complete — nothing pending after Roam #9.)*
 
 ## Key Learnings
 
@@ -47,3 +50,6 @@
 - **handler.go split boundary**: `handler.go` = service lifecycle (Execute loop, serviceHandler pipe bridge, RunService, backoffTicks, event log constants). `check.go` = one check cycle (svcRunCheck, pruneNotifyState, applyRemoteConfig). Both files need all the same imports because they share the same package and cross-reference each other's symbols.
 - **MemAuditStore test strategy**: `OpenMemAuditStore` uses `windows.CreateFile` for exclusive locking, so tests require a real temp file (use `t.TempDir()`). The public methods (Append, History, Changes, StateSince, Flush, Prune) are pure in-memory logic after that; no mocking needed. The concurrent access test (`sync.WaitGroup` + multiple goroutines) exercises the `sync.RWMutex` under `go test -race`.
 - **AuditStore test strategy**: `writeTestRecords` helper (from `audit_filter_test.go`) creates a real temp file, writes records, and returns the store — usable in `audit_test.go` without redeclaration (same package). `scanRecords` malformed-line skip can be tested by inserting raw garbage bytes via `os.OpenFile` after calling `Record`. `StateSince` for an absent mode returns `nil` (the backward walk finds no preceding different-mode record), while `History(0)` with `n=0` returns all records.
+- **Security headers layering**: `securityMiddleware` (defensive headers: nosniff, SAMEORIGIN, Referrer-Policy, Permissions-Policy) wraps the mux unconditionally; `hstsMiddleware` wraps the result only when TLS is active. This keeps the two concerns separate and lets HSTS remain TLS-gated.
+- **Health endpoint Grace miscounting**: `switch s.LastResult.Status { case "Alert": ... default: healthy++ }` silently lumped Grace, Error, and any unknown status into `healthy`. Fix: add explicit `case "Grace": grace++` and expose a `grace` JSON field. Adding a new field to a JSON response is backward-compatible — existing decoders ignore unknown fields.
+- **PathValue fallback is dead code**: `DELETE /api/v1/servers/{host}` registered via Go 1.22 `http.ServeMux` always populates `r.PathValue("host")` when the route matches; the URL-split fallback can never be reached and should be deleted.
