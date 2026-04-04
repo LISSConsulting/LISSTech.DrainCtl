@@ -24,7 +24,8 @@ func marshalJSON(v any) *C.char {
 }
 
 func marshalError(err error) *C.char {
-	return C.CString(`{"error":"` + err.Error() + `"}`)
+	out, _ := json.Marshal(map[string]string{"error": err.Error()})
+	return C.CString(string(out))
 }
 
 //export DrainCtl_Version
@@ -57,7 +58,7 @@ func DrainCtl_Check(dbPath *C.char, graceMinutes C.int, retentionDays C.int) *C.
 	out, err := dc.Check(dc.CheckOptions{
 		DBPath:        db,
 		GracePeriod:   time.Duration(graceMinutes) * time.Minute,
-		RetentionDays: int(retentionDays),
+		RetentionDays: dc.ClampRetention(int(retentionDays), dc.DiscardLogger()),
 		Log:           dc.DiscardLogger(),
 	})
 	if err != nil {
