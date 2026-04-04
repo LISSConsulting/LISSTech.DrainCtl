@@ -1085,6 +1085,7 @@
                     background: var(--green);
                 }
             }
+            @media(max-width:640px){.settings-modal{padding:20px 18px}.settings-modal>div[style*="grid-template-columns"]{grid-template-columns:1fr!important}.btn-add-target{width:100%}}
         </style>
     </head>
     <body>
@@ -5211,22 +5212,8 @@
                 });
             })();
 
-            if (location.search === "?mock") {
-                fetch("mock.js")
-                    .then(function (r) {
-                        return r.text();
-                    })
-                    .then(function (t) {
-                        eval(t);
-                    })
-                    .catch(function () {
-                        console.log("mock.js not found");
-                    });
-            } else {
-                setInterval(refresh, 30000);
-                refresh();
-                loadNotifyConfig();
-            }
+            if(location.search==='?mock'){var s=document.createElement('script');s.src='mock.js';document.body.appendChild(s)}
+            else{setInterval(refresh,30000);refresh();loadNotifyConfig();}
         </script>
     </body>
 </html>
