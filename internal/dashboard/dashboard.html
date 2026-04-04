@@ -354,7 +354,11 @@ function render(servers){
 let chartInstance=null;
 function renderChart(){
   const el=document.getElementById('chart-el');
-  if(!history.length||!history[0].t){el.innerHTML='';if(chartInstance){chartInstance.destroy();chartInstance=null;}return;}
+  if(!history.length||!history[0].t||history.length<3){
+    if(chartInstance){chartInstance.destroy();chartInstance=null;}
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:200px;font-family:JetBrains Mono,monospace;font-size:.8rem;color:var(--muted)">Collecting data'+(history.length?'... '+history.length+'/3':'')+'</div>';
+    return;
+  }
   const cs=getComputedStyle(document.documentElement);
   const colors={ok:cs.getPropertyValue('--green').trim(),grace:cs.getPropertyValue('--amber').trim(),alert:cs.getPropertyValue('--red').trim(),off:cs.getPropertyValue('--subtle').trim()};
   const now=Date.now()/1000;
