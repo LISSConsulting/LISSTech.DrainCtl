@@ -3,10 +3,11 @@
 package dashboard
 
 import (
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -91,8 +92,8 @@ func (s *ServerState) All() []ServerInfo {
 	for _, info := range s.servers {
 		out = append(out, *info)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Hostname < out[j].Hostname
+	slices.SortFunc(out, func(a, b ServerInfo) int {
+		return cmp.Compare(a.Hostname, b.Hostname)
 	})
 	return out
 }

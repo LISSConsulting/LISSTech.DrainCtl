@@ -414,12 +414,16 @@ function Get-RDSHDrainNotification {
 function Set-RDSHDrainNotification {
     <#
     .SYNOPSIS
-    Updates notification settings for DrainCtl.
+    Updates notification settings for DrainCtl (legacy — use Add/Remove-RDSHDrainNotificationTarget instead).
 
     .DESCRIPTION
-    Writes notification configuration to config.json. Only specified
-    parameters are changed; unspecified parameters retain their current
-    values.
+    Writes notification configuration to config.json using the legacy flat
+    format (single webhook + single ntfy). Only specified parameters are
+    changed; unspecified parameters retain their current values.
+
+    DEPRECATED: This cmdlet manages at most one webhook and one ntfy target.
+    For multi-target management use Get-RDSHDrainNotificationTarget,
+    Add-RDSHDrainNotificationTarget, and Remove-RDSHDrainNotificationTarget.
 
     .PARAMETER WebhookURL
     Webhook URL for HTTP POST JSON notifications. Set to empty string to disable.
@@ -467,6 +471,8 @@ function Set-RDSHDrainNotification {
         [int]$RepeatMinutes
     )
 
+    Write-Warning 'Set-RDSHDrainNotification is deprecated. Use Add-RDSHDrainNotificationTarget and Remove-RDSHDrainNotificationTarget for multi-target management.'
+
     if (-not $PSCmdlet.ShouldProcess('DrainCtl notification configuration', 'Update')) {
         return
     }
@@ -483,6 +489,178 @@ function Set-RDSHDrainNotification {
     $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose 'Notification configuration updated.'
+}
+
+function Get-RDSHDrainNotificationTarget {
+    <#
+    .SYNOPSIS
+    Lists all configured notification targets.
+
+    .DESCRIPTION
+    Returns all notification targets from config.json as structured objects.
+    Each target has a Type (webhook or ntfy), URL, Triggers array, and
+    RepeatMinutes setting.
+
+    .EXAMPLE
+    PS> Get-RDSHDrainNotificationTarget
+
+    Type    URL                                   Triggers                        RepeatMinutes
+    ----    ---                                   --------                        -------------
+    webhook https://hooks.example.com/drain       {drain_on, drain_off, alert}               15
+    ntfy    https://ntfy.sh/drainctl-alerts       {alert}                                     0
+
+    .EXAMPLE
+    PS> Get-RDSHDrainNotificationTarget | Where-Object Type -eq 'webhook'
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject[]])]
+    param()
+
+    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $raw = Invoke-DrainCtlNative -Ptr $ptr
+
+    $targets = Get-SafeProperty $raw 'notifications' @()
+    if ($null -eq $targets -or @($targets).Count -eq 0) {
+        return
+    }
+
+    foreach ($t in $targets) {
+        [PSCustomObject]@{
+            PSTypeName    = 'DrainCtl.NotificationTarget'
+            Type          = $t.type
+            URL           = $t.url
+            Triggers      = @($t.triggers)
+            RepeatMinutes = [int](Get-SafeProperty $t 'repeat_minutes' 0)
+        }
+    }
+}
+
+function Add-RDSHDrainNotificationTarget {
+    <#
+    .SYNOPSIS
+    Adds a notification target to DrainCtl.
+
+    .DESCRIPTION
+    Appends a new notification target (webhook or ntfy) to the
+    notifications array in config.json.
+
+    .PARAMETER Type
+    Target type: 'webhook' or 'ntfy'.
+
+    .PARAMETER URL
+    Target URL (e.g. 'https://hooks.example.com/drain' or 'https://ntfy.sh/alerts').
+
+    .PARAMETER Triggers
+    Array of trigger names. Valid values: drain_on, drain_off, grace_entered,
+    alert, healthy, session_warning. Default: drain_on, drain_off, alert, healthy.
+
+    .PARAMETER RepeatMinutes
+    Minutes between repeated alert notifications. 0 = notify once only. Default: 0.
+
+    .EXAMPLE
+    PS> Add-RDSHDrainNotificationTarget -Type webhook -URL 'https://hooks.example.com/drain'
+
+    .EXAMPLE
+    PS> Add-RDSHDrainNotificationTarget -Type ntfy -URL 'https://ntfy.sh/alerts' -Triggers alert -RepeatMinutes 5
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('webhook', 'ntfy')]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$URL,
+
+        [Parameter()]
+        [ValidateSet('drain_on', 'drain_off', 'grace_entered', 'alert', 'healthy', 'session_warning')]
+        [string[]]$Triggers = @('drain_on', 'drain_off', 'alert', 'healthy'),
+
+        [Parameter()]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$RepeatMinutes = 0
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("$Type target $URL", 'Add notification target')) {
+        return
+    }
+
+    # Read current config.
+    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $raw = Invoke-DrainCtlNative -Ptr $ptr
+    $targets = @(Get-SafeProperty $raw 'notifications' @())
+
+    # Append new target.
+    $newTarget = @{
+        type           = $Type
+        url            = $URL
+        triggers       = @($Triggers)
+        repeat_minutes = $RepeatMinutes
+    }
+    $targets += $newTarget
+
+    # Save via new format.
+    $payload = @{ notifications = @($targets) }
+    $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
+    $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+    $null = Invoke-DrainCtlNative -Ptr $ptr
+
+    Write-Verbose "Added $Type notification target: $URL"
+}
+
+function Remove-RDSHDrainNotificationTarget {
+    <#
+    .SYNOPSIS
+    Removes a notification target from DrainCtl by URL.
+
+    .DESCRIPTION
+    Removes the first notification target matching the given URL from
+    config.json. URL matching is case-insensitive.
+
+    .PARAMETER URL
+    URL of the target to remove.
+
+    .EXAMPLE
+    PS> Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'
+
+    .EXAMPLE
+    PS> Get-RDSHDrainNotificationTarget | Where-Object Type -eq 'ntfy' | ForEach-Object { Remove-RDSHDrainNotificationTarget -URL $_.URL }
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+        [ValidateNotNullOrEmpty()]
+        [string]$URL
+    )
+
+    process {
+        if (-not $PSCmdlet.ShouldProcess("target $URL", 'Remove notification target')) {
+            return
+        }
+
+        # Read current config.
+        $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+        $raw = Invoke-DrainCtlNative -Ptr $ptr
+        $targets = @(Get-SafeProperty $raw 'notifications' @())
+
+        $filtered = @($targets | Where-Object { $_.url -ine $URL })
+
+        if ($filtered.Count -eq $targets.Count) {
+            Write-Warning "No notification target found with URL: $URL"
+            return
+        }
+
+        # Save via new format.
+        $payload = @{ notifications = @($filtered) }
+        $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
+        $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+        $null = Invoke-DrainCtlNative -Ptr $ptr
+
+        Write-Verbose "Removed notification target: $URL"
+    }
 }
 
 function Test-RDSHDrainNotification {
@@ -557,6 +735,9 @@ Export-ModuleMember -Function @(
     'Install-RDSHDrainAudit'
     'Get-RDSHDrainNotification'
     'Set-RDSHDrainNotification'
+    'Get-RDSHDrainNotificationTarget'
+    'Add-RDSHDrainNotificationTarget'
+    'Remove-RDSHDrainNotificationTarget'
     'Test-RDSHDrainNotification'
     'Enable-RDSHDrainDashboard'
     'Disable-RDSHDrainDashboard'

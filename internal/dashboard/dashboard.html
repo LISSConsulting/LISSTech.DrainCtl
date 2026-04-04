@@ -148,6 +148,24 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .settings-status{font-size:.78rem;margin-top:10px;font-weight:600}
 .settings-status.ok{color:var(--green)}.settings-status.err{color:var(--red)}
 
+/* Target rows */
+.target-list{display:flex;flex-direction:column;gap:14px}
+.target-row{background:var(--surface);border:var(--bw) solid var(--border);border-radius:var(--r);padding:14px;position:relative}
+.target-row-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.target-type{font-family:'JetBrains Mono',monospace;font-size:.78rem;padding:6px 10px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none;cursor:pointer}
+.target-type:focus{box-shadow:0 0 0 2px var(--accent)}
+.target-url{flex:1}
+.btn-rm-target{font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;padding:6px 10px;background:var(--card);color:var(--red);border:1.5px solid var(--red);border-radius:4px;cursor:pointer;transition:background .1s,color .1s}
+.btn-rm-target:hover{background:var(--red);color:#fff}
+.target-triggers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.target-triggers label{font-size:.72rem;font-weight:600;display:flex;align-items:center;gap:4px;cursor:pointer}
+.target-triggers input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:pointer}
+.target-repeat{display:flex;align-items:center;gap:8px}
+.target-repeat-label{font-size:.72rem;color:var(--muted);font-weight:600}
+.btn-add-target{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;background:var(--card);color:var(--accent);border:2px dashed var(--accent);border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s}
+.btn-add-target:hover{background:var(--accent);color:#fff}
+.settings-divider{height:1px;background:var(--border);margin:18px 0;opacity:.4}
+
 @media(max-width:768px){.counters{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr}.chart-host{width:80px;font-size:.65rem}}
 @media(max-width:480px){.nav-right span{display:none}.nav-right::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--green)}}
 </style>
@@ -204,23 +222,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 <div class="settings-drawer" id="settings-drawer">
   <div class="settings-title"><span>Notification Settings</span><button class="settings-close" onclick="toggleSettings()">&times;</button></div>
   <div class="settings-group">
-    <div class="settings-label">Webhook URL</div>
-    <input class="settings-input" id="cfg-webhook" type="text" placeholder="https://hooks.example.com/...">
+    <div class="settings-label">Notification Targets</div>
+    <div class="target-list" id="target-list"></div>
+    <button class="btn-add-target" onclick="addTargetRow()" style="margin-top:10px">+ Add Target</button>
   </div>
-  <div class="settings-group">
-    <div class="settings-label">ntfy.sh URL</div>
-    <input class="settings-input" id="cfg-ntfy" type="text" placeholder="https://ntfy.sh/drainctl-alerts">
-  </div>
-  <div class="settings-group">
-    <div class="settings-label">Triggers</div>
-    <label class="settings-check"><input type="checkbox" id="cfg-transition" checked> On Transition</label>
-    <label class="settings-check"><input type="checkbox" id="cfg-grace" checked> On Grace Exceeded</label>
-  </div>
-  <div class="settings-group">
-    <div class="settings-label">Repeat Minutes</div>
-    <input class="settings-num" id="cfg-repeat" type="number" min="0" value="0" placeholder="0">
-    <div style="font-size:.72rem;color:var(--muted);margin-top:4px">0 = notify once per event</div>
-  </div>
+  <div class="settings-divider"></div>
   <div class="settings-group">
     <div class="settings-label">Session Warning Threshold</div>
     <input class="settings-num" id="cfg-threshold" type="number" min="0" max="100" value="80" placeholder="80">
@@ -444,21 +450,57 @@ function toggleSettings(){
   document.getElementById('settings-overlay').classList.toggle('open');
   document.getElementById('settings-drawer').classList.toggle('open');
 }
+const ALL_TRIGGERS=['drain_on','drain_off','grace_entered','alert','healthy','session_warning'];
+const TRIGGER_LABELS={drain_on:'Drain On',drain_off:'Drain Off',grace_entered:'Grace',alert:'Alert',healthy:'Healthy',session_warning:'Sessions'};
+let targetCounter=0;
+function addTargetRow(data){
+  const id=targetCounter++;
+  const t=data||{type:'webhook',url:'',triggers:['drain_on','drain_off','alert','healthy'],repeat_minutes:0};
+  const row=document.createElement('div');
+  row.className='target-row';
+  row.dataset.targetId=id;
+  const triggers=t.triggers||[];
+  row.innerHTML=`<div class="target-row-head">`
+    +`<select class="target-type" data-field="type"><option value="webhook"${t.type==='webhook'?' selected':''}>Webhook</option><option value="ntfy"${t.type==='ntfy'?' selected':''}>ntfy</option></select>`
+    +`<input class="settings-input target-url" data-field="url" type="text" value="${(t.url||'').replace(/"/g,'&quot;')}" placeholder="${t.type==='ntfy'?'https://ntfy.sh/drainctl-alerts':'https://hooks.example.com/...'}">`
+    +`<button class="btn-rm-target" onclick="this.closest('.target-row').remove()">Remove</button>`
+    +`</div>`
+    +`<div class="target-triggers">`
+    +ALL_TRIGGERS.map(tr=>`<label><input type="checkbox" data-trigger="${tr}"${triggers.includes(tr)?' checked':''}> ${TRIGGER_LABELS[tr]}</label>`).join('')
+    +`</div>`
+    +`<div class="target-repeat"><span class="target-repeat-label">Repeat min</span>`
+    +`<input class="settings-num" data-field="repeat" type="number" min="0" value="${t.repeat_minutes||0}" style="width:70px">`
+    +`<span style="font-size:.68rem;color:var(--muted)">0 = once</span></div>`;
+  const sel=row.querySelector('.target-type');
+  const url=row.querySelector('.target-url');
+  sel.addEventListener('change',()=>{url.placeholder=sel.value==='ntfy'?'https://ntfy.sh/drainctl-alerts':'https://hooks.example.com/...';});
+  document.getElementById('target-list').appendChild(row);
+  return row;
+}
+function readTargets(){
+  const rows=document.querySelectorAll('.target-row');
+  const targets=[];
+  rows.forEach(row=>{
+    const url=row.querySelector('[data-field="url"]').value.trim();
+    if(!url)return;
+    const type=row.querySelector('[data-field="type"]').value;
+    const repeat=parseInt(row.querySelector('[data-field="repeat"]').value)||0;
+    const triggers=[];
+    row.querySelectorAll('[data-trigger]').forEach(cb=>{if(cb.checked)triggers.push(cb.dataset.trigger);});
+    targets.push({type,url,triggers,repeat_minutes:repeat});
+  });
+  return targets;
+}
 async function loadNotifyConfig(){
   try{
     const r=await fetch('/api/v1/notify-config');
     if(!r.ok)return;
     const c=await r.json();
+    document.getElementById('target-list').innerHTML='';
+    targetCounter=0;
     const targets=c.notifications||[];
-    const wh=targets.find(t=>t.type==='webhook');
-    const nt=targets.find(t=>t.type==='ntfy');
-    document.getElementById('cfg-webhook').value=wh?wh.url:'';
-    document.getElementById('cfg-ntfy').value=nt?nt.url:'';
-    const hasTrigger=name=>targets.some(t=>(t.triggers||[]).includes(name));
-    document.getElementById('cfg-transition').checked=hasTrigger('drain_on')||hasTrigger('drain_off');
-    document.getElementById('cfg-grace').checked=hasTrigger('alert');
-    const first=targets[0];
-    document.getElementById('cfg-repeat').value=first?(first.repeat_minutes||0):0;
+    if(targets.length===0)addTargetRow();
+    else targets.forEach(t=>addTargetRow(t));
     document.getElementById('cfg-threshold').value=c.session_warning_threshold||80;
   }catch(e){console.error('loadNotifyConfig:',e)}
 }
@@ -466,19 +508,8 @@ async function saveNotifyConfig(){
   const st=document.getElementById('cfg-status');
   st.textContent='';st.className='settings-status';
   try{
-    const webhook=document.getElementById('cfg-webhook').value.trim();
-    const ntfy=document.getElementById('cfg-ntfy').value.trim();
-    const onTrans=document.getElementById('cfg-transition').checked;
-    const onGrace=document.getElementById('cfg-grace').checked;
-    const repeat=parseInt(document.getElementById('cfg-repeat').value)||0;
+    const notifications=readTargets();
     const threshold=parseInt(document.getElementById('cfg-threshold').value)||80;
-    let triggers=[];
-    if(onTrans)triggers.push('drain_on','drain_off','grace_entered','healthy');
-    if(onGrace)triggers.push('alert');
-    if(!triggers.length)triggers=['drain_on','drain_off','alert','healthy'];
-    let notifications=[];
-    if(webhook)notifications.push({type:'webhook',url:webhook,triggers,repeat_minutes:repeat});
-    if(ntfy)notifications.push({type:'ntfy',url:ntfy,triggers,repeat_minutes:repeat});
     const body=JSON.stringify({notifications,session_warning_threshold:threshold});
     const r=await fetch('/api/v1/notify-config',{method:'PUT',headers:{'Content-Type':'application/json'},body});
     if(r.ok){st.textContent='Saved successfully.';st.className='settings-status ok';}

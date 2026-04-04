@@ -132,7 +132,8 @@ pre {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.82rem;
   line-height: 1.7;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   margin: 16px 0 24px;
 }
 pre code { background: none; border: none; padding: 0; font-size: inherit; color: #f0e0e0; }
@@ -217,8 +218,29 @@ th { background: var(--surface); font-weight: 700; }
 
 <p>DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; your RMM, SCCM, Intune, GPO, or just double-click it.</p>
 
+<h3>Interactive install</h3>
+<p>Double-click the MSI to launch the interactive installer. It walks you through choosing an install mode (<strong>dashboard</strong>, <strong>registration</strong>, or <strong>standalone</strong>) and setting notification URLs, dashboard address, grace period, and other options.</p>
+
 <h3>Silent install</h3>
 <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn</code></pre>
+
+<h3>Unattended MSI properties</h3>
+<p>Pass these properties on the command line (or in your RMM/SCCM transform) to pre-configure the installation:</p>
+<table>
+  <thead><tr><th>Property</th><th>Values / Example</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>INSTALL_MODE</code></td><td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td><td>Sets the operational mode. <strong>dashboard</strong> enables the web UI, <strong>registration</strong> registers with an existing dashboard, <strong>standalone</strong> runs independently.</td></tr>
+    <tr><td><code>WEBHOOK_URL</code></td><td><code>https://hooks.example.com/drain</code></td><td>Adds a webhook notification target</td></tr>
+    <tr><td><code>NTFY_URL</code></td><td><code>https://ntfy.sh/drainctl</code></td><td>Adds an ntfy notification target</td></tr>
+    <tr><td><code>DASHBOARD_URL</code></td><td><code>https://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
+    <tr><td><code>DASHBOARD_PORT</code></td><td><code>49470</code></td><td>Port for the dashboard listener (used with <code>dashboard</code> mode)</td></tr>
+    <tr><td><code>DASHBOARD_GROUP</code></td><td><code>Domain Admins</code></td><td>AD group authorized for dashboard access</td></tr>
+    <tr><td><code>GRACE_PERIOD</code></td><td><code>120</code></td><td>Grace period in minutes before drain mode becomes an alert</td></tr>
+  </tbody>
+</table>
+
+<p>Example &mdash; register with a dashboard, no UI:</p>
+<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470</code></pre>
 
 <h3>What the MSI does</h3>
 <ul>
@@ -443,6 +465,9 @@ Get-RDSHDrainHistory -ChangesOnly |
     <tr><td><code>Get-RDSHDrainNotification</code></td><td>PSObject</td><td>Current notification config</td></tr>
     <tr><td><code>Set-RDSHDrainNotification</code></td><td>&mdash;</td><td>Update notification settings</td></tr>
     <tr><td><code>Test-RDSHDrainNotification</code></td><td>&mdash;</td><td>Send test notification</td></tr>
+    <tr><td><code>Get-RDSHDrainNotificationTarget</code></td><td>PSObject[]</td><td>Lists all notification targets with type, URL, triggers, repeat interval</td></tr>
+    <tr><td><code>Add-RDSHDrainNotificationTarget</code></td><td>&mdash;</td><td>Adds a notification target (<code>-Type</code>, <code>-URL</code>, <code>-Triggers</code>, <code>-RepeatMinutes</code>)</td></tr>
+    <tr><td><code>Remove-RDSHDrainNotificationTarget</code></td><td>&mdash;</td><td>Removes a notification target by <code>-URL</code></td></tr>
   </tbody>
 </table>
 
@@ -478,6 +503,19 @@ Test-RDSHDrainNotification
 
 # See current config
 Get-RDSHDrainNotification</code></pre>
+
+<h3>PowerShell target management</h3>
+<pre><code># List all targets
+Get-RDSHDrainNotificationTarget
+
+# Add a webhook for alerts only
+Add-RDSHDrainNotificationTarget -Type webhook -URL 'https://hooks.example.com/drain' -Triggers alert -RepeatMinutes 15
+
+# Add ntfy for all events
+Add-RDSHDrainNotificationTarget -Type ntfy -URL 'https://ntfy.sh/drainctl'
+
+# Remove a target
+Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code></pre>
 
 <h3>Granular triggers</h3>
 <p>Each notification target can subscribe to specific triggers. Assign them with <code>--triggers</code> when adding a target, or edit <code>config.json</code> directly.</p>
@@ -562,8 +600,11 @@ drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
 
 <h3>Register servers</h3>
 <p>On each RDSH server you want to monitor, run this once:</p>
-<pre><code># Register this server with the dashboard
-drainctl register http://dashboard-server:49470</code></pre>
+<pre><code># Register with explicit URL
+drainctl register https://dashboard-server:49470
+
+# Or auto-discover via DNS SRV record
+drainctl register --auto</code></pre>
 
 <p>This does two things:</p>
 <ol>
@@ -571,9 +612,23 @@ drainctl register http://dashboard-server:49470</code></pre>
   <li>Sends a registration request to the dashboard (so it knows about this server)</li>
 </ol>
 
+<h3>Auto-discovery (DNS SRV)</h3>
+<p>Instead of configuring <code>dashboard.url</code> on every agent, create a DNS SRV record and agents will find the dashboard automatically. The service checks for <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.</p>
+
+<pre><code># PowerShell — create the SRV record in AD-integrated DNS
+Add-DnsServerResourceRecord -ZoneName "contoso.com" `
+  -Name "_drainctl._tcp" -Srv `
+  -DomainName "dashboard.contoso.com" `
+  -Port 49470 -Priority 0 -Weight 0
+
+# Verify
+Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
+
+<p>Once the SRV record exists, agents discover the dashboard without any per-machine config. Just install the MSI and the service registers itself.</p>
+
 <div class="callout">
   <strong>&#x1F4A1; Self-maintaining.</strong>
-  After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back.
+  After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back. With SRV discovery, even registration is automatic &mdash; install the MSI and you're done.
 </div>
 
 <h3>View the dashboard</h3>
@@ -581,9 +636,11 @@ drainctl register http://dashboard-server:49470</code></pre>
 drainctl dashboard
 
 # Or navigate directly
-http://dashboard-server:49470</code></pre>
+https://dashboard-server:49470</code></pre>
 
 <p>The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session trends.</p>
+
+<p>The <strong>notification settings drawer</strong> supports multi-target editing &mdash; add and remove individual notification targets, each with its own triggers and repeat interval, directly from the dashboard UI.</p>
 
 <h3>Manage servers</h3>
 <pre><code># List all registered servers
@@ -605,10 +662,12 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
 <table>
   <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTP dashboard (set to true)</td></tr>
+    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTPS dashboard (set to true)</td></tr>
     <tr><td><code>dashboard.port</code></td><td>49470</td><td>Port the dashboard listens on</td></tr>
     <tr><td><code>dashboard.group</code></td><td>Domain Admins</td><td>AD group authorized to view the dashboard</td></tr>
     <tr><td><code>dashboard.url</code></td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td></tr>
+    <tr><td><code>dashboard.tls_cert</code></td><td><em>empty</em></td><td>Path to PEM certificate file. If empty, a self-signed cert is auto-generated.</td></tr>
+    <tr><td><code>dashboard.tls_key</code></td><td><em>empty</em></td><td>Path to PEM private key file. Required when <code>tls_cert</code> is set.</td></tr>
   </tbody>
 </table>
 
@@ -739,7 +798,7 @@ drainctl service uninstall</code></pre>
 </ul>
 
 <h3>Dashboard returns 403 on agent report</h3>
-<p>The reporting server isn't registered. Run <code>drainctl register http://dashboard:49470</code> on that server.</p>
+<p>The reporting server isn't registered. Run <code>drainctl register https://dashboard:49470</code> on that server.</p>
 
 <h3>Need help?</h3>
 <p><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/issues">Open an issue on GitHub</a> or contact <a href="https://lisstech.com">LISS Technologies</a> support.</p>

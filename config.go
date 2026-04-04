@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -98,10 +99,13 @@ type Config struct {
 
 // DashboardJSON holds dashboard settings in config.json.
 type DashboardJSON struct {
-	Enabled bool   `json:"enabled"`
-	Port    int    `json:"port"`
-	Group   string `json:"group"`
-	URL     string `json:"url,omitempty"`
+	Enabled        bool   `json:"enabled"`
+	Port           int    `json:"port"`
+	Group          string `json:"group"`
+	URL            string `json:"url,omitempty"`
+	TLSCert        string `json:"tls_cert,omitempty"`        // path to PEM certificate file
+	TLSKey         string `json:"tls_key,omitempty"`         // path to PEM private key file
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // SHA-256 cert fingerprint for pinning (agent-side)
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -117,10 +121,13 @@ type ServiceConfig struct {
 
 // DashboardConfig holds runtime dashboard parameters.
 type DashboardConfig struct {
-	Enabled bool
-	Port    int
-	Group   string
-	URL     string // agent-side: dashboard URL to report to
+	Enabled        bool
+	Port           int
+	Group          string
+	URL            string // agent-side: dashboard URL to report to
+	TLSCert        string // path to PEM certificate file
+	TLSKey         string // path to PEM private key file
+	TLSFingerprint string // SHA-256 cert fingerprint for pinning (agent-side)
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -159,10 +166,13 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 // ToDashboardConfig converts the JSON config to runtime DashboardConfig.
 func (c *Config) ToDashboardConfig() DashboardConfig {
 	return DashboardConfig{
-		Enabled: c.Dashboard.Enabled,
-		Port:    c.Dashboard.Port,
-		Group:   c.Dashboard.Group,
-		URL:     c.Dashboard.URL,
+		Enabled:        c.Dashboard.Enabled,
+		Port:           c.Dashboard.Port,
+		Group:          c.Dashboard.Group,
+		URL:            c.Dashboard.URL,
+		TLSCert:        c.Dashboard.TLSCert,
+		TLSKey:         c.Dashboard.TLSKey,
+		TLSFingerprint: c.Dashboard.TLSFingerprint,
 	}
 }
 
@@ -209,15 +219,15 @@ func (c *Config) Validate(log LogFunc) {
 		if len(c.Notifications[i].Triggers) == 0 {
 			c.Notifications[i].Triggers = append([]Trigger{}, DefaultTriggers...)
 		} else {
-			valid := c.Notifications[i].Triggers[:0]
-			for _, tr := range c.Notifications[i].Triggers {
-				if ValidTriggers[tr] {
-					valid = append(valid, tr)
-				} else if log != nil {
-					LogMsg(log, LvlWRN, "unknown trigger ignored", fmt.Sprintf("trigger=%s url=%s", tr, c.Notifications[i].URL))
+			c.Notifications[i].Triggers = slices.DeleteFunc(c.Notifications[i].Triggers, func(tr Trigger) bool {
+				if !ValidTriggers[tr] {
+					if log != nil {
+						LogMsg(log, LvlWRN, "unknown trigger ignored", fmt.Sprintf("trigger=%s url=%s", tr, c.Notifications[i].URL))
+					}
+					return true
 				}
-			}
-			c.Notifications[i].Triggers = valid
+				return false
+			})
 		}
 	}
 }

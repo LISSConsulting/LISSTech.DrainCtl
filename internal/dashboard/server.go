@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -72,21 +73,45 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("GET /", wg(http.HandlerFunc(ds.handleUI)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
+
+	// Resolve TLS configuration.
+	var tlsCfg *tls.Config
+	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir, log)
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "dashboard TLS setup failed, falling back to HTTP", fmt.Sprintf("error=%q", err))
+		tlsCfg = nil
+	}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard listen %s: %w", addr, err)
 	}
 
+	// Wrap listener with TLS if configured.
+	if tlsCfg != nil {
+		ln = tls.NewListener(ln, tlsCfg)
+	}
+
+	// Wrap handler with HSTS header when TLS is active.
+	var handler http.Handler = mux
+	if tlsCfg != nil {
+		handler = hstsMiddleware(mux)
+	}
+
 	ds.server = &http.Server{
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start serving in background.
+	scheme := "http"
+	if tlsCfg != nil {
+		scheme = "https"
+	}
 	go func() {
-		log(dc.LvlINF, "dashboard=listening", fmt.Sprintf("addr=%s", addr))
+		log(dc.LvlINF, "dashboard=listening", fmt.Sprintf("addr=%s scheme=%s", addr, scheme))
 		if err := ds.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			dc.LogMsg(log, dc.LvlERR, "dashboard server error", fmt.Sprintf("error=%q", err))
 		}
@@ -282,4 +307,12 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(dashboardHTML)
+}
+
+// hstsMiddleware adds Strict-Transport-Security headers to all responses.
+func hstsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000") // 2 years
+		next.ServeHTTP(w, r)
+	})
 }

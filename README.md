@@ -61,7 +61,7 @@ graph TB
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
         EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
         POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
-        CFG["config.json Watcher 5s"] -->|"config changed"| RELOAD["ReloadConfig()"]
+        CFG["config.json Watcher (RDCW+poll)"] -->|"config changed"| RELOAD["ReloadConfig()"]
         CHECK --> SESS["WTS Session Enum"]
         SESS --> STORE["MemAuditStore"]
         CHECK --> STORE
@@ -126,6 +126,12 @@ The MSI installs:
 | JSON config | `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` |
 
 > **Upgrading from v26?** The first run auto-migrates your registry configuration to `config.json`. Existing installs upgrade seamlessly — no manual steps required.
+
+The bundle installer (`LISSTech.DrainCtl.exe`) provides a branded setup wizard with license acceptance and configuration options. For unattended deployment, MSI properties can be passed directly:
+
+```powershell
+msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash.example.com:49470 WEBHOOK_URL=https://hooks.example.com/drain
+```
 
 ### PowerShell Gallery (module only)
 
@@ -242,8 +248,11 @@ Import-Module LISSTech.DrainCtl
 | `Get-RDSHDrainHistory` | `PSObject[]` | Audit trail records |
 | `Install-RDSHDrainAudit` | — | Configure registry auditing (one-time) |
 | `Get-RDSHDrainNotification` | `PSObject` | Current notification configuration |
-| `Set-RDSHDrainNotification` | — | Update notification settings |
+| `Set-RDSHDrainNotification` | — | Update notification settings *(deprecated — use target cmdlets below)* |
 | `Test-RDSHDrainNotification` | — | Send test notification to configured backends |
+| `Get-RDSHDrainNotificationTarget` | `PSObject[]` | Lists all configured notification targets with full detail |
+| `Add-RDSHDrainNotificationTarget` | — | Adds a notification target (webhook or ntfy) with per-target triggers |
+| `Remove-RDSHDrainNotificationTarget` | — | Removes a notification target by URL |
 
 ### Examples
 
@@ -276,7 +285,9 @@ The `DrainCtl` Windows Service provides:
 - **Exclusive audit file** ownership — no corruption from concurrent access
 - **In-memory store** — CLI/PS queries are instant (named pipe, no file I/O)
 - **Event Log entries** — warnings for grace, errors for alerts, info for transitions
-- **Auto-registration** with dashboard on startup when `dashboard.url` is set (idempotent)
+- **Auto-discovery** via DNS SRV (`_drainctl._tcp.<domain>`) — agents find the dashboard with zero per-machine config
+- **Auto-registration** with dashboard on startup (via SRV discovery or explicit `dashboard.url`)
+- **HTTPS by default** — auto-generated self-signed cert, or bring your own PEM files
 
 ### Event Log
 
@@ -391,7 +402,7 @@ The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered
 
 ## 🔧 Configuration
 
-Configuration lives in a JSON file, hot-reloaded every 5 seconds:
+Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryChangesW) with poll fallback:
 
 **Path:** `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json`
 
@@ -437,7 +448,10 @@ Configuration lives in a JSON file, hot-reloaded every 5 seconds:
 | `poll_interval_seconds` | int | `300` | Seconds between safety-net polls |
 | `audit_path` | string | `%ProgramData%\...\audit.jsonl` | Audit file path |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled) |
-| `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration on service startup |
+| `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration (or leave empty for SRV discovery) |
+| `dashboard.tls_cert` | string | *(empty)* | Path to PEM certificate file (auto-generated if empty) |
+| `dashboard.tls_key` | string | *(empty)* | Path to PEM private key file |
+| `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning |
 | `notifications` | array | `[]` | Notification targets (see below) |
 
 ### Notification Target Fields
