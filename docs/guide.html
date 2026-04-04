@@ -1,286 +1,484 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="favicon.ico" type="image/x-icon"><link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>DrainCtl Guide — Installation, Configuration &amp; Usage</title>
-<meta name="description" content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&family=DM+Serif+Display:ital@0;1&family=Work+Sans:wght@400;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Source+Sans+3:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-:root {
-  --bg: #fdf8f6;
-  --fg: #2d1a1a;
-  --accent: #a3475b;
-  --green: #5d8a6e;
-  --amber: #b87843;
-  --red: #9e2a3b;
-  --border: #2d1a1a;
-  --shadow: #2d1a1a;
-  --card: #fffaf8;
-  --muted: #7a5a5a;
-  --subtle: #a68e8e;
-  --code-bg: #1a0e0e;
-  --code-fg: #e8d5d5;
-  --surface: #f5ebe8;
-  --r: 10px;
-  --bw: 2.5px;
-  --so: 4px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #110a0a;
-    --fg: #f5e8e8;
-    --card: #1f1414;
-    --border: #4a3535;
-    --shadow: #000;
-    --muted: #c4a8a8;
-    --subtle: #6b5050;
-    --surface: #1f1414;
-    --code-bg: #0d0808;
-  }
-}
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  font-family: 'Work Sans', sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  line-height: 1.65;
-  -webkit-font-smoothing: antialiased;
-}
-.wrap { max-width: 780px; margin: 0 auto; padding: 0 28px; }
-a { color: var(--accent); }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="favicon.ico" type="image/x-icon" />
+        <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+        <title>DrainCtl Guide — Installation, Configuration &amp; Usage</title>
+        <meta
+            name="description"
+            content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring."
+        />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --bg: #fdf8f6;
+                --fg: #2d1a1a;
+                --accent: #a3475b;
+                --green: #5d8a6e;
+                --amber: #b87843;
+                --red: #9e2a3b;
+                --border: #2d1a1a;
+                --shadow: #2d1a1a;
+                --card: #fffaf8;
+                --muted: #7a5a5a;
+                --subtle: #a68e8e;
+                --code-bg: #1a0e0e;
+                --code-fg: #e8d5d5;
+                --surface: #f5ebe8;
+                --r: 10px;
+                --bw: 2.5px;
+                --so: 4px;
+            }
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --bg: #110a0a;
+                    --fg: #f5e8e8;
+                    --card: #1f1414;
+                    --border: #4a3535;
+                    --shadow: #000;
+                    --muted: #c4a8a8;
+                    --subtle: #6b5050;
+                    --surface: #1f1414;
+                    --code-bg: #0d0808;
+                }
+            }
+            *,
+            *::before,
+            *::after {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: "Work Sans", sans-serif;
+                background: var(--bg);
+                color: var(--fg);
+                line-height: 1.65;
+                -webkit-font-smoothing: antialiased;
+            }
+            .wrap {
+                max-width: 780px;
+                margin: 0 auto;
+                padding: 0 28px;
+            }
+            a {
+                color: var(--accent);
+            }
 
-/* Nav */
-.nav {
-  position: sticky; top: 0; z-index: 100;
-  background: var(--bg);
-  border-bottom: var(--bw) solid var(--border);
-  padding: 0;
-  height: 56px;
-}
-.nav .wrap {
-  display: flex; align-items: center; justify-content: space-between;
-  max-width: 780px; height: 100%;
-}
-.nav-brand {
-  font-weight: 800; font-size: 1.1rem;
-  text-decoration: none; color: var(--fg);
-  display: flex; align-items: center; gap: 8px;
-}
-.nav-brand .emoji { font-size: 1.1em; vertical-align: middle; }
-.nav-brand span { opacity: 0.4; font-weight: 400; }
-.nav-links {
-  display: flex; align-items: center; gap: 28px;
-  list-style: none; height: 100%;
-  margin: 0; padding: 0;
-}
-.nav-links a {
-  text-decoration: none; color: var(--muted); font-weight: 600;
-  font-size: 0.9rem; transition: color 0.15s;
-}
-.nav-links a:hover { color: var(--fg); }
-@media (max-width: 640px) { .nav-links { display: none; } }
+            /* Nav */
+            .nav {
+                position: sticky;
+                top: 0;
+                z-index: 100;
+                background: var(--bg);
+                border-bottom: var(--bw) solid var(--border);
+                padding: 0;
+                height: 56px;
+            }
+            .nav .wrap {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                max-width: 780px;
+                height: 100%;
+            }
+            .nav-brand {
+                font-weight: 800;
+                font-size: 1.1rem;
+                text-decoration: none;
+                color: var(--fg);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .nav-brand .emoji {
+                font-size: 1.1em;
+                vertical-align: middle;
+            }
+            .nav-brand span {
+                opacity: 0.4;
+                font-weight: 400;
+            }
+            .nav-links {
+                display: flex;
+                align-items: center;
+                gap: 28px;
+                list-style: none;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .nav-links a {
+                text-decoration: none;
+                color: var(--muted);
+                font-weight: 600;
+                font-size: 0.9rem;
+                transition: color 0.15s;
+            }
+            .nav-links a:hover {
+                color: var(--fg);
+            }
+            @media (max-width: 640px) {
+                .nav-links {
+                    display: none;
+                }
+            }
 
-/* Content */
-.hero-sm { padding: 48px 0 20px; }
-.hero-sm h1 { font-size: 2.4rem; font-family: 'DM Serif Display', serif; font-weight: 400; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 10px; }
-.hero-sm p { font-size: 1.05rem; color: var(--muted); }
+            /* Content */
+            .hero-sm {
+                padding: 48px 0 20px;
+            }
+            .hero-sm h1 {
+                font-size: 2.4rem;
+                font-family: "DM Serif Display", serif;
+                font-weight: 400;
+                letter-spacing: -0.025em;
+                line-height: 1.1;
+                margin-bottom: 10px;
+            }
+            .hero-sm p {
+                font-size: 1.05rem;
+                color: var(--muted);
+            }
 
-.toc {
-  background: var(--surface);
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  padding: 18px 24px;
-  margin: 20px 0 36px;
-}
-.toc h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 10px; border: none; padding: 0; }
-.toc ol { padding-left: 20px; margin-bottom: 0; }
-.toc li { margin-bottom: 4px; }
-.toc a { text-decoration: none; font-weight: 600; font-size: 0.92rem; }
-.toc a:hover { text-decoration: underline; }
+            .toc {
+                background: var(--surface);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                padding: 18px 24px;
+                margin: 20px 0 36px;
+            }
+            .toc h2 {
+                font-size: 0.8rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: var(--accent);
+                margin-bottom: 10px;
+                border: none;
+                padding: 0;
+            }
+            .toc ol {
+                padding-left: 20px;
+                margin-bottom: 0;
+            }
+            .toc li {
+                margin-bottom: 4px;
+            }
+            .toc a {
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 0.92rem;
+            }
+            .toc a:hover {
+                text-decoration: underline;
+            }
 
-h2 {
-  font-family: 'Fraunces', serif;
-  font-size: 1.6rem; font-weight: 400;
-  letter-spacing: -0.01em;
-  margin: 40px 0 8px;
-  padding-top: 20px;
-  border-top: var(--bw) solid var(--border);
-}
-h2:first-of-type { border-top: none; margin-top: 0; }
-h3 { font-size: 1.15rem; font-weight: 800; margin: 24px 0 8px; }
-p { margin-bottom: 14px; }
-ul, ol { margin-bottom: 14px; padding-left: 22px; }
-li { margin-bottom: 6px; }
-strong { font-weight: 800; }
-code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.84em;
-  color: var(--accent);
-}
-pre {
-  background: var(--code-bg);
-  color: var(--code-fg);
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  padding: 20px 24px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 16px 0 24px;
-}
-pre code { background: none; border: none; padding: 0; font-size: inherit; color: #f0e0e0; }
+            h2 {
+                font-family: "Fraunces", serif;
+                font-size: 1.6rem;
+                font-weight: 400;
+                letter-spacing: -0.01em;
+                margin: 40px 0 8px;
+                padding-top: 20px;
+                border-top: var(--bw) solid var(--border);
+            }
+            h2:first-of-type {
+                border-top: none;
+                margin-top: 0;
+            }
+            h3 {
+                font-family: "Fraunces", serif;
+                font-size: 1.15rem;
+                font-weight: 800;
+                margin: 24px 0 8px;
+            }
+            p {
+                margin-bottom: 14px;
+            }
+            ul,
+            ol {
+                margin-bottom: 14px;
+                padding-left: 22px;
+            }
+            li {
+                margin-bottom: 6px;
+            }
+            strong {
+                font-weight: 800;
+            }
+            code {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.84em;
+                color: var(--accent);
+            }
+            pre {
+                background: var(--code-bg);
+                color: var(--code-fg);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                padding: 20px 24px;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.82rem;
+                line-height: 1.7;
+                white-space: pre-wrap;
+                word-break: break-word;
+                margin: 16px 0 24px;
+            }
+            pre code {
+                background: none;
+                border: none;
+                padding: 0;
+                font-size: inherit;
+                color: #f0e0e0;
+            }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 16px 0 24px;
-  font-size: 0.9rem;
-}
-th, td {
-  text-align: left;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-}
-th { background: var(--surface); font-weight: 700; }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 16px 0 24px;
+                font-size: 0.9rem;
+            }
+            th,
+            td {
+                text-align: left;
+                padding: 10px 14px;
+                border: 1px solid var(--border);
+            }
+            th {
+                background: var(--surface);
+                font-weight: 700;
+            }
 
-.callout {
-  background: var(--surface);
-  border-left: 4px solid var(--accent);
-  padding: 16px 20px;
-  margin: 20px 0;
-  border-radius: 0 var(--r) var(--r) 0;
-  font-size: 0.92rem;
-}
-.callout.warn { border-left-color: var(--amber); }
-.callout strong { display: block; margin-bottom: 4px; }
+            .callout {
+                background: var(--surface);
+                border-left: 4px solid var(--accent);
+                padding: 16px 20px;
+                margin: 20px 0;
+                border-radius: 0 var(--r) var(--r) 0;
+                font-size: 0.92rem;
+            }
+            .callout.warn {
+                border-left-color: var(--amber);
+            }
+            .callout strong {
+                display: block;
+                margin-bottom: 4px;
+            }
 
-.footer {
-  border-top: var(--bw) solid var(--border);
-  padding: 40px 0;
-  text-align: center;
-  margin-top: 60px;
-}
-.footer p { font-size: 0.85rem; color: var(--subtle); }
-.footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
-</style>
-</head>
-<body>
+            .footer {
+                border-top: var(--bw) solid var(--border);
+                padding: 40px 0;
+                text-align: center;
+                margin-top: 60px;
+            }
+            .footer p {
+                font-size: 0.85rem;
+                color: var(--subtle);
+            }
+            .footer a {
+                color: var(--accent);
+                text-decoration: none;
+                font-weight: 600;
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="nav">
+            <div class="wrap">
+                <a href="index.html" class="nav-brand"
+                    ><span class="emoji">&#x1F6B0;</span> DrainCtl <span>Guide</span></a
+                >
+                <ul class="nav-links">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#install">Install</a></li>
+                    <li><a href="#configure">Configure</a></li>
+                    <li><a href="#usage">Usage</a></li>
+                    <li><a href="#notifications">Notifications</a></li>
+                    <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
+                </ul>
+            </div>
+        </nav>
 
-<nav class="nav">
-  <div class="wrap">
-    <a href="index.html" class="nav-brand"><span class="emoji">&#x1F6B0;</span> DrainCtl <span>Guide</span></a>
-    <ul class="nav-links">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="#install">Install</a></li>
-      <li><a href="#configure">Configure</a></li>
-      <li><a href="#usage">Usage</a></li>
-      <li><a href="#notifications">Notifications</a></li>
-      <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
-    </ul>
-  </div>
-</nav>
+        <div class="wrap">
+            <div class="hero-sm">
+                <h1>The Guide</h1>
+                <p>
+                    Everything you need to deploy DrainCtl, configure it for your environment, and start getting
+                    real-time drain mode visibility across your RDSH farm.
+                </p>
+            </div>
 
-<div class="wrap">
+            <nav class="toc">
+                <h2>Contents</h2>
+                <ol>
+                    <li><a href="#install">Installation</a></li>
+                    <li><a href="#first-run">First Run</a></li>
+                    <li><a href="#configure">Configuration</a></li>
+                    <li><a href="#audit-setup">Audit Setup (Change Attribution)</a></li>
+                    <li><a href="#usage">CLI Usage</a></li>
+                    <li><a href="#powershell">PowerShell Module</a></li>
+                    <li><a href="#notifications">Notifications</a></li>
+                    <li><a href="#sessions">Session Tracking</a></li>
+                    <li><a href="#dashboard">Multi-Server Dashboard</a></li>
+                    <li><a href="#rmm">RMM Integration</a></li>
+                    <li><a href="#service">Service Management</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting</a></li>
+                </ol>
+            </nav>
 
-<div class="hero-sm">
-  <h1>The Guide</h1>
-  <p>Everything you need to deploy DrainCtl, configure it for your environment, and start getting real-time drain mode visibility across your RDSH farm.</p>
-</div>
+            <!-- ── Installation ──────────────────────────────────────────────────── -->
+            <h2 id="install">1. Installation</h2>
 
-<nav class="toc">
-  <h2>Contents</h2>
-  <ol>
-    <li><a href="#install">Installation</a></li>
-    <li><a href="#first-run">First Run</a></li>
-    <li><a href="#configure">Configuration</a></li>
-    <li><a href="#audit-setup">Audit Setup (Change Attribution)</a></li>
-    <li><a href="#usage">CLI Usage</a></li>
-    <li><a href="#powershell">PowerShell Module</a></li>
-    <li><a href="#notifications">Notifications</a></li>
-    <li><a href="#sessions">Session Tracking</a></li>
-    <li><a href="#dashboard">Multi-Server Dashboard</a></li>
-    <li><a href="#rmm">RMM Integration</a></li>
-    <li><a href="#service">Service Management</a></li>
-    <li><a href="#troubleshooting">Troubleshooting</a></li>
-  </ol>
-</nav>
+            <p>
+                DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; your RMM, SCCM, Intune,
+                GPO, or just double-click it.
+            </p>
 
-<!-- ── Installation ──────────────────────────────────────────────────── -->
-<h2 id="install">1. Installation</h2>
+            <h3>Interactive install</h3>
+            <p>
+                Double-click the MSI to launch the interactive installer. It walks you through choosing an install mode
+                (<strong>dashboard</strong>, <strong>registration</strong>, or <strong>standalone</strong>) and setting
+                notification URLs, dashboard address, grace period, and other options.
+            </p>
 
-<p>DrainCtl ships as a single MSI. Deploy it however you deploy software &mdash; your RMM, SCCM, Intune, GPO, or just double-click it.</p>
+            <h3>Silent install</h3>
+            <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn</code></pre>
 
-<h3>Interactive install</h3>
-<p>Double-click the MSI to launch the interactive installer. It walks you through choosing an install mode (<strong>dashboard</strong>, <strong>registration</strong>, or <strong>standalone</strong>) and setting notification URLs, dashboard address, grace period, and other options.</p>
+            <h3>Unattended MSI properties</h3>
+            <p>
+                Pass these properties on the command line (or in your RMM/SCCM transform) to pre-configure the
+                installation:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Property</th>
+                        <th>Values / Example</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>INSTALL_MODE</code></td>
+                        <td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td>
+                        <td>
+                            Sets the operational mode. <strong>dashboard</strong> enables the web UI,
+                            <strong>registration</strong> registers with an existing dashboard,
+                            <strong>standalone</strong> runs independently.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>WEBHOOK_URL</code></td>
+                        <td><code>https://hooks.example.com/drain</code></td>
+                        <td>Adds a webhook notification target</td>
+                    </tr>
+                    <tr>
+                        <td><code>NTFY_URL</code></td>
+                        <td><code>https://ntfy.sh/drainctl</code></td>
+                        <td>Adds an ntfy notification target</td>
+                    </tr>
+                    <tr>
+                        <td><code>DASHBOARD_URL</code></td>
+                        <td><code>https://dash:49470</code></td>
+                        <td>Dashboard URL to register with (used with <code>registration</code> mode)</td>
+                    </tr>
+                    <tr>
+                        <td><code>DASHBOARD_PORT</code></td>
+                        <td><code>49470</code></td>
+                        <td>Port for the dashboard listener (used with <code>dashboard</code> mode)</td>
+                    </tr>
+                    <tr>
+                        <td><code>DASHBOARD_GROUP</code></td>
+                        <td><code>Domain Admins</code></td>
+                        <td>AD group authorized for dashboard access</td>
+                    </tr>
+                    <tr>
+                        <td><code>GRACE_PERIOD</code></td>
+                        <td><code>120</code></td>
+                        <td>Grace period in minutes before drain mode becomes an alert</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<h3>Silent install</h3>
-<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn</code></pre>
+            <p>Example &mdash; register with a dashboard, no UI:</p>
+            <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470</code></pre>
 
-<h3>Unattended MSI properties</h3>
-<p>Pass these properties on the command line (or in your RMM/SCCM transform) to pre-configure the installation:</p>
-<table>
-  <thead><tr><th>Property</th><th>Values / Example</th><th>Description</th></tr></thead>
-  <tbody>
-    <tr><td><code>INSTALL_MODE</code></td><td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td><td>Sets the operational mode. <strong>dashboard</strong> enables the web UI, <strong>registration</strong> registers with an existing dashboard, <strong>standalone</strong> runs independently.</td></tr>
-    <tr><td><code>WEBHOOK_URL</code></td><td><code>https://hooks.example.com/drain</code></td><td>Adds a webhook notification target</td></tr>
-    <tr><td><code>NTFY_URL</code></td><td><code>https://ntfy.sh/drainctl</code></td><td>Adds an ntfy notification target</td></tr>
-    <tr><td><code>DASHBOARD_URL</code></td><td><code>https://dash:49470</code></td><td>Dashboard URL to register with (used with <code>registration</code> mode)</td></tr>
-    <tr><td><code>DASHBOARD_PORT</code></td><td><code>49470</code></td><td>Port for the dashboard listener (used with <code>dashboard</code> mode)</td></tr>
-    <tr><td><code>DASHBOARD_GROUP</code></td><td><code>Domain Admins</code></td><td>AD group authorized for dashboard access</td></tr>
-    <tr><td><code>GRACE_PERIOD</code></td><td><code>120</code></td><td>Grace period in minutes before drain mode becomes an alert</td></tr>
-  </tbody>
-</table>
+            <h3>What the MSI does</h3>
+            <ul>
+                <li>
+                    Installs <code>drainctl.exe</code> and <code>drainctl.dll</code> to
+                    <code>C:\Program Files\LISS Technologies\LISSTech DrainCtl\bin\</code>
+                </li>
+                <li>
+                    Adds the bin folder to <strong>system PATH</strong> &mdash; <code>drainctl</code> is available
+                    immediately in any terminal
+                </li>
+                <li>
+                    Registers the <strong>LISSTech.DrainCtl</strong> PowerShell module in
+                    <code>C:\Program Files\WindowsPowerShell\Modules\</code>
+                </li>
+                <li>Creates the data directory at <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\</code></li>
+                <li>
+                    Installs and <strong>auto-starts</strong> the <strong>DrainCtl</strong> Windows Service (runs as
+                    LocalSystem)
+                </li>
+                <li>Registers the Event Log source with a custom message file</li>
+                <li>
+                    Writes default configuration to
+                    <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code>
+                </li>
+            </ul>
 
-<p>Example &mdash; register with a dashboard, no UI:</p>
-<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470</code></pre>
+            <div class="callout">
+                <strong>&#x1F4A1; No reboot required.</strong>
+                The service starts immediately. Open a new terminal and <code>drainctl check</code> will work right
+                away.
+            </div>
 
-<h3>What the MSI does</h3>
-<ul>
-  <li>Installs <code>drainctl.exe</code> and <code>drainctl.dll</code> to <code>C:\Program Files\LISS Technologies\LISSTech DrainCtl\bin\</code></li>
-  <li>Adds the bin folder to <strong>system PATH</strong> &mdash; <code>drainctl</code> is available immediately in any terminal</li>
-  <li>Registers the <strong>LISSTech.DrainCtl</strong> PowerShell module in <code>C:\Program Files\WindowsPowerShell\Modules\</code></li>
-  <li>Creates the data directory at <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\</code></li>
-  <li>Installs and <strong>auto-starts</strong> the <strong>DrainCtl</strong> Windows Service (runs as LocalSystem)</li>
-  <li>Registers the Event Log source with a custom message file</li>
-  <li>Writes default configuration to <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></li>
-</ul>
+            <h3>PowerShell module only (no service)</h3>
 
-<div class="callout">
-  <strong>&#x1F4A1; No reboot required.</strong>
-  The service starts immediately. Open a new terminal and <code>drainctl check</code> will work right away.
-</div>
+            <p>
+                If you just want the PowerShell cmdlets without the Windows Service, install directly from
+                <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>:
+            </p>
 
-<h3>PowerShell module only (no service)</h3>
+            <pre><code>Install-Module -Name LISSTech.DrainCtl -Scope AllUsers</code></pre>
 
-<p>If you just want the PowerShell cmdlets without the Windows Service, install directly from <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>:</p>
+            <p>
+                This gives you Get-RDSHDrainMode, Test-RDSHDrainMode, and friends &mdash; but without the service,
+                queries go directly to the registry instead of the named pipe (slightly slower, no persistent audit
+                store).
+            </p>
 
-<pre><code>Install-Module -Name LISSTech.DrainCtl -Scope AllUsers</code></pre>
+            <div class="callout">
+                <strong>&#x1F4E6; PSGallery vs MSI</strong>
+                The MSI is the full package: service + CLI + PowerShell module + Event Log + notifications. PSGallery is
+                the module alone &mdash; great for quick checks, scripting, or machines where you don't need continuous
+                monitoring.
+            </div>
 
-<p>This gives you Get-RDSHDrainMode, Test-RDSHDrainMode, and friends &mdash; but without the service, queries go directly to the registry instead of the named pipe (slightly slower, no persistent audit store).</p>
+            <h3>Silent uninstall</h3>
+            <pre><code>msiexec /x LISSTech.DrainCtl.msi /qn</code></pre>
+            <p>
+                This stops the service, removes all files, cleans up PATH, and deregisters the Event Log source. Your
+                audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).
+            </p>
 
-<div class="callout">
-  <strong>&#x1F4E6; PSGallery vs MSI</strong>
-  The MSI is the full package: service + CLI + PowerShell module + Event Log + notifications. PSGallery is the module alone &mdash; great for quick checks, scripting, or machines where you don't need continuous monitoring.
-</div>
+            <!-- ── First Run ─────────────────────────────────────────────────────── -->
+            <h2 id="first-run">2. First Run</h2>
 
-<h3>Silent uninstall</h3>
-<pre><code>msiexec /x LISSTech.DrainCtl.msi /qn</code></pre>
-<p>This stops the service, removes all files, cleans up PATH, and deregisters the Event Log source. Your audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).</p>
+            <p>After installation, verify everything is working:</p>
 
-<!-- ── First Run ─────────────────────────────────────────────────────── -->
-<h2 id="first-run">2. First Run</h2>
-
-<p>After installation, verify everything is working:</p>
-
-<pre><code># Is the service running?
+            <pre><code># Is the service running?
 Get-Service DrainCtl
 
 # Quick status check (instant &mdash; talks to the service via named pipe)
@@ -289,22 +487,30 @@ drainctl check
 # PowerShell way
 Get-RDSHDrainMode | Format-List</code></pre>
 
-<p>You should see <code>status=Healthy</code> and <code>connections_allowed=true</code>. If drain mode is active on this server, you'll see the current state and how long it's been active.</p>
+            <p>
+                You should see <code>status=Healthy</code> and <code>connections_allowed=true</code>. If drain mode is
+                active on this server, you'll see the current state and how long it's been active.
+            </p>
 
-<div class="callout">
-  <strong>&#x26A1; Instant response?</strong>
-  If <code>drainctl check</code> responds in under 100ms, it's talking to the service over the named pipe. If it takes a second or two, the service isn't running and it's falling back to a direct registry read. Check <code>Get-Service DrainCtl</code>.
-</div>
+            <div class="callout">
+                <strong>&#x26A1; Instant response?</strong>
+                If <code>drainctl check</code> responds in under 100ms, it's talking to the service over the named pipe.
+                If it takes a second or two, the service isn't running and it's falling back to a direct registry read.
+                Check <code>Get-Service DrainCtl</code>.
+            </div>
 
-<!-- ── Configuration ─────────────────────────────────────────────────── -->
-<h2 id="configure">3. Configuration</h2>
+            <!-- ── Configuration ─────────────────────────────────────────────────── -->
+            <h2 id="configure">3. Configuration</h2>
 
-<p>All settings live in a single JSON file and <strong>hot-reload automatically</strong> when you save it. No service restart needed.</p>
+            <p>
+                All settings live in a single JSON file and <strong>hot-reload automatically</strong> when you save it.
+                No service restart needed.
+            </p>
 
-<pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></pre>
+            <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></pre>
 
-<h3>Full config.json structure</h3>
-<pre><code>{
+            <h3>Full config.json structure</h3>
+            <pre><code>{
   "grace_period": 60,
   "retention_days": 90,
   "poll_interval": 300,
@@ -325,64 +531,115 @@ Get-RDSHDrainMode | Format-List</code></pre>
   "session_warning_threshold": 80
 }</code></pre>
 
-<table>
-  <thead>
-    <tr><th>Key</th><th>Default</th><th>What it does</th></tr>
-  </thead>
-  <tbody>
-    <tr><td><code>grace_period</code></td><td>60</td><td>Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the grace period, the status is "Grace" and exit code is 0.</td></tr>
-    <tr><td><code>retention_days</code></td><td>90</td><td>Days to keep audit records. Maximum 365. Older records are pruned daily.</td></tr>
-    <tr><td><code>poll_interval</code></td><td>300</td><td>Seconds between safety-net polls. The service also uses real-time registry notifications, so this is a fallback.</td></tr>
-    <tr><td><code>audit_path</code></td><td><em>ProgramData path</em></td><td>Full path to the JSONL audit trail file.</td></tr>
-    <tr><td><code>notifications</code></td><td><em>[]</em></td><td>Array of notification targets (see <a href="#notifications">Notifications</a>).</td></tr>
-    <tr><td><code>dashboard</code></td><td><em>see above</em></td><td>Dashboard settings (see <a href="#dashboard">Dashboard</a>).</td></tr>
-    <tr><td><code>session_warning_threshold</code></td><td>80</td><td>Session utilization percentage that triggers a <code>session_warning</code> notification.</td></tr>
-  </tbody>
-</table>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>What it does</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>grace_period</code></td>
+                        <td>60</td>
+                        <td>
+                            Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the
+                            grace period, the status is "Grace" and exit code is 0.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>retention_days</code></td>
+                        <td>90</td>
+                        <td>Days to keep audit records. Maximum 365. Older records are pruned daily.</td>
+                    </tr>
+                    <tr>
+                        <td><code>poll_interval</code></td>
+                        <td>300</td>
+                        <td>
+                            Seconds between safety-net polls. The service also uses real-time registry notifications, so
+                            this is a fallback.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>audit_path</code></td>
+                        <td><em>ProgramData path</em></td>
+                        <td>Full path to the JSONL audit trail file.</td>
+                    </tr>
+                    <tr>
+                        <td><code>notifications</code></td>
+                        <td><em>[]</em></td>
+                        <td>Array of notification targets (see <a href="#notifications">Notifications</a>).</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard</code></td>
+                        <td><em>see above</em></td>
+                        <td>Dashboard settings (see <a href="#dashboard">Dashboard</a>).</td>
+                    </tr>
+                    <tr>
+                        <td><code>session_warning_threshold</code></td>
+                        <td>80</td>
+                        <td>
+                            Session utilization percentage that triggers a <code>session_warning</code> notification.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
 
-<p>Edit the file with any text editor, or use the CLI to change individual settings:</p>
+            <p>Edit the file with any text editor:</p>
 
-<pre><code># Set grace period to 2 hours
-drainctl config set grace_period 120
+            <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code></pre>
 
-# View current configuration
-drainctl config get</code></pre>
+            <p>The service picks up changes within seconds (it watches config.json with a file system watcher). No restart needed.</p>
 
-<p>The service picks up changes within seconds (it watches config.json with a file system watcher).</p>
+            <div class="callout">
+                <strong>&#x1F504; Migrating from a previous version?</strong>
+                On first run, DrainCtl automatically migrates your settings from the registry
+                (<code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code>) into <code>config.json</code>.
+                Your old registry values are left in place but are no longer read. No manual migration needed.
+            </div>
 
-<div class="callout">
-  <strong>&#x1F504; Migrating from a previous version?</strong>
-  On first run, DrainCtl v27 automatically migrates your settings from the registry (<code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code>) into <code>config.json</code>. Your old registry values are left in place but are no longer read. No manual migration needed.
-</div>
+            <!-- ── Audit Setup ───────────────────────────────────────────────────── -->
+            <h2 id="audit-setup">4. Audit Setup (Change Attribution)</h2>
 
-<!-- ── Audit Setup ───────────────────────────────────────────────────── -->
-<h2 id="audit-setup">4. Audit Setup (Change Attribution)</h2>
+            <p>
+                DrainCtl can tell you <strong>who</strong> changed drain mode &mdash; but it needs Windows to record
+                that information first. Run this once (as admin):
+            </p>
 
-<p>DrainCtl can tell you <strong>who</strong> changed drain mode &mdash; but it needs Windows to record that information first. Run this once (as admin):</p>
-
-<pre><code>drainctl audit-setup
+            <pre><code>drainctl audit-setup
 # or
 Install-RDSHDrainAudit</code></pre>
 
-<p>This does two things:</p>
-<ol>
-  <li>Enables the <strong>Registry</strong> audit subcategory via <code>auditpol</code></li>
-  <li>Sets a <strong>SACL</strong> on the Terminal Server registry key so that Windows writes Event ID 4657 whenever <code>TSServerDrainMode</code> is modified</li>
-</ol>
+            <p>This does two things:</p>
+            <ol>
+                <li>Enables the <strong>Registry</strong> audit subcategory via <code>auditpol</code></li>
+                <li>
+                    Sets a <strong>SACL</strong> on the Terminal Server registry key so that Windows writes Event ID
+                    4657 whenever <code>TSServerDrainMode</code> is modified
+                </li>
+            </ol>
 
-<div class="callout warn">
-  <strong>&#x26A0;&#xFE0F; Domain-joined machines</strong>
-  On domain-joined servers, Group Policy refresh (~90 min) can overwrite local <code>auditpol</code> settings. For persistence, configure the equivalent GPO:<br><br>
-  <code>Computer Configuration &gt; Policies &gt; Windows Settings &gt; Security Settings &gt; Advanced Audit Policy Configuration &gt; Object Access &gt; Audit Registry &gt; Success</code>
-</div>
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; Domain-joined machines</strong>
+                On domain-joined servers, Group Policy refresh (~90 min) can overwrite local
+                <code>auditpol</code> settings. For persistence, configure the equivalent GPO:<br /><br />
+                <code
+                    >Computer Configuration &gt; Policies &gt; Windows Settings &gt; Security Settings &gt; Advanced
+                    Audit Policy Configuration &gt; Object Access &gt; Audit Registry &gt; Success</code
+                >
+            </div>
 
-<p>Without audit setup, DrainCtl still detects changes instantly &mdash; it just can't tell you who made them. The <code>changed_by</code> field will be empty.</p>
+            <p>
+                Without audit setup, DrainCtl still detects changes instantly &mdash; it just can't tell you who made
+                them. The <code>changed_by</code> field will be empty.
+            </p>
 
-<!-- ── CLI Usage ──────────────────────────────────────────────────────── -->
-<h2 id="usage">5. CLI Usage</h2>
+            <!-- ── CLI Usage ──────────────────────────────────────────────────────── -->
+            <h2 id="usage">5. CLI Usage</h2>
 
-<h3>Check current state</h3>
-<pre><code># Plain text (default &mdash; great for terminal and RMM scripts)
+            <h3>Check current state</h3>
+            <pre><code># Plain text (default &mdash; great for terminal and RMM scripts)
 drainctl check
 
 # JSON (great for parsing)
@@ -394,8 +651,8 @@ drainctl check --format table
 # Quiet mode (only final status line)
 drainctl --quiet check</code></pre>
 
-<h3>View audit history</h3>
-<pre><code># Last 50 records (table format)
+            <h3>View audit history</h3>
+            <pre><code># Last 50 records (table format)
 drainctl history
 
 # Only state transitions
@@ -404,40 +661,69 @@ drainctl history --changes-only
 # Last 10 records as JSON
 drainctl history --limit 10 --format json</code></pre>
 
-<h3>Exit codes</h3>
-<table>
-  <thead><tr><th>Code</th><th>Meaning</th><th>When</th></tr></thead>
-  <tbody>
-    <tr><td><strong>0</strong></td><td>Healthy / Grace</td><td>Connections allowed, or drain mode active but within grace period</td></tr>
-    <tr><td><strong>1</strong></td><td>Alert</td><td>Drain mode active beyond grace period &mdash; new connections are blocked</td></tr>
-    <tr><td><strong>2</strong></td><td>Error</td><td>Registry unreadable or other failure</td></tr>
-  </tbody>
-</table>
+            <h3>Exit codes</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Meaning</th>
+                        <th>When</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>0</strong></td>
+                        <td>Healthy / Grace</td>
+                        <td>Connections allowed, or drain mode active but within grace period</td>
+                    </tr>
+                    <tr>
+                        <td><strong>1</strong></td>
+                        <td>Alert</td>
+                        <td>Drain mode active beyond grace period &mdash; new connections are blocked</td>
+                    </tr>
+                    <tr>
+                        <td><strong>2</strong></td>
+                        <td>Error</td>
+                        <td>Registry unreadable or other failure</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<h3>Output formats</h3>
-<p><code>--format plain</code> (default for <code>check</code>), <code>table</code> (default for <code>history</code>), <code>csv</code>, <code>json</code>.</p>
+            <h3>Output formats</h3>
+            <p>
+                <code>--format plain</code> (default for <code>check</code>), <code>table</code> (default for
+                <code>history</code>), <code>csv</code>, <code>json</code>.
+            </p>
 
-<p>The JSON output from <code>drainctl check --format json</code> includes session data &mdash; active sessions, total capacity, and utilization percentage &mdash; useful for building custom dashboards or feeding into monitoring systems.</p>
+            <p>
+                The JSON output from <code>drainctl check --format json</code> includes session data &mdash; active
+                sessions, total capacity, and utilization percentage &mdash; useful for building custom dashboards or
+                feeding into monitoring systems.
+            </p>
 
-<h3>Notification management</h3>
-<pre><code># List all notification targets
-drainctl notify list
+            <h3>Notification management</h3>
+            <pre><code># View notification status
+drainctl notify status
 
-# Add a webhook target with specific triggers
-drainctl notify add webhook https://hooks.example.com/drainctl --triggers drain_on,alert
+# Set a webhook target
+drainctl notify set-webhook https://hooks.example.com/drainctl
 
-# Add an ntfy target
-drainctl notify add ntfy https://ntfy.sh/my-rdsh-alerts --triggers drain_on,drain_off,alert
+# Set an ntfy target
+drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
 
-# Remove a notification target
-drainctl notify remove https://hooks.example.com/drainctl</code></pre>
+            <div class="callout">
+                <strong>&#x1F4A1; Multi-target management.</strong>
+                To add, remove, or configure individual notification targets with granular triggers and repeat intervals,
+                edit <code>config.json</code> directly or use the dashboard UI. The CLI <code>set-webhook</code> and
+                <code>set-ntfy</code> commands are convenience shortcuts for single-target setups.
+            </div>
 
-<!-- ── PowerShell ─────────────────────────────────────────────────────── -->
-<h2 id="powershell">6. PowerShell Module</h2>
+            <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
+            <h2 id="powershell">6. PowerShell Module</h2>
 
-<p>The module is auto-registered by the MSI. It works on both PowerShell 5.1 and 7+.</p>
+            <p>The module is auto-registered by the MSI. It works on both PowerShell 5.1 and 7+.</p>
 
-<pre><code># Rich status object
+            <pre><code># Rich status object
 Get-RDSHDrainMode
 
 # Boolean check &mdash; perfect for scripts and alerts
@@ -454,58 +740,128 @@ Get-RDSHDrainHistory -ChangesOnly |
     Where-Object { $_.DrainMode -ne "ALLOW_ALL_CONNECTIONS" } |
     Select-Object Timestamp, ChangedBy, DrainMode</code></pre>
 
-<h3>All cmdlets</h3>
-<table>
-  <thead><tr><th>Cmdlet</th><th>Returns</th><th>Description</th></tr></thead>
-  <tbody>
-    <tr><td><code>Get-RDSHDrainMode</code></td><td>PSObject</td><td>Full drain mode state with audit data</td></tr>
-    <tr><td><code>Test-RDSHDrainMode</code></td><td>bool</td><td><code>$true</code> if connections allowed</td></tr>
-    <tr><td><code>Get-RDSHDrainHistory</code></td><td>PSObject[]</td><td>Audit trail records</td></tr>
-    <tr><td><code>Install-RDSHDrainAudit</code></td><td>&mdash;</td><td>One-time audit configuration</td></tr>
-    <tr><td><code>Get-RDSHDrainNotification</code></td><td>PSObject</td><td>Current notification config</td></tr>
-    <tr><td><code>Set-RDSHDrainNotification</code></td><td>&mdash;</td><td>Update notification settings</td></tr>
-    <tr><td><code>Test-RDSHDrainNotification</code></td><td>&mdash;</td><td>Send test notification</td></tr>
-    <tr><td><code>Get-RDSHDrainNotificationTarget</code></td><td>PSObject[]</td><td>Lists all notification targets with type, URL, triggers, repeat interval</td></tr>
-    <tr><td><code>Add-RDSHDrainNotificationTarget</code></td><td>&mdash;</td><td>Adds a notification target (<code>-Type</code>, <code>-URL</code>, <code>-Triggers</code>, <code>-RepeatMinutes</code>)</td></tr>
-    <tr><td><code>Remove-RDSHDrainNotificationTarget</code></td><td>&mdash;</td><td>Removes a notification target by <code>-URL</code></td></tr>
-  </tbody>
-</table>
+            <h3>All cmdlets</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cmdlet</th>
+                        <th>Returns</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>Get-RDSHDrainMode</code></td>
+                        <td>PSObject</td>
+                        <td>Full drain mode state with audit data</td>
+                    </tr>
+                    <tr>
+                        <td><code>Test-RDSHDrainMode</code></td>
+                        <td>bool</td>
+                        <td><code>$true</code> if connections allowed</td>
+                    </tr>
+                    <tr>
+                        <td><code>Get-RDSHDrainHistory</code></td>
+                        <td>PSObject[]</td>
+                        <td>Audit trail records</td>
+                    </tr>
+                    <tr>
+                        <td><code>Install-RDSHDrainAudit</code></td>
+                        <td>&mdash;</td>
+                        <td>One-time audit configuration</td>
+                    </tr>
+                    <tr>
+                        <td><code>Get-RDSHDrainNotification</code></td>
+                        <td>PSObject</td>
+                        <td>Current notification config</td>
+                    </tr>
+                    <tr>
+                        <td><code>Set-RDSHDrainNotification</code></td>
+                        <td>&mdash;</td>
+                        <td>Update notification settings</td>
+                    </tr>
+                    <tr>
+                        <td><code>Test-RDSHDrainNotification</code></td>
+                        <td>&mdash;</td>
+                        <td>Send test notification</td>
+                    </tr>
+                    <tr>
+                        <td><code>Get-RDSHDrainNotificationTarget</code></td>
+                        <td>PSObject[]</td>
+                        <td>Lists all notification targets with type, URL, triggers, repeat interval</td>
+                    </tr>
+                    <tr>
+                        <td><code>Add-RDSHDrainNotificationTarget</code></td>
+                        <td>&mdash;</td>
+                        <td>
+                            Adds a notification target (<code>-Type</code>, <code>-URL</code>, <code>-Triggers</code>,
+                            <code>-RepeatMinutes</code>)
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>Remove-RDSHDrainNotificationTarget</code></td>
+                        <td>&mdash;</td>
+                        <td>Removes a notification target by <code>-URL</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>Enable-RDSHDrainDashboard</code></td>
+                        <td>&mdash;</td>
+                        <td>Enable the multi-server dashboard on this server</td>
+                    </tr>
+                    <tr>
+                        <td><code>Disable-RDSHDrainDashboard</code></td>
+                        <td>&mdash;</td>
+                        <td>Disable the dashboard on this server</td>
+                    </tr>
+                    <tr>
+                        <td><code>Install-RDSHDrainCertificate</code></td>
+                        <td>&mdash;</td>
+                        <td>Install a custom TLS certificate for the dashboard</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<!-- ── Notifications ──────────────────────────────────────────────────── -->
-<h2 id="notifications">7. Notifications</h2>
+            <!-- ── Notifications ──────────────────────────────────────────────────── -->
+            <h2 id="notifications">7. Notifications</h2>
 
-<p>Get pushed when something happens. DrainCtl supports <strong>multiple notification targets</strong> &mdash; any combination of <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints) and <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics. Each target has its own triggers and repeat interval.</p>
+            <p>
+                Get pushed when something happens. DrainCtl supports
+                <strong>multiple notification targets</strong> &mdash; any combination of
+                <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints) and
+                <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics. Each target has its own triggers and
+                repeat interval.
+            </p>
 
-<h3>Setup</h3>
-<pre><code># Add a webhook (Slack, Teams, PagerDuty, custom endpoint, etc.)
-drainctl notify add webhook https://hooks.slack.com/services/T.../B.../xxx --triggers drain_on,drain_off,alert
-
-# Add an ntfy target (push notifications on your phone!)
-drainctl notify add ntfy https://ntfy.sh/my-rdsh-alerts --triggers drain_on,alert,healthy
-
-# Convenience shortcuts (add a single target quickly)
+            <h3>Setup</h3>
+            <pre><code># Set a webhook target (Slack, Teams, PagerDuty, custom endpoint, etc.)
 drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx
+
+# Set an ntfy target (push notifications on your phone!)
 drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts
 
-# List all notification targets
-drainctl notify list
-
-# Remove a target
-drainctl notify remove https://hooks.slack.com/services/T.../B.../xxx
+# View notification status
+drainctl notify status
 
 # Send a test to make sure it works
 drainctl notify test</code></pre>
 
-<h3>PowerShell way</h3>
-<pre><code>Set-RDSHDrainNotification -WebhookURL "https://hooks.example.com/drainctl"
+            <p>
+                To manage multiple targets with per-target triggers and repeat intervals, edit
+                <code>config.json</code> directly or use the
+                <a href="#dashboard">dashboard UI</a>'s notification settings drawer. See the
+                <a href="#configure">Configuration</a> section for the full <code>config.json</code> structure.
+            </p>
+
+            <h3>PowerShell way</h3>
+            <pre><code>Set-RDSHDrainNotification -WebhookURL "https://hooks.example.com/drainctl"
 Set-RDSHDrainNotification -NtfyURL "https://ntfy.sh/my-alerts"
 Test-RDSHDrainNotification
 
 # See current config
 Get-RDSHDrainNotification</code></pre>
 
-<h3>PowerShell target management</h3>
-<pre><code># List all targets
+            <h3>PowerShell target management</h3>
+            <pre><code># List all targets
 Get-RDSHDrainNotificationTarget
 
 # Add a webhook for alerts only
@@ -517,24 +873,53 @@ Add-RDSHDrainNotificationTarget -Type ntfy -URL 'https://ntfy.sh/drainctl'
 # Remove a target
 Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code></pre>
 
-<h3>Granular triggers</h3>
-<p>Each notification target can subscribe to specific triggers. Assign them with <code>--triggers</code> when adding a target, or edit <code>config.json</code> directly.</p>
-<table>
-  <thead><tr><th>Trigger</th><th>Description</th></tr></thead>
-  <tbody>
-    <tr><td><code>drain_on</code></td><td>Drain mode activated</td></tr>
-    <tr><td><code>drain_off</code></td><td>Drain mode deactivated</td></tr>
-    <tr><td><code>grace_entered</code></td><td>Entered grace period</td></tr>
-    <tr><td><code>alert</code></td><td>Grace period exceeded</td></tr>
-    <tr><td><code>healthy</code></td><td>Returned to healthy</td></tr>
-    <tr><td><code>session_warning</code></td><td>Session utilization threshold exceeded (default 80%)</td></tr>
-  </tbody>
-</table>
+            <h3>Granular triggers</h3>
+            <p>
+                Each notification target can subscribe to specific triggers. Assign them with
+                <code>--triggers</code> when adding a target, or edit <code>config.json</code> directly.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Trigger</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>drain_on</code></td>
+                        <td>Drain mode activated</td>
+                    </tr>
+                    <tr>
+                        <td><code>drain_off</code></td>
+                        <td>Drain mode deactivated</td>
+                    </tr>
+                    <tr>
+                        <td><code>grace_entered</code></td>
+                        <td>Entered grace period</td>
+                    </tr>
+                    <tr>
+                        <td><code>alert</code></td>
+                        <td>Grace period exceeded</td>
+                    </tr>
+                    <tr>
+                        <td><code>healthy</code></td>
+                        <td>Returned to healthy</td>
+                    </tr>
+                    <tr>
+                        <td><code>session_warning</code></td>
+                        <td>Session utilization threshold exceeded (default 80%)</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<p>Each target also has a <code>repeat_minutes</code> setting &mdash; set it to re-send alerts periodically while the condition persists (0 = notify once).</p>
+            <p>
+                Each target also has a <code>repeat_minutes</code> setting &mdash; set it to re-send alerts periodically
+                while the condition persists (0 = notify once).
+            </p>
 
-<h3>Webhook payload</h3>
-<pre><code>{
+            <h3>Webhook payload</h3>
+            <pre><code>{
   "event": "transition",
   "host": "MDS-LDC1-RDS5",
   "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
@@ -546,49 +931,81 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
   "timestamp": "2026-04-03T14:30:00-04:00"
 }</code></pre>
 
-<p>ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and <strong>default</strong> for transitions.</p>
+            <p>
+                ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and
+                <strong>default</strong> for transitions.
+            </p>
 
-<!-- ── Session Tracking ───────────────────────────────────────────────── -->
-<h2 id="sessions">8. Session Tracking</h2>
+            <!-- ── Session Tracking ───────────────────────────────────────────────── -->
+            <h2 id="sessions">8. Session Tracking</h2>
 
-<p>DrainCtl monitors active RDS sessions via <code>WTSEnumerateSessionsW</code> and exposes utilization data alongside drain mode state.</p>
+            <p>
+                DrainCtl monitors active RDS sessions via <code>WTSEnumerateSessionsW</code> and exposes utilization
+                data alongside drain mode state.
+            </p>
 
-<h3>Session data in CLI output</h3>
-<p>Session counts and utilization appear automatically in <code>drainctl check --format json</code> output, including active sessions, total capacity, and utilization percentage. This is useful for feeding into monitoring systems or custom dashboards.</p>
+            <h3>Session data in CLI output</h3>
+            <p>
+                Session counts and utilization appear automatically in <code>drainctl check --format json</code> output,
+                including active sessions, total capacity, and utilization percentage. This is useful for feeding into
+                monitoring systems or custom dashboards.
+            </p>
 
-<h3>Session utilization alerts</h3>
-<p>When session utilization exceeds the configured threshold, DrainCtl fires a <code>session_warning</code> notification. The default threshold is <strong>80%</strong> &mdash; change it in <code>config.json</code>:</p>
+            <h3>Session utilization alerts</h3>
+            <p>
+                When session utilization exceeds the configured threshold, DrainCtl fires a
+                <code>session_warning</code> notification. The default threshold is <strong>80%</strong> &mdash; change
+                it in <code>config.json</code>:
+            </p>
 
-<pre><code>{
+            <pre><code>{
   "session_warning_threshold": 80
 }</code></pre>
 
-<p>Add <code>session_warning</code> to a notification target's triggers to receive these alerts (see <a href="#notifications">Notifications</a>).</p>
+            <p>
+                Add <code>session_warning</code> to a notification target's triggers to receive these alerts (see
+                <a href="#notifications">Notifications</a>).
+            </p>
 
-<h3>Dashboard session gauges</h3>
-<p>The <a href="#dashboard">multi-server dashboard</a> displays per-server session gauges showing current utilization at a glance.</p>
+            <h3>Dashboard session gauges</h3>
+            <p>
+                The <a href="#dashboard">multi-server dashboard</a> displays per-server session gauges showing current
+                utilization at a glance.
+            </p>
 
-<!-- ── Dashboard ──────────────────────────────────────────────────────── -->
-<h2 id="dashboard">9. Multi-Server Dashboard</h2>
+            <!-- ── Dashboard ──────────────────────────────────────────────────────── -->
+            <h2 id="dashboard">9. Multi-Server Dashboard</h2>
 
-<p>Managing multiple RDSH servers? The dashboard gives you a single, live view of drain mode state across your entire farm &mdash; with Windows Authentication so only the right people see it.</p>
+            <p>
+                Managing multiple RDSH servers? The dashboard gives you a single, live view of drain mode state across
+                your entire farm &mdash; with Windows Authentication so only the right people see it.
+            </p>
 
-<h3>How it works</h3>
-<ol>
-  <li><strong>One server runs the dashboard</strong> &mdash; enable it in <code>config.json</code>, the DrainCtl service serves an HTTP dashboard</li>
-  <li><strong>Other servers register</strong> &mdash; run drainctl register once, the agent starts reporting its state automatically</li>
-  <li><strong>Dashboard aggregates</strong> &mdash; live grid of all servers, color-coded by status, auto-refreshes every 30 seconds</li>
-</ol>
+            <h3>How it works</h3>
+            <ol>
+                <li>
+                    <strong>One server runs the dashboard</strong> &mdash; enable it in <code>config.json</code>, the
+                    DrainCtl service serves an HTTP dashboard
+                </li>
+                <li>
+                    <strong>Other servers register</strong> &mdash; run drainctl register once, the agent starts
+                    reporting its state automatically
+                </li>
+                <li>
+                    <strong>Dashboard aggregates</strong> &mdash; live grid of all servers, color-coded by status,
+                    auto-refreshes every 30 seconds
+                </li>
+            </ol>
 
-<h3>Enable the dashboard (on one server)</h3>
-<pre><code># Enable the dashboard server (writes to config.json)
+            <h3>Enable the dashboard (on one server)</h3>
+            <pre><code># Enable the dashboard server (writes to config.json)
 drainctl dashboard enable --port 49470 --group "Domain Admins"
 
 # Or with a custom AD group
 drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
 
-<p>You can also edit <code>config.json</code> directly:</p>
-<pre><code>{
+            <p>You can also edit <code>config.json</code> directly:</p>
+            <pre><code>{
   "dashboard": {
     "enabled": true,
     "port": 49470,
@@ -596,26 +1013,33 @@ drainctl dashboard enable --port 49470 --group "RDS Admins"</code></pre>
   }
 }</code></pre>
 
-<p>Changes are hot-reloaded &mdash; no service restart needed.</p>
+            <p>Changes are hot-reloaded &mdash; no service restart needed.</p>
 
-<h3>Register servers</h3>
-<p>On each RDSH server you want to monitor, run this once:</p>
-<pre><code># Register with explicit URL
+            <h3>Register servers</h3>
+            <p>On each RDSH server you want to monitor, run this once:</p>
+            <pre><code># Register with explicit URL
 drainctl register https://dashboard-server:49470
 
 # Or auto-discover via DNS SRV record
 drainctl register --auto</code></pre>
 
-<p>This does two things:</p>
-<ol>
-  <li>Writes <code>dashboard.url</code> to the local <code>config.json</code> (so the service starts reporting automatically on startup)</li>
-  <li>Sends a registration request to the dashboard (so it knows about this server)</li>
-</ol>
+            <p>This does two things:</p>
+            <ol>
+                <li>
+                    Writes <code>dashboard.url</code> to the local <code>config.json</code> (so the service starts
+                    reporting automatically on startup)
+                </li>
+                <li>Sends a registration request to the dashboard (so it knows about this server)</li>
+            </ol>
 
-<h3>Auto-discovery (DNS SRV)</h3>
-<p>Instead of configuring <code>dashboard.url</code> on every agent, create a DNS SRV record and agents will find the dashboard automatically. The service checks for <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.</p>
+            <h3>Auto-discovery (DNS SRV)</h3>
+            <p>
+                Instead of configuring <code>dashboard.url</code> on every agent, create a DNS SRV record and agents
+                will find the dashboard automatically. The service checks for
+                <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.
+            </p>
 
-<pre><code># PowerShell — create the SRV record in AD-integrated DNS
+            <pre><code># PowerShell — create the SRV record in AD-integrated DNS
 Add-DnsServerResourceRecord -ZoneName "contoso.com" `
   -Name "_drainctl._tcp" -Srv `
   -DomainName "dashboard.contoso.com" `
@@ -624,172 +1048,299 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
 # Verify
 Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
 
-<p>Once the SRV record exists, agents discover the dashboard without any per-machine config. Just install the MSI and the service registers itself.</p>
+            <p>
+                Once the SRV record exists, agents discover the dashboard without any per-machine config. Just install
+                the MSI and the service registers itself.
+            </p>
 
-<div class="callout">
-  <strong>&#x1F4A1; Self-maintaining.</strong>
-  After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back. With SRV discovery, even registration is automatic &mdash; install the MSI and you're done.
-</div>
+            <div class="callout">
+                <strong>&#x1F4A1; Self-maintaining.</strong>
+                After registration, the service reports its state on every check cycle. No cron jobs, no scripts, no
+                manual syncing. If the dashboard server is down, reports are silently skipped and resume when it's back.
+                With SRV discovery, even registration is automatic &mdash; install the MSI and you're done.
+            </div>
 
-<h3>View the dashboard</h3>
-<pre><code># Open in your browser
+            <h3>View the dashboard</h3>
+            <pre><code># Open in your browser
 drainctl dashboard
 
 # Or navigate directly
 https://dashboard-server:49470</code></pre>
 
-<p>The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session trends.</p>
+            <p>
+                The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who
+                last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for
+                alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current
+                utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session
+                trends.
+            </p>
 
-<p>The <strong>notification settings drawer</strong> supports multi-target editing &mdash; add and remove individual notification targets, each with its own triggers and repeat interval, directly from the dashboard UI.</p>
+            <p>
+                The <strong>notification settings drawer</strong> supports multi-target editing &mdash; add and remove
+                individual notification targets, each with its own triggers and repeat interval, directly from the
+                dashboard UI.
+            </p>
 
-<h3>Manage servers</h3>
-<pre><code># List all registered servers
+            <h3>Manage servers</h3>
+            <pre><code># List all registered servers
 drainctl dashboard list-servers
 
 # Remove a decommissioned server
 drainctl dashboard remove-server RDSH-OLD</code></pre>
 
-<h3>Authentication</h3>
-<p>The dashboard uses <strong>Windows Authentication (Kerberos/SPNEGO)</strong> via SSPI. No passwords, no tokens, no configuration:</p>
-<ul>
-  <li><strong>Agent reporting</strong> &mdash; each server authenticates with its machine Kerberos ticket. Automatic in a domain, zero config.</li>
-  <li><strong>Dashboard UI</strong> &mdash; your browser sends your domain credentials (Integrated Windows Auth). Works out of the box in Intranet zone.</li>
-  <li><strong>Authorization</strong> &mdash; only members of the configured AD group (DashboardGroup) can view the dashboard. Agents can report but not view.</li>
-  <li><strong>Unregistered hosts</strong> &mdash; the dashboard rejects reports from servers that haven't been registered (403).</li>
-</ul>
+            <h3>Authentication</h3>
+            <p>
+                The dashboard uses <strong>Windows Authentication (Kerberos/SPNEGO)</strong> via SSPI. No passwords, no
+                tokens, no configuration:
+            </p>
+            <ul>
+                <li>
+                    <strong>Agent reporting</strong> &mdash; each server authenticates with its machine Kerberos ticket.
+                    Automatic in a domain, zero config.
+                </li>
+                <li>
+                    <strong>Dashboard UI</strong> &mdash; your browser sends your domain credentials (Integrated Windows
+                    Auth). Works out of the box in Intranet zone.
+                </li>
+                <li>
+                    <strong>Authorization</strong> &mdash; only members of the configured AD group (DashboardGroup) can
+                    view the dashboard. Agents can report but not view.
+                </li>
+                <li>
+                    <strong>Unregistered hosts</strong> &mdash; the dashboard rejects reports from servers that haven't
+                    been registered (403).
+                </li>
+            </ul>
 
-<h3 id="tls">HTTPS &amp; TLS Certificates</h3>
-<p>The dashboard always runs over HTTPS. On first start, the service auto-generates a self-signed TLS certificate (ECDSA P-256, valid 1 year). The certificate and private key are stored in the DrainCtl data directory:</p>
-<pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt   # world-readable
+            <h3 id="tls">HTTPS &amp; TLS Certificates</h3>
+            <p>
+                The dashboard always runs over HTTPS. On first start, the service auto-generates a self-signed TLS
+                certificate (ECDSA P-256, valid 1 year). The certificate and private key are stored in the DrainCtl data
+                directory:
+            </p>
+            <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt   # world-readable
 %ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.key   # SYSTEM + Admins only</code></pre>
 
-<p>The private key is ACL-restricted to SYSTEM and Administrators. The certificate auto-renews 24 hours before expiry.</p>
+            <p>
+                The private key is ACL-restricted to SYSTEM and Administrators. The certificate auto-renews 24 hours
+                before expiry.
+            </p>
 
-<h4>Certificate fingerprint</h4>
-<p>To view the dashboard's current TLS certificate fingerprint:</p>
-<pre><code>drainctl dashboard fingerprint</code></pre>
+            <h4>Certificate fingerprint</h4>
+            <p>To view the dashboard's current TLS certificate fingerprint:</p>
+            <pre><code>drainctl dashboard fingerprint</code></pre>
 
-<h4>Certificate pinning (optional)</h4>
-<p>Certificate pinning lets agents verify they're talking to the real dashboard, not an impersonator. Pinning is <strong>opt-in</strong> &mdash; without it, agents use trust-on-first-use (TOFU) for TLS, which is fine for most environments.</p>
+            <h4>Certificate pinning (optional)</h4>
+            <p>
+                Certificate pinning lets agents verify they're talking to the real dashboard, not an impersonator.
+                Pinning is <strong>opt-in</strong> &mdash; without it, agents use trust-on-first-use (TOFU) for TLS,
+                which is fine for most environments.
+            </p>
 
-<p><strong>Auto-pin on registration:</strong> Pass <code>--pin</code> when registering to automatically capture and save the dashboard's certificate fingerprint:</p>
-<pre><code># Register and auto-pin the dashboard's TLS certificate
+            <p>
+                <strong>Auto-pin on registration:</strong> Pass <code>--pin</code> when registering to automatically
+                capture and save the dashboard's certificate fingerprint:
+            </p>
+            <pre><code># Register and auto-pin the dashboard's TLS certificate
 drainctl register --auto --pin
 drainctl register https://dashboard:49470 --pin</code></pre>
-<p>The fingerprint is saved to <code>dashboard.tls_fingerprint</code> in the agent's <code>config.json</code>. All subsequent reports will verify the dashboard's certificate matches.</p>
+            <p>
+                The fingerprint is saved to <code>dashboard.tls_fingerprint</code> in the agent's
+                <code>config.json</code>. All subsequent reports will verify the dashboard's certificate matches.
+            </p>
 
-<p><strong>Auto-pin via config (for service auto-registration):</strong> Set <code>"auto_pin": true</code> in <code>config.json</code> and the service will capture the fingerprint on its next registration:</p>
-<pre><code>{
+            <p>
+                <strong>Auto-pin via config (for service auto-registration):</strong> Set
+                <code>"auto_pin": true</code> in <code>config.json</code> and the service will capture the fingerprint
+                on its next registration:
+            </p>
+            <pre><code>{
   "dashboard": {
     "url": "https://dashboard:49470",
     "auto_pin": true
   }
 }</code></pre>
 
-<p><strong>MSI/Bundle deployment:</strong> Pass <code>AUTO_PIN=1</code> as an MSI property:</p>
-<pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470 AUTO_PIN=1</code></pre>
+            <p><strong>MSI/Bundle deployment:</strong> Pass <code>AUTO_PIN=1</code> as an MSI property:</p>
+            <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470 AUTO_PIN=1</code></pre>
 
-<p><strong>Manual pinning:</strong> If you prefer to set the fingerprint yourself (e.g., distributed via GPO), run <code>drainctl dashboard fingerprint</code> on the dashboard server and set <code>dashboard.tls_fingerprint</code> in each agent's config. A manually-set fingerprint is never overwritten by auto-pin.</p>
+            <p>
+                <strong>Manual pinning:</strong> If you prefer to set the fingerprint yourself (e.g., distributed via
+                GPO), run <code>drainctl dashboard fingerprint</code> on the dashboard server and set
+                <code>dashboard.tls_fingerprint</code> in each agent's config. A manually-set fingerprint is never
+                overwritten by auto-pin.
+            </p>
 
-<div class="callout warn">
-  <strong>&#x26A0;&#xFE0F; Certificate renewal and pinning.</strong>
-  The auto-generated certificate is valid for 1 year and renews automatically. When it renews, the fingerprint changes. Agents with the old fingerprint pinned will silently fail to report until they re-register. To re-pin after renewal, run <code>drainctl register --auto --pin</code> on each agent, or set <code>"auto_pin": true</code> in config and restart the service. Without pinning enabled, cert renewal is seamless.
-</div>
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; Certificate renewal and pinning.</strong>
+                The auto-generated certificate is valid for 1 year and renews automatically. When it renews, the
+                fingerprint changes. Agents with the old fingerprint pinned will silently fail to report until they
+                re-register. To re-pin after renewal, run <code>drainctl register --auto --pin</code> on each agent, or
+                set <code>"auto_pin": true</code> in config and restart the service. Without pinning enabled, cert
+                renewal is seamless.
+            </div>
 
-<h4>Bring your own certificate</h4>
-<p>To use a CA-issued or internal PKI certificate instead of the auto-generated self-signed one:</p>
-<pre><code># CLI
+            <h4>Bring your own certificate</h4>
+            <p>To use a CA-issued or internal PKI certificate instead of the auto-generated self-signed one:</p>
+            <pre><code># CLI
 drainctl dashboard install-cert C:\certs\dashboard.pem C:\certs\dashboard-key.pem
 
 # PowerShell
 Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\dashboard-key.pem</code></pre>
-<p>This copies the PEM files into the DrainCtl data directory and updates <code>config.json</code> with the paths. Restart the service to use the new certificate.</p>
+            <p>
+                This copies the PEM files into the DrainCtl data directory and updates <code>config.json</code> with the
+                paths. Restart the service to use the new certificate.
+            </p>
 
-<p>Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the event log.</p>
+            <p>
+                Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both
+                are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the
+                event log.
+            </p>
 
-<p>You can also set the paths directly in <code>config.json</code>:</p>
-<pre><code>{
+            <p>You can also set the paths directly in <code>config.json</code>:</p>
+            <pre><code>{
   "dashboard": {
     "tls_cert": "C:\\certs\\dashboard.pem",
     "tls_key": "C:\\certs\\dashboard-key.pem"
   }
 }</code></pre>
 
-<h3>Dashboard configuration (config.json)</h3>
-<table>
-  <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-  <tbody>
-    <tr><td><code>dashboard.enabled</code></td><td>false</td><td>Enable the HTTPS dashboard (set to true)</td></tr>
-    <tr><td><code>dashboard.port</code></td><td>49470</td><td>Port the dashboard listens on</td></tr>
-    <tr><td><code>dashboard.group</code></td><td>Domain Admins</td><td>AD group authorized to view the dashboard</td></tr>
-    <tr><td><code>dashboard.url</code></td><td><em>empty</em></td><td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td></tr>
-    <tr><td><code>dashboard.tls_cert</code></td><td><em>empty</em></td><td>Path to PEM certificate file. If empty, a self-signed cert is auto-generated.</td></tr>
-    <tr><td><code>dashboard.tls_key</code></td><td><em>empty</em></td><td>Path to PEM private key file. Required when <code>tls_cert</code> is set.</td></tr>
-    <tr><td><code>dashboard.tls_fingerprint</code></td><td><em>empty</em></td><td>SHA-256 certificate fingerprint for agent-side pinning. Set manually or via <code>--pin</code>.</td></tr>
-    <tr><td><code>dashboard.auto_pin</code></td><td>false</td><td>Auto-capture dashboard cert fingerprint on service registration.</td></tr>
-  </tbody>
-</table>
+            <h3>Dashboard configuration (config.json)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>dashboard.enabled</code></td>
+                        <td>false</td>
+                        <td>Enable the HTTPS dashboard (set to true)</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.port</code></td>
+                        <td>49470</td>
+                        <td>Port the dashboard listens on</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.group</code></td>
+                        <td>Domain Admins</td>
+                        <td>AD group authorized to view the dashboard</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.url</code></td>
+                        <td><em>empty</em></td>
+                        <td>Agent-side: URL of the dashboard to report to (set by <code>drainctl register</code>)</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.tls_cert</code></td>
+                        <td><em>empty</em></td>
+                        <td>Path to PEM certificate file. If empty, a self-signed cert is auto-generated.</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.tls_key</code></td>
+                        <td><em>empty</em></td>
+                        <td>Path to PEM private key file. Required when <code>tls_cert</code> is set.</td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.tls_fingerprint</code></td>
+                        <td><em>empty</em></td>
+                        <td>
+                            SHA-256 certificate fingerprint for agent-side pinning. Set manually or via
+                            <code>--pin</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>dashboard.auto_pin</code></td>
+                        <td>false</td>
+                        <td>Auto-capture dashboard cert fingerprint on service registration.</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<h3>Centralized notification config</h3>
-<p>When an agent has a <code>dashboard.url</code> configured, it automatically pulls notification targets, grace period, and session warning threshold from the dashboard server. This means you only need to configure notifications once &mdash; on the dashboard &mdash; and all agents inherit the settings.</p>
+            <h3>Centralized notification config</h3>
+            <p>
+                When an agent has a <code>dashboard.url</code> configured, it automatically pulls notification targets,
+                grace period, and session warning threshold from the dashboard server. This means you only need to
+                configure notifications once &mdash; on the dashboard &mdash; and all agents inherit the settings.
+            </p>
 
-<p><strong>How it works:</strong></p>
-<ul>
-  <li>On startup, the agent fetches <code>GET /api/v1/notify-config</code> from the dashboard</li>
-  <li>The fetched targets, grace period, and session threshold <strong>replace</strong> local config.json values</li>
-  <li>The agent re-fetches every ~5 minutes to pick up changes made in the dashboard UI</li>
-  <li>If the dashboard is unreachable, the agent uses the last successfully fetched config</li>
-  <li>If no fetch ever succeeds, the agent falls back to local config.json targets</li>
-</ul>
+            <p><strong>How it works:</strong></p>
+            <ul>
+                <li>On startup, the agent fetches <code>GET /api/v1/notify-config</code> from the dashboard</li>
+                <li>
+                    The fetched targets, grace period, and session threshold <strong>replace</strong> local config.json
+                    values
+                </li>
+                <li>The agent re-fetches every ~5 minutes to pick up changes made in the dashboard UI</li>
+                <li>If the dashboard is unreachable, the agent uses the last successfully fetched config</li>
+                <li>If no fetch ever succeeds, the agent falls back to local config.json targets</li>
+            </ul>
 
-<p><strong>No dashboard URL?</strong> Agents without <code>dashboard.url</code> use their local <code>config.json</code> notification targets as before &mdash; nothing changes for standalone deployments.</p>
+            <p>
+                <strong>No dashboard URL?</strong> Agents without <code>dashboard.url</code> use their local
+                <code>config.json</code> notification targets as before &mdash; nothing changes for standalone
+                deployments.
+            </p>
 
-<div class="callout">
-  <strong>Tip:</strong> For farms with dozens of servers, configure notifications entirely in the dashboard UI and leave <code>notifications</code> empty in each agent's config.json. The dashboard becomes the single source of truth.
-</div>
+            <div class="callout">
+                <strong>Tip:</strong> For farms with dozens of servers, configure notifications entirely in the
+                dashboard UI and leave <code>notifications</code> empty in each agent's config.json. The dashboard
+                becomes the single source of truth.
+            </div>
 
-<div class="callout warn">
-  <strong>&#x26A0;&#xFE0F; Firewall</strong>
-  The dashboard listens on the configured port. If you're running Windows Firewall, allow inbound TCP on that port for the agent servers and admin workstations.
-</div>
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; Firewall</strong>
+                The dashboard listens on the configured port. If you're running Windows Firewall, allow inbound TCP on
+                that port for the agent servers and admin workstations.
+            </div>
 
-<!-- ── RMM Integration ────────────────────────────────────────────────── -->
-<h2 id="rmm">10. RMM Integration</h2>
+            <!-- ── RMM Integration ────────────────────────────────────────────────── -->
+            <h2 id="rmm">10. RMM Integration</h2>
 
-<p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
+            <p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
 
-<h3>How it works</h3>
-<ol>
-  <li>Your RMM runs a monitoring script at its polling interval</li>
-  <li>The script executes drainctl check</li>
-  <li>DrainCtl connects to the service via named pipe &mdash; <strong>instant response</strong></li>
-  <li>The RMM captures stdout (structured key=value lines) and the exit code</li>
-  <li>Threshold: exit code 0 = Normal, 1 = Alert, 2 = Error</li>
-</ol>
+            <h3>How it works</h3>
+            <ol>
+                <li>Your RMM runs a monitoring script at its polling interval</li>
+                <li>The script executes drainctl check</li>
+                <li>DrainCtl connects to the service via named pipe &mdash; <strong>instant response</strong></li>
+                <li>The RMM captures stdout (structured key=value lines) and the exit code</li>
+                <li>Threshold: exit code 0 = Normal, 1 = Alert, 2 = Error</li>
+            </ol>
 
-<div class="callout">
-  <strong>&#x1F3AF; Pro tip:</strong> Even if your RMM only polls every 15 minutes, the service detected the change in real time. The audit trail has the exact timestamp and attribution. Your RMM is just sampling the service's state.
-</div>
+            <div class="callout">
+                <strong>&#x1F3AF; Pro tip:</strong> Even if your RMM only polls every 15 minutes, the service detected
+                the change in real time. The audit trail has the exact timestamp and attribution. Your RMM is just
+                sampling the service's state.
+            </div>
 
-<h3>Minimal monitoring script</h3>
-<pre><code>drainctl check --quiet
+            <h3>Minimal monitoring script</h3>
+            <pre><code>drainctl check --quiet
 exit $LASTEXITCODE</code></pre>
 
-<p>That's it. --quiet suppresses intermediate log lines &mdash; only the final status line is emitted. Works with any RMM that supports PowerShell or CMD scripts with exit code thresholds.</p>
+            <p>
+                That's it. --quiet suppresses intermediate log lines &mdash; only the final status line is emitted.
+                Works with any RMM that supports PowerShell or CMD scripts with exit code thresholds.
+            </p>
 
-<h3>JSON output for advanced integrations</h3>
-<pre><code># Parse JSON output for custom dashboards or APIs
+            <h3>JSON output for advanced integrations</h3>
+            <pre><code># Parse JSON output for custom dashboards or APIs
 $result = drainctl check --format json | ConvertFrom-Json
 if ($result.exit_code -ne 0) {
     # Send to your ticketing system, dashboard, etc.
 }</code></pre>
 
-<!-- ── Service Management ─────────────────────────────────────────────── -->
-<h2 id="service">11. Service Management</h2>
+            <!-- ── Service Management ─────────────────────────────────────────────── -->
+            <h2 id="service">11. Service Management</h2>
 
-<p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
+            <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
-<pre><code># Check service status
+            <pre><code># Check service status
 Get-Service DrainCtl
 
 # Stop / Start / Restart
@@ -805,138 +1356,158 @@ drainctl service start
 drainctl service stop
 drainctl service uninstall</code></pre>
 
-<h3>What the service does</h3>
-<ul>
-  <li><strong>Subscribes</strong> to registry changes on <code>TSServerDrainMode</code> via <code>RegNotifyChangeKeyValue</code> &mdash; instant detection</li>
-  <li><strong>Subscribes</strong> to Security Event ID 4657 via <code>EvtSubscribe</code> &mdash; knows who made the change</li>
-  <li><strong>Polls</strong> every 5 minutes as a safety net</li>
-  <li><strong>Maintains</strong> an in-memory audit store (flushed to JSONL every 30 seconds)</li>
-  <li><strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant CLI/PS responses</li>
-  <li><strong>Writes</strong> to the Windows Event Log (Application/DrainCtl) on state changes</li>
-  <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
-  <li><strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization alerts</li>
-  <li><strong>Hot-reloads</strong> configuration when <code>config.json</code> changes</li>
-</ul>
+            <h3>What the service does</h3>
+            <ul>
+                <li>
+                    <strong>Subscribes</strong> to registry changes on <code>TSServerDrainMode</code> via
+                    <code>RegNotifyChangeKeyValue</code> &mdash; instant detection
+                </li>
+                <li>
+                    <strong>Subscribes</strong> to Security Event ID 4657 via <code>EvtSubscribe</code> &mdash; knows
+                    who made the change
+                </li>
+                <li><strong>Polls</strong> every 5 minutes as a safety net</li>
+                <li><strong>Maintains</strong> an in-memory audit store (flushed to JSONL every 30 seconds)</li>
+                <li>
+                    <strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant
+                    CLI/PS responses
+                </li>
+                <li><strong>Writes</strong> to the Windows Event Log (Application/DrainCtl) on state changes</li>
+                <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
+                <li>
+                    <strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization
+                    alerts
+                </li>
+                <li><strong>Hot-reloads</strong> configuration when <code>config.json</code> changes</li>
+            </ul>
 
-<h3>Event Log</h3>
-<p>Check <code>Application</code> log, source <code>DrainCtl</code>:</p>
-<table>
-  <thead><tr><th>ID</th><th>Level</th><th>What happened</th></tr></thead>
-  <tbody>
-    <tr><td>1000</td><td>Info</td><td>Service started</td></tr>
-    <tr><td>1001</td><td>Info</td><td>Service stopped</td></tr>
-    <tr><td>1002</td><td>Info</td><td>Check: healthy</td></tr>
-    <tr><td>1004</td><td>Info</td><td>State transition detected</td></tr>
-    <tr><td>2000</td><td>Warning</td><td>Drain mode in grace period</td></tr>
-    <tr><td>3000</td><td>Error</td><td>Drain mode alert (grace exceeded)</td></tr>
-  </tbody>
-</table>
+            <h3>Event Log</h3>
+            <p>Check <code>Application</code> log, source <code>DrainCtl</code>:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Level</th>
+                        <th>What happened</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1000</td>
+                        <td>Info</td>
+                        <td>Service started</td>
+                    </tr>
+                    <tr>
+                        <td>1001</td>
+                        <td>Info</td>
+                        <td>Service stopped</td>
+                    </tr>
+                    <tr>
+                        <td>1002</td>
+                        <td>Info</td>
+                        <td>Check: healthy</td>
+                    </tr>
+                    <tr>
+                        <td>1004</td>
+                        <td>Info</td>
+                        <td>State transition detected</td>
+                    </tr>
+                    <tr>
+                        <td>2000</td>
+                        <td>Warning</td>
+                        <td>Drain mode in grace period</td>
+                    </tr>
+                    <tr>
+                        <td>3000</td>
+                        <td>Error</td>
+                        <td>Drain mode alert (grace exceeded)</td>
+                    </tr>
+                </tbody>
+            </table>
 
-<!-- ── Troubleshooting ────────────────────────────────────────────────── -->
-<h2 id="troubleshooting">12. Troubleshooting</h2>
+            <!-- ── Troubleshooting ────────────────────────────────────────────────── -->
+            <h2 id="troubleshooting">12. Troubleshooting</h2>
 
-<h3>"changed_by" is empty</h3>
-<p>Run <code>drainctl audit-setup</code> as admin. On domain-joined machines, also configure the GPO (see <a href="#audit-setup">Audit Setup</a>).</p>
+            <h3>"changed_by" is empty</h3>
+            <p>
+                Run <code>drainctl audit-setup</code> as admin. On domain-joined machines, also configure the GPO (see
+                <a href="#audit-setup">Audit Setup</a>).
+            </p>
 
-<h3>Service won't start</h3>
-<p>Check the Application Event Log for DrainCtl errors (Event ID 3002). Common causes:</p>
-<ul>
-  <li>Another instance holds the audit file lock &mdash; restart the machine or find the process</li>
-  <li>Permissions on the ProgramData directory</li>
-</ul>
+            <h3>Service won't start</h3>
+            <p>Check the Application Event Log for DrainCtl errors (Event ID 3002). Common causes:</p>
+            <ul>
+                <li>Another instance holds the audit file lock &mdash; restart the machine or find the process</li>
+                <li>Permissions on the ProgramData directory</li>
+            </ul>
 
-<h3>CLI is slow (1-2 seconds instead of instant)</h3>
-<p>The service isn't running. <code>drainctl check</code> falls back to direct registry read + file-based audit. Start the service: <code>Start-Service DrainCtl</code>.</p>
+            <h3>CLI is slow (1-2 seconds instead of instant)</h3>
+            <p>
+                The service isn't running. <code>drainctl check</code> falls back to direct registry read + file-based
+                audit. Start the service: <code>Start-Service DrainCtl</code>.
+            </p>
 
-<h3>Notifications not arriving</h3>
-<ol>
-  <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
-  <li><code>drainctl notify test</code> &mdash; sends a test message</li>
-  <li>Check the Application Event Log for "webhook notification failed" or "ntfy notification failed" warnings</li>
-  <li>Verify network connectivity from the RDSH server to the webhook/ntfy endpoint</li>
-</ol>
+            <h3>Notifications not arriving</h3>
+            <ol>
+                <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
+                <li><code>drainctl notify test</code> &mdash; sends a test message</li>
+                <li>
+                    Check the Application Event Log for "webhook notification failed" or "ntfy notification failed"
+                    warnings
+                </li>
+                <li>Verify network connectivity from the RDSH server to the webhook/ntfy endpoint</li>
+            </ol>
 
-<h3>Dashboard shows "Offline" for a registered server</h3>
-<p>The server's DrainCtl service isn't reporting. Check:</p>
-<ul>
-  <li>Is the service running on that server? <code>Get-Service DrainCtl</code></li>
-  <li>Is <code>dashboard.url</code> set in <code>config.json</code>? Check with <code>drainctl config get</code></li>
-  <li>Can the server reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code></li>
-  <li>Check the Application Event Log on the reporting server for DrainCtl errors</li>
-</ul>
+            <h3>Dashboard shows "Offline" for a registered server</h3>
+            <p>The server's DrainCtl service isn't reporting. Check:</p>
+            <ul>
+                <li>Is the service running on that server? <code>Get-Service DrainCtl</code></li>
+                <li>
+                    Is <code>dashboard.url</code> set in
+                    <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code>?
+                </li>
+                <li>
+                    Can the server reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code>
+                </li>
+                <li>Check the Application Event Log on the reporting server for DrainCtl errors</li>
+            </ul>
 
-<h3>Dashboard returns 401 or "Access Denied"</h3>
-<p>Windows Authentication (Kerberos) issue:</p>
-<ul>
-  <li>Make sure the dashboard URL is in the browser's Intranet zone (or Trusted Sites)</li>
-  <li>Try using the FQDN (e.g., <code>http://server.domain.com:49470</code>) &mdash; Kerberos needs the full hostname</li>
-  <li>Verify your account is in the configured DashboardGroup (default: Domain Admins)</li>
-  <li>For cross-domain scenarios, ensure Kerberos delegation is configured</li>
-</ul>
+            <h3>Dashboard returns 401 or "Access Denied"</h3>
+            <p>Windows Authentication (Kerberos) issue:</p>
+            <ul>
+                <li>Make sure the dashboard URL is in the browser's Intranet zone (or Trusted Sites)</li>
+                <li>
+                    Try using the FQDN (e.g., <code>http://server.domain.com:49470</code>) &mdash; Kerberos needs the
+                    full hostname
+                </li>
+                <li>Verify your account is in the configured DashboardGroup (default: Domain Admins)</li>
+                <li>For cross-domain scenarios, ensure Kerberos delegation is configured</li>
+            </ul>
 
-<h3>Dashboard returns 403 on agent report</h3>
-<p>The reporting server isn't registered. Run <code>drainctl register https://dashboard:49470</code> on that server.</p>
+            <h3>Dashboard returns 403 on agent report</h3>
+            <p>
+                The reporting server isn't registered. Run <code>drainctl register https://dashboard:49470</code> on
+                that server.
+            </p>
 
-<h3>Need help?</h3>
-<p><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/issues">Open an issue on GitHub</a> or contact <a href="https://lisstech.com">LISS Technologies</a> support.</p>
+            <h3>Need help?</h3>
+            <p>
+                <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/issues">Open an issue on GitHub</a> or
+                contact <a href="https://lisstech.com">LISS Technologies</a> support.
+            </p>
+        </div>
 
-</div>
+        <footer class="footer">
+            <div class="wrap">
+                <p>
+                    <a href="index.html">Home</a> &middot;
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a> &middot;
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a> &middot;
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0</a>
+                </p>
+                <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
+            </div>
+        </footer>
 
-<footer class="footer">
-  <div class="wrap">
-    <p>
-      <a href="index.html">Home</a> &middot;
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a> &middot;
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a> &middot;
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0</a>
-    </p>
-    <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
-  </div>
-</footer>
-
-
-<button id="font-switcher" onclick="cycleFont()" style="
-  position:fixed;bottom:20px;right:20px;z-index:999;
-  background:var(--accent);color:#fff;
-  border:var(--bw) solid var(--border);
-  border-radius:var(--r);
-  box-shadow:var(--so) var(--so) 0 var(--shadow);
-  padding:10px 16px;
-  font-family:'Work Sans',sans-serif;
-  font-size:0.82rem;font-weight:700;
-  cursor:pointer;
-  transition:transform 0.1s,box-shadow 0.1s;
-">&#x1F3A8; DM Serif + Fraunces + Work Sans</button>
-
-<script>
-var fontTriples = [
-  { title: "'DM Serif Display', serif", heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "DM Serif + Fraunces + Work Sans" },
-  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "Fraunces + Work Sans" },
-  { title: "'DM Serif Display', serif", heading: "'DM Serif Display', serif", body: "'DM Sans', sans-serif", label: "DM Serif + DM Sans" },
-  { title: "'Playfair Display', serif", heading: "'Literata', serif", body: "'Source Sans 3', sans-serif", label: "Playfair + Literata + Source Sans" },
-  { title: "'Playfair Display', serif", heading: "'Playfair Display', serif", body: "'Lato', sans-serif", label: "Playfair + Lato" },
-  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Fraunces', serif", label: "Fraunces only" },
-];
-var fontIdx = parseInt(localStorage.getItem('drainctl-font-idx') || '0', 10);
-
-function applyFont(idx) {
-  var t = fontTriples[idx];
-  document.body.style.fontFamily = t.body;
-  document.querySelectorAll('h1').forEach(function(el) { el.style.fontFamily = t.title; });
-  document.querySelectorAll('h2, h3').forEach(function(el) {
-    if (!el.closest('.toc')) el.style.fontFamily = t.heading;
-  });
-  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + t.label;
-}
-
-function cycleFont() {
-  fontIdx = (fontIdx + 1) % fontTriples.length;
-  localStorage.setItem('drainctl-font-idx', fontIdx);
-  applyFont(fontIdx);
-}
-
-if (fontIdx > 0) applyFont(fontIdx);
-</script>
-
-</body>
+    </body>
 </html>
