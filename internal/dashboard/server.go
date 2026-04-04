@@ -36,6 +36,15 @@ type DashboardServer struct {
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
 	testNotifyFunc func() error
+
+	// testLoadConfigFunc, if non-nil, is called by handleGetNotifyConfig instead
+	// of dc.LoadConfig. Used in tests to avoid filesystem access.
+	testLoadConfigFunc func() (*dc.Config, error)
+
+	// testPutNotifyConfigFunc, if non-nil, is called by handlePutNotifyConfig
+	// instead of dc.UpdateNotifications / dc.UpdateSessionThreshold / dc.UpdateGracePeriod.
+	// Receives the parsed request values; nil pointers mean the field was absent.
+	testPutNotifyConfigFunc func(notifications []dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -262,7 +271,13 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 
 // handleGetNotifyConfig returns the current notification config as JSON.
 func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.Request) {
-	cfg, err := dc.LoadConfig(ds.log)
+	var cfg *dc.Config
+	var err error
+	if ds.testLoadConfigFunc != nil {
+		cfg, err = ds.testLoadConfigFunc()
+	} else {
+		cfg, err = dc.LoadConfig(ds.log)
+	}
 	if err != nil {
 		dc.LogMsg(ds.log, dc.LvlERR, "load config failed", fmt.Sprintf("error=%q", err))
 		http.Error(w, "failed to load config", http.StatusInternalServerError)
@@ -303,25 +318,33 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := dc.UpdateNotifications(in.Notifications, ds.log); err != nil {
-		dc.LogMsg(ds.log, dc.LvlERR, "update notifications failed", fmt.Sprintf("error=%q", err))
-		http.Error(w, "failed to update notifications", http.StatusInternalServerError)
-		return
-	}
-
-	if in.SessionWarningThreshold != nil {
-		if err := dc.UpdateSessionThreshold(*in.SessionWarningThreshold, ds.log); err != nil {
-			dc.LogMsg(ds.log, dc.LvlERR, "update session threshold failed", fmt.Sprintf("error=%q", err))
-			http.Error(w, "failed to update session threshold", http.StatusInternalServerError)
+	if ds.testPutNotifyConfigFunc != nil {
+		if err := ds.testPutNotifyConfigFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
+			dc.LogMsg(ds.log, dc.LvlERR, "update config failed (test hook)", fmt.Sprintf("error=%q", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-	}
-
-	if in.GracePeriod != nil {
-		if err := dc.UpdateGracePeriod(*in.GracePeriod, ds.log); err != nil {
-			dc.LogMsg(ds.log, dc.LvlERR, "update grace period failed", fmt.Sprintf("error=%q", err))
-			http.Error(w, "failed to update grace period", http.StatusInternalServerError)
+	} else {
+		if err := dc.UpdateNotifications(in.Notifications, ds.log); err != nil {
+			dc.LogMsg(ds.log, dc.LvlERR, "update notifications failed", fmt.Sprintf("error=%q", err))
+			http.Error(w, "failed to update notifications", http.StatusInternalServerError)
 			return
+		}
+
+		if in.SessionWarningThreshold != nil {
+			if err := dc.UpdateSessionThreshold(*in.SessionWarningThreshold, ds.log); err != nil {
+				dc.LogMsg(ds.log, dc.LvlERR, "update session threshold failed", fmt.Sprintf("error=%q", err))
+				http.Error(w, "failed to update session threshold", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if in.GracePeriod != nil {
+			if err := dc.UpdateGracePeriod(*in.GracePeriod, ds.log); err != nil {
+				dc.LogMsg(ds.log, dc.LvlERR, "update grace period failed", fmt.Sprintf("error=%q", err))
+				http.Error(w, "failed to update grace period", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -456,9 +479,24 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	_ = enc.Encode(records)
 }
 
+// cspHeader is the Content-Security-Policy value applied to all responses.
+// The dashboard SPA uses inline scripts and styles (uPlot + app JS) and loads
+// fonts from Google Fonts CDN, so 'unsafe-inline' is required for script-src
+// and style-src. All other sources are restricted to 'self'.
+const cspHeader = "default-src 'none'; " +
+	"script-src 'unsafe-inline'; " +
+	"style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+	"font-src https://fonts.gstatic.com; " +
+	"img-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"frame-ancestors 'self'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'"
+
 // securityMiddleware adds defensive HTTP security headers to all responses.
 func securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", cspHeader)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
