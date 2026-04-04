@@ -456,13 +456,30 @@ func serviceCmd() *cobra.Command {
 // -- register ---------------------------------------------------------------
 
 func registerCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "register <dashboard-url>",
+	cmd := &cobra.Command{
+		Use:   "register [dashboard-url]",
 		Short: "Register this server with a DrainCtl dashboard",
-		Args:  cobra.ExactArgs(1),
+		Long: `Register this server with a DrainCtl dashboard.
+
+Provide a URL explicitly, or use --auto to discover the dashboard via
+DNS SRV record (_drainctl._tcp.<domain>).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			dashURL := args[0]
+			auto, _ := cmd.Flags().GetBool("auto")
+
+			var dashURL string
+			if len(args) > 0 {
+				dashURL = args[0]
+			} else if auto {
+				dashURL = dashboard.DiscoverDashboardURL(log)
+				if dashURL == "" {
+					return fmt.Errorf("no dashboard found via SRV lookup (_drainctl._tcp.<domain>)")
+				}
+				log(dc.LvlINF, fmt.Sprintf("discovered dashboard: %s", dashURL))
+			} else {
+				return fmt.Errorf("provide a dashboard URL or use --auto for SRV discovery")
+			}
 
 			// Persist DashboardURL to config.json.
 			fileCfg, err := dc.LoadConfig(log)
@@ -484,6 +501,8 @@ func registerCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Bool("auto", false, "Discover dashboard via DNS SRV record (_drainctl._tcp.<domain>)")
+	return cmd
 }
 
 // -- dashboard --------------------------------------------------------------
