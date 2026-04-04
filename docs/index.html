@@ -198,26 +198,54 @@ body {
 .stat-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
 
 /* ── Features ─────────────────────────────────────────── */
+.features-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.feature-h {
+  padding: 32px;
+  border-left: 5px solid var(--accent);
+}
+.feature-h .icon {
+  font-size: 2rem;
+  margin-bottom: 14px;
+  display: block;
+}
+.feature-h h3 {
+  font-size: 1.15rem; font-weight: 800;
+  margin-bottom: 8px;
+}
+.feature-h p { font-size: 0.92rem; color: var(--muted); line-height: 1.6; }
+
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 18px;
 }
-.feature { padding: 26px; }
+.feature { padding: 24px 26px; }
 .feature .icon {
-  width: 42px; height: 42px;
+  width: 38px; height: 38px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.3rem;
+  font-size: 1.15rem;
   background: var(--surface);
   border: var(--bw) solid var(--border);
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .feature h3 {
-  font-size: 1rem; font-weight: 800;
-  margin-bottom: 6px;
+  font-size: 0.95rem; font-weight: 800;
+  margin-bottom: 5px;
 }
-.feature p { font-size: 0.88rem; color: var(--muted); line-height: 1.55; }
+.feature p { font-size: 0.85rem; color: var(--muted); line-height: 1.55; }
+@media (max-width: 768px) {
+  .features-hero { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .features-grid { grid-template-columns: 1fr; }
+}
 
 /* ── How it works ─────────────────────────────────────── */
 .flow-steps {
@@ -407,56 +435,54 @@ body {
     <div class="section-label">Capabilities</div>
     <div class="section-title">Everything you need to monitor drain mode.</div>
     <div class="section-desc">One binary. One service. Real-time visibility across your entire RDSH farm &mdash; with a dashboard to prove it.</div>
+    <div class="features-hero">
+      <div class="feature-h card">
+        <span class="icon">&#9889;</span>
+        <h3>Instant Detection</h3>
+        <p>The moment someone runs <code>chglogon /drain</code>, the service knows. No polling delay &mdash; Windows notifies DrainCtl directly through the kernel.</p>
+      </div>
+      <div class="feature-h card">
+        <span class="icon">&#128100;</span>
+        <h3>Who Changed It</h3>
+        <p>DrainCtl tells you the exact user account that enabled drain mode. Not just that it changed &mdash; who did it, and when.</p>
+      </div>
+      <div class="feature-h card">
+        <span class="icon">&#128101;</span>
+        <h3>Session Tracking</h3>
+        <p>See active and disconnected sessions on every server. Set a capacity threshold and get alerted before your farm runs out of slots.</p>
+      </div>
+    </div>
+
     <div class="features-grid">
       <div class="feature card">
-        <div class="icon">&#9889;</div>
-        <h3>Instant Detection</h3>
-        <p>Windows kernel-level registry notification. No polling lag. The service knows before your next heartbeat.</p>
+        <div class="icon">&#127760;</div>
+        <h3>Farm Dashboard</h3>
+        <p>One page for your entire RDSH farm. Live status, session gauges, state history chart, and event log &mdash; secured with Kerberos SSO.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#128276;</div>
+        <h3>Smart Alerts</h3>
+        <p>Multiple webhook and ntfy.sh targets. Each gets its own triggers &mdash; drain on/off, grace, alert, session warning &mdash; and repeat interval.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128203;</div>
         <h3>90-Day Audit Trail</h3>
-        <p>Every state observation logged. Transitions, durations, patterns &mdash; queryable via CLI, PowerShell, or the dashboard.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128100;</div>
-        <h3>Change Attribution</h3>
-        <p>EvtSubscribe on Security Event 4657 tells you exactly who changed drain mode &mdash; in under a second.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#127760;</div>
-        <h3>Multi-Server Dashboard</h3>
-        <p>Aggregated farm view with live status grid. Servers self-register, report state in real time. Kerberos/SSPI auth with AD group control.</p>
+        <p>Every state change logged with timestamps, durations, and attribution. Query it from the CLI, PowerShell, or the dashboard.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128187;</div>
-        <h3>PowerShell + PSGallery</h3>
-        <p>Native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Pipeline-friendly objects. Works on 5.1 and 7+.</p>
+        <h3>PowerShell + CLI</h3>
+        <p>Native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit codes + JSON for any RMM. Works on PS 5.1 and 7+.</p>
       </div>
       <div class="feature card">
-        <div class="icon">&#128276;</div>
-        <h3>Webhook &amp; ntfy.sh</h3>
-        <p>Multiple webhook and ntfy.sh targets with granular triggers &mdash; drain_on, drain_off, alert, session_warning, and more. Each target gets its own trigger filter and repeat interval.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128200;</div>
-        <h3>RMM Ready</h3>
-        <p>Exit codes + structured stdout for any RMM. Drop the CLI into your monitoring automation.</p>
+        <div class="icon">&#128196;</div>
+        <h3>Simple Config</h3>
+        <p>One JSON file. Edit in Notepad, deploy with your RMM, push with GPO. Changes apply instantly &mdash; no service restart.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128274;</div>
         <h3>EV Code-Signed</h3>
         <p>Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from download to execution.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128101;</div>
-        <h3>Session Tracking</h3>
-        <p>Know exactly how many users are on each server. Active sessions, disconnected sessions, utilization percentage &mdash; all tracked in real time and displayed on the dashboard.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128680;</div>
-        <h3>Session Alerts</h3>
-        <p>Set a utilization threshold and get notified before your servers hit capacity. Per-target webhook and ntfy.sh with granular trigger control.</p>
       </div>
     </div>
   </div>
