@@ -1,954 +1,1360 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="favicon.ico" type="image/x-icon"><link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>DrainCtl — RDSH Drain Mode Monitor</title>
-<meta name="description" content="Real-time Remote Desktop drain mode monitoring for Windows Server. Instant detection, 90-day audit trail, change attribution.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&family=DM+Serif+Display:ital@0;1&family=Work+Sans:wght@400;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Source+Sans+3:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-:root {
-  --bg: #fdf8f6;
-  --fg: #2d1a1a;
-  --accent: #a3475b;
-  --green: #5d8a6e;
-  --amber: #b87843;
-  --red: #9e2a3b;
-  --border: #2d1a1a;
-  --shadow: #2d1a1a;
-  --card: #fffaf8;
-  --muted: #7a5a5a;
-  --subtle: #a68e8e;
-  --code-bg: #1a0e0e;
-  --code-fg: #e8d5d5;
-  --surface: #f5ebe8;
-  --r: 10px;
-  --bw: 2.5px;
-  --so: 4px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #110a0a;
-    --fg: #f5e8e8;
-    --card: #1f1414;
-    --border: #4a3535;
-    --shadow: #000;
-    --muted: #c4a8a8;
-    --subtle: #6b5050;
-    --surface: #1f1414;
-    --code-bg: #0d0808;
-  }
-}
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  font-family: 'Work Sans', sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  line-height: 1.65;
-  -webkit-font-smoothing: antialiased;
-}
-.wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="favicon.ico" type="image/x-icon" />
+        <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+        <title>DrainCtl — RDSH Drain Mode Monitor</title>
+        <meta
+            name="description"
+            content="Real-time Remote Desktop drain mode monitoring for Windows Server. Instant detection, 90-day audit trail, change attribution."
+        />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Work+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --bg: #fdf8f6;
+                --fg: #2d1a1a;
+                --accent: #a3475b;
+                --green: #5d8a6e;
+                --amber: #b87843;
+                --red: #9e2a3b;
+                --border: #2d1a1a;
+                --shadow: #2d1a1a;
+                --card: #fffaf8;
+                --muted: #7a5a5a;
+                --subtle: #a68e8e;
+                --code-bg: #1a0e0e;
+                --code-fg: #e8d5d5;
+                --surface: #f5ebe8;
+                --r: 10px;
+                --bw: 2.5px;
+                --so: 4px;
+            }
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --bg: #110a0a;
+                    --fg: #f5e8e8;
+                    --card: #1f1414;
+                    --border: #4a3535;
+                    --shadow: #000;
+                    --muted: #c4a8a8;
+                    --subtle: #6b5050;
+                    --surface: #1f1414;
+                    --code-bg: #0d0808;
+                }
+            }
+            *,
+            *::before,
+            *::after {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: "Work Sans", sans-serif;
+                background: var(--bg);
+                color: var(--fg);
+                line-height: 1.65;
+                -webkit-font-smoothing: antialiased;
+            }
+            .wrap {
+                max-width: 1040px;
+                margin: 0 auto;
+                padding: 0 28px;
+            }
 
-/* ── Navbar ───────────────────────────────────────────── */
-.nav {
-  position: sticky; top: 0; z-index: 100;
-  background: var(--bg);
-  border-bottom: var(--bw) solid var(--border);
-  padding: 0;
-  height: 56px;
-}
-.nav .wrap {
-  display: flex; align-items: center; justify-content: space-between;
-  height: 100%;
-}
-.nav-brand {
-  font-weight: 800; font-size: 1.1rem;
-  text-decoration: none; color: var(--fg);
-  display: flex; align-items: center; gap: 8px;
-  line-height: 56px;
-}
-.nav-brand .emoji { font-size: 1.1em; vertical-align: middle; }
-.nav-brand span { opacity: 0.4; font-weight: 400; }
-.nav-links { display: flex; align-items: center; gap: 28px; list-style: none; height: 100%; margin: 0; padding: 0; }
-.nav-links a {
-  text-decoration: none; color: var(--muted);
-  font-weight: 600; font-size: 0.9rem;
-  line-height: 56px; transition: color 0.15s;
-}
-.nav-links a:hover { color: var(--fg); }
-@media (max-width: 640px) {
-  .nav-links { display: none; }
-}
+            /* ── Navbar ───────────────────────────────────────────── */
+            .nav {
+                position: sticky;
+                top: 0;
+                z-index: 100;
+                background: var(--bg);
+                border-bottom: var(--bw) solid var(--border);
+                padding: 0;
+                height: 56px;
+            }
+            .nav .wrap {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                height: 100%;
+            }
+            .nav-brand {
+                font-weight: 800;
+                font-size: 1.1rem;
+                text-decoration: none;
+                color: var(--fg);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                line-height: 56px;
+            }
+            .nav-brand .emoji {
+                font-size: 1.1em;
+                vertical-align: middle;
+            }
+            .nav-brand span {
+                opacity: 0.4;
+                font-weight: 400;
+            }
+            .nav-links {
+                display: flex;
+                align-items: center;
+                gap: 28px;
+                list-style: none;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .nav-links a {
+                text-decoration: none;
+                color: var(--muted);
+                font-weight: 600;
+                font-size: 0.9rem;
+                line-height: 56px;
+                transition: color 0.15s;
+            }
+            .nav-links a:hover {
+                color: var(--fg);
+            }
+            @media (max-width: 640px) {
+                .nav-links {
+                    display: none;
+                }
+            }
 
-/* ── Shared ───────────────────────────────────────────── */
-.section { padding: 80px 0; }
-.section-label {
-  font-size: 0.8rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.12em;
-  color: var(--accent); margin-bottom: 12px;
-}
-.section-title {
-  font-size: 2.2rem; font-family: 'Fraunces', serif; font-weight: 400;
-  letter-spacing: -0.025em; line-height: 1.15;
-  margin-bottom: 16px;
-}
-.section-desc {
-  font-size: 1.05rem; color: var(--muted);
-  max-width: 560px; margin-bottom: 40px;
-}
-.card {
-  background: var(--card);
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-.card:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
-}
-.btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 13px 26px;
-  font-family: 'Work Sans', sans-serif;
-  font-size: 0.95rem; font-weight: 700;
-  text-decoration: none;
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  transition: transform 0.1s, box-shadow 0.1s;
-  cursor: pointer;
-}
-.btn:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
-}
-.btn:active {
-  transform: translate(2px, 2px);
-  box-shadow: 1px 1px 0 var(--shadow);
-}
-.btn-fill { background: var(--accent); color: #fff; }
-.btn-ghost { background: var(--card); color: var(--fg); }
-.ps-copy-btn {
-  padding: 10px 14px;
-  background: transparent;
-  color: var(--code-fg);
-  border: none;
-  border-left: var(--bw) solid var(--border);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-copy-btn:hover { background: rgba(163,71,91,0.25); color: #fff; }
-.ps-copy-btn.copied { color: #4ade80; }
+            /* ── Shared ───────────────────────────────────────────── */
+            .section {
+                padding: 80px 0;
+            }
+            .section-label {
+                font-size: 0.8rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: var(--accent);
+                margin-bottom: 12px;
+            }
+            .section-title {
+                font-size: 2.2rem;
+                font-family: "DM Serif Display", serif;
+                font-weight: 400;
+                letter-spacing: -0.025em;
+                line-height: 1.15;
+                margin-bottom: 16px;
+            }
+            .section-desc {
+                font-size: 1.05rem;
+                color: var(--muted);
+                max-width: 560px;
+                margin-bottom: 40px;
+            }
+            .card {
+                background: var(--card);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                transition:
+                    transform 0.12s ease,
+                    box-shadow 0.12s ease;
+            }
+            .card:hover {
+                transform: translate(-2px, -2px);
+                box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 13px 26px;
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.95rem;
+                font-weight: 700;
+                text-decoration: none;
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                transition:
+                    transform 0.1s,
+                    box-shadow 0.1s;
+                cursor: pointer;
+            }
+            .btn:hover {
+                transform: translate(-2px, -2px);
+                box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+            }
+            .btn:active {
+                transform: translate(2px, 2px);
+                box-shadow: 1px 1px 0 var(--shadow);
+            }
+            .btn-fill {
+                background: var(--accent);
+                color: #fff;
+            }
+            .btn-ghost {
+                background: var(--card);
+                color: var(--fg);
+            }
+            .ps-copy-btn {
+                padding: 10px 14px;
+                background: transparent;
+                color: var(--code-fg);
+                border: none;
+                border-left: var(--bw) solid var(--border);
+                cursor: pointer;
+                transition:
+                    color 0.15s,
+                    background 0.15s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .ps-copy-btn:hover {
+                background: rgba(163, 71, 91, 0.25);
+                color: #fff;
+            }
+            .ps-copy-btn.copied {
+                color: #4ade80;
+            }
 
-/* ── Hero ─────────────────────────────────────────────── */
-.hero {
-  padding: 100px 0 80px;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-}
-.hero::before {
-  content: '';
-  position: absolute; inset: 0;
-  background:
-    radial-gradient(circle at 20% 50%, rgba(163,71,91,0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 50%, rgba(158,42,59,0.06) 0%, transparent 50%);
-  pointer-events: none;
-}
-.hero-icon {
-  font-size: 56px; display: block;
-  margin-bottom: 20px;
-  animation: float 3s ease-in-out infinite;
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
-.hero h1 {
-  font-size: clamp(2.4rem, 5vw, 3.6rem);
-  font-family: 'DM Serif Display', serif; font-weight: 400;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-  margin-bottom: 16px;
-}
-.hero h1 em {
-  font-style: normal;
-  background: linear-gradient(135deg, #a3475b, #d4768a, #9e2a3b);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.hero-sub {
-  font-size: 1.15rem; color: var(--muted);
-  max-width: 520px; margin: 0 auto 36px;
-  line-height: 1.7;
-}
-.hero-buttons { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+            /* ── Hero ─────────────────────────────────────────────── */
+            .hero {
+                padding: 100px 0 80px;
+                text-align: center;
+                position: relative;
+                overflow: hidden;
+            }
+            .hero::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background:
+                    radial-gradient(circle at 20% 50%, rgba(163, 71, 91, 0.08) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 50%, rgba(158, 42, 59, 0.06) 0%, transparent 50%);
+                pointer-events: none;
+            }
+            .hero-icon {
+                font-size: 56px;
+                display: block;
+                margin-bottom: 20px;
+                animation: float 3s ease-in-out infinite;
+            }
+            @keyframes float {
+                0%,
+                100% {
+                    transform: translateY(0);
+                }
+                50% {
+                    transform: translateY(-6px);
+                }
+            }
+            .hero h1 {
+                font-size: clamp(2.4rem, 5vw, 3.6rem);
+                font-family: "DM Serif Display", serif;
+                font-weight: 400;
+                letter-spacing: -0.03em;
+                line-height: 1.05;
+                margin-bottom: 16px;
+            }
+            .hero h1 em {
+                font-style: normal;
+                background: linear-gradient(135deg, #a3475b, #d4768a, #9e2a3b);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+            .hero-sub {
+                font-size: 1.15rem;
+                color: var(--muted);
+                max-width: 520px;
+                margin: 0 auto 36px;
+                line-height: 1.7;
+            }
+            .hero-buttons {
+                display: flex;
+                gap: 14px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
 
-/* ── Stats bar ────────────────────────────────────────── */
-.stats {
-  border-top: var(--bw) solid var(--border);
-  border-bottom: var(--bw) solid var(--border);
-  background: var(--surface);
-  padding: 28px 0;
-}
-.stats .wrap {
-  display: flex; justify-content: center; flex-wrap: wrap; gap: 48px;
-}
-.stat { text-align: center; }
-.stat-value {
-  font-size: 1.6rem; font-weight: 900;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: -0.02em;
-}
-.stat-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+            /* ── Stats bar ────────────────────────────────────────── */
+            .stats {
+                border-top: var(--bw) solid var(--border);
+                border-bottom: var(--bw) solid var(--border);
+                background: var(--surface);
+                padding: 28px 0;
+            }
+            .stats .wrap {
+                display: flex;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 48px;
+            }
+            .stat {
+                text-align: center;
+            }
+            .stat-value {
+                font-size: 1.6rem;
+                font-weight: 900;
+                font-family: "JetBrains Mono", monospace;
+                letter-spacing: -0.02em;
+            }
+            .stat-label {
+                font-size: 0.8rem;
+                color: var(--muted);
+                font-weight: 600;
+            }
 
-/* ── Features ─────────────────────────────────────────── */
-.features-hero {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 18px;
-  margin-bottom: 18px;
-}
-.feature-h {
-  padding: 32px;
-  border-left: 5px solid var(--accent);
-}
-.feature-h .icon {
-  font-size: 2rem;
-  margin-bottom: 14px;
-  display: block;
-}
-.feature-h h3 {
-  font-size: 1.15rem; font-weight: 800;
-  margin-bottom: 8px;
-}
-.feature-h p { font-size: 0.92rem; color: var(--muted); line-height: 1.6; }
+            /* ── Features ─────────────────────────────────────────── */
+            .features-hero {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 18px;
+                margin-bottom: 18px;
+            }
+            .feature-h {
+                padding: 32px;
+                border-left: 5px solid var(--accent);
+            }
+            .feature-h .icon {
+                font-size: 2rem;
+                margin-bottom: 14px;
+                display: block;
+            }
+            .feature-h h3 {
+                font-size: 1.15rem;
+                font-family: "Fraunces", serif;
+                font-weight: 800;
+                margin-bottom: 8px;
+            }
+            .feature-h p {
+                font-size: 0.92rem;
+                color: var(--muted);
+                line-height: 1.6;
+            }
 
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-}
-.feature { padding: 24px 26px; }
-.feature .icon {
-  width: 38px; height: 38px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.15rem;
-  background: var(--surface);
-  border: var(--bw) solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 14px;
-}
-.feature h3 {
-  font-size: 0.95rem; font-weight: 800;
-  margin-bottom: 5px;
-}
-.feature p { font-size: 0.85rem; color: var(--muted); line-height: 1.55; }
-@media (max-width: 768px) {
-  .features-hero { grid-template-columns: 1fr; }
-  .features-grid { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 480px) {
-  .features-grid { grid-template-columns: 1fr; }
-}
+            .features-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 18px;
+            }
+            .feature {
+                padding: 24px 26px;
+            }
+            .feature .icon {
+                width: 38px;
+                height: 38px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.15rem;
+                background: var(--surface);
+                border: var(--bw) solid var(--border);
+                border-radius: 8px;
+                margin-bottom: 14px;
+            }
+            .feature h3 {
+                font-size: 0.95rem;
+                font-family: "Fraunces", serif;
+                font-weight: 800;
+                margin-bottom: 5px;
+            }
+            .feature p {
+                font-size: 0.85rem;
+                color: var(--muted);
+                line-height: 1.55;
+            }
+            @media (max-width: 768px) {
+                .features-hero {
+                    grid-template-columns: 1fr;
+                }
+                .features-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+            @media (max-width: 480px) {
+                .features-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
 
-/* ── How it works ─────────────────────────────────────── */
-.flow-steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 18px;
-  counter-reset: step;
-}
-.flow-step {
-  padding: 26px;
-  position: relative;
-  counter-increment: step;
-}
-.flow-step::before {
-  content: counter(step);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 2.4rem; font-weight: 700;
-  color: var(--accent);
-  opacity: 0.15;
-  position: absolute; top: 18px; right: 20px;
-}
-.flow-step h3 { font-size: 0.95rem; font-weight: 800; margin-bottom: 6px; }
-.flow-step p { font-size: 0.85rem; color: var(--muted); line-height: 1.55; }
-.flow-step .tag {
-  display: inline-block;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem; font-weight: 700;
-  padding: 2px 8px;
-  border: 1.5px solid var(--border);
-  border-radius: 4px;
-  margin-top: 10px;
-  color: var(--subtle);
-}
+            /* ── How it works ─────────────────────────────────────── */
+            .flow-steps {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 18px;
+                counter-reset: step;
+            }
+            .flow-step {
+                padding: 26px;
+                position: relative;
+                counter-increment: step;
+            }
+            .flow-step::before {
+                content: counter(step);
+                font-family: "JetBrains Mono", monospace;
+                font-size: 2.4rem;
+                font-weight: 700;
+                color: var(--accent);
+                opacity: 0.15;
+                position: absolute;
+                top: 18px;
+                right: 20px;
+            }
+            .flow-step h3 {
+                font-size: 0.95rem;
+                font-weight: 800;
+                margin-bottom: 6px;
+            }
+            .flow-step p {
+                font-size: 0.85rem;
+                color: var(--muted);
+                line-height: 1.55;
+            }
+            .flow-step .tag {
+                display: inline-block;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.7rem;
+                font-weight: 700;
+                padding: 2px 8px;
+                border: 1.5px solid var(--border);
+                border-radius: 4px;
+                margin-top: 10px;
+                color: var(--subtle);
+            }
 
-/* ── Usage ────────────────────────────────────────────── */
-.usage-tabs {
-  display: flex; gap: 0;
-  border: var(--bw) solid var(--border);
-  border-bottom: none;
-  border-radius: var(--r) var(--r) 0 0;
-  overflow: hidden;
-}
-.usage-tab {
-  flex: 1; padding: 12px 20px;
-  font-family: 'Work Sans', sans-serif;
-  font-size: 0.85rem; font-weight: 700;
-  background: var(--surface);
-  border: none; cursor: pointer;
-  color: var(--muted);
-  border-right: var(--bw) solid var(--border);
-  transition: background 0.15s, color 0.15s;
-}
-.usage-tab:last-child { border-right: none; }
-.usage-tab.active { background: var(--code-bg); color: #fff; }
-.usage-tab:hover:not(.active) { background: var(--card); color: var(--fg); }
-.usage-panel {
-  display: none;
-  background: var(--code-bg);
-  color: var(--code-fg);
-  border: var(--bw) solid var(--border);
-  border-top: none;
-  border-radius: 0 0 var(--r) var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  padding: 28px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem;
-  line-height: 1.8;
-  overflow-x: auto;
-  white-space: pre;
-}
-.usage-panel.active { display: block; }
-.c { color: #6b7280; }
-.g { color: #4ade80; }
-.b { color: #60a5fa; }
-.y { color: #fbbf24; }
-.r { color: #f87171; }
-.w { color: #e2e8f0; }
-.d { color: #94a3b8; }
+            /* ── Usage ────────────────────────────────────────────── */
+            .usage-tabs {
+                display: flex;
+                gap: 0;
+                border: var(--bw) solid var(--border);
+                border-bottom: none;
+                border-radius: var(--r) var(--r) 0 0;
+                overflow: hidden;
+            }
+            .usage-tab {
+                flex: 1;
+                padding: 12px 20px;
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.85rem;
+                font-weight: 700;
+                background: var(--surface);
+                border: none;
+                cursor: pointer;
+                color: var(--muted);
+                border-right: var(--bw) solid var(--border);
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+            }
+            .usage-tab:last-child {
+                border-right: none;
+            }
+            .usage-tab.active {
+                background: var(--code-bg);
+                color: #fff;
+            }
+            .usage-tab:hover:not(.active) {
+                background: var(--card);
+                color: var(--fg);
+            }
+            .usage-panel {
+                display: none;
+                background: var(--code-bg);
+                color: var(--code-fg);
+                border: var(--bw) solid var(--border);
+                border-top: none;
+                border-radius: 0 0 var(--r) var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                padding: 28px;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.82rem;
+                line-height: 1.8;
+                overflow-x: auto;
+                white-space: pre;
+            }
+            .usage-panel.active {
+                display: block;
+            }
+            .c {
+                color: #6b7280;
+            }
+            .g {
+                color: #4ade80;
+            }
+            .b {
+                color: #60a5fa;
+            }
+            .y {
+                color: #fbbf24;
+            }
+            .r {
+                color: #f87171;
+            }
+            .w {
+                color: #e2e8f0;
+            }
+            .d {
+                color: #94a3b8;
+            }
 
-/* ── Comic panels (What's New) ───────────────────────── */
-.comic {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 0;
-  border: var(--bw) solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--so) var(--so) 0 var(--shadow);
-  overflow: hidden;
-  background: var(--card);
-}
-.comic-panel {
-  padding: 24px;
-  border: var(--bw) solid var(--border);
-  margin: -1px;
-  position: relative;
-  background: var(--card);
-  transition: background 0.15s;
-}
-.comic-panel:hover { background: var(--surface); }
-.comic-hero  { grid-column: 1 / 5; background: linear-gradient(135deg, rgba(163,71,91,0.08), rgba(93,138,110,0.08)); }
-.comic-tall  { grid-column: 5 / 7; }
-.comic-panel:nth-child(3) { grid-column: 1 / 3; }
-.comic-panel:nth-child(4) { grid-column: 3 / 5; }
-.comic-panel:nth-child(5) { grid-column: 5 / 7; }
-.comic-wide  { grid-column: 1 / 7; }
+            /* ── Comic panels (What's New) ───────────────────────── */
+            .comic {
+                display: grid;
+                grid-template-columns: repeat(6, 1fr);
+                gap: 0;
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                overflow: hidden;
+                background: var(--card);
+            }
+            .comic-panel {
+                padding: 24px;
+                border: var(--bw) solid var(--border);
+                margin: -1px;
+                position: relative;
+                background: var(--card);
+                transition: background 0.15s;
+            }
+            .comic-panel:hover {
+                background: var(--surface);
+            }
+            .comic-hero {
+                grid-column: 1 / 5;
+                background: linear-gradient(135deg, rgba(163, 71, 91, 0.08), rgba(93, 138, 110, 0.08));
+            }
+            .comic-tall {
+                grid-column: 5 / 7;
+            }
+            .comic-panel:nth-child(3) {
+                grid-column: 1 / 3;
+            }
+            .comic-panel:nth-child(4) {
+                grid-column: 3 / 5;
+            }
+            .comic-panel:nth-child(5) {
+                grid-column: 5 / 7;
+            }
+            .comic-wide {
+                grid-column: 1 / 7;
+            }
 
-.comic-caption {
-  font-family: 'Fraunces', serif;
-  font-style: italic;
-  font-size: 0.72rem;
-  color: var(--subtle);
-  margin-bottom: 10px;
-  padding: 3px 10px;
-  background: rgba(163,71,91,0.07);
-  border-radius: 4px;
-  display: inline-block;
-}
-.comic-body h3 {
-  font-size: 1rem;
-  font-weight: 800;
-  margin-bottom: 5px;
-}
-.comic-body p {
-  font-size: 0.84rem;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.comic-body code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.78rem;
-}
-.comic-icon {
-  font-size: 1.8rem;
-  margin-bottom: 8px;
-}
-.comic-code {
-  display: inline-block;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  background: var(--code-bg);
-  color: var(--code-fg);
-  padding: 4px 10px;
-  border-radius: 4px;
-  margin-top: 8px;
-  border: 1px solid var(--border);
-}
-.comic-burst {
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  font-family: 'Work Sans', sans-serif;
-  font-weight: 900;
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  color: #fff;
-  background: var(--accent);
-  padding: 4px 12px;
-  border-radius: 4px;
-  border: var(--bw) solid var(--border);
-  box-shadow: 2px 2px 0 var(--shadow);
-  transform: rotate(3deg);
-}
-@media (max-width: 768px) {
-  .comic { grid-template-columns: 1fr; }
-  .comic-hero, .comic-tall, .comic-wide,
-  .comic-panel:nth-child(3),
-  .comic-panel:nth-child(4),
-  .comic-panel:nth-child(5) { grid-column: 1 / -1; }
-}
+            .comic-caption {
+                font-family: "Fraunces", serif;
+                font-style: italic;
+                font-size: 0.72rem;
+                color: var(--subtle);
+                margin-bottom: 10px;
+                padding: 3px 10px;
+                background: rgba(163, 71, 91, 0.07);
+                border-radius: 4px;
+                display: inline-block;
+            }
+            .comic-body h3 {
+                font-size: 1rem;
+                font-weight: 800;
+                margin-bottom: 5px;
+            }
+            .comic-body p {
+                font-size: 0.84rem;
+                color: var(--muted);
+                line-height: 1.5;
+            }
+            .comic-body code {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.78rem;
+            }
+            .comic-icon {
+                font-size: 1.8rem;
+                margin-bottom: 8px;
+            }
+            .comic-code {
+                display: inline-block;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.75rem;
+                background: var(--code-bg);
+                color: var(--code-fg);
+                padding: 4px 10px;
+                border-radius: 4px;
+                margin-top: 8px;
+                border: 1px solid var(--border);
+            }
+            .comic-burst {
+                position: absolute;
+                top: 12px;
+                right: 16px;
+                font-family: "Work Sans", sans-serif;
+                font-weight: 900;
+                font-size: 0.7rem;
+                letter-spacing: 0.1em;
+                color: #fff;
+                background: var(--accent);
+                padding: 4px 12px;
+                border-radius: 4px;
+                border: var(--bw) solid var(--border);
+                box-shadow: 2px 2px 0 var(--shadow);
+                transform: rotate(3deg);
+            }
+            @media (max-width: 768px) {
+                .comic {
+                    grid-template-columns: 1fr;
+                }
+                .comic-hero,
+                .comic-tall,
+                .comic-wide,
+                .comic-panel:nth-child(3),
+                .comic-panel:nth-child(4),
+                .comic-panel:nth-child(5) {
+                    grid-column: 1 / -1;
+                }
+            }
 
-/* ── Install ──────────────────────────────────────────── */
-.install-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-@media (max-width: 640px) {
-  .install-grid { grid-template-columns: 1fr; }
-  #install .wrap > div[style*="grid"] { grid-template-columns: 1fr !important; }
-}
-.install-card { padding: 26px; display: flex; flex-direction: column; }
-.install-card h3 {
-  font-size: 1rem; font-weight: 800;
-  margin-bottom: 8px;
-  display: flex; align-items: center; gap: 8px;
-}
-.install-card .mono {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem;
-  background: var(--surface);
-  padding: 12px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  margin: 12px 0;
-  display: block;
-  white-space: pre;
-  overflow-x: auto;
-}
-.install-card p { font-size: 0.88rem; color: var(--muted); }
-.install-card ul {
-  font-size: 0.85rem; color: var(--muted);
-  padding-left: 18px; margin-top: 8px;
-}
-.install-card li { margin-bottom: 4px; }
+            /* ── Install ──────────────────────────────────────────── */
+            .install-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 18px;
+            }
+            @media (max-width: 640px) {
+                .install-grid {
+                    grid-template-columns: 1fr;
+                }
+                #install .wrap > div[style*="grid"] {
+                    grid-template-columns: 1fr !important;
+                }
+            }
+            .install-card {
+                padding: 26px;
+                display: flex;
+                flex-direction: column;
+            }
+            .install-card h3 {
+                font-size: 1rem;
+                font-weight: 800;
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .install-card .mono {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.82rem;
+                background: var(--surface);
+                padding: 12px 16px;
+                border-radius: 6px;
+                border: 1px solid var(--border);
+                margin: 12px 0;
+                display: block;
+                white-space: pre;
+                overflow-x: auto;
+            }
+            .install-card p {
+                font-size: 0.88rem;
+                color: var(--muted);
+            }
+            .install-card ul {
+                font-size: 0.85rem;
+                color: var(--muted);
+                padding-left: 18px;
+                margin-top: 8px;
+            }
+            .install-card li {
+                margin-bottom: 4px;
+            }
 
-/* ── Footer ───────────────────────────────────────────── */
-.footer {
-  border-top: var(--bw) solid var(--border);
-  padding: 40px 0;
-  text-align: center;
-}
-.footer p { font-size: 0.85rem; color: var(--subtle); }
-.footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
-.footer a:hover { text-decoration: underline; }
-.footer-links {
-  display: flex; gap: 24px; justify-content: center;
-  margin-bottom: 16px;
-}
-</style>
-</head>
-<body>
+            /* ── Footer ───────────────────────────────────────────── */
+            .footer {
+                border-top: var(--bw) solid var(--border);
+                padding: 40px 0;
+                text-align: center;
+            }
+            .footer p {
+                font-size: 0.85rem;
+                color: var(--subtle);
+            }
+            .footer a {
+                color: var(--accent);
+                text-decoration: none;
+                font-weight: 600;
+            }
+            .footer a:hover {
+                text-decoration: underline;
+            }
+            .footer-links {
+                display: flex;
+                gap: 24px;
+                justify-content: center;
+                margin-bottom: 16px;
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="nav">
+            <div class="wrap">
+                <a href="#" class="nav-brand"
+                    ><span class="emoji">🚰</span> DrainCtl <span>by LISS Technologies</span></a
+                >
+                <ul class="nav-links">
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#how">How It Works</a></li>
+                    <li><a href="#dashboard">Dashboard</a></li>
+                    <li><a href="#usage">Usage</a></li>
+                    <li><a href="#install">Install</a></li>
+                    <li><a href="guide.html">Guide</a></li>
+                    <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
+                </ul>
+            </div>
+        </nav>
 
-<nav class="nav">
-  <div class="wrap">
-    <a href="#" class="nav-brand"><span class="emoji">🚰</span> DrainCtl <span>by LISS Technologies</span></a>
-    <ul class="nav-links">
-      <li><a href="#features">Features</a></li>
-      <li><a href="#how">How It Works</a></li>
-      <li><a href="#dashboard">Dashboard</a></li>
-      <li><a href="#usage">Usage</a></li>
-      <li><a href="#install">Install</a></li>
-      <li><a href="guide.html">Guide</a></li>
-      <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
-    </ul>
-  </div>
-</nav>
+        <!-- Hero -->
+        <section class="hero">
+            <div class="wrap">
+                <span class="hero-icon">🚰</span>
+                <h1>Stop guessing.<br />Start <em>knowing.</em></h1>
+                <p class="hero-sub">
+                    DrainCtl monitors RDSH drain mode in real time. The moment someone blocks new connections, you know
+                    &mdash; who did it, when, and how long it's been active.
+                </p>
+                <div class="hero-buttons">
+                    <a
+                        href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
+                        class="btn btn-fill"
+                        >Download MSI</a
+                    >
+                    <a
+                        href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe"
+                        class="btn btn-fill"
+                        >Download EXE</a
+                    >
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
+                </div>
+                <div class="hero-ps" style="margin-top: 24px; max-width: 640px; margin-left: auto; margin-right: auto">
+                    <div
+                        class="ps-oneliner"
+                        style="
+                            display: flex;
+                            align-items: center;
+                            gap: 0;
+                            border: var(--bw) solid var(--border);
+                            border-radius: var(--r);
+                            box-shadow: var(--so) var(--so) 0 var(--shadow);
+                            overflow: hidden;
+                            background: var(--code-bg);
+                            font-family: &quot;JetBrains Mono&quot;, monospace;
+                            font-size: 0.88rem;
+                        "
+                    >
+                        <code
+                            style="
+                                flex: 1;
+                                padding: 12px 16px;
+                                color: var(--code-fg);
+                                white-space: nowrap;
+                                overflow-x: auto;
+                            "
+                            id="ps-install"
+                            >irm https://lissconsulting.github.io/LISSTech.DrainCtl/install.ps1 | iex</code
+                        >
+                        <button onclick="copyPS()" class="ps-copy-btn" id="ps-copy-btn" title="Copy to clipboard">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align: middle">
+                                <rect
+                                    x="5"
+                                    y="5"
+                                    width="9"
+                                    height="9"
+                                    rx="1.5"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
+                                    fill="none"
+                                />
+                                <path
+                                    d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
+                                    fill="none"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-<!-- Hero -->
-<section class="hero">
-  <div class="wrap">
-    <span class="hero-icon">🚰</span>
-    <h1>Stop guessing.<br>Start <em>knowing.</em></h1>
-    <p class="hero-sub">DrainCtl monitors RDSH drain mode in real time. The moment someone blocks new connections, you know &mdash; who did it, when, and how long it's been active.</p>
-    <div class="hero-buttons">
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi" class="btn btn-fill">Download MSI</a>
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe" class="btn btn-fill">Download EXE</a>
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
-    </div>
-    <div class="hero-ps" style="margin-top:24px;max-width:640px;margin-left:auto;margin-right:auto">
-      <div class="ps-oneliner" style="display:flex;align-items:center;gap:0;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);overflow:hidden;background:var(--code-bg);font-family:'JetBrains Mono',monospace;font-size:0.88rem">
-        <code style="flex:1;padding:12px 16px;color:var(--code-fg);white-space:nowrap;overflow-x:auto" id="ps-install">irm https://lissconsulting.github.io/LISSTech.DrainCtl/install.ps1 | iex</code>
-        <button onclick="copyPS()" class="ps-copy-btn" id="ps-copy-btn" title="Copy to clipboard">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-        </button>
-      </div>
-    </div>
-  </div>
-</section>
+        <!-- Stats -->
+        <section class="stats">
+            <div class="wrap">
+                <div class="stat">
+                    <div class="stat-value">&lt;1s</div>
+                    <div class="stat-label">Detection time</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">90d</div>
+                    <div class="stat-label">Audit retention</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">6</div>
+                    <div class="stat-label">Trigger types</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">N&times;M</div>
+                    <div class="stat-label">Notification targets</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">&#x1F512;</div>
+                    <div class="stat-label">Kerberos auth</div>
+                </div>
+            </div>
+        </section>
 
-<!-- Stats -->
-<section class="stats">
-  <div class="wrap">
-    <div class="stat">
-      <div class="stat-value">&lt;1s</div>
-      <div class="stat-label">Detection time</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">90d</div>
-      <div class="stat-label">Audit retention</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">6</div>
-      <div class="stat-label">Trigger types</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">N&times;M</div>
-      <div class="stat-label">Notification targets</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">&#x1F512;</div>
-      <div class="stat-label">Kerberos auth</div>
-    </div>
-  </div>
-</section>
+        <!-- Features -->
+        <section class="section" id="features">
+            <div class="wrap">
+                <div class="section-label">Capabilities</div>
+                <div class="section-title">Everything you need to monitor drain mode.</div>
+                <div class="section-desc">
+                    One binary. One service. Real-time visibility across your entire RDSH farm &mdash; with a dashboard
+                    to prove it.
+                </div>
+                <div class="features-hero">
+                    <div class="feature-h card">
+                        <span class="icon">&#9889;</span>
+                        <h3>Instant Detection</h3>
+                        <p>
+                            The moment someone runs <code>chglogon /drain</code>, the service knows. No polling delay
+                            &mdash; Windows notifies DrainCtl directly through the kernel.
+                        </p>
+                    </div>
+                    <div class="feature-h card">
+                        <span class="icon">&#128100;</span>
+                        <h3>Who Changed It</h3>
+                        <p>
+                            DrainCtl tells you the exact user account that enabled drain mode. Not just that it changed
+                            &mdash; who did it, and when.
+                        </p>
+                    </div>
+                    <div class="feature-h card">
+                        <span class="icon">&#128101;</span>
+                        <h3>Session Tracking</h3>
+                        <p>
+                            See active and disconnected sessions on every server. Set a capacity threshold and get
+                            alerted before your farm runs out of slots.
+                        </p>
+                    </div>
+                </div>
 
-<!-- Features -->
-<section class="section" id="features">
-  <div class="wrap">
-    <div class="section-label">Capabilities</div>
-    <div class="section-title">Everything you need to monitor drain mode.</div>
-    <div class="section-desc">One binary. One service. Real-time visibility across your entire RDSH farm &mdash; with a dashboard to prove it.</div>
-    <div class="features-hero">
-      <div class="feature-h card">
-        <span class="icon">&#9889;</span>
-        <h3>Instant Detection</h3>
-        <p>The moment someone runs <code>chglogon /drain</code>, the service knows. No polling delay &mdash; Windows notifies DrainCtl directly through the kernel.</p>
-      </div>
-      <div class="feature-h card">
-        <span class="icon">&#128100;</span>
-        <h3>Who Changed It</h3>
-        <p>DrainCtl tells you the exact user account that enabled drain mode. Not just that it changed &mdash; who did it, and when.</p>
-      </div>
-      <div class="feature-h card">
-        <span class="icon">&#128101;</span>
-        <h3>Session Tracking</h3>
-        <p>See active and disconnected sessions on every server. Set a capacity threshold and get alerted before your farm runs out of slots.</p>
-      </div>
-    </div>
+                <div class="features-grid">
+                    <div class="feature card">
+                        <div class="icon">&#127760;</div>
+                        <h3>Farm Dashboard</h3>
+                        <p>
+                            One page for your entire RDSH farm. Live status, session gauges, state history chart, and
+                            event log &mdash; secured with Kerberos SSO.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128276;</div>
+                        <h3>Smart Alerts &amp; Centralized Config</h3>
+                        <p>
+                            Configure notification targets, grace periods, and alert thresholds once in the dashboard
+                            &mdash; every agent inherits them. Unlimited webhook and ntfy.sh targets with per-target
+                            triggers and repeat intervals.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128203;</div>
+                        <h3>90-Day Audit Trail</h3>
+                        <p>
+                            Every state change logged with timestamps, durations, and attribution. Query it from the
+                            CLI, PowerShell, or the dashboard.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128187;</div>
+                        <h3>PowerShell + CLI</h3>
+                        <p>
+                            12 native cmdlets on
+                            <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit
+                            codes + JSON for any RMM. Works on PS 5.1 and 7+.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128196;</div>
+                        <h3>Zero-Touch Discovery</h3>
+                        <p>
+                            One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk
+                            away &mdash; agents register themselves.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128274;</div>
+                        <h3>EV Code-Signed</h3>
+                        <p>
+                            Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from
+                            download to execution.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-    <div class="features-grid">
-      <div class="feature card">
-        <div class="icon">&#127760;</div>
-        <h3>Farm Dashboard</h3>
-        <p>One page for your entire RDSH farm. Live status, session gauges, state history chart, and event log &mdash; secured with Kerberos SSO.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128276;</div>
-        <h3>Smart Alerts &amp; Centralized Config</h3>
-        <p>Configure notification targets, grace periods, and alert thresholds once in the dashboard &mdash; every agent inherits them. Unlimited webhook and ntfy.sh targets with per-target triggers and repeat intervals.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128203;</div>
-        <h3>90-Day Audit Trail</h3>
-        <p>Every state change logged with timestamps, durations, and attribution. Query it from the CLI, PowerShell, or the dashboard.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128187;</div>
-        <h3>PowerShell + CLI</h3>
-        <p>12 native cmdlets on <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit codes + JSON for any RMM. Works on PS 5.1 and 7+.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128196;</div>
-        <h3>Zero-Touch Discovery</h3>
-        <p>One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk away &mdash; agents register themselves.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128274;</div>
-        <h3>EV Code-Signed</h3>
-        <p>Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from download to execution.</p>
-      </div>
-    </div>
-  </div>
-</section>
+        <!-- How it works -->
+        <section
+            class="section"
+            id="how"
+            style="
+                background: var(--surface);
+                border-top: var(--bw) solid var(--border);
+                border-bottom: var(--bw) solid var(--border);
+            "
+        >
+            <div class="wrap">
+                <div class="section-label">Architecture</div>
+                <div class="section-title">Three signals. One answer.</div>
+                <div class="section-desc">
+                    The service triangulates registry notifications, event log subscriptions, and safety-net polling to
+                    deliver a definitive, attributed state.
+                </div>
+                <div class="flow-steps">
+                    <div class="flow-step card">
+                        <h3>Registry Notification</h3>
+                        <p>
+                            Windows fires <code>RegNotifyChangeKeyValue</code> the instant
+                            <code>TSServerDrainMode</code> is written. Zero delay.
+                        </p>
+                        <span class="tag">~0ms</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>Event Log Subscription</h3>
+                        <p>
+                            <code>EvtSubscribe</code> on Security Event 4657 pushes the username, domain, and process
+                            that made the change.
+                        </p>
+                        <span class="tag">~200ms</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>State Evaluation</h3>
+                        <p>
+                            The service reads the registry, detects transitions, correlates attribution, evaluates the
+                            grace period, and appends to the audit store.
+                        </p>
+                        <span class="tag">in-memory</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>Instant Query</h3>
+                        <p>
+                            CLI and PowerShell connect via named pipe. No file I/O, no registry reads. The answer is
+                            already computed.
+                        </p>
+                        <span class="tag">\\.\pipe\drainctl</span>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-<!-- How it works -->
-<section class="section" id="how" style="background: var(--surface); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
-  <div class="wrap">
-    <div class="section-label">Architecture</div>
-    <div class="section-title">Three signals. One answer.</div>
-    <div class="section-desc">The service triangulates registry notifications, event log subscriptions, and safety-net polling to deliver a definitive, attributed state.</div>
-    <div class="flow-steps">
-      <div class="flow-step card">
-        <h3>Registry Notification</h3>
-        <p>Windows fires <code>RegNotifyChangeKeyValue</code> the instant <code>TSServerDrainMode</code> is written. Zero delay.</p>
-        <span class="tag">~0ms</span>
-      </div>
-      <div class="flow-step card">
-        <h3>Event Log Subscription</h3>
-        <p><code>EvtSubscribe</code> on Security Event 4657 pushes the username, domain, and process that made the change.</p>
-        <span class="tag">~200ms</span>
-      </div>
-      <div class="flow-step card">
-        <h3>State Evaluation</h3>
-        <p>The service reads the registry, detects transitions, correlates attribution, evaluates the grace period, and appends to the audit store.</p>
-        <span class="tag">in-memory</span>
-      </div>
-      <div class="flow-step card">
-        <h3>Instant Query</h3>
-        <p>CLI and PowerShell connect via named pipe. No file I/O, no registry reads. The answer is already computed.</p>
-        <span class="tag">\\.\pipe\drainctl</span>
-      </div>
-    </div>
-  </div>
-</section>
+        <!-- What's New -->
+        <section
+            class="section"
+            id="new"
+            style="border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border)"
+        >
+            <div class="wrap">
+                <div class="section-label">Highlights</div>
+                <div class="section-title serif" style="font-style: italic">Built for production RDSH farms.</div>
+                <div class="comic">
+                    <!-- Row 1: big hero + tall side panel -->
+                    <div class="comic-panel comic-hero">
+                        <div class="comic-caption">Meanwhile, in the server room&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#128269;</div>
+                            <h3>Zero-Touch Discovery</h3>
+                            <p>
+                                One DNS SRV record. Every agent finds the dashboard <em>on its own</em>. No scripts, no
+                                per-machine config, no manual URLs.
+                            </p>
+                            <code class="comic-code">_drainctl._tcp.contoso.com</code>
+                        </div>
+                    </div>
+                    <div class="comic-panel comic-tall">
+                        <div class="comic-caption">The lock clicks shut&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#128274;</div>
+                            <h3>HTTPS<br />Everywhere</h3>
+                            <p>
+                                Auto TLS on first start. Self-signed cert, or bring your own. Certificate pinning. HSTS.
+                                Private key locked to SYSTEM.
+                            </p>
+                        </div>
+                    </div>
+                    <!-- Row 2: three equal panels -->
+                    <div class="comic-panel">
+                        <div class="comic-caption">At the notification desk&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#128276;</div>
+                            <h3>Target Editor</h3>
+                            <p>
+                                Add and remove webhook + ntfy targets right in the dashboard. Per-target triggers and
+                                repeat intervals.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="comic-panel">
+                        <div class="comic-caption">The cmdlets assemble&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#9889;</div>
+                            <h3>12 Cmdlets</h3>
+                            <p>
+                                <code>Add-</code>, <code>Get-</code>, <code>Remove-RDSHDrainNotificationTarget</code>.
+                                Full multi-target control from PowerShell.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="comic-panel">
+                        <div class="comic-caption">A familiar face, modernized&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#128640;</div>
+                            <h3>Go 1.25</h3>
+                            <p>
+                                Range-over-int, <code>slices</code>, <code>clear()</code>. Event-based config watcher.
+                                Faster, leaner, modern.
+                            </p>
+                        </div>
+                    </div>
+                    <!-- Row 3: wide cinematic panel -->
+                    <div class="comic-panel comic-wide">
+                        <div class="comic-caption">The installer arrives&hellip;</div>
+                        <div class="comic-body" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap">
+                            <div class="comic-icon" style="font-size: 2.5rem">&#128230;</div>
+                            <div style="flex: 1; min-width: 200px">
+                                <h3>MSI with Superpowers</h3>
+                                <p>
+                                    Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>,
+                                    <code>WEBHOOK_URL=...</code> &mdash; configure everything from the command line.
+                                    Burn bundle with branded UI and RTF license.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-<!-- What's New -->
-<section class="section" id="new" style="border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
-  <div class="wrap">
-    <div class="section-label">Highlights</div>
-    <div class="section-title serif" style="font-style:italic">Built for production RDSH farms.</div>
-    <div class="comic">
-      <!-- Row 1: big hero + tall side panel -->
-      <div class="comic-panel comic-hero">
-        <div class="comic-caption">Meanwhile, in the server room&hellip;</div>
-        <div class="comic-body">
-          <div class="comic-icon">&#128269;</div>
-          <h3>Zero-Touch Discovery</h3>
-          <p>One DNS SRV record. Every agent finds the dashboard <em>on its own</em>. No scripts, no per-machine config, no manual URLs.</p>
-          <code class="comic-code">_drainctl._tcp.contoso.com</code>
-        </div>
-      </div>
-      <div class="comic-panel comic-tall">
-        <div class="comic-caption">The lock clicks shut&hellip;</div>
-        <div class="comic-body">
-          <div class="comic-icon">&#128274;</div>
-          <h3>HTTPS<br>Everywhere</h3>
-          <p>Auto TLS on first start. Self-signed cert, or bring your own. Certificate pinning. HSTS. Private key locked to SYSTEM.</p>
-        </div>
-      </div>
-      <!-- Row 2: three equal panels -->
-      <div class="comic-panel">
-        <div class="comic-caption">At the notification desk&hellip;</div>
-        <div class="comic-body">
-          <div class="comic-icon">&#128276;</div>
-          <h3>Target Editor</h3>
-          <p>Add and remove webhook + ntfy targets right in the dashboard. Per-target triggers and repeat intervals.</p>
-        </div>
-      </div>
-      <div class="comic-panel">
-        <div class="comic-caption">The cmdlets assemble&hellip;</div>
-        <div class="comic-body">
-          <div class="comic-icon">&#9889;</div>
-          <h3>12 Cmdlets</h3>
-          <p><code>Add-</code>, <code>Get-</code>, <code>Remove-RDSHDrainNotificationTarget</code>. Full multi-target control from PowerShell.</p>
-        </div>
-      </div>
-      <div class="comic-panel">
-        <div class="comic-caption">A familiar face, modernized&hellip;</div>
-        <div class="comic-body">
-          <div class="comic-icon">&#128640;</div>
-          <h3>Go 1.25</h3>
-          <p>Range-over-int, <code>slices</code>, <code>clear()</code>. Event-based config watcher. Faster, leaner, modern.</p>
-        </div>
-      </div>
-      <!-- Row 3: wide cinematic panel -->
-      <div class="comic-panel comic-wide">
-        <div class="comic-caption">The installer arrives&hellip;</div>
-        <div class="comic-body" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
-          <div class="comic-icon" style="font-size:2.5rem">&#128230;</div>
-          <div style="flex:1;min-width:200px">
-            <h3>MSI with Superpowers</h3>
-            <p>Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>, <code>WEBHOOK_URL=...</code> &mdash; configure everything from the command line. Burn bundle with branded UI and RTF license.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+        <!-- Dashboard -->
+        <section class="section" id="dashboard">
+            <div class="wrap">
+                <div class="section-label">Farm Monitoring</div>
+                <div class="section-title">One dashboard for your entire RDSH farm.</div>
+                <div class="section-desc">
+                    See every server's drain state, session count, and alert history on a single page. Configure
+                    notifications and thresholds once &mdash; every agent in the farm inherits them. Enable the
+                    dashboard, add one DNS SRV record, done.
+                </div>
 
-<!-- Dashboard -->
-<section class="section" id="dashboard">
-  <div class="wrap">
-    <div class="section-label">Farm Monitoring</div>
-    <div class="section-title">One dashboard for your entire RDSH farm.</div>
-    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Configure notifications and thresholds once &mdash; every agent in the farm inherits them. Enable the dashboard, add one DNS SRV record, done.</div>
+                <div style="margin-bottom: 28px">
+                    <picture>
+                        <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)" />
+                        <img
+                            src="dashboard-screenshot.png"
+                            alt="DrainCtl Dashboard showing server overview, state history chart, and server cards with session gauges"
+                            style="
+                                width: 100%;
+                                border: var(--bw) solid var(--border);
+                                border-radius: var(--r);
+                                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                            "
+                        />
+                    </picture>
+                </div>
 
-    <div style="margin-bottom:28px">
-      <picture>
-        <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)">
-        <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard showing server overview, state history chart, and server cards with session gauges" style="width:100%;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow)">
-      </picture>
-    </div>
+                <div class="features-grid" style="margin-bottom: 0; grid-template-columns: repeat(2, 1fr)">
+                    <div class="feature card">
+                        <div class="icon">&#128268;</div>
+                        <h3>One Command Setup</h3>
+                        <p>
+                            <code>drainctl dashboard enable</code>, add one DNS SRV record, done. Agents discover and
+                            register themselves.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128274;</div>
+                        <h3>Secure by Default</h3>
+                        <p>Auto TLS, Kerberos SSO, certificate pinning, HSTS. No passwords, no login page.</p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#128200;</div>
+                        <h3>Live Monitoring</h3>
+                        <p>
+                            State history chart, session gauges, event log, and multi-target notification editor &mdash;
+                            all in one page.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#9881;&#65039;</div>
+                        <h3>Centralized Config</h3>
+                        <p>
+                            Set notification targets, grace periods, and session thresholds once in the dashboard. Every
+                            agent pulls them automatically &mdash; 50 servers, one config.
+                        </p>
+                    </div>
+                </div>
 
-    <div class="features-grid" style="margin-bottom:0;grid-template-columns:repeat(2,1fr)">
-      <div class="feature card">
-        <div class="icon">&#128268;</div>
-        <h3>One Command Setup</h3>
-        <p><code>drainctl dashboard enable</code>, add one DNS SRV record, done. Agents discover and register themselves.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128274;</div>
-        <h3>Secure by Default</h3>
-        <p>Auto TLS, Kerberos SSO, certificate pinning, HSTS. No passwords, no login page.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#128200;</div>
-        <h3>Live Monitoring</h3>
-        <p>State history chart, session gauges, event log, and multi-target notification editor &mdash; all in one page.</p>
-      </div>
-      <div class="feature card">
-        <div class="icon">&#9881;&#65039;</div>
-        <h3>Centralized Config</h3>
-        <p>Set notification targets, grace periods, and session thresholds once in the dashboard. Every agent pulls them automatically &mdash; 50 servers, one config.</p>
-      </div>
-    </div>
+                <div style="margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap">
+                    <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
+                </div>
+            </div>
+        </section>
 
-    <div style="margin-top:18px;display:flex;gap:14px;flex-wrap:wrap">
-      <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
-    </div>
-  </div>
-</section>
+        <!-- Usage Guide -->
+        <section class="section" id="usage">
+            <div class="wrap">
+                <div class="section-label">Usage Guide</div>
+                <div class="section-title">CLI, PowerShell, or both.</div>
+                <div class="section-desc">
+                    Every interface returns the same data. Pick the one that fits your workflow.
+                </div>
 
-<!-- Usage Guide -->
-<section class="section" id="usage">
-  <div class="wrap">
-    <div class="section-label">Usage Guide</div>
-    <div class="section-title">CLI, PowerShell, or both.</div>
-    <div class="section-desc">Every interface returns the same data. Pick the one that fits your workflow.</div>
+                <div class="usage-tabs">
+                    <button class="usage-tab active" onclick="showTab(0)">CLI</button>
+                    <button class="usage-tab" onclick="showTab(1)">PowerShell</button>
+                    <button class="usage-tab" onclick="showTab(2)">JSON</button>
+                    <button class="usage-tab" onclick="showTab(3)">History</button>
+                </div>
 
-    <div class="usage-tabs">
-      <button class="usage-tab active" onclick="showTab(0)">CLI</button>
-      <button class="usage-tab" onclick="showTab(1)">PowerShell</button>
-      <button class="usage-tab" onclick="showTab(2)">JSON</button>
-      <button class="usage-tab" onclick="showTab(3)">History</button>
-    </div>
+                <div class="usage-panel active" id="tab0">
+                    <span class="c"># Check drain mode status (instant via service pipe)</span>
+                    <span class="b">PS&gt;</span> drainctl check <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> source=service <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> host=MDS-LDC1-RDS5 <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
+                    <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
+                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
+                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy
+                    connections_allowed=true exit=0
 
-    <div class="usage-panel active" id="tab0"><span class="c"># Check drain mode status (instant via service pipe)</span>
-<span class="b">PS&gt;</span> drainctl check
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> source=service
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> host=MDS-LDC1-RDS5
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy connections_allowed=true exit=0
+                    <span class="c"># When drain mode is active beyond grace period:</span>
+                    <span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r"
+                        >Alert</span
+                    >
+                    connections_allowed=<span class="r">false</span> exit=1
+                    <span class="c"># Exit code 1 triggers your RMM monitoring threshold</span>
+                </div>
 
-<span class="c"># When drain mode is active beyond grace period:</span>
-<span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r">Alert</span> connections_allowed=<span class="r">false</span> exit=1
-<span class="c"># Exit code 1 triggers your RMM monitoring threshold</span></div>
+                <div class="usage-panel" id="tab1">
+                    <span class="c"># Rich status object</span> <span class="b">PS&gt;</span> Get-RDSHDrainMode
 
-    <div class="usage-panel" id="tab1"><span class="c"># Rich status object</span>
-<span class="b">PS&gt;</span> Get-RDSHDrainMode
+                    <span class="w">Timestamp :</span> <span class="d">4/2/2026 8:08:56 PM</span>
+                    <span class="w">Host :</span> <span class="d">MDS-LDC1-RDS5</span>
+                    <span class="w">DrainMode :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
+                    <span class="w">StateSince :</span> <span class="d">4/2/2026 6:30:00 PM</span>
+                    <span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
+                    <span class="w">Status :</span> <span class="g">Healthy</span>
+                    <span class="w">ConnectionsAllowed :</span> <span class="g">True</span>
+                    <span class="w">Message :</span> <span class="d">All connections allowed.</span>
+                    <span class="w">ExitCode :</span> <span class="d">0</span>
 
-<span class="w">Timestamp            :</span> <span class="d">4/2/2026 8:08:56 PM</span>
-<span class="w">Host                 :</span> <span class="d">MDS-LDC1-RDS5</span>
-<span class="w">DrainMode            :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
-<span class="w">StateSince           :</span> <span class="d">4/2/2026 6:30:00 PM</span>
-<span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
-<span class="w">Status               :</span> <span class="g">Healthy</span>
-<span class="w">ConnectionsAllowed   :</span> <span class="g">True</span>
-<span class="w">Message              :</span> <span class="d">All connections allowed.</span>
-<span class="w">ExitCode             :</span> <span class="d">0</span>
+                    <span class="c"># Boolean check for scripts and alerts</span>
+                    <span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) {
+                    <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
+                    <span class="g">OK</span>
 
-<span class="c"># Boolean check for scripts and alerts</span>
-<span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) { <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
-<span class="g">OK</span>
+                    <span class="c"># One-liner for monitoring scripts</span>
+                    <span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status <span class="g">Healthy</span>
+                </div>
 
-<span class="c"># One-liner for monitoring scripts</span>
-<span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status
-<span class="g">Healthy</span></div>
+                <div class="usage-panel" id="tab2">
+                    <span class="c"># Machine-readable output for automation</span>
+                    <span class="b">PS&gt;</span> drainctl check --format json
+                    <span class="w">{</span>
+                    <span class="b">"version"</span>: <span class="d">"26.94.2"</span>,
+                    <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
+                    <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
+                    <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
+                    <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
+                    <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
+                    <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
+                    <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
+                    <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
+                    <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
+                    <span class="b">"sessions"</span>: { <span class="b">"active_sessions"</span>:
+                    <span class="d">12</span>, <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
+                    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
+                    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
+                    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
+                    },
+                    <span class="b">"transition"</span>: <span class="d">false</span>, <span class="b">"message"</span>:
+                    <span class="d">"All connections allowed."</span>, <span class="b">"exit_code"</span>:
+                    <span class="d">0</span> <span class="w">}</span>
+                </div>
 
-    <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
-<span class="b">PS&gt;</span> drainctl check --format json
-<span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.94.2"</span>,
-  <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
-  <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
-  <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
-  <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
-  <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
-  <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
-  <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
-  <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
-  <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
-  <span class="b">"sessions"</span>: {
-    <span class="b">"active_sessions"</span>: <span class="d">12</span>,
-    <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
-    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
-    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
-    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
-  },
-  <span class="b">"transition"</span>: <span class="d">false</span>,
-  <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
-  <span class="b">"exit_code"</span>: <span class="d">0</span>
-<span class="w">}</span></div>
+                <div class="usage-panel" id="tab3">
+                    <span class="c"># View recent state transitions with attribution</span>
+                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
 
-    <div class="usage-panel" id="tab3"><span class="c"># View recent state transitions with attribution</span>
-<span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
+                    <span class="w">Timestamp DrainMode Changed ChangedBy Exit</span>
+                    <span class="d">--------- --------- ------- --------- ----</span>
+                    <span class="y">4/2/2026 10:14:04 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\lissadmin 0</span>
+                    <span class="g">4/2/2026 10:13:32 PM ALLOW_ALL_CONNECTIONS YES MDS\lissadmin 0</span>
+                    <span class="y">4/2/2026 10:10:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\lissadmin 0</span>
+                    <span class="g">4/2/2026 8:30:00 PM ALLOW_ALL_CONNECTIONS YES MDS\svcaccount 0</span>
+                    <span class="y">4/2/2026 6:15:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\jdoe 0</span>
 
-<span class="w">Timestamp            DrainMode                            Changed  ChangedBy       Exit</span>
-<span class="d">---------            ---------                            -------  ---------       ----</span>
-<span class="y">4/2/2026 10:14:04 PM ALLOW_RECONNECTIONS_PREVENT_NEW...   YES      MDS\lissadmin      0</span>
-<span class="g">4/2/2026 10:13:32 PM ALLOW_ALL_CONNECTIONS                 YES      MDS\lissadmin      0</span>
-<span class="y">4/2/2026 10:10:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW...   YES      MDS\lissadmin      0</span>
-<span class="g">4/2/2026  8:30:00 PM ALLOW_ALL_CONNECTIONS                 YES      MDS\svcaccount     0</span>
-<span class="y">4/2/2026  6:15:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW...   YES      MDS\jdoe           0</span>
+                    <span class="c"># Filter in pipeline</span>
+                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp,
+                    ChangedBy
+                </div>
+            </div>
+        </section>
 
-<span class="c"># Filter in pipeline</span>
-<span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp, ChangedBy</div>
-  </div>
-</section>
+        <!-- Install -->
+        <section
+            class="section"
+            id="install"
+            style="
+                background: var(--surface);
+                border-top: var(--bw) solid var(--border);
+                border-bottom: var(--bw) solid var(--border);
+            "
+        >
+            <div class="wrap" style="max-width: 1200px">
+                <div class="section-label">Installation</div>
+                <div class="section-title">Three ways to install. Zero guesswork.</div>
+                <div class="section-desc" style="max-width: 720px">
+                    Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the
+                    PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px">
+                    <div class="install-card card">
+                        <h3>&#128230; EXE Bundle</h3>
+                        <p>
+                            Branded setup wizard with license, configuration options, and progress UI. The recommended
+                            way to install interactively.
+                        </p>
+                        <ul>
+                            <li>Configuration wizard</li>
+                            <li>License acceptance</li>
+                            <li>Installs service + CLI + PS module</li>
+                            <li>Branded UI</li>
+                        </ul>
+                        <div style="margin-top: auto; padding-top: 16px">
+                            <a
+                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe"
+                                class="btn btn-fill"
+                                style="
+                                    display: flex;
+                                    justify-content: center;
+                                    text-decoration: none;
+                                    font-size: 0.85rem;
+                                    width: 100%;
+                                "
+                                >Download EXE</a
+                            >
+                        </div>
+                    </div>
+                    <div class="install-card card">
+                        <h3>&#9881; MSI (Silent)</h3>
+                        <p>
+                            Direct MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via
+                            properties.
+                        </p>
+                        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
+                        <ul>
+                            <li>Windows Service (auto-start)</li>
+                            <li>CLI on system PATH</li>
+                            <li>PowerShell module registered</li>
+                            <li><a href="guide.html#install">MSI property reference</a></li>
+                        </ul>
+                        <div style="margin-top: auto; padding-top: 16px">
+                            <a
+                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
+                                class="btn btn-fill"
+                                style="
+                                    display: flex;
+                                    justify-content: center;
+                                    text-decoration: none;
+                                    font-size: 0.85rem;
+                                    width: 100%;
+                                "
+                                >Download MSI</a
+                            >
+                        </div>
+                    </div>
+                    <div class="install-card card">
+                        <h3>&#128026; PowerShell Gallery</h3>
+                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting.</p>
+                        <code class="mono">Install-Module LISSTech.DrainCtl</code>
+                        <ul>
+                            <li>12 cmdlets</li>
+                            <li>PS 5.1 + PS 7+</li>
+                            <li>No admin required</li>
+                            <li>
+                                <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"
+                                    >View on PSGallery</a
+                                >
+                            </li>
+                        </ul>
+                        <div style="margin-top: auto; padding-top: 16px">
+                            <a
+                                href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"
+                                class="btn"
+                                style="
+                                    display: flex;
+                                    justify-content: center;
+                                    text-decoration: none;
+                                    font-size: 0.85rem;
+                                    width: 100%;
+                                    background: #2e71b8;
+                                    color: #fff;
+                                "
+                                >View on PSGallery</a
+                            >
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-<!-- Install -->
-<section class="section" id="install" style="background: var(--surface); border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border);">
-  <div class="wrap" style="max-width:1200px">
-    <div class="section-label">Installation</div>
-    <div class="section-title">Three ways to install. Zero guesswork.</div>
-    <div class="section-desc" style="max-width:720px">Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a></div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
-      <div class="install-card card">
-        <h3>&#128230; EXE Bundle</h3>
-        <p>Branded setup wizard with license, configuration options, and progress UI. The recommended way to install interactively.</p>
-        <ul>
-          <li>Configuration wizard</li>
-          <li>License acceptance</li>
-          <li>Installs service + CLI + PS module</li>
-          <li>Branded UI</li>
-        </ul>
-        <div style="margin-top:auto;padding-top:16px">
-          <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe" class="btn btn-fill" style="display:flex;justify-content:center;text-decoration:none;font-size:.85rem;width:100%">Download EXE</a>
-        </div>
-      </div>
-      <div class="install-card card">
-        <h3>&#9881; MSI (Silent)</h3>
-        <p>Direct MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via properties.</p>
-        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
-        <ul>
-          <li>Windows Service (auto-start)</li>
-          <li>CLI on system PATH</li>
-          <li>PowerShell module registered</li>
-          <li><a href="guide.html#install">MSI property reference</a></li>
-        </ul>
-        <div style="margin-top:auto;padding-top:16px">
-          <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi" class="btn btn-fill" style="display:flex;justify-content:center;text-decoration:none;font-size:.85rem;width:100%">Download MSI</a>
-        </div>
-      </div>
-      <div class="install-card card">
-        <h3>&#128026; PowerShell Gallery</h3>
-        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting.</p>
-        <code class="mono">Install-Module LISSTech.DrainCtl</code>
-        <ul>
-          <li>12 cmdlets</li>
-          <li>PS 5.1 + PS 7+</li>
-          <li>No admin required</li>
-          <li><a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">View on PSGallery</a></li>
-        </ul>
-        <div style="margin-top:auto;padding-top:16px">
-          <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl" class="btn" style="display:flex;justify-content:center;text-decoration:none;font-size:.85rem;width:100%;background:#2e71b8;color:#fff">View on PSGallery</a>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+        <footer class="footer">
+            <div class="wrap">
+                <div class="footer-links">
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE"
+                        >Apache 2.0 License</a
+                    >
+                </div>
+                <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
+            </div>
+        </footer>
 
-<footer class="footer">
-  <div class="wrap">
-    <div class="footer-links">
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a>
-      <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0 License</a>
-    </div>
-    <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
-  </div>
-</footer>
+        <script>
+            function showTab(i) {
+                document.querySelectorAll(".usage-tab").forEach((t, j) => t.classList.toggle("active", j === i));
+                document.querySelectorAll(".usage-panel").forEach((p, j) => p.classList.toggle("active", j === i));
+            }
+            function copyPS() {
+                var t = document.getElementById("ps-install").textContent;
+                var b = document.getElementById("ps-copy-btn");
+                var copyIcon =
+                    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
+                var checkIcon =
+                    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+                navigator.clipboard.writeText(t).then(function () {
+                    b.innerHTML = checkIcon;
+                    b.classList.add("copied");
+                    setTimeout(function () {
+                        b.innerHTML = copyIcon;
+                        b.classList.remove("copied");
+                    }, 1500);
+                });
+            }
 
-<script>
-function showTab(i) {
-  document.querySelectorAll('.usage-tab').forEach((t, j) => t.classList.toggle('active', j === i));
-  document.querySelectorAll('.usage-panel').forEach((p, j) => p.classList.toggle('active', j === i));
-}
-function copyPS() {
-  var t = document.getElementById('ps-install').textContent;
-  var b = document.getElementById('ps-copy-btn');
-  var copyIcon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
-  var checkIcon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  navigator.clipboard.writeText(t).then(function() {
-    b.innerHTML = checkIcon;
-    b.classList.add('copied');
-    setTimeout(function() { b.innerHTML = copyIcon; b.classList.remove('copied'); }, 1500);
-  });
-}
-
-// ── Font Picker ──────────────────────────────────────
-var fontTriples = [
-  { title: "'DM Serif Display', serif", heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "DM Serif + Fraunces + Work Sans" },
-  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Work Sans', sans-serif", label: "Fraunces + Work Sans" },
-  { title: "'DM Serif Display', serif", heading: "'DM Serif Display', serif", body: "'DM Sans', sans-serif", label: "DM Serif + DM Sans" },
-  { title: "'Playfair Display', serif", heading: "'Literata', serif", body: "'Source Sans 3', sans-serif", label: "Playfair + Literata + Source Sans" },
-  { title: "'Playfair Display', serif", heading: "'Playfair Display', serif", body: "'Lato', sans-serif", label: "Playfair + Lato" },
-  { title: "'Fraunces', serif",         heading: "'Fraunces', serif", body: "'Fraunces', serif", label: "Fraunces only" },
-];
-var fontIdx = parseInt(localStorage.getItem('drainctl-font-idx') || '0', 10);
-
-function applyFont(idx) {
-  var t = fontTriples[idx];
-  document.body.style.fontFamily = t.body;
-  document.querySelectorAll('.hero h1, .section-title').forEach(function(el) { el.style.fontFamily = t.title; });
-  document.querySelectorAll('.feature-h h3, .feature h3, .flow-step h3, .comic-body h3, .install-card h3').forEach(function(el) { el.style.fontFamily = t.heading; });
-  document.getElementById('font-switcher').textContent = '\u{1F3A8} ' + t.label;
-}
-
-function cycleFont() {
-  fontIdx = (fontIdx + 1) % fontTriples.length;
-  localStorage.setItem('drainctl-font-idx', fontIdx);
-  applyFont(fontIdx);
-}
-
-if (fontIdx > 0) applyFont(fontIdx);
-</script>
-
-<button id="font-switcher" onclick="cycleFont()" style="
-  position:fixed;bottom:20px;right:20px;z-index:999;
-  background:var(--accent);color:#fff;
-  border:var(--bw) solid var(--border);
-  border-radius:var(--r);
-  box-shadow:var(--so) var(--so) 0 var(--shadow);
-  padding:10px 16px;
-  font-family:'Work Sans',sans-serif;
-  font-size:0.82rem;font-weight:700;
-  cursor:pointer;
-  transition:transform 0.1s,box-shadow 0.1s;
-">&#x1F3A8; DM Serif + Fraunces + Work Sans</button>
-
-</body>
+        </script>
+    </body>
 </html>
