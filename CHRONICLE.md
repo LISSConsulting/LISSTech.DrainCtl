@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixth roam-mode pass complete.** `drainctl service start/stop/status` implemented via SCM (replaced stubs); `ServiceStatus()` added to mgmt.go.
+> Current state: **Seventh roam-mode pass complete.** `internal/svc/handler.go` split into `handler.go` + `check.go`; 20 new tests for `internal/store/memstore.go` (0% → full coverage of all public methods).
 
 ## Completed Work
 
@@ -20,6 +20,8 @@
 | Roam #5 | Config hot-reload: `pruneNotifyState` removes stale `LastAlertNotify` entries for URLs removed from targets | correctness, svc |
 | Roam #5 | `drainctl history --since`/`--until` — RFC3339 time-bounded queries; `HistoryFiltered`/`ChangesFiltered` on `AuditStore`; post-filter on pipe path; 11 tests | feature, CLI, testing |
 | Roam #6 | `drainctl service start/stop/status` — replaced instruction-printing stubs with real SCM calls via `golang.org/x/sys/windows/svc/mgr`; 30 s timeout polling with 500 ms sleep; `svcStateString` helper; start/stop require admin, status does not | feature, CLI |
+| Roam #7 | `internal/svc/handler.go` split into `handler.go` (service lifecycle: `drainService`, `Execute`, `serviceHandler`, `RunService`, `backoffTicks`, event constants) and `check.go` (check cycle: `svcRunCheck`, `pruneNotifyState`, `applyRemoteConfig`); 623 → 411 + 227 lines | code quality |
+| Roam #7 | 20 tests for `internal/store/memstore.go` — covers `LastObservation`, `History` (ordering, limits), `Changes` (filtering, limits), `StateSince` (empty, all-same-mode, after-transition, absent-mode, returns-to-current), `Flush`/`Close` persistence, `Prune`, `FlushIfDirty`, concurrent access | testing |
 
 ## Remaining Work
 
@@ -41,3 +43,5 @@
 - **`NotifyState.LastAlertNotify` keyed by URL**: On config hot-reload, prune stale entries by building an active-URL set and deleting entries not in it. Only prune when using local config (not dashboard remote), since remote config manages its own targets.
 - **`HistoryFiltered` ring buffer with time filter**: The scan is oldest-first; applying the time predicate before the ring-shift means only matching records count toward the limit. The pipe path returns `[]HistoryRecord` (string timestamps), so time filtering there is done post-fetch with RFC3339 parsing.
 - **SCM start/stop polling pattern**: After calling `s.Start()` or `s.Control(svc.Stop)`, poll `s.Query()` every 500 ms up to 30 s. The initial `Control(svc.Stop)` response already carries the new status, so check it before sleeping. `ServiceStatus()` doesn't require admin — opening a service for `SERVICE_QUERY_STATUS` access is unprivileged on default Windows ACLs.
+- **handler.go split boundary**: `handler.go` = service lifecycle (Execute loop, serviceHandler pipe bridge, RunService, backoffTicks, event log constants). `check.go` = one check cycle (svcRunCheck, pruneNotifyState, applyRemoteConfig). Both files need all the same imports because they share the same package and cross-reference each other's symbols.
+- **MemAuditStore test strategy**: `OpenMemAuditStore` uses `windows.CreateFile` for exclusive locking, so tests require a real temp file (use `t.TempDir()`). The public methods (Append, History, Changes, StateSince, Flush, Prune) are pure in-memory logic after that; no mocking needed. The concurrent access test (`sync.WaitGroup` + multiple goroutines) exercises the `sync.RWMutex` under `go test -race`.
