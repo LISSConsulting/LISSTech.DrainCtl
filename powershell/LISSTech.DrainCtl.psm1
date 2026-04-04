@@ -707,8 +707,8 @@ function Enable-RDSHDrainDashboard {
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param(
-        [int]$Port = 49470,
-        [string]$Group = 'Domain Admins'
+        [ValidateRange(1, 65535)][int]$Port = 49470,
+        [ValidateNotNullOrEmpty()][string]$Group = 'Domain Admins'
     )
     if (-not $PSCmdlet.ShouldProcess('DrainCtl Dashboard', 'Enable')) { return }
     $ptr = [DrainCtlNative]::DrainCtl_EnableDashboard($Port, $Group)
