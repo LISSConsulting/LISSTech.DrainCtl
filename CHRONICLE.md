@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **First roam-mode pass complete.** Security, validation, and test coverage improvements shipped.
+> Current state: **Second roam-mode pass complete.** Dashboard handler tests and streaming audit history shipped.
 
 ## Completed Work
 
@@ -11,13 +11,13 @@
 | Roam #1 | URL scheme validation in `Config.Validate` (strip non-http/https notification targets) | security, validation |
 | Roam #1 | First unit test suite — 27 tests across `config_test.go` and `notify_test.go` | testing |
 | Roam #1 | gofmt pre-existing violations fixed across all Go source files | code quality |
+| Roam #2 | `internal/dashboard` handler tests — 19 tests for `handleHealth`, `handleRegister`, `handleReport` | testing, dashboard |
+| Roam #2 | `audit.go` streaming refactor — `readAll` replaced with `scanRecords(fn)` + rolling-window `History`/`Changes` | performance, code quality |
 
 ## Remaining Work
 
 | Priority | Item | Location | Notes |
 |----------|------|----------|-------|
-| High | Add `internal/dashboard` tests (handleHealth, handleRegister validation, handleReport) | `internal/dashboard/` | Needs httptest + auth bypass via devmode build tag |
-| High | Stream-based audit history (`readAll` loads entire JSONL into memory) | `audit.go`, `internal/store/memstore.go` | Risk of OOM on long-lived high-frequency deployments |
 | Medium | `GET /api/v1/history/{host}` endpoint — expose per-host audit trail from dashboard | `internal/dashboard/server.go` | Currently only accessible via CLI/pipe |
 | Medium | Exponential backoff for dashboard client (currently retries every 10 polls flat) | `internal/svc/handler.go` | Better resilience when dashboard is temporarily unreachable |
 | Medium | `drainctl configure` interactive UX polish — show current value next to each prompt | `cmd/drainctl/main.go` | Quality-of-life for operators |
@@ -32,4 +32,5 @@
 - **Health endpoint design**: Placed at `GET /api/v1/health` with no auth so load balancers and uptime monitors can probe without Kerberos. Returns `ok`, `version`, `servers`, `healthy`, `alerting`, `unknown` counts.
 - **URL scheme validation**: Added to `Config.Validate` so it applies uniformly on every config load/save path. Empty URLs are preserved (existing behaviour handles them downstream).
 - **`svc/handler.go` is large** (800+ lines) — split into sub-files would improve navigability but isn't blocking anything yet.
-- **`readAll` in audit.go** loads the entire JSONL into memory on every operation — fine for 90-day retention at 300s poll intervals (~25 K records), but worth streaming if retention or frequency increases.
+- **Dashboard handler tests need no `devmode` tag**: handlers are methods on `*DashboardServer`; calling them directly with `httptest.NewRecorder` bypasses all middleware. Auth is only injected by the mux wrappers, not by the handlers themselves.
+- **`audit.go` streaming pattern**: `scanRecords(fn func(AuditRecord) bool) error` replaces `readAll`. `History(n)` uses a copy-shift ring buffer — `O(n)` memory regardless of file size. `Changes(n)` uses the same ring. `StateSince` still collects all records (needs backward walk). `LastObservation` retains a single record.

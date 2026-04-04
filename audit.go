@@ -61,18 +61,19 @@ func (a *AuditStore) Record(rec *AuditRecord) error {
 	return err
 }
 
-// readAll parses every record from the JSONL file.
-func (a *AuditStore) readAll() ([]AuditRecord, error) {
+// scanRecords iterates every record in the JSONL file from oldest to newest,
+// calling fn for each parsed record. Scanning stops early when fn returns
+// false or EOF is reached. Malformed lines are silently skipped.
+func (a *AuditStore) scanRecords(fn func(AuditRecord) bool) error {
 	f, err := os.Open(a.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil
 		}
-		return nil, fmt.Errorf("open audit file: %w", err)
+		return fmt.Errorf("open audit file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	var records []AuditRecord
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
 
@@ -85,36 +86,47 @@ func (a *AuditStore) readAll() ([]AuditRecord, error) {
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}
-		records = append(records, rec)
+		if !fn(rec) {
+			break
+		}
 	}
-	return records, scanner.Err()
+	return scanner.Err()
 }
 
 // LastObservation returns the most recent record, or nil if the file is empty.
+// Retains only a single record in memory regardless of file size.
 func (a *AuditStore) LastObservation() (*AuditRecord, error) {
-	records, err := a.readAll()
-	if err != nil || len(records) == 0 {
+	var last AuditRecord
+	found := false
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		last = rec
+		found = true
+		return true
+	})
+	if err != nil || !found {
 		return nil, err
 	}
-	return &records[len(records)-1], nil
+	return &last, nil
 }
 
 // Prune removes records older than the retention period by rewriting the file.
 func (a *AuditStore) Prune(retention time.Duration) (int64, error) {
-	records, err := a.readAll()
-	if err != nil || len(records) == 0 {
+	cutoff := time.Now().Add(-retention)
+
+	var kept []AuditRecord
+	var total int64
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		total++
+		if !rec.Timestamp.Before(cutoff) {
+			kept = append(kept, rec)
+		}
+		return true
+	})
+	if err != nil {
 		return 0, err
 	}
 
-	cutoff := time.Now().Add(-retention)
-	var kept []AuditRecord
-	for _, r := range records {
-		if !r.Timestamp.Before(cutoff) {
-			kept = append(kept, r)
-		}
-	}
-
-	pruned := int64(len(records) - len(kept))
+	pruned := total - int64(len(kept))
 	if pruned == 0 {
 		return 0, nil
 	}
@@ -149,20 +161,38 @@ func (a *AuditStore) Prune(retention time.Duration) (int64, error) {
 }
 
 // History returns the most recent n records, newest first.
+// Uses a rolling window of size n to avoid loading the entire file into memory
+// when only a small number of recent records is needed. When n <= 0, all
+// records are returned.
 func (a *AuditStore) History(n int) ([]AuditRecord, error) {
-	records, err := a.readAll()
+	var buf []AuditRecord
+	if n > 0 {
+		buf = make([]AuditRecord, 0, n)
+	}
+
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		if n <= 0 {
+			buf = append(buf, rec)
+			return true
+		}
+		if len(buf) < n {
+			buf = append(buf, rec)
+		} else {
+			// Slide oldest off the front, append newest at the end.
+			copy(buf, buf[1:])
+			buf[n-1] = rec
+		}
+		return true
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
-		records[i], records[j] = records[j], records[i]
+	// Reverse to newest-first order.
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
 	}
-
-	if n > 0 && n < len(records) {
-		records = records[:n]
-	}
-	return records, nil
+	return buf, nil
 }
 
 // StateSince returns the timestamp when the current mode was first observed.
@@ -171,7 +201,12 @@ func (a *AuditStore) History(n int) ([]AuditRecord, error) {
 // (i.e. every record has the same mode), it returns the oldest record's timestamp.
 // Returns nil if the trail is empty.
 func (a *AuditStore) StateSince(mode DrainMode) (*time.Time, error) {
-	records, err := a.readAll()
+	// Must examine every record to walk backward — collect all then scan in reverse.
+	var records []AuditRecord
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		records = append(records, rec)
+		return true
+	})
 	if err != nil || len(records) == 0 {
 		return nil, err
 	}
@@ -194,25 +229,34 @@ func (a *AuditStore) StateSince(mode DrainMode) (*time.Time, error) {
 }
 
 // Changes returns only records where a state transition occurred, newest first.
+// Uses a rolling window of size n to avoid loading more changes than requested.
+// When n <= 0, all change records are returned.
 func (a *AuditStore) Changes(n int) ([]AuditRecord, error) {
-	records, err := a.readAll()
+	var changes []AuditRecord
+	if n > 0 {
+		changes = make([]AuditRecord, 0, n)
+	}
+
+	err := a.scanRecords(func(rec AuditRecord) bool {
+		if !rec.Changed {
+			return true
+		}
+		if n > 0 && len(changes) == n {
+			// Ring: drop oldest, keep newest n.
+			copy(changes, changes[1:])
+			changes[n-1] = rec
+		} else {
+			changes = append(changes, rec)
+		}
+		return true
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	var changes []AuditRecord
-	for _, r := range records {
-		if r.Changed {
-			changes = append(changes, r)
-		}
-	}
-
+	// Reverse to newest-first order.
 	for i, j := 0, len(changes)-1; i < j; i, j = i+1, j-1 {
 		changes[i], changes[j] = changes[j], changes[i]
-	}
-
-	if n > 0 && n < len(changes) {
-		changes = changes[:n]
 	}
 	return changes, nil
 }
