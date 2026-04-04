@@ -467,6 +467,7 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			auto, _ := cmd.Flags().GetBool("auto")
+			pin, _ := cmd.Flags().GetBool("pin")
 
 			var dashURL string
 			if len(args) > 0 {
@@ -478,7 +479,14 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 				}
 				log(dc.LvlINF, fmt.Sprintf("discovered dashboard: %s", dashURL))
 			} else {
-				return fmt.Errorf("provide a dashboard URL or use --auto for SRV discovery")
+				// Fall back to URL already saved in config.json.
+				existingCfg, loadErr := dc.LoadConfig(log)
+				if loadErr == nil && existingCfg.Dashboard.URL != "" {
+					dashURL = existingCfg.Dashboard.URL
+					log(dc.LvlINF, fmt.Sprintf("using configured dashboard: %s", dashURL))
+				} else {
+					return fmt.Errorf("provide a dashboard URL, use --auto for SRV discovery, or configure dashboard.url in config.json")
+				}
 			}
 
 			// Persist DashboardURL to config.json.
@@ -493,15 +501,28 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 			log(dc.LvlINF, fmt.Sprintf("config=DashboardURL set to %q", dashURL))
 
 			// Register with the dashboard.
-			if err := dashboard.Register(dashURL, log); err != nil {
-				dc.LogMsg(log, dc.LvlWRN, "registration failed (service will retry on next check)", fmt.Sprintf("error=%q", err))
+			regResult, regErr := dashboard.Register(dashURL, log)
+			if regErr != nil {
+				dc.LogMsg(log, dc.LvlWRN, "registration failed (service will retry on next check)", fmt.Sprintf("error=%q", regErr))
 				return nil
 			}
+
+			// Auto-pin: save the dashboard's TLS fingerprint (unless --pin=false).
+			if pin && regResult.TLSFingerprint != "" && fileCfg.Dashboard.TLSFingerprint == "" {
+				fileCfg.Dashboard.TLSFingerprint = regResult.TLSFingerprint
+				if err := dc.SaveConfig(fileCfg, log); err != nil {
+					dc.LogMsg(log, dc.LvlWRN, "failed to save fingerprint", fmt.Sprintf("error=%q", err))
+				} else {
+					log(dc.LvlINF, fmt.Sprintf("auto-pinned fingerprint=%s", regResult.TLSFingerprint))
+				}
+			}
+
 			log(dc.LvlOK, "registered with dashboard")
 			return nil
 		},
 	}
 	cmd.Flags().Bool("auto", false, "Discover dashboard via DNS SRV record (_drainctl._tcp.<domain>)")
+	cmd.Flags().Bool("pin", false, "Auto-pin the dashboard's TLS certificate fingerprint on first registration")
 	return cmd
 }
 
@@ -636,6 +657,42 @@ func dashboardCmd() *cobra.Command {
 		},
 	})
 
+	dcmd.AddCommand(&cobra.Command{
+		Use:   "trust-cert",
+		Short: "Import the dashboard TLS certificate into the local Trusted Root store (requires admin)",
+		Long: `Import the dashboard's auto-generated TLS certificate into the local machine's
+Trusted Root Certification Authorities store. This suppresses browser certificate
+warnings when accessing the dashboard.
+
+Requires elevated (admin) privileges. Uses certutil under the hood.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			certPath := dc.DefaultDataDir() + `\dashboard-tls.crt`
+
+			if _, err := os.Stat(certPath); err != nil {
+				return fmt.Errorf("certificate not found at %s — is the dashboard enabled?", certPath)
+			}
+
+			// Verify we can read and parse the cert first.
+			fp, err := dashboard.CertFingerprint(dc.DefaultDataDir())
+			if err != nil {
+				return fmt.Errorf("read certificate: %w", err)
+			}
+
+			log(dc.LvlINF, fmt.Sprintf("importing certificate fingerprint=%s", fp))
+			log(dc.LvlINF, fmt.Sprintf("cert=%s", certPath))
+
+			out, err := exec.Command("certutil", "-addstore", "Root", certPath).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("certutil: %w\n%s", err, string(out))
+			}
+
+			log(dc.LvlOK, "certificate imported into Trusted Root Certification Authorities")
+			log(dc.LvlINF, "browsers on this machine will now trust the dashboard's HTTPS certificate")
+			return nil
+		},
+	})
+
 	return dcmd
 }
 
@@ -668,6 +725,8 @@ func configureCmd() *cobra.Command {
 				fileCfg.GracePeriod = grace
 			}
 
+			autoPin, _ := cmd.Flags().GetBool("auto-pin")
+
 			switch mode {
 			case "dashboard":
 				fileCfg.Dashboard.Enabled = true
@@ -681,6 +740,10 @@ func configureCmd() *cobra.Command {
 				if dashURL != "" {
 					fileCfg.Dashboard.URL = dashURL
 				}
+			}
+
+			if cmd.Flags().Changed("auto-pin") {
+				fileCfg.Dashboard.AutoPin = &autoPin
 			}
 
 			// Add notification targets from flags (only if URLs are provided).
@@ -717,6 +780,7 @@ func configureCmd() *cobra.Command {
 	cmd.Flags().Int("dashboard-port", dc.DefaultDashboardPort, "Dashboard listen port")
 	cmd.Flags().String("dashboard-group", dc.DefaultDashboardGroup, "AD group for dashboard access")
 	cmd.Flags().Int("grace-period", 60, "Grace period in minutes")
+	cmd.Flags().Bool("auto-pin", false, "Auto-pin dashboard TLS certificate on registration")
 
 	return cmd
 }

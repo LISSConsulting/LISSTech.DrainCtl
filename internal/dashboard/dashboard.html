@@ -7,7 +7,7 @@
 <title>DrainCtl Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>.uplot,.uplot *,.uplot *::before,.uplot *::after{box-sizing:border-box}.uplot{font-family:'JetBrains Mono',monospace;line-height:1.5;width:min-content}.u-wrap{position:relative;user-select:none}.u-over,.u-under{position:absolute}.u-under{overflow:hidden}.uplot canvas{display:block;position:relative;width:100%;height:100%}.u-legend{display:none}.u-title{display:none}.u-select{background:rgba(0,0,0,.07);position:absolute;pointer-events:none}.u-cursor-x,.u-cursor-y,.u-cursor-pt{display:none}.u-axis{position:absolute;font-size:.68rem;color:var(--muted)}.u-axis .u-tick{stroke:var(--border);stroke-opacity:.15}</style>
 <style>
 :root {
@@ -20,7 +20,7 @@
   --muted:#c4a8a8;--subtle:#6b5050;--surface:#1f1414;--code-bg:#0d0808;
 }}
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+body{font-family:'Work Sans',sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
 .mono{font-family:'JetBrains Mono',monospace}
 .serif{font-family:'DM Serif Display',serif}
 
@@ -76,7 +76,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .srv-k{color:var(--muted);font-weight:600}
 .srv-v{font-family:'JetBrains Mono',monospace;font-size:.76rem;text-align:right;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .srv-act{margin-top:8px;padding-top:6px;border-top:1px solid var(--surface);display:flex;justify-content:flex-end}
-.btn-rm{font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;padding:3px 10px;background:var(--card);color:var(--red);border:1.5px solid var(--red);border-radius:4px;cursor:pointer;transition:background .1s,color .1s}
+.btn-rm{font-family:'Work Sans',sans-serif;font-size:.7rem;font-weight:700;padding:3px 10px;background:var(--card);color:var(--red);border:1.5px solid var(--red);border-radius:4px;cursor:pointer;transition:background .1s,color .1s}
 .btn-rm:hover{background:var(--red);color:#fff}
 
 /* Event log */
@@ -85,7 +85,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .log-search{flex:1;font-family:'JetBrains Mono',monospace;font-size:.78rem;padding:8px 12px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none}
 .log-search:focus{box-shadow:0 0 0 2px var(--accent)}
 .log-search::placeholder{color:var(--subtle)}
-.btn-expand{font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;padding:6px 14px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s;white-space:nowrap}
+.btn-expand{font-family:'Work Sans',sans-serif;font-size:.72rem;font-weight:700;padding:6px 14px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s;white-space:nowrap}
 .btn-expand:hover{transform:translate(-1px,-1px);box-shadow:calc(var(--so)+1px) calc(var(--so)+1px) 0 var(--shadow)}
 .log{background:var(--code-bg);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);height:280px;overflow-y:auto;padding:14px 16px;scrollbar-width:none}
 .log::-webkit-scrollbar{display:none}
@@ -101,7 +101,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .evt.sev-ok{border-left-color:#7dc09a}.evt.sev-grace{border-left-color:#e0a060;background:rgba(224,160,96,.12)}
 .evt.sev-alert{border-left-color:#e87080;background:rgba(232,112,128,.15)}.evt.sev-off{border-left-color:#6b5050;opacity:.5}
 .evt.is-transition{border-left-width:5px;font-weight:700;background:rgba(163,71,91,.18);color:#fff}
-.evt-empty{color:var(--subtle);font-style:italic;font-family:'DM Sans',sans-serif;font-size:.82rem;padding:20px 0;text-align:center}
+.evt-empty{color:var(--subtle);font-style:italic;font-family:'Work Sans',sans-serif;font-size:.82rem;padding:20px 0;text-align:center}
 .evt.hidden{display:none}
 
 /* Session gauge */
@@ -125,13 +125,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .btn-gear{font-family:'JetBrains Mono',monospace;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;background:var(--card);color:var(--muted);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);padding:6px 14px;cursor:pointer;transition:transform .1s,box-shadow .1s,color .15s}
 .btn-gear:hover{transform:translate(-1px,-1px);box-shadow:calc(var(--so)+1px) calc(var(--so)+1px) 0 var(--shadow);color:var(--accent)}
 
-/* Settings drawer */
-.settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:150}
-.settings-overlay.open{display:block}
-.settings-drawer{position:fixed;top:0;right:-420px;width:400px;max-width:90vw;height:100vh;background:var(--card);border-left:var(--bw) solid var(--border);box-shadow:-6px 0 24px rgba(0,0,0,.15);z-index:160;transition:right .25s ease;overflow-y:auto;padding:28px 24px}
-.settings-drawer.open{right:0}
-.settings-title{font-family:'DM Serif Display',serif;font-size:1.15rem;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
-.settings-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);padding:4px}
+/* Settings modal */
+.settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:150;justify-content:center;align-items:center}
+.settings-overlay.open{display:flex}
+.settings-modal{width:860px;max-width:94vw;max-height:90vh;background:var(--card);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:8px 8px 0 var(--shadow);overflow-y:auto;padding:32px 36px}
+.settings-title{font-family:'DM Serif Display',serif;font-size:1.3rem;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between}
+.settings-close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted);padding:4px 8px}
 .settings-close:hover{color:var(--fg)}
 .settings-group{margin-bottom:18px}
 .settings-label{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-bottom:6px}
@@ -142,29 +141,44 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 .settings-check input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
 .settings-num{width:100px;font-family:'JetBrains Mono',monospace;font-size:.8rem;padding:8px 12px;background:var(--surface);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none}
 .settings-num:focus{box-shadow:0 0 0 2px var(--accent)}
-.btn-save{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;background:var(--accent);color:#fff;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s}
+.btn-save{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;font-family:'Work Sans',sans-serif;font-size:.85rem;font-weight:700;background:var(--accent);color:#fff;border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);cursor:pointer;transition:transform .1s,box-shadow .1s}
 .btn-save:hover{transform:translate(-2px,-2px);box-shadow:calc(var(--so)+2px) calc(var(--so)+2px) 0 var(--shadow)}
 .btn-save:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--shadow)}
 .settings-status{font-size:.78rem;margin-top:10px;font-weight:600}
 .settings-status.ok{color:var(--green)}.settings-status.err{color:var(--red)}
 
 /* Target rows */
-.target-list{display:flex;flex-direction:column;gap:14px}
-.target-row{background:var(--surface);border:var(--bw) solid var(--border);border-radius:var(--r);padding:14px;position:relative}
-.target-row-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.target-type{font-family:'JetBrains Mono',monospace;font-size:.78rem;padding:6px 10px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none;cursor:pointer}
+.target-list{display:flex;flex-direction:column;gap:16px}
+.target-row{background:var(--surface);border:var(--bw) solid var(--border);border-radius:var(--r);padding:22px 24px;position:relative}
+.target-row-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.target-type{font-family:'Work Sans',sans-serif;font-size:.82rem;font-weight:600;padding:8px 12px;background:var(--card);color:var(--fg);border:var(--bw) solid var(--border);border-radius:var(--r);outline:none;cursor:pointer}
 .target-type:focus{box-shadow:0 0 0 2px var(--accent)}
-.target-url{flex:1}
-.btn-rm-target{font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;padding:6px 10px;background:var(--card);color:var(--red);border:1.5px solid var(--red);border-radius:4px;cursor:pointer;transition:background .1s,color .1s}
-.btn-rm-target:hover{background:var(--red);color:#fff}
-.target-triggers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-.target-triggers label{font-size:.72rem;font-weight:600;display:flex;align-items:center;gap:4px;cursor:pointer}
-.target-triggers input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:pointer}
-.target-repeat{display:flex;align-items:center;gap:8px}
-.target-repeat-label{font-size:.72rem;color:var(--muted);font-weight:600}
-.btn-add-target{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;background:var(--card);color:var(--accent);border:2px dashed var(--accent);border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s}
+.target-url{flex:1;min-width:0}
+.btn-rm-target{width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;background:none;color:var(--muted);border:1.5px solid var(--border);border-radius:6px;cursor:pointer;transition:background .1s,color .1s,border-color .1s;flex-shrink:0;padding:0;line-height:1}
+.btn-rm-target:hover{background:var(--red);color:#fff;border-color:var(--red)}
+.target-section-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px}
+.target-triggers{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.trigger-pill{font-family:'Work Sans',sans-serif;font-size:.75rem;font-weight:600;padding:6px 14px;background:var(--card);color:var(--muted);border:var(--bw) solid var(--border);border-radius:20px;cursor:pointer;transition:all .15s;user-select:none;display:inline-block}
+.trigger-pill:hover{border-color:var(--accent);color:var(--fg)}
+.trigger-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.trigger-pill input{display:none}
+.target-desc{font-size:.78rem;color:var(--muted);line-height:1.55;margin-bottom:12px}
+.target-repeat{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.target-repeat-label{font-size:.75rem;color:var(--muted);font-weight:600}
+.repeat-pills{display:flex;gap:6px;margin-bottom:10px}
+.repeat-pill{font-family:'Work Sans',sans-serif;font-size:.72rem;font-weight:600;padding:5px 12px;background:var(--card);color:var(--muted);border:var(--bw) solid var(--border);border-radius:20px;cursor:pointer;transition:all .15s;user-select:none}
+.repeat-pill:hover{border-color:var(--accent);color:var(--fg)}
+.repeat-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-add-target{display:flex;align-items:center;justify-content:center;gap:6px;width:50%;padding:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;background:var(--card);color:var(--accent);border:2px dashed var(--accent);border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s}
 .btn-add-target:hover{background:var(--accent);color:#fff}
 .settings-divider{height:1px;background:var(--border);margin:18px 0;opacity:.4}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--surface);border-radius:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+*{scrollbar-width:thin;scrollbar-color:var(--border) var(--surface)}
 
 @media(max-width:768px){.counters{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr}.chart-host{width:80px;font-size:.65rem}}
 @media(max-width:480px){.nav-right span{display:none}.nav-right::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--green)}}
@@ -218,22 +232,58 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
   <div class="grid" id="grid"><div class="empty"><h2>Connecting...</h2></div></div>
 </div>
 
-<div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
-<div class="settings-drawer" id="settings-drawer">
-  <div class="settings-title"><span>Notification Settings</span><button class="settings-close" onclick="toggleSettings()">&times;</button></div>
+<div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()">
+<div class="settings-modal" id="settings-drawer" onclick="event.stopPropagation()">
+  <div class="settings-title"><span>Dashboard Configuration</span><button class="settings-close" onclick="toggleSettings()">&times;</button></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:24px">
+    <div class="settings-group" style="margin-bottom:0">
+      <div class="settings-label">Grace Period</div>
+      <p class="target-desc">How long drain mode can stay active before it becomes an alert.</p>
+      <div class="repeat-pills" id="grace-pills">
+        <span class="repeat-pill" data-mins="15">15 min</span>
+        <span class="repeat-pill" data-mins="30">30 min</span>
+        <span class="repeat-pill active" data-mins="60">1 hour</span>
+        <span class="repeat-pill" data-mins="120">2 hours</span>
+        <span class="repeat-pill" data-mins="240">4 hours</span>
+      </div>
+      <div class="target-repeat">
+        <input class="settings-num" id="cfg-grace" type="number" min="1" max="1440" value="60" style="width:80px">
+        <span style="font-size:.75rem;color:var(--muted)">minutes (custom)</span>
+      </div>
+    </div>
+    <div class="settings-group" style="margin-bottom:0">
+      <div class="settings-label">Session Warning Threshold</div>
+      <p class="target-desc">Alert when sessions on any server exceed this percentage.</p>
+      <div class="repeat-pills" id="threshold-pills">
+        <span class="repeat-pill" data-val="70">70%</span>
+        <span class="repeat-pill active" data-val="80">80%</span>
+        <span class="repeat-pill" data-val="90">90%</span>
+        <span class="repeat-pill" data-val="95">95%</span>
+      </div>
+      <div style="margin-bottom:10px"><span class="repeat-pill" data-val="0" id="threshold-off" style="border-style:dashed;font-size:.7rem">Disable session warnings</span></div>
+      <div class="target-repeat">
+        <input class="settings-num" id="cfg-threshold" type="number" min="0" max="100" value="80" style="width:80px">
+        <span style="font-size:.75rem;color:var(--muted)">percent (custom)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-divider"></div>
+
   <div class="settings-group">
     <div class="settings-label">Notification Targets</div>
     <div class="target-list" id="target-list"></div>
-    <button class="btn-add-target" onclick="addTargetRow()" style="margin-top:10px">+ Add Target</button>
+    <button class="btn-add-target" onclick="addTargetRow()" style="margin-top:12px">+ Add Target</button>
   </div>
+
   <div class="settings-divider"></div>
-  <div class="settings-group">
-    <div class="settings-label">Session Warning Threshold</div>
-    <input class="settings-num" id="cfg-threshold" type="number" min="0" max="100" value="80" placeholder="80">
-    <div style="font-size:.72rem;color:var(--muted);margin-top:4px">0 = disabled, 1–100 = percentage</div>
+
+  <div style="display:flex;align-items:center;gap:16px">
+    <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
+    <div class="settings-status" id="cfg-status"></div>
   </div>
-  <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
-  <div class="settings-status" id="cfg-status"></div>
+</div>
 </div>
 
 <footer class="footer">
@@ -448,10 +498,10 @@ async function refresh(){
 async function rm(h){if(!confirm('Remove '+h+'?'))return;try{const r=await fetch('/api/v1/servers/'+encodeURIComponent(h),{method:'DELETE'});if(r.ok)refresh();else alert('HTTP '+r.status)}catch(e){alert(e.message)}}
 function toggleSettings(){
   document.getElementById('settings-overlay').classList.toggle('open');
-  document.getElementById('settings-drawer').classList.toggle('open');
 }
 const ALL_TRIGGERS=['drain_on','drain_off','grace_entered','alert','healthy','session_warning'];
 const TRIGGER_LABELS={drain_on:'Drain On',drain_off:'Drain Off',grace_entered:'Grace',alert:'Alert',healthy:'Healthy',session_warning:'Sessions'};
+const TRIGGER_DESCS={drain_on:'Server blocked new connections',drain_off:'Drain mode turned off',grace_entered:'Drain mode active but within grace period',alert:'Drain mode active beyond the grace period',healthy:'Server returned to healthy state',session_warning:'Active sessions exceeded the warning threshold'};
 let targetCounter=0;
 function addTargetRow(data){
   const id=targetCounter++;
@@ -460,35 +510,99 @@ function addTargetRow(data){
   row.className='target-row';
   row.dataset.targetId=id;
   const triggers=t.triggers||[];
-  row.innerHTML=`<div class="target-row-head">`
-    +`<select class="target-type" data-field="type"><option value="webhook"${t.type==='webhook'?' selected':''}>Webhook</option><option value="ntfy"${t.type==='ntfy'?' selected':''}>ntfy</option></select>`
-    +`<input class="settings-input target-url" data-field="url" type="text" value="${(t.url||'').replace(/"/g,'&quot;')}" placeholder="${t.type==='ntfy'?'https://ntfy.sh/drainctl-alerts':'https://hooks.example.com/...'}">`
-    +`<button class="btn-rm-target" onclick="this.closest('.target-row').remove()">Remove</button>`
-    +`</div>`
-    +`<div class="target-triggers">`
-    +ALL_TRIGGERS.map(tr=>`<label><input type="checkbox" data-trigger="${tr}"${triggers.includes(tr)?' checked':''}> ${TRIGGER_LABELS[tr]}</label>`).join('')
-    +`</div>`
-    +`<div class="target-repeat"><span class="target-repeat-label">Repeat min</span>`
-    +`<input class="settings-num" data-field="repeat" type="number" min="0" value="${t.repeat_minutes||0}" style="width:70px">`
-    +`<span style="font-size:.68rem;color:var(--muted)">0 = once</span></div>`;
-  const sel=row.querySelector('.target-type');
-  const url=row.querySelector('.target-url');
-  sel.addEventListener('change',()=>{url.placeholder=sel.value==='ntfy'?'https://ntfy.sh/drainctl-alerts':'https://hooks.example.com/...';});
+  var rv=t.repeat_minutes||0;
+  // For ntfy, extract topic from URL
+  var isNtfy=t.type==='ntfy';
+  var displayUrl=t.url||'';
+  if(isNtfy&&displayUrl.match(/^https?:\/\/ntfy\.sh\//)){displayUrl=displayUrl.replace(/^https?:\/\/ntfy\.sh\//,'');}
+  row.innerHTML='<div class="target-row-head">'
+    +'<select class="target-type" data-field="type"><option value="webhook"'+(t.type==='webhook'?' selected':'')+'>Webhook</option><option value="ntfy"'+(isNtfy?' selected':'')+'>Ntfy.sh</option></select>'
+    +'<span class="ntfy-prefix" style="font-family:JetBrains Mono,monospace;font-size:.82rem;color:var(--muted);padding:8px 0 8px 12px;white-space:nowrap;display:'+(isNtfy?'inline':'none')+'">ntfy.sh /</span>'
+    +'<input class="settings-input target-url" data-field="url" type="text" value="'+displayUrl.replace(/"/g,'&quot;')+'" placeholder="'+(isNtfy?'my-drainctl-alerts':'https://hooks.example.com/...')+'">'
+    +'<button class="btn-rm-target" title="Remove target">&times;</button>'
+    +'</div>'
+    +'<div class="target-section-label">Triggers</div>'
+    +'<p class="target-desc">Which events send a notification to this target.</p>'
+    +'<div class="target-triggers">'
+    +ALL_TRIGGERS.map(function(tr){return '<span class="trigger-pill'+(triggers.includes(tr)?' active':'')+'" data-trigger="'+tr+'" title="'+TRIGGER_DESCS[tr]+'"><input type="checkbox" data-trigger="'+tr+'"'+(triggers.includes(tr)?' checked':'')+'>'+TRIGGER_LABELS[tr]+'</span>';}).join('')
+    +'</div>'
+    +'<div class="target-section-label">Repeat interval</div>'
+    +'<p class="target-desc">Re-send while the condition persists. <strong>Once</strong> = only on state change.</p>'
+    +'<div class="repeat-pills">'
+    +'<span class="repeat-pill'+(rv===0?' active':'')+'" data-mins="0">Once</span>'
+    +'<span class="repeat-pill'+(rv===15?' active':'')+'" data-mins="15">15 min</span>'
+    +'<span class="repeat-pill'+(rv===60?' active':'')+'" data-mins="60">1 hour</span>'
+    +'<span class="repeat-pill'+(rv===240?' active':'')+'" data-mins="240">4 hours</span>'
+    +'<span class="repeat-pill'+(rv===480?' active':'')+'" data-mins="480">8 hours</span>'
+    +'</div>'
+    +'<div class="target-repeat">'
+    +'<input class="settings-num" data-field="repeat" type="number" min="0" value="'+rv+'" style="width:80px">'
+    +'<span style="font-size:.75rem;color:var(--muted)">minutes (custom value)</span></div>';
+
+  // Wire up events
+  var rmBtn=row.querySelector('.btn-rm-target');
+  rmBtn.addEventListener('click',function(){row.remove();});
+
+  var sel=row.querySelector('.target-type');
+  var urlInput=row.querySelector('.target-url');
+  var ntfyPrefix=row.querySelector('.ntfy-prefix');
+  sel.addEventListener('change',function(){
+    var isN=sel.value==='ntfy';
+    ntfyPrefix.style.display=isN?'inline':'none';
+    urlInput.placeholder=isN?'my-drainctl-alerts':'https://hooks.example.com/...';
+    // If switching to ntfy and URL has full ntfy.sh URL, strip it
+    if(isN&&urlInput.value.match(/^https?:\/\/ntfy\.sh\//)){urlInput.value=urlInput.value.replace(/^https?:\/\/ntfy\.sh\//,'');}
+    urlInput.value='';
+  });
+
+  // Trigger pill toggles
+  row.querySelectorAll('.trigger-pill').forEach(function(pill){
+    pill.addEventListener('click',function(e){
+      e.preventDefault();
+      pill.classList.toggle('active');
+      var cb=pill.querySelector('input');
+      cb.checked=pill.classList.contains('active');
+    });
+  });
+
+  // Repeat pill presets
+  var repeatInput=row.querySelector('[data-field="repeat"]');
+  row.querySelectorAll('.repeat-pill').forEach(function(pill){
+    pill.addEventListener('click',function(){
+      var mins=parseInt(pill.dataset.mins);
+      repeatInput.value=mins;
+      row.querySelectorAll('.repeat-pill').forEach(function(p){p.classList.remove('active');});
+      pill.classList.add('active');
+    });
+  });
+  repeatInput.addEventListener('input',function(){
+    var v=parseInt(repeatInput.value)||0;
+    row.querySelectorAll('.repeat-pill').forEach(function(p){
+      p.classList.toggle('active',parseInt(p.dataset.mins)===v);
+    });
+  });
+
   document.getElementById('target-list').appendChild(row);
   return row;
 }
 function readTargets(){
   const rows=document.querySelectorAll('.target-row');
   const targets=[];
+  var valid=true;
   rows.forEach(row=>{
-    const url=row.querySelector('[data-field="url"]').value.trim();
-    if(!url)return;
+    const urlInput=row.querySelector('[data-field="url"]');
+    var url=urlInput.value.trim();
     const type=row.querySelector('[data-field="type"]').value;
+    if(!url){urlInput.style.borderColor='var(--red)';valid=false;return;}
+    urlInput.style.borderColor='';
+    // Reconstruct full ntfy URL from topic name
+    if(type==='ntfy'&&!url.match(/^https?:\/\//)){url='https://ntfy.sh/'+url;}
     const repeat=parseInt(row.querySelector('[data-field="repeat"]').value)||0;
     const triggers=[];
     row.querySelectorAll('[data-trigger]').forEach(cb=>{if(cb.checked)triggers.push(cb.dataset.trigger);});
     targets.push({type,url,triggers,repeat_minutes:repeat});
   });
+  if(!valid)return null;
   return targets;
 }
 async function loadNotifyConfig(){
@@ -501,16 +615,23 @@ async function loadNotifyConfig(){
     const targets=c.notifications||[];
     if(targets.length===0)addTargetRow();
     else targets.forEach(t=>addTargetRow(t));
-    document.getElementById('cfg-threshold').value=c.session_warning_threshold||80;
+    var th=c.session_warning_threshold||80;
+    var gr=c.grace_period||60;
+    document.getElementById('cfg-threshold').value=th;
+    document.getElementById('cfg-grace').value=gr;
+    syncPills('grace-pills',gr,'mins');
+    syncPills('threshold-pills',th,'val');
   }catch(e){console.error('loadNotifyConfig:',e)}
 }
 async function saveNotifyConfig(){
   const st=document.getElementById('cfg-status');
   st.textContent='';st.className='settings-status';
+  const notifications=readTargets();
+  if(notifications===null){st.textContent='Please fill in all target URLs.';st.className='settings-status err';return;}
   try{
-    const notifications=readTargets();
     const threshold=parseInt(document.getElementById('cfg-threshold').value)||80;
-    const body=JSON.stringify({notifications,session_warning_threshold:threshold});
+    const grace=parseInt(document.getElementById('cfg-grace').value)||60;
+    const body=JSON.stringify({notifications,session_warning_threshold:threshold,grace_period:grace});
     const r=await fetch('/api/v1/notify-config',{method:'PUT',headers:{'Content-Type':'application/json'},body});
     if(r.ok){st.textContent='Saved successfully.';st.className='settings-status ok';}
     else{st.textContent='Error: HTTP '+r.status;st.className='settings-status err';}
@@ -518,11 +639,56 @@ async function saveNotifyConfig(){
 }
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
-    if(document.getElementById('settings-drawer').classList.contains('open'))toggleSettings();
+    if(document.getElementById('settings-overlay').classList.contains('open'))toggleSettings();
     else if(logExpanded)toggleExpand();
   }
 });
-setInterval(refresh,30000);refresh();loadNotifyConfig();
+// Pill sync helper
+function syncPills(containerId,val,attr){
+  document.querySelectorAll('#'+containerId+' .repeat-pill').forEach(function(p){
+    p.classList.toggle('active',parseInt(p.dataset[attr])===val);
+  });
+}
+
+// Grace period pills
+(function(){
+  var input=document.getElementById('cfg-grace');
+  document.querySelectorAll('#grace-pills .repeat-pill').forEach(function(pill){
+    pill.addEventListener('click',function(){
+      input.value=pill.dataset.mins;
+      syncPills('grace-pills',parseInt(pill.dataset.mins),'mins');
+    });
+  });
+  input.addEventListener('input',function(){
+    syncPills('grace-pills',parseInt(input.value)||0,'mins');
+  });
+})();
+
+// Threshold pills
+(function(){
+  var input=document.getElementById('cfg-threshold');
+  var offPill=document.getElementById('threshold-off');
+  function syncThreshold(val){
+    syncPills('threshold-pills',val,'val');
+    offPill.classList.toggle('active',val===0);
+  }
+  document.querySelectorAll('#threshold-pills .repeat-pill').forEach(function(pill){
+    pill.addEventListener('click',function(){
+      input.value=pill.dataset.val;
+      syncThreshold(parseInt(pill.dataset.val));
+    });
+  });
+  offPill.addEventListener('click',function(){
+    input.value=0;
+    syncThreshold(0);
+  });
+  input.addEventListener('input',function(){
+    syncThreshold(parseInt(input.value)||0);
+  });
+})();
+
+if(location.search==='?mock'){fetch('mock.js').then(function(r){return r.text()}).then(function(t){eval(t)}).catch(function(){console.log('mock.js not found')})}
+else{setInterval(refresh,30000);refresh();loadNotifyConfig();}
 </script>
 </body>
 </html>

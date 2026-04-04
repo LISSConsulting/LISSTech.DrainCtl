@@ -57,30 +57,51 @@ func InitDashClient(fingerprint string) {
 	dashClient = newDashClient(fingerprint)
 }
 
+// RegisterResult holds the response from a successful registration.
+type RegisterResult struct {
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
+}
+
 // Register notifies the dashboard server that this host exists.
-// Errors are logged but never returned — registration is non-fatal.
-func Register(dashboardURL string, log dc.LogFunc) error {
+// On success it returns the dashboard's TLS certificate fingerprint
+// (if the dashboard is running HTTPS) so the caller can enable pinning.
+func Register(dashboardURL string, log dc.LogFunc) (*RegisterResult, error) {
 	hostname, err := hostName()
 	if err != nil {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: cannot get hostname", fmt.Sprintf("error=%q", err))
-		return err
+		return nil, err
 	}
 
 	payload, _ := json.Marshal(map[string]string{"hostname": hostname})
 	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/register", payload)
 	if err != nil {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: register failed", fmt.Sprintf("error=%q", err))
-		return err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: register rejected",
 			fmt.Sprintf("status=%d", resp.StatusCode))
-		return fmt.Errorf("register: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("register: status %d", resp.StatusCode)
 	}
-	log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s", dashboardURL))
-	return nil
+
+	var result struct {
+		OK             bool   `json:"ok"`
+		TLSFingerprint string `json:"tls_fingerprint,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		// Non-fatal: registration succeeded even if we can't parse the fingerprint.
+		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s (fingerprint unavailable)", dashboardURL))
+		return &RegisterResult{}, nil
+	}
+
+	if result.TLSFingerprint != "" {
+		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s fingerprint=%s", dashboardURL, result.TLSFingerprint))
+	} else {
+		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s", dashboardURL))
+	}
+	return &RegisterResult{TLSFingerprint: result.TLSFingerprint}, nil
 }
 
 // ReportState sends the latest CheckResult to the dashboard server.
