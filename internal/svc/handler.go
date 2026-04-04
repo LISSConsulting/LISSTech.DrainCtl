@@ -223,6 +223,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 
 	// Auto-register with dashboard if URL is configured (or discovered).
+	// When the dashboard URL is set, notification config is pulled from
+	// the dashboard and replaces local targets. On fetch failure the
+	// service keeps using the last successfully fetched targets (or falls
+	// back to local config.json targets if no fetch ever succeeded).
+	var useRemoteConfig bool
+	pollsSinceConfigFetch := 0
+	const configFetchInterval = 10 // re-fetch every 10 polls (~5 min at 30s interval)
+
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
 		regResult, regErr := dashboard.Register(dashCfg.URL, s.log)
@@ -243,6 +251,22 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					}
 				}
 			}
+		}
+
+		// Fetch notification config from dashboard (replaces local targets).
+		if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", err))
+		} else {
+			useRemoteConfig = true
+			notifyTargets = remote.Notifications
+			if remote.SessionWarningThreshold > 0 {
+				cfg.SessionWarningThreshold = remote.SessionWarningThreshold
+			}
+			if remote.GracePeriod > 0 {
+				cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
+			}
+			s.log(dc.LvlINF, fmt.Sprintf("dashboard=notify-config-fetched targets=%d threshold=%d grace=%d",
+				len(remote.Notifications), remote.SessionWarningThreshold, remote.GracePeriod))
 		}
 	}
 
@@ -288,6 +312,26 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
+			// Periodically re-fetch notification config from dashboard.
+			if dashCfg.URL != "" {
+				pollsSinceConfigFetch++
+				if pollsSinceConfigFetch >= configFetchInterval {
+					pollsSinceConfigFetch = 0
+					if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
+						dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
+							fmt.Sprintf("error=%q", err))
+					} else {
+						useRemoteConfig = true
+						notifyTargets = remote.Notifications
+						if remote.SessionWarningThreshold > 0 {
+							cfg.SessionWarningThreshold = remote.SessionWarningThreshold
+						}
+						if remote.GracePeriod > 0 {
+							cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
+						}
+					}
+				}
+			}
 			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
 
 		case <-configCh:
@@ -302,8 +346,25 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			cfg = newCfg
 			handler.cfg = &cfg
-			dashCfg = newFullCfg.ToDashboardConfig()
-			notifyTargets = newFullCfg.Notifications
+			newDashCfg := newFullCfg.ToDashboardConfig()
+
+			// Handle dashboard URL or TLS fingerprint changes.
+			if newDashCfg.URL != dashCfg.URL || newDashCfg.TLSFingerprint != dashCfg.TLSFingerprint {
+				if newDashCfg.URL != "" {
+					dashboard.InitDashClient(newDashCfg.TLSFingerprint)
+					pollsSinceConfigFetch = configFetchInterval // force re-fetch next poll
+				}
+			}
+
+			// If dashboard URL was removed, revert to local targets.
+			if newDashCfg.URL == "" && useRemoteConfig {
+				useRemoteConfig = false
+				notifyTargets = newFullCfg.Notifications
+			} else if !useRemoteConfig {
+				notifyTargets = newFullCfg.Notifications
+			}
+
+			dashCfg = newDashCfg
 			s.log(dc.LvlINF, "config=reloaded")
 			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
 

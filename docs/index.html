@@ -575,8 +575,8 @@ body {
       </div>
       <div class="feature card">
         <div class="icon">&#128276;</div>
-        <h3>Smart Alerts</h3>
-        <p>Full multi-target notification editor in the dashboard. Add unlimited webhook and ntfy.sh targets, each with individual triggers and repeat intervals.</p>
+        <h3>Smart Alerts &amp; Centralized Config</h3>
+        <p>Configure notification targets, grace periods, and alert thresholds once in the dashboard &mdash; every agent inherits them. Unlimited webhook and ntfy.sh targets with per-target triggers and repeat intervals.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128203;</div>
@@ -591,7 +591,7 @@ body {
       <div class="feature card">
         <div class="icon">&#128196;</div>
         <h3>Zero-Touch Discovery</h3>
-        <p>One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk away &mdash; agents register themselves. No per-machine config.</p>
+        <p>One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk away &mdash; agents register themselves.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128274;</div>
@@ -702,7 +702,7 @@ body {
   <div class="wrap">
     <div class="section-label">Farm Monitoring</div>
     <div class="section-title">One dashboard for your entire RDSH farm.</div>
-    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Enable the dashboard, add one DNS SRV record, and every agent discovers it automatically &mdash; zero per-machine configuration.</div>
+    <div class="section-desc">See every server's drain state, session count, and alert history on a single page. Configure notifications and thresholds once &mdash; every agent in the farm inherits them. Enable the dashboard, add one DNS SRV record, done.</div>
 
     <div style="margin-bottom:28px">
       <picture>
@@ -711,11 +711,11 @@ body {
       </picture>
     </div>
 
-    <div class="features-grid" style="margin-bottom:0">
+    <div class="features-grid" style="margin-bottom:0;grid-template-columns:repeat(2,1fr)">
       <div class="feature card">
         <div class="icon">&#128268;</div>
         <h3>One Command Setup</h3>
-        <p><code>drainctl dashboard enable</code>, add one DNS SRV record, done. Agents discover it automatically.</p>
+        <p><code>drainctl dashboard enable</code>, add one DNS SRV record, done. Agents discover and register themselves.</p>
       </div>
       <div class="feature card">
         <div class="icon">&#128274;</div>
@@ -726,6 +726,11 @@ body {
         <div class="icon">&#128200;</div>
         <h3>Live Monitoring</h3>
         <p>State history chart, session gauges, event log, and multi-target notification editor &mdash; all in one page.</p>
+      </div>
+      <div class="feature card">
+        <div class="icon">&#9881;&#65039;</div>
+        <h3>Centralized Config</h3>
+        <p>Set notification targets, grace periods, and session thresholds once in the dashboard. Every agent pulls them automatically &mdash; 50 servers, one config.</p>
       </div>
     </div>
 

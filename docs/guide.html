@@ -696,27 +696,24 @@ drainctl register https://dashboard:49470 --pin</code></pre>
   The auto-generated certificate is valid for 1 year and renews automatically. When it renews, the fingerprint changes. Agents with the old fingerprint pinned will silently fail to report until they re-register. To re-pin after renewal, run <code>drainctl register --auto --pin</code> on each agent, or set <code>"auto_pin": true</code> in config and restart the service. Without pinning enabled, cert renewal is seamless.
 </div>
 
-<h4>Trusting the self-signed certificate</h4>
-<p>Browsers will show a certificate warning for self-signed certs. To suppress it, import the certificate into the Trusted Root store:</p>
-<pre><code># On the dashboard server (requires admin):
-drainctl dashboard trust-cert</code></pre>
-<p>This imports <code>dashboard-tls.crt</code> into the local machine's Trusted Root Certification Authorities store using <code>certutil</code>.</p>
-
-<p>For admin workstations that access the dashboard remotely, either copy the <code>.crt</code> file and run <code>trust-cert</code> locally, or use PowerShell:</p>
-<pre><code>$cert = "\\dashboard-server\c$\ProgramData\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt"
-Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Root</code></pre>
-
-<p>For farm-wide trust, distribute the <code>.crt</code> via Group Policy: <strong>Computer Configuration &rarr; Windows Settings &rarr; Security Settings &rarr; Public Key Policies &rarr; Trusted Root Certification Authorities</strong>.</p>
-
 <h4>Bring your own certificate</h4>
-<p>To use a CA-issued or internal PKI certificate instead of the self-signed one, set the paths in <code>config.json</code>:</p>
+<p>To use a CA-issued or internal PKI certificate instead of the auto-generated self-signed one:</p>
+<pre><code># CLI
+drainctl dashboard install-cert C:\certs\dashboard.pem C:\certs\dashboard-key.pem
+
+# PowerShell
+Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\dashboard-key.pem</code></pre>
+<p>This copies the PEM files into the DrainCtl data directory and updates <code>config.json</code> with the paths. Restart the service to use the new certificate.</p>
+
+<p>Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the event log.</p>
+
+<p>You can also set the paths directly in <code>config.json</code>:</p>
 <pre><code>{
   "dashboard": {
     "tls_cert": "C:\\certs\\dashboard.pem",
     "tls_key": "C:\\certs\\dashboard-key.pem"
   }
 }</code></pre>
-<p>Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the event log.</p>
 
 <h3>Dashboard configuration (config.json)</h3>
 <table>
@@ -732,6 +729,24 @@ Import-Certificate -FilePath $cert -CertStoreLocation Cert:\LocalMachine\Root</c
     <tr><td><code>dashboard.auto_pin</code></td><td>false</td><td>Auto-capture dashboard cert fingerprint on service registration.</td></tr>
   </tbody>
 </table>
+
+<h3>Centralized notification config</h3>
+<p>When an agent has a <code>dashboard.url</code> configured, it automatically pulls notification targets, grace period, and session warning threshold from the dashboard server. This means you only need to configure notifications once &mdash; on the dashboard &mdash; and all agents inherit the settings.</p>
+
+<p><strong>How it works:</strong></p>
+<ul>
+  <li>On startup, the agent fetches <code>GET /api/v1/notify-config</code> from the dashboard</li>
+  <li>The fetched targets, grace period, and session threshold <strong>replace</strong> local config.json values</li>
+  <li>The agent re-fetches every ~5 minutes to pick up changes made in the dashboard UI</li>
+  <li>If the dashboard is unreachable, the agent uses the last successfully fetched config</li>
+  <li>If no fetch ever succeeds, the agent falls back to local config.json targets</li>
+</ul>
+
+<p><strong>No dashboard URL?</strong> Agents without <code>dashboard.url</code> use their local <code>config.json</code> notification targets as before &mdash; nothing changes for standalone deployments.</p>
+
+<div class="callout">
+  <strong>Tip:</strong> For farms with dozens of servers, configure notifications entirely in the dashboard UI and leave <code>notifications</code> empty in each agent's config.json. The dashboard becomes the single source of truth.
+</div>
 
 <div class="callout warn">
   <strong>&#x26A0;&#xFE0F; Firewall</strong>

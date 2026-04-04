@@ -657,41 +657,30 @@ func dashboardCmd() *cobra.Command {
 		},
 	})
 
-	dcmd.AddCommand(&cobra.Command{
-		Use:   "trust-cert",
-		Short: "Import the dashboard TLS certificate into the local Trusted Root store (requires admin)",
-		Long: `Import the dashboard's auto-generated TLS certificate into the local machine's
-Trusted Root Certification Authorities store. This suppresses browser certificate
-warnings when accessing the dashboard.
+	installCertCmd := &cobra.Command{
+		Use:   "install-cert <cert.pem> <key.pem>",
+		Short: "Install a custom TLS certificate for the dashboard",
+		Long: `Copy a PEM certificate and private key into the DrainCtl data directory
+and update config.json so the dashboard uses them instead of the
+auto-generated self-signed certificate.
 
-Requires elevated (admin) privileges. Uses certutil under the hood.`,
+The files are copied to:
+  %ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.crt
+  %ProgramData%\LISS Technologies\LISSTech DrainCtl\dashboard-tls.key
+
+Restart the service after installing a new certificate.`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			certPath := dc.DefaultDataDir() + `\dashboard-tls.crt`
-
-			if _, err := os.Stat(certPath); err != nil {
-				return fmt.Errorf("certificate not found at %s — is the dashboard enabled?", certPath)
+			if err := dc.InstallCertificate(args[0], args[1], log); err != nil {
+				return err
 			}
-
-			// Verify we can read and parse the cert first.
-			fp, err := dashboard.CertFingerprint(dc.DefaultDataDir())
-			if err != nil {
-				return fmt.Errorf("read certificate: %w", err)
-			}
-
-			log(dc.LvlINF, fmt.Sprintf("importing certificate fingerprint=%s", fp))
-			log(dc.LvlINF, fmt.Sprintf("cert=%s", certPath))
-
-			out, err := exec.Command("certutil", "-addstore", "Root", certPath).CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("certutil: %w\n%s", err, string(out))
-			}
-
-			log(dc.LvlOK, "certificate imported into Trusted Root Certification Authorities")
-			log(dc.LvlINF, "browsers on this machine will now trust the dashboard's HTTPS certificate")
+			log(dc.LvlOK, "certificate installed")
+			log(dc.LvlINF, "restart the DrainCtl service to use the new certificate")
 			return nil
 		},
-	})
+	}
+	dcmd.AddCommand(installCertCmd)
 
 	return dcmd
 }

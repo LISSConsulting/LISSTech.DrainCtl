@@ -183,10 +183,11 @@ sign-binaries:
     Write-Host "   Certificate: $cn" -ForegroundColor DarkGray
     Write-Host "   Thumbprint:  $($thumbprint.Substring(0,8))..." -ForegroundColor DarkGray
 
-    # PowerShell module files (Authenticode)
+    # PowerShell files (Authenticode)
     foreach ($file in @(
         (Join-Path $moduleDir "LISSTech.DrainCtl.psm1"),
-        (Join-Path $moduleDir "LISSTech.DrainCtl.psd1")
+        (Join-Path $moduleDir "LISSTech.DrainCtl.psd1"),
+        "docs/install.ps1"
     )) {
         if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
         $name = [System.IO.Path]::GetFileName($file)

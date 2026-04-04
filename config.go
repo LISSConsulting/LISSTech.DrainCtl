@@ -389,6 +389,46 @@ func UpdateGracePeriod(minutes int, log LogFunc) error {
 	return saveConfigToFile(cfg, log)
 }
 
+// InstallCertificate copies a PEM cert and key into the data directory and
+// updates config.json so the dashboard uses them. The key file is written
+// with restrictive permissions (0600).
+func InstallCertificate(certPath, keyPath string, log LogFunc) error {
+	// Verify source files.
+	for _, f := range []string{certPath, keyPath} {
+		if _, err := os.Stat(f); err != nil {
+			return fmt.Errorf("file not found: %s", f)
+		}
+	}
+
+	dataDir := DefaultDataDir()
+	dstCert := dataDir + `\dashboard-tls.crt`
+	dstKey := dataDir + `\dashboard-tls.key`
+
+	certData, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("read cert: %w", err)
+	}
+	if err := os.WriteFile(dstCert, certData, 0644); err != nil {
+		return fmt.Errorf("write cert: %w", err)
+	}
+
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("read key: %w", err)
+	}
+	if err := os.WriteFile(dstKey, keyData, 0600); err != nil {
+		return fmt.Errorf("write key: %w", err)
+	}
+
+	cfg, err := LoadConfig(log)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg.Dashboard.TLSCert = dstCert
+	cfg.Dashboard.TLSKey = dstKey
+	return saveConfigToFile(cfg, log)
+}
+
 // ── Registry migration ──────────────────────────────────────────────────
 
 // MigrateFromRegistry reads the old registry-based config and writes it to
