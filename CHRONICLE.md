@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Tenth roam-mode pass complete.** 27 unit tests for `internal/dashboard/store.go` (`ServerState`): CRUD operations, history ring buffer, persistence roundtrip, concurrent access under `-race`.
+> Current state: **Eleventh roam-mode pass complete.** Test notification endpoint (`POST /api/v1/notify-test`) + dashboard UI: webhook HMAC secret field + Send Test button. 6 new handler tests.
 
 ## Completed Work
 
@@ -27,10 +27,13 @@
 | Roam #9 | `securityMiddleware`: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` headers added to all responses; HSTS remains TLS-only, chained on top | security, dashboard |
 | Roam #9 | `handleDeleteServer`: removed unreachable URL-path fallback (predated Go 1.22 `ServeMux` `PathValue`); 11 new tests for `handleServers`, `handleDeleteServer`, and Grace health counting | code quality, testing |
 | Roam #10 | 27 tests for `internal/dashboard/store.go` (`ServerState`) — `NewServerState` (empty dir, load existing, corrupt file), `Register` (idempotent, sets `RegisteredAt`), `Remove` (bool return), `IsRegistered`, `Update` (`LastResult`/`LastSeen`, unregistered no-op), `HostHistory` (newest-first, n-limit, n=0 returns all, ring cap at `historyMax`, ring evicts oldest), `All` (empty slice, hostname sort, snapshot isolation), persistence (register/remove/`LastResult` survive reload, tmp→rename pattern, valid JSON), concurrent access under `-race` | testing |
+| Roam #11 | `POST /api/v1/notify-test` — sends a test notification to all configured targets; returns 400 with error message when no targets or webhook fails; `testNotifyFunc` hook on `DashboardServer` for test isolation; 6 handler tests (no-targets→400, success→200, network error, config error, mock webhook call, HMAC signature header) | feature, dashboard, testing |
+| Roam #11 | Dashboard UI: webhook HMAC secret field — password input per notification target row (webhook-only, hidden for ntfy); populated from `loadNotifyConfig`, included in `saveNotifyConfig` payload; shows placeholder "Optional signing secret" | feature, UX, dashboard |
+| Roam #11 | Dashboard UI: "Send Test" button in settings modal — calls `POST /api/v1/notify-test`, shows "Sending…" while in-flight, displays success/error in `cfg-status`, re-enables on completion | feature, UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #10.)*
+*(All tracked items complete — nothing pending after Roam #11.)*
 
 ## Key Learnings
 
@@ -57,3 +60,5 @@
 - **`ServerState` history is separate from `servers` map**: `Update()` appends to `history[hostname]` regardless of whether the host is registered; only the `ServerInfo` side is guarded by `IsRegistered`. Tests for `Update` on an unregistered host must assert that `All()` remains empty (no `ServerInfo` created), while accepting that the ring buffer will have an entry. The ring is always in-memory and not persisted, so this is benign.
 - **`All()` returns value copies**: `ServerState.All()` copies each `*ServerInfo` by value before returning, so mutating the returned slice does not affect internal state. This is worth verifying explicitly (see `TestAll_ReturnsSnapshot`).
 - **`hostname()` helper in store_test.go**: Uses `string(rune('A'+n))` to generate `SRVA`…`SRVE` for concurrent tests. Simple enough to avoid an import; works for up to 26 hosts.
+- **`handleNotifyTest` uses `testNotifyFunc` injection**: `handleGetNotifyConfig` and `handlePutNotifyConfig` call `dc.LoadConfig` directly and have no unit tests (they require ProgramData). For `handleNotifyTest`, a `testNotifyFunc func() error` field on `DashboardServer` lets tests inject a fake function without touching the filesystem. The nil check keeps the production path clean.
+- **Webhook secret in settings UI**: The `secret` field is only included in the `PUT /api/v1/notify-config` payload when non-empty (saves bandwidth and avoids accidentally clearing secrets when the user hasn't changed them). The password input uses `autocomplete="new-password"` to prevent browser autofill pollution.

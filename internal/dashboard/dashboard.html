@@ -853,6 +853,38 @@
                 transform: translate(2px, 2px);
                 box-shadow: 1px 1px 0 var(--shadow);
             }
+            .btn-test {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 22px;
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.85rem;
+                font-weight: 700;
+                background: var(--card);
+                color: var(--fg);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                cursor: pointer;
+                transition:
+                    transform 0.1s,
+                    box-shadow 0.1s;
+            }
+            .btn-test:hover {
+                transform: translate(-2px, -2px);
+                box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+            }
+            .btn-test:active {
+                transform: translate(2px, 2px);
+                box-shadow: 1px 1px 0 var(--shadow);
+            }
+            .btn-test:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+                transform: none;
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+            }
             .settings-status {
                 font-size: 0.78rem;
                 margin-top: 10px;
@@ -1246,8 +1278,9 @@
 
                 <div class="settings-divider"></div>
 
-                <div style="display: flex; align-items: center; gap: 16px">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
                     <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
+                    <button class="btn-test" id="btn-test" onclick="sendTestNotification()">Send Test</button>
                     <div class="settings-status" id="cfg-status"></div>
                 </div>
             </div>
@@ -4978,6 +5011,7 @@
                 if (isNtfy && displayUrl.match(/^https?:\/\/ntfy\.sh\//)) {
                     displayUrl = displayUrl.replace(/^https?:\/\/ntfy\.sh\//, "");
                 }
+                var secretVal = (!isNtfy && t.secret) ? t.secret : "";
                 row.innerHTML =
                     '<div class="target-row-head">' +
                     '<select class="target-type" data-field="type"><option value="webhook"' +
@@ -4994,6 +5028,13 @@
                     (isNtfy ? "my-drainctl-alerts" : "https://hooks.example.com/...") +
                     '">' +
                     '<button class="btn-rm-target" title="Remove target">&times;</button>' +
+                    "</div>" +
+                    '<div class="webhook-secret-wrap" style="display:' + (isNtfy ? "none" : "flex") + ';align-items:center;gap:10px;margin-bottom:14px">' +
+                    '<div class="target-section-label" style="margin-bottom:0;white-space:nowrap">HMAC Secret</div>' +
+                    '<input class="settings-input" data-field="secret" type="password" value="' +
+                    secretVal.replace(/"/g, "&quot;") +
+                    '" placeholder="Optional signing secret" autocomplete="new-password" style="flex:1">' +
+                    '<span style="font-size:.72rem;color:var(--muted);white-space:nowrap">X-DrainCtl-Signature</span>' +
                     "</div>" +
                     '<div class="target-section-label">Triggers</div>' +
                     '<p class="target-desc">Which events send a notification to this target.</p>' +
@@ -5050,9 +5091,11 @@
                 var sel = row.querySelector(".target-type");
                 var urlInput = row.querySelector(".target-url");
                 var ntfyPrefix = row.querySelector(".ntfy-prefix");
+                var secretWrap = row.querySelector(".webhook-secret-wrap");
                 sel.addEventListener("change", function () {
                     var isN = sel.value === "ntfy";
                     ntfyPrefix.style.display = isN ? "inline" : "none";
+                    secretWrap.style.display = isN ? "none" : "flex";
                     urlInput.placeholder = isN ? "my-drainctl-alerts" : "https://hooks.example.com/...";
                     // If switching to ntfy and URL has full ntfy.sh URL, strip it
                     if (isN && urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
@@ -5111,11 +5154,15 @@
                         url = "https://ntfy.sh/" + url;
                     }
                     const repeat = parseInt(row.querySelector('[data-field="repeat"]').value) || 0;
+                    const secretInput = row.querySelector('[data-field="secret"]');
+                    const secret = (type === "webhook" && secretInput) ? secretInput.value : "";
                     const triggers = [];
                     row.querySelectorAll("input[data-trigger]").forEach((cb) => {
                         if (cb.checked) triggers.push(cb.dataset.trigger);
                     });
-                    targets.push({ type, url, triggers, repeat_minutes: repeat });
+                    const target = { type, url, triggers, repeat_minutes: repeat };
+                    if (secret) target.secret = secret;
+                    targets.push(target);
                 });
                 if (!valid) return null;
                 return targets;
@@ -5173,6 +5220,31 @@
                 } catch (e) {
                     st.textContent = "Error: " + e.message;
                     st.className = "settings-status err";
+                }
+            }
+            async function sendTestNotification() {
+                const st = document.getElementById("cfg-status");
+                const btn = document.getElementById("btn-test");
+                st.textContent = "";
+                st.className = "settings-status";
+                btn.disabled = true;
+                btn.textContent = "Sending...";
+                try {
+                    const r = await fetch("/api/v1/notify-test", { method: "POST" });
+                    if (r.ok) {
+                        st.textContent = "Test notification sent.";
+                        st.className = "settings-status ok";
+                    } else {
+                        const msg = await r.text();
+                        st.textContent = "Error: " + (msg || "HTTP " + r.status);
+                        st.className = "settings-status err";
+                    }
+                } catch (e) {
+                    st.textContent = "Error: " + e.message;
+                    st.className = "settings-status err";
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "Send Test";
                 }
             }
             document.addEventListener("keydown", (e) => {
