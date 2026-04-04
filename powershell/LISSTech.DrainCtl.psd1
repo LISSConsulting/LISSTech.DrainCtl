@@ -1,11 +1,11 @@
 @{
     RootModule        = 'LISSTech.DrainCtl.psm1'
-    ModuleVersion     = '26.93.11'
+    ModuleVersion     = '26.93.12'
     GUID              = 'a3f7c8e1-4b2d-4f9a-8e6c-1d5b3a9f7e2c'
     Author            = 'LISS Consulting, Corp.'
     CompanyName       = 'LISS Consulting, Corp.'
     Copyright         = '(c) 2026 LISS Consulting, Corp. All rights reserved.'
-    Description       = 'Monitor and manage Remote Desktop Session Host drain mode (TSServerDrainMode). Reads the registry natively via a Go shared library, maintains a 90-day JSONL audit trail of state changes, and attributes changes to specific users via Windows Security Event Log (Event ID 4657). Ships drainctl.exe CLI for N-central automation and drainctl.dll for PowerShell cmdlet integration. Supports the DrainCtl Windows Service for continuous monitoring.'
+    Description       = 'Know the instant someone blocks new connections on your RDSH servers. DrainCtl monitors drain mode in real time, tracks who changed it, counts active sessions, and alerts you before capacity runs out. Includes a multi-server dashboard with Kerberos SSO, webhook and ntfy.sh notifications with granular triggers, and a 90-day audit trail. Works standalone or as a Windows Service.'
 
     PowerShellVersion      = '5.1'
     CompatiblePSEditions   = @('Desktop', 'Core')
@@ -36,10 +36,10 @@
 
     PrivateData = @{
         PSData = @{
-            Tags         = @('RDSH', 'RemoteDesktop', 'DrainMode', 'TerminalServer', 'NCentral', 'Windows', 'Monitoring')
+            Tags         = @('RDSH', 'RemoteDesktop', 'DrainMode', 'TerminalServer', 'RDS', 'Sessions', 'Windows', 'Monitoring', 'Dashboard', 'Notifications')
             LicenseUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl'
-            ReleaseNotes = 'v26.93.11: CalVer versioning, enhanced pipe output, service event log entries.'
+            ReleaseNotes = 'v27: JSON config (migrated from registry), multi-target webhook/ntfy notifications with granular triggers (drain_on, drain_off, alert, session_warning, etc.), WTS session tracking with utilization alerts, uPlot dashboard with session gauges, dark mode, EV code-signed.'
         }
     }
 }
