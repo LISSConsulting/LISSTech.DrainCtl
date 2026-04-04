@@ -5,10 +5,10 @@ package dashboard
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"golang.org/x/sys/windows"
 )
 
 // SRVService is the SRV service name used for dashboard discovery.
@@ -45,36 +45,21 @@ func DiscoverDashboardURL(log dc.LogFunc) string {
 }
 
 // machineDomain returns the DNS domain the machine is joined to, or empty
-// if workgroup/standalone. Uses USERDNSDOMAIN first (set for domain logons),
-// falls back to parsing the machine's FQDN.
+// if workgroup/standalone. Uses GetComputerNameEx(ComputerNameDnsDomain),
+// the canonical Win32 API for domain discovery. Works under SYSTEM.
 func machineDomain() string {
-	// USERDNSDOMAIN is set when a domain user is logged on. The service
-	// runs as SYSTEM which may not have it, so also try the FQDN.
-	if d := os.Getenv("USERDNSDOMAIN"); d != "" {
-		return strings.ToLower(d)
-	}
-
-	hostname, err := os.Hostname()
-	if err != nil {
+	var size uint32
+	// First call to get buffer size.
+	_ = windows.GetComputerNameEx(windows.ComputerNameDnsDomain, nil, &size)
+	if size == 0 {
 		return ""
 	}
 
-	// Resolve the hostname to get the FQDN.
-	addrs, err := net.LookupHost(hostname)
-	if err != nil || len(addrs) == 0 {
+	buf := make([]uint16, size)
+	if err := windows.GetComputerNameEx(windows.ComputerNameDnsDomain, &buf[0], &size); err != nil {
 		return ""
 	}
 
-	// Reverse-lookup to get FQDN.
-	names, err := net.LookupAddr(addrs[0])
-	if err != nil || len(names) == 0 {
-		return ""
-	}
-
-	fqdn := strings.TrimSuffix(names[0], ".")
-	parts := strings.SplitN(fqdn, ".", 2)
-	if len(parts) < 2 {
-		return ""
-	}
-	return strings.ToLower(parts[1])
+	domain := windows.UTF16ToString(buf[:size])
+	return strings.ToLower(domain)
 }
