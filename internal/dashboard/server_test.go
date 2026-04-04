@@ -5,6 +5,7 @@ package dashboard
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -824,5 +825,154 @@ func TestHandleDeleteServer_IdempotentDeleteReturns404(t *testing.T) {
 	}
 	if code := deleteOnce(); code != http.StatusNotFound {
 		t.Errorf("second delete: status = %d, want %d (host already gone)", code, http.StatusNotFound)
+	}
+}
+
+// ── handleNotifyTest ──────────────────────────────────────────────────────────
+
+func TestHandleNotifyTest_NoTargets_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testNotifyFunc = func() error {
+		return fmt.Errorf("no notification targets configured")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (no targets should yield 400)", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "no notification targets configured") {
+		t.Errorf("body = %q, want error message in body", w.Body.String())
+	}
+}
+
+func TestHandleNotifyTest_Success_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+	called := false
+	ds.testNotifyFunc = func() error {
+		called = true
+		return nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !called {
+		t.Error("testNotifyFunc was not called")
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK {
+		t.Error("ok = false, want true")
+	}
+}
+
+func TestHandleNotifyTest_NetworkError_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testNotifyFunc = func() error {
+		return fmt.Errorf("connection refused")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleNotifyTest_ConfigError_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testNotifyFunc = func() error {
+		return fmt.Errorf("failed to load config: open config.json: no such file or directory")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (config errors surface as 400)", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleNotifyTest_MockWebhookReceivesRequest(t *testing.T) {
+	// Spin up a local webhook receiver.
+	received := make(chan struct{}, 1)
+	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer webhookSrv.Close()
+
+	ds := newTestServer(t)
+	// Simulate what the real path does: send to a configured target.
+	target := dc.NotificationTarget{
+		Type:    "webhook",
+		URL:     webhookSrv.URL,
+		Triggers: dc.DefaultTriggers,
+	}
+	ds.testNotifyFunc = func() error {
+		return dc.SendTestNotification([]dc.NotificationTarget{target}, nil)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	select {
+	case <-received:
+		// webhook was called
+	default:
+		t.Error("webhook server was not called")
+	}
+}
+
+func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testing.T) {
+	var gotSig string
+	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-DrainCtl-Signature")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer webhookSrv.Close()
+
+	ds := newTestServer(t)
+	target := dc.NotificationTarget{
+		Type:    "webhook",
+		URL:     webhookSrv.URL,
+		Secret:  "test-secret",
+		Triggers: dc.DefaultTriggers,
+	}
+	ds.testNotifyFunc = func() error {
+		return dc.SendTestNotification([]dc.NotificationTarget{target}, nil)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.HasPrefix(gotSig, "sha256=") {
+		t.Errorf("X-DrainCtl-Signature = %q, want sha256=... prefix", gotSig)
 	}
 }

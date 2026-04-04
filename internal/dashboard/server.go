@@ -32,6 +32,10 @@ type DashboardServer struct {
 	log         dc.LogFunc
 	server      *http.Server
 	fingerprint string // SHA-256 fingerprint of the TLS certificate
+
+	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
+	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
+	testNotifyFunc func() error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -72,6 +76,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("DELETE /api/v1/servers/{host}", wg(http.HandlerFunc(ds.handleDeleteServer)))
 	mux.Handle("GET /api/v1/notify-config", wg(http.HandlerFunc(ds.handleGetNotifyConfig)))
 	mux.Handle("PUT /api/v1/notify-config", wg(http.HandlerFunc(ds.handlePutNotifyConfig)))
+	mux.Handle("POST /api/v1/notify-test", wg(http.HandlerFunc(ds.handleNotifyTest)))
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -326,6 +331,37 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		user = auth.Username
 	}
 	ds.log(dc.LvlINF, "dashboard=notify-config-updated", fmt.Sprintf("user=%s", user))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleNotifyTest sends a test notification to all currently configured targets.
+func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
+	// testNotifyFunc can be injected in tests to avoid real config/network I/O.
+	fn := ds.testNotifyFunc
+	if fn == nil {
+		fn = func() error {
+			cfg, err := dc.LoadConfig(ds.log)
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			return dc.SendTestNotification(cfg.Notifications, ds.log)
+		}
+	}
+
+	auth := GetAuthInfo(r)
+	user := ""
+	if auth != nil {
+		user = auth.Username
+	}
+	ds.log(dc.LvlINF, "dashboard=notify-test", fmt.Sprintf("user=%s", user))
+
+	if err := fn(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
