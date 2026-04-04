@@ -107,10 +107,11 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		ln = tls.NewListener(ln, tlsCfg)
 	}
 
-	// Wrap handler with HSTS header when TLS is active.
-	var handler http.Handler = mux
+	// Apply security headers to all responses.
+	// HSTS is additionally applied when TLS is active.
+	var handler http.Handler = securityMiddleware(mux)
 	if tlsCfg != nil {
-		handler = hstsMiddleware(mux)
+		handler = hstsMiddleware(handler)
 	}
 
 	ds.server = &http.Server{
@@ -232,13 +233,6 @@ func (ds *DashboardServer) handleServers(w http.ResponseWriter, r *http.Request)
 func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
 	if host == "" {
-		// Fallback: parse from URL path for compatibility.
-		parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
-		if len(parts) > 0 {
-			host = parts[len(parts)-1]
-		}
-	}
-	if host == "" {
 		http.Error(w, "host parameter required", http.StatusBadRequest)
 		return
 	}
@@ -351,7 +345,7 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	servers := ds.state.All()
 
-	healthy, alerting, unknown := 0, 0, 0
+	healthy, grace, alerting, unknown := 0, 0, 0, 0
 	for _, s := range servers {
 		if s.LastResult == nil {
 			unknown++
@@ -360,6 +354,8 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		switch s.LastResult.Status {
 		case "Alert":
 			alerting++
+		case "Grace":
+			grace++
 		default:
 			healthy++
 		}
@@ -370,6 +366,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Version  string `json:"version"`
 		Servers  int    `json:"servers"`
 		Healthy  int    `json:"healthy"`
+		Grace    int    `json:"grace"`
 		Alerting int    `json:"alerting"`
 		Unknown  int    `json:"unknown"`
 	}{
@@ -377,6 +374,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Version:  dc.Version,
 		Servers:  len(servers),
 		Healthy:  healthy,
+		Grace:    grace,
 		Alerting: alerting,
 		Unknown:  unknown,
 	}
@@ -420,6 +418,17 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(records)
+}
+
+// securityMiddleware adds defensive HTTP security headers to all responses.
+func securityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // hstsMiddleware adds Strict-Transport-Security headers to all responses.
