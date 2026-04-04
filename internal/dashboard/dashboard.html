@@ -55,7 +55,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--fg);line-
 
 /* Chart */
 .chart-wrap{margin-bottom:24px}
-.chart{border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);background:var(--card);padding:16px 18px;position:relative}
+.chart{border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);background:var(--card);padding:16px 18px;position:relative;overflow:hidden}
 .chart .uplot{width:100%!important;min-width:0}.chart canvas{border-radius:6px}
 .chart-legend{display:flex;gap:16px;justify-content:center;margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--muted)}
 .chart-legend span{display:flex;align-items:center;gap:4px}
@@ -367,6 +367,7 @@ function renderChart(){
   const data=[xs];
   layers.forEach((l,li)=>{data.push(history.map(d=>{const total=d.t||1;let cum=0;for(let j=0;j<=li;j++)cum+=(d[layers[j]]||0);return cum/total*100;}));});
   if(chartInstance){chartInstance.destroy();chartInstance=null;}
+  el.innerHTML='';
   const opts={width:el.clientWidth,height:200,cursor:{show:false},legend:{show:false},select:{show:false},
     axes:[
       {// X-axis: relative time
