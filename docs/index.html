@@ -349,6 +349,7 @@ body {
   border: 1px solid var(--border);
   margin: 12px 0;
   display: block;
+  white-space: pre;
   overflow-x: auto;
 }
 .install-card p { font-size: 0.88rem; color: var(--muted); }
@@ -573,7 +574,7 @@ drainctl dashboard enable
 Restart-Service DrainCtl
 
 <span style="color:var(--muted)"># On each RDSH host:</span>
-drainctl register https://dashboard:49470</code>
+drainctl register http://dashboard:49470</code>
         <ul>
           <li>Health, grace, and alert status at a glance</li>
           <li>Session utilization gauges per server</li>
