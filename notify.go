@@ -4,6 +4,9 @@ package drainctl
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -90,7 +93,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		// Dispatch to backend.
 		switch target.Type {
 		case "webhook":
-			if err := sendWebhook(target.URL, payload); err != nil {
+			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
 				LogMsg(log, LvlWRN, "webhook notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
 			} else {
 				log(LvlINF, "notify=webhook", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
@@ -158,7 +161,7 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 
 		switch target.Type {
 		case "webhook":
-			if err := sendWebhook(target.URL, payload); err != nil {
+			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
 				LogMsg(log, LvlERR, "webhook test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
 				lastErr = err
 			} else {
@@ -181,7 +184,9 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 }
 
 // sendWebhook performs an HTTP POST with a JSON payload to the given URL.
-func sendWebhook(url string, payload map[string]any) error {
+// If secret is non-empty the request includes an X-DrainCtl-Signature header
+// containing the HMAC-SHA256 of the body: "sha256=<hex>".
+func sendWebhook(url string, secret string, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -193,6 +198,9 @@ func sendWebhook(url string, payload map[string]any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DrainCtl/"+Version)
+	if secret != "" {
+		req.Header.Set("X-DrainCtl-Signature", webhookSignature(secret, body))
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -204,6 +212,14 @@ func sendWebhook(url string, payload map[string]any) error {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// webhookSignature returns the HMAC-SHA256 signature of body using secret,
+// formatted as "sha256=<hex>" (compatible with GitHub-style webhook signatures).
+func webhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 // sendNtfy posts a message to an ntfy.sh-compatible endpoint.

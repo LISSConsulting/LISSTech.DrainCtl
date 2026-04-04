@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -65,6 +66,7 @@ type NotificationTarget struct {
 	URL           string    `json:"url"`
 	Triggers      []Trigger `json:"triggers"`                 // empty = DefaultTriggers
 	RepeatMinutes int       `json:"repeat_minutes,omitempty"` // 0 = once only
+	Secret        string    `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks
 }
 
 // HasTrigger returns true if the target subscribes to the given trigger.
@@ -216,6 +218,22 @@ func (c *Config) Validate(log LogFunc) {
 	if c.SessionWarningThreshold > 100 {
 		c.SessionWarningThreshold = 100
 	}
+
+	// Strip notification targets with invalid URL schemes (must be http or https).
+	c.Notifications = slices.DeleteFunc(c.Notifications, func(t NotificationTarget) bool {
+		if t.URL == "" {
+			return false // empty URL is handled elsewhere
+		}
+		lower := strings.ToLower(t.URL)
+		if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+			if log != nil {
+				LogMsg(log, LvlWRN, "notification target has invalid URL scheme, ignored",
+					fmt.Sprintf("url=%s", t.URL))
+			}
+			return true
+		}
+		return false
+	})
 
 	// Default empty triggers to DefaultTriggers, strip invalid trigger names.
 	for i := range c.Notifications {
