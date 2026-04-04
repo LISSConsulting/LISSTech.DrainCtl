@@ -42,7 +42,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		log = dc.DiscardLogger()
 	}
 
-	state := NewServerState(dataDir)
+	state := NewServerState(dataDir, log)
 
 	ds := &DashboardServer{
 		state: state,
