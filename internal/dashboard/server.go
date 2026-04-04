@@ -92,8 +92,14 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		ln = tls.NewListener(ln, tlsCfg)
 	}
 
+	// Wrap handler with HSTS header when TLS is active.
+	var handler http.Handler = mux
+	if tlsCfg != nil {
+		handler = hstsMiddleware(mux)
+	}
+
 	ds.server = &http.Server{
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -301,4 +307,12 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(dashboardHTML)
+}
+
+// hstsMiddleware adds Strict-Transport-Security headers to all responses.
+func hstsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000") // 2 years
+		next.ServeHTTP(w, r)
+	})
 }

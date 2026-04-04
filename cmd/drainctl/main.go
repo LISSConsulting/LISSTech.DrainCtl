@@ -603,6 +603,20 @@ func dashboardCmd() *cobra.Command {
 		},
 	})
 
+	dcmd.AddCommand(&cobra.Command{
+		Use:   "fingerprint",
+		Short: "Show the dashboard TLS certificate fingerprint",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dataDir := dc.DefaultDataDir()
+			fp, err := dashboard.CertFingerprint(dataDir)
+			if err != nil {
+				return fmt.Errorf("read certificate: %w", err)
+			}
+			fmt.Println(fp)
+			return nil
+		},
+	})
+
 	return dcmd
 }
 

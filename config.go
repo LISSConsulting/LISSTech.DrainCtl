@@ -99,12 +99,13 @@ type Config struct {
 
 // DashboardJSON holds dashboard settings in config.json.
 type DashboardJSON struct {
-	Enabled bool   `json:"enabled"`
-	Port    int    `json:"port"`
-	Group   string `json:"group"`
-	URL     string `json:"url,omitempty"`
-	TLSCert string `json:"tls_cert,omitempty"` // path to PEM certificate file
-	TLSKey  string `json:"tls_key,omitempty"`  // path to PEM private key file
+	Enabled        bool   `json:"enabled"`
+	Port           int    `json:"port"`
+	Group          string `json:"group"`
+	URL            string `json:"url,omitempty"`
+	TLSCert        string `json:"tls_cert,omitempty"`        // path to PEM certificate file
+	TLSKey         string `json:"tls_key,omitempty"`         // path to PEM private key file
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // SHA-256 cert fingerprint for pinning (agent-side)
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -120,12 +121,13 @@ type ServiceConfig struct {
 
 // DashboardConfig holds runtime dashboard parameters.
 type DashboardConfig struct {
-	Enabled bool
-	Port    int
-	Group   string
-	URL     string // agent-side: dashboard URL to report to
-	TLSCert string // path to PEM certificate file
-	TLSKey  string // path to PEM private key file
+	Enabled        bool
+	Port           int
+	Group          string
+	URL            string // agent-side: dashboard URL to report to
+	TLSCert        string // path to PEM certificate file
+	TLSKey         string // path to PEM private key file
+	TLSFingerprint string // SHA-256 cert fingerprint for pinning (agent-side)
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -164,12 +166,13 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 // ToDashboardConfig converts the JSON config to runtime DashboardConfig.
 func (c *Config) ToDashboardConfig() DashboardConfig {
 	return DashboardConfig{
-		Enabled: c.Dashboard.Enabled,
-		Port:    c.Dashboard.Port,
-		Group:   c.Dashboard.Group,
-		URL:     c.Dashboard.URL,
-		TLSCert: c.Dashboard.TLSCert,
-		TLSKey:  c.Dashboard.TLSKey,
+		Enabled:        c.Dashboard.Enabled,
+		Port:           c.Dashboard.Port,
+		Group:          c.Dashboard.Group,
+		URL:            c.Dashboard.URL,
+		TLSCert:        c.Dashboard.TLSCert,
+		TLSKey:         c.Dashboard.TLSKey,
+		TLSFingerprint: c.Dashboard.TLSFingerprint,
 	}
 }
 
