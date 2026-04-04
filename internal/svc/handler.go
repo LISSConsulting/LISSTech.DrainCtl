@@ -258,13 +258,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", err))
 		} else {
 			useRemoteConfig = true
-			notifyTargets = remote.Notifications
-			if remote.SessionWarningThreshold > 0 {
-				cfg.SessionWarningThreshold = remote.SessionWarningThreshold
-			}
-			if remote.GracePeriod > 0 {
-				cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
-			}
+			applyRemoteConfig(remote, &cfg, &notifyTargets)
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=notify-config-fetched targets=%d threshold=%d grace=%d",
 				len(remote.Notifications), remote.SessionWarningThreshold, remote.GracePeriod))
 		}
@@ -322,13 +316,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 							fmt.Sprintf("error=%q", err))
 					} else {
 						useRemoteConfig = true
-						notifyTargets = remote.Notifications
-						if remote.SessionWarningThreshold > 0 {
-							cfg.SessionWarningThreshold = remote.SessionWarningThreshold
-						}
-						if remote.GracePeriod > 0 {
-							cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
-						}
+						applyRemoteConfig(remote, &cfg, &notifyTargets)
 					}
 				}
 			}
@@ -555,6 +543,17 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
 		dashboard.ReportState(dashCfg.URL, result, log)
+	}
+}
+
+// applyRemoteConfig updates service config from dashboard-sourced notification settings.
+func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConfig, targets *[]dc.NotificationTarget) {
+	*targets = remote.Notifications
+	if remote.SessionWarningThreshold >= 0 {
+		cfg.SessionWarningThreshold = remote.SessionWarningThreshold
+	}
+	if remote.GracePeriod > 0 {
+		cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
 	}
 }
 
