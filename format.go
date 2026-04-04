@@ -128,6 +128,9 @@ type HistoryRecord struct {
 	StateDurationSeconds *int   `json:"state_duration_seconds"`
 	Changed              bool   `json:"changed"`
 	ChangedBy            string `json:"changed_by,omitempty"`
+	ActiveSessions       int    `json:"active_sessions,omitempty"`
+	TotalSessions        int    `json:"total_sessions,omitempty"`
+	MaxSessions          int    `json:"max_sessions,omitempty"`
 	ExitCode             int    `json:"exit_code"`
 }
 
@@ -168,6 +171,9 @@ func AuditToHistory(rec AuditRecord, stateDur *int) HistoryRecord {
 		Changed:              rec.Changed,
 		ChangedBy:            rec.ChangedBy,
 		StateDurationSeconds: stateDur,
+		ActiveSessions:       rec.ActiveSessions,
+		TotalSessions:        rec.TotalSessions,
+		MaxSessions:          rec.MaxSessions,
 		ExitCode:             rec.ExitCode,
 	}
 	if !rec.KeyModified.IsZero() {
