@@ -540,6 +540,117 @@ func TestSendNotification_WebhookPayloadOmitsSessionsWhenNil(t *testing.T) {
 	}
 }
 
+// ── SendTestNotification ──────────────────────────────────────────────────────
+
+func TestSendTestNotification_NoTargets_ReturnsError(t *testing.T) {
+	err := SendTestNotification(nil, nil)
+	if err == nil {
+		t.Error("expected error for nil targets, got nil")
+	}
+	err2 := SendTestNotification([]NotificationTarget{}, nil)
+	if err2 == nil {
+		t.Error("expected error for empty targets, got nil")
+	}
+}
+
+func TestSendTestNotification_EmptyURLTargets_ReturnsError(t *testing.T) {
+	// Targets with empty URLs count as "no targets".
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: ""},
+	}
+	if err := SendTestNotification(targets, nil); err == nil {
+		t.Error("expected error when all target URLs are empty, got nil")
+	}
+}
+
+func TestSendTestNotification_WebhookSuccess(t *testing.T) {
+	var count int32
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&count, 1)
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		capturedBody = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
+	}
+	if err := SendTestNotification(targets, nil); err != nil {
+		t.Fatalf("SendTestNotification error: %v", err)
+	}
+	if atomic.LoadInt32(&count) != 1 {
+		t.Errorf("webhook called %d times, want 1", count)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if got := payload["event"]; got != "test" {
+		t.Errorf("event = %v, want 'test'", got)
+	}
+}
+
+func TestSendTestNotification_WebhookError_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
+	}
+	if err := SendTestNotification(targets, nil); err == nil {
+		t.Error("expected error for webhook 500 response, got nil")
+	}
+}
+
+func TestSendTestNotification_NtfySuccess(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "ntfy", URL: srv.URL, Triggers: DefaultTriggers},
+	}
+	if err := SendTestNotification(targets, nil); err != nil {
+		t.Fatalf("SendTestNotification error: %v", err)
+	}
+	if atomic.LoadInt32(&count) != 1 {
+		t.Errorf("ntfy endpoint called %d times, want 1", count)
+	}
+}
+
+func TestSendTestNotification_MultipleTargets_CallsAll(t *testing.T) {
+	var count1, count2 int32
+	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count1, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv1.Close()
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count2, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv2.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv1.URL},
+		{Type: "ntfy", URL: srv2.URL},
+	}
+	if err := SendTestNotification(targets, nil); err != nil {
+		t.Fatalf("SendTestNotification error: %v", err)
+	}
+	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
+		t.Errorf("calls: srv1=%d srv2=%d, want 1+1", count1, count2)
+	}
+}
+
 // TestSendNotification_NtfySessionWarningMessage verifies that the ntfy body for
 // session_warning includes the utilization percentage and session counts rather
 // than the generic status message.
