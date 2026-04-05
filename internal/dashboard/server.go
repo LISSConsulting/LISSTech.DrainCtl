@@ -123,7 +123,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 
 	// Apply security headers to all responses.
 	// HSTS is additionally applied when TLS is active.
-	var handler http.Handler = securityMiddleware(mux)
+	handler := securityMiddleware(mux)
 	if tlsCfg != nil {
 		handler = hstsMiddleware(handler)
 	}
