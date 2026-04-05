@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Thirty-first roam-mode pass complete.** Two dashboard bug fixes: (1) `renderHistoryModal` was reading `e.time` but `CheckResult` serializes as `"timestamp"` — all history modal timestamps were silently blank; (2) `stateHistory` was accumulating `t=0` entries on polls with no registered servers; `stateHistory[0].t === 0` caused `renderChart` to show "Collecting data..." for up to 30 minutes after servers registered on a fresh install.
+> Current state: **Thirty-second roam-mode pass complete.** Two correctness fixes: (1) `Config.Validate` now strips `NotificationTarget` entries with unknown `Type` (anything other than `"webhook"` or `"ntfy"`) — such targets silently never fired; (2) `internal/dashboard/client.go` now drains response bodies in `negotiateRequest` (401 path), `ReportState` (success path), and `RemoveServer` (success path) before `Close()`, enabling HTTP keep-alive connection reuse. 3 new tests.
 
 ## Completed Work
 
@@ -91,10 +91,12 @@
 | Roam #30 | Dashboard `render()` prunes stale `prev` map entries after each refresh — servers removed from the dashboard left behind entries that could surface as false "transition" events if the server was later re-added; 3 new tests (`TestSendNotification_WebhookPayloadIncludesSessions`, `_OmitsSessionsWhenNil`, `_NtfySessionWarningMessage`) | correctness, dashboard, testing |
 | Roam #31 | Dashboard `renderHistoryModal` bug fix: `e.time` → `e.timestamp` — `CheckResult` serializes its timestamp as `"timestamp"` in JSON, so `e.time` was always `undefined`; all history modal entries showed a blank timestamp | correctness, dashboard |
 | Roam #31 | Dashboard `stateHistory` bug fix: `push` is now conditional on `t > 0` — polls while no servers are registered produced `{ t: 0 }` entries; `renderChart` exits early when `stateHistory[0].t === 0`, so the chart would not appear for up to 30 minutes (MAX_HIST × 30 s) after the first servers registered on a fresh install | correctness, dashboard |
+| Roam #32 | `Config.Validate`: unknown `NotificationTarget.Type` values now stripped with a warning log — a target whose `Type` was neither `"webhook"` nor `"ntfy"` was previously saved to config and silently never fired notifications; 3 new tests (`TestValidate_StripsUnknownType`, `_UnknownTypeLogsWarning`, `_PreservesValidTypes`) | correctness, config, testing |
+| Roam #32 | `internal/dashboard/client.go` body drain: `negotiateRequest` 401 branch, `ReportState` success path, and `RemoveServer` success path now drain response bodies via `io.Copy(io.Discard, ...)` before `Close()` — Go's `http.Transport` requires the body to be fully read before connection reuse; `notify.go` already did this but the dashboard client did not | correctness, performance |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #31.)*
+*(All tracked items complete — nothing pending after Roam #32.)*
 
 ## Key Learnings
 
@@ -165,3 +167,5 @@
 - **400 vs 500 for input validation errors**: `UpdateNotifySettings` can fail for two distinct reasons — a local I/O error (config file unreadable → 500 is correct) or an out-of-range value supplied by the caller (→ 400). The handler is the HTTP boundary; it must validate HTTP input and map validation errors to 4xx before delegating to the domain function. Duplicating the range check in the handler is correct: the domain function enforces invariants, the handler enforces the HTTP contract.
 - **HTTP response body must be drained for connection reuse**: Go's `http.Transport` does not reuse a keep-alive connection unless the response body is read to completion before `Close()`. `defer resp.Body.Close()` alone is not sufficient — add `_, _ = io.Copy(io.Discard, resp.Body)` before returning to drain any unread bytes. This applies to every outbound HTTP call that cares about connection pool efficiency (notifications, config fetches, health probes).
 - **`AuditStore.Prune` vs `MemAuditStore.Prune` consistency**: Both rewrite kept records to a file; both should handle `json.Marshal` errors identically (skip the record). `AuditRecord` contains only primitive-typed fields so Marshal never actually fails, but silently writing an empty line on error is wrong — `scanRecords` would skip it on re-read, silently dropping the record. The correct pattern matches `MemAuditStore`: `if err != nil { continue }`.
+- **`Config.Validate` must reject unknown `NotificationTarget.Type`**: Stripping URL-scheme violations is not enough — an unrecognised `Type` (e.g. `"email"` or `""`) passes URL validation but falls through the `switch target.Type` in `SendNotification` without firing or logging, creating a silent black hole. Strip at the same `Validate()` call site where URL schemes are validated, so the guard applies uniformly to every save path (config file, dashboard API, `UpdateNotifySettings`).
+- **`negotiateRequest` 401 body drain**: The 401 response path called `resp.Body.Close()` without draining first. On HTTP/1.1 keep-alive connections this prevents the transport from reusing the connection for the retried (authenticated) request. Drain with `_, _ = io.Copy(io.Discard, resp.Body)` before `Close()`. The same applies to any non-decode response path — `ReportState` and `RemoveServer` success returns did not drain either.

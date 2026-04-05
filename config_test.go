@@ -299,6 +299,65 @@ func TestValidate_DashboardGroupPreservesNormal(t *testing.T) {
 	}
 }
 
+// ── Validate — type validation ───────────────────────────────────────────────
+
+func TestValidate_StripsUnknownType(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook"},
+		{Type: "email", URL: "https://example.com/email"}, // unknown
+		{Type: "", URL: "https://example.com/empty"},      // unknown (empty)
+		{Type: "ntfy", URL: "https://ntfy.sh/topic"},
+		{Type: "slack", URL: "https://hooks.slack.com/foo"}, // unknown
+	}
+
+	cfg.Validate(nil)
+
+	if len(cfg.Notifications) != 2 {
+		t.Errorf("expected 2 valid notifications after Validate, got %d", len(cfg.Notifications))
+	}
+	for _, n := range cfg.Notifications {
+		if n.Type != "webhook" && n.Type != "ntfy" {
+			t.Errorf("Validate kept notification with unknown type %q", n.Type)
+		}
+	}
+}
+
+func TestValidate_UnknownTypeLogsWarning(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "fax", URL: "https://example.com/fax"},
+	}
+
+	var warned bool
+	cfg.Validate(func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warned = true
+		}
+	})
+
+	if !warned {
+		t.Error("expected Validate to log a warning for unknown notification type")
+	}
+	if len(cfg.Notifications) != 0 {
+		t.Errorf("expected 0 notifications after stripping unknown type, got %d", len(cfg.Notifications))
+	}
+}
+
+func TestValidate_PreservesValidTypes(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook"},
+		{Type: "ntfy", URL: "https://ntfy.sh/topic"},
+	}
+
+	cfg.Validate(nil)
+
+	if len(cfg.Notifications) != 2 {
+		t.Errorf("expected both valid-type targets to survive Validate, got %d", len(cfg.Notifications))
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {
