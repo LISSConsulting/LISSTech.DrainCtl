@@ -136,10 +136,11 @@
 | Roam #43 | Dashboard status pill on auth failure: a 401 or 403 response from `/api/v1/servers` now sets the status pill to "Auth Error" (amber) instead of leaving it at its previous stale "Live" value — operators can distinguish an authentication failure from a connectivity loss | correctness, UX, dashboard |
 | Roam #44 | B5: landing page inline styles eliminated — `.section--shaded` (background + top/bottom border on `#how`, `#install`), `.section--bordered` (border-only on `#new`), `.install-cards` (3-col install grid), `.wrap--wide` (1200px), `.install-cta` (push-to-bottom CTA in install cards), `.btn--block` (full-width flex install buttons), `.btn-psgallery` (PSGallery blue), `.features-grid--2col` (dashboard 2-col features grid); `@media (max-width:640px)` fragile `[style*="grid"] !important` attribute selector replaced with `.install-cards` class rule | code quality, docs |
 | Roam #44 | B9: `internal/dashboard/mock.js` → `testdata/mock.js`; `mock_dev.go` + `mock_prod.go` compile-time pair added — devmode builds (−tags devmode) embed `testdata/mock.js` and register `GET /mock.js` on the server mux so the `?mock` developer mode works end-to-end via the dev server; production builds compile a no-op stub | code quality, dashboard |
+| Roam #45 | B4: Dashboard settings modal unsaved-changes guard — `_cfgDirty` flag tracks any modification to notification targets (type, URL, secret, trigger pills, repeat interval), grace period, or session-warning threshold; closing the modal via close button, overlay click, or Escape prompts "You have unsaved changes. Close without saving?" when dirty; flag resets on `loadNotifyConfig` open, after DOM population (so initial row population does not set dirty), and on successful save | UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #44.)*
+*(All tracked items complete — nothing pending after Roam #45.)*
 
 ## Key Learnings
 
