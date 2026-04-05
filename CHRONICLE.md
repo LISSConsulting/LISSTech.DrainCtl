@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Twenty-ninth roam-mode pass complete.** Three improvements: (1) `pipeConn.SetDeadline` now forwards to `c.file.SetDeadline(t)` — the stored deadline was never applied to the underlying `os.File`, making all pipe I/O timeouts silently no-ops; server-side handles (opened with `FILE_FLAG_OVERLAPPED`) now enforce the 5 s deadline; (2) `renderHistoryModal` XSS: timestamp NaN fallback used raw `e.time` unescaped in `innerHTML`, fixed to `esc(e.time)`; (3) `internal/pipe/pipe_test.go` — 7 new tests covering all `handlePipeConn` command paths via `net.Pipe()`.
+> Current state: **Thirtieth roam-mode pass complete.** Three improvements: (1) webhook/ntfy notification payload now includes `sessions` field (active, total, max, utilization_pct) when session data is available — enables webhook consumers to see session state on all triggers, and makes `session_warning` payloads actually useful; (2) ntfy `session_warning` body now reads "Session utilization at N% (X/Y sessions)." instead of the generic status message that doesn't mention sessions; (3) dashboard `render()` now prunes stale `prev` entries for servers that have been removed — prevents removed-then-re-added servers from showing a spurious transition event from stale pre-removal state; 3 new tests.
 
 ## Completed Work
 
@@ -86,10 +86,13 @@
 | Roam #29 | `pipeConn.SetDeadline` forwarding fix: the stored `c.deadline` field was never applied to the underlying `os.File`; all `conn.SetDeadline()` calls in `handlePipeConn` and `pipeRPC` were silently no-ops; now delegates to `c.file.SetDeadline(t)` so overlapped server-side handles enforce the 5 s deadline | correctness, svc |
 | Roam #29 | Dashboard `renderHistoryModal` XSS: `ts = e.time` fallback (NaN date) was injected unescaped into `innerHTML`; fixed to `esc(e.time)` — server timestamps are always valid RFC 3339 in practice, but defensive escaping is required | security, dashboard |
 | Roam #29 | `internal/pipe/pipe_test.go`: 7 new tests for `handlePipeConn` via `net.Pipe()` — status OK, status nil result → error, history records, default limit (0 → 50), `ChangesOnly` flag, unknown command → error, invalid JSON → error; first test coverage for the named pipe IPC layer | testing, svc |
+| Roam #30 | `SendNotification` webhook payload now includes `"sessions"` field (`active_sessions`, `disconnected_sessions`, `total_sessions`, `max_sessions`, `utilization_pct`) when `result.Sessions != nil` — previously all notification triggers, including `session_warning`, sent no session data to webhook consumers | feature, notify |
+| Roam #30 | ntfy `session_warning` body overridden to "Session utilization at N% (X/Y sessions)." — previously sent `result.Message` which for a Healthy server reads "All connections allowed." and contains no session information; tags changed to `busts_in_silhouette` | UX, notify |
+| Roam #30 | Dashboard `render()` prunes stale `prev` map entries after each refresh — servers removed from the dashboard left behind entries that could surface as false "transition" events if the server was later re-added; 3 new tests (`TestSendNotification_WebhookPayloadIncludesSessions`, `_OmitsSessionsWhenNil`, `_NtfySessionWarningMessage`) | correctness, dashboard, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #29.)*
+*(All tracked items complete — nothing pending after Roam #30.)*
 
 ## Key Learnings
 

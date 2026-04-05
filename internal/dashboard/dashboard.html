@@ -4974,6 +4974,13 @@
                         }
                         prev[h] = s;
                     });
+                // Prune stale prev entries for servers that are no longer registered.
+                // This prevents stale state from showing as a false "transition" if a
+                // server is removed and later re-added.
+                if (servers) {
+                    const cur = new Set(servers.map(function (s) { return s.hostname; }));
+                    Object.keys(prev).forEach(function (h) { if (!cur.has(h)) delete prev[h]; });
+                }
                 if (evts.length > MAX_EVT) evts.length = MAX_EVT;
                 renderLog();
 
