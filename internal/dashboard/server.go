@@ -505,8 +505,13 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 		changesOnly = true
 	}
 
-	// Fetch the full ring buffer so filtering has the full picture, then apply limit.
-	records := ds.state.HostHistory(host, historyMax)
+	// For changes_only, fetch the full ring so filtering has the full picture.
+	// For the plain case, fetch only the requested limit — no need to allocate more.
+	fetchN := limit
+	if changesOnly {
+		fetchN = historyMax
+	}
+	records := ds.state.HostHistory(host, fetchN)
 	if records == nil {
 		records = []dc.CheckResult{}
 	}
@@ -519,10 +524,9 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		records = filtered
-	}
-
-	if limit < len(records) {
-		records = records[:limit]
+		if limit < len(records) {
+			records = records[:limit]
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

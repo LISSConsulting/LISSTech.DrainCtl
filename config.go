@@ -197,7 +197,7 @@ func (c *Config) HasTargets() bool {
 func (c *Config) Validate(log LogFunc) {
 	c.RetentionDays = ClampRetention(c.RetentionDays, log)
 
-	if c.GracePeriod < 1 {
+	if c.GracePeriod < 1 || c.GracePeriod > 1440 {
 		c.GracePeriod = DefaultGracePeriod
 	}
 	if c.PollInterval < 10 {

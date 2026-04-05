@@ -299,6 +299,30 @@ func TestValidate_DashboardGroupPreservesNormal(t *testing.T) {
 	}
 }
 
+// ── Validate — grace period range ────────────────────────────────────────────
+
+func TestValidate_GracePeriodClamped(t *testing.T) {
+	for _, gp := range []int{0, -1, 1441, 99999} {
+		cfg := DefaultConfig()
+		cfg.GracePeriod = gp
+		cfg.Validate(nil)
+		if cfg.GracePeriod != DefaultGracePeriod {
+			t.Errorf("grace_period %d: expected default %d after Validate, got %d", gp, DefaultGracePeriod, cfg.GracePeriod)
+		}
+	}
+}
+
+func TestValidate_GracePeriodPreservesValid(t *testing.T) {
+	for _, gp := range []int{1, 60, DefaultGracePeriod, 720, 1440} {
+		cfg := DefaultConfig()
+		cfg.GracePeriod = gp
+		cfg.Validate(nil)
+		if cfg.GracePeriod != gp {
+			t.Errorf("grace_period %d: expected value unchanged after Validate, got %d", gp, cfg.GracePeriod)
+		}
+	}
+}
+
 // ── Validate — type validation ───────────────────────────────────────────────
 
 func TestValidate_StripsUnknownType(t *testing.T) {
