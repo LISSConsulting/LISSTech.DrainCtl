@@ -3,6 +3,8 @@
 package dashboard
 
 import (
+	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"sync"
@@ -34,9 +36,11 @@ func newIPRateLimiter(rate, cap float64) *ipRateLimiter {
 	}
 }
 
-// Allow returns true if the given IP may proceed, consuming one token.
-// It refills tokens proportional to elapsed time since the last call.
-func (rl *ipRateLimiter) Allow(ip string) bool {
+// Allow returns (true, 0) if the given IP may proceed, consuming one token.
+// It returns (false, retryAfter) when the bucket is exhausted; retryAfter is
+// the minimum wait (whole seconds, ≥ 1 s) before the next token arrives.
+// Tokens refill proportional to elapsed time since the last call.
+func (rl *ipRateLimiter) Allow(ip string) (bool, time.Duration) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -65,21 +69,25 @@ func (rl *ipRateLimiter) Allow(ip string) bool {
 	}
 
 	if b.tokens < 1 {
-		return false
+		// Ceiling of seconds until 1 token is available.
+		secs := math.Ceil((1 - b.tokens) / rl.rate)
+		return false, time.Duration(int64(secs)) * time.Second
 	}
 	b.tokens--
-	return true
+	return true, 0
 }
 
 // rateLimitMiddleware wraps next and returns 429 Too Many Requests when the
 // client IP exceeds the configured rate. The IP is extracted from RemoteAddr.
+// A Retry-After header (delay in whole seconds, RFC 7231) is included on 429.
 func rateLimitMiddleware(rl *ipRateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			ip = r.RemoteAddr
 		}
-		if !rl.Allow(ip) {
+		if ok, wait := rl.Allow(ip); !ok {
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())))
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}

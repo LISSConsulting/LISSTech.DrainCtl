@@ -76,10 +76,12 @@
 | Roam #25 | `handlePutNotifyConfig`: replaced three separate LoadConfig+save cycles with single `UpdateNotifySettings()` call; changed `in.Notifications` from `[]NotificationTarget` to `*[]NotificationTarget` so an absent field is a no-op (was silently clearing all targets on partial updates); 1 new test `TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil`; updated 5 existing test hook signatures | correctness, dashboard, testing |
 | Roam #25 | `MemAuditStore.Prune`: `json.Marshal` error now skips the record instead of writing an empty line — matches `flushLocked` behaviour | correctness, svc |
 | Roam #25 | `ipRateLimiter.Allow`: removed redundant `addr != ip` guard in prune loop; current IP's `lastSeen` is always `now` after refill so it is never pruned regardless | code quality, dashboard |
+| Roam #26 | `ipRateLimiter.Allow` returns `(bool, time.Duration)` — `rateLimitMiddleware` now sets `Retry-After: N` (whole seconds, RFC 7231 SHOULD) on 429 responses so well-behaved clients back off correctly; 1 new test `TestRateLimiter_Middleware_Rejects_SetsRetryAfterHeader`; 4 existing tests updated for new signature | correctness, security, dashboard, testing |
+| Roam #26 | `handlePutNotifyConfig`: validates `session_warning_threshold` (0–100) and `grace_period` (1–1440) before calling `UpdateNotifySettings` — out-of-range values now return 400 Bad Request instead of 500 Internal Server Error; 4 new tests | correctness, dashboard, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #25.)*
+*(All tracked items complete — nothing pending after Roam #26.)*
 
 ## Key Learnings
 
@@ -142,3 +144,6 @@
 - **`atomic.Pointer[T]` for cross-goroutine config handoff**: When a struct field is written by one goroutine and read by another with no other synchronisation point between them, use `atomic.Pointer[T]` rather than a bare `*T`. Embedding the `atomic.Pointer` directly in the struct avoids a separate mutex and keeps the critical section implicit. Call `Store(&value)` on write and `Load()` on read. Note that `T` itself must not be mutated after the pointer is stored — treat stored values as immutable snapshots.
 - **`Remove()` must clean up all derived state**: When a registry-pattern struct has multiple per-key data structures (e.g., `servers map` and `history map`), all of them must be pruned in `Remove()`. Forgetting to delete from one causes memory leaks for hosts that are repeatedly registered and removed. Adding a test that calls `HostHistory` after `Remove` and asserts `len == 0` is the minimal regression guard.
 - **`ComputeStateDurations` semantics**: The first observation in a new mode always has duration = 0 (the clock resets at the transition point). Only subsequent same-mode observations accumulate time. Tests that assert a non-zero duration for a transition record will fail — the correct test structure is: oldest (mode A, dur=0), transition point (mode B, dur=0), later in mode B (dur = elapsed since transition).
+
+- **`Retry-After` header on token-bucket 429**: `Allow()` returning `(bool, time.Duration)` is cleaner than a separate `WaitTime()` method because it keeps the deny decision and the associated delay co-located. The wait is `ceil((1 - tokens) / rate)` seconds — always ≥ 1 s since `tokens < 1` and rate > 0. `rateLimitMiddleware` converts the duration to a whole-second string and sets `Retry-After`; the `int(wait.Seconds())` cast truncates, but `math.Ceil` already rounded up so the result is exact.
+- **400 vs 500 for input validation errors**: `UpdateNotifySettings` can fail for two distinct reasons — a local I/O error (config file unreadable → 500 is correct) or an out-of-range value supplied by the caller (→ 400). The handler is the HTTP boundary; it must validate HTTP input and map validation errors to 4xx before delegating to the domain function. Duplicating the range check in the handler is correct: the domain function enforces invariants, the handler enforces the HTTP contract.
