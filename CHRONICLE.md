@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-fourth roam-mode pass complete.** Two correctness/security fixes: `RepeatMinutes` clamped in `Config.Validate()` to prevent `time.Duration` overflow; `handlePutNotifyConfig` now validates notification targets (type, URL scheme, triggers, repeat_minutes) and returns 400 instead of silently dropping invalid entries.
+> Current state: **Fifty-fifth roam-mode pass complete.** Dashboard inline style cleanup: all remaining static `style="..."` attributes in `dashboard.html` extracted to named CSS classes (`.footer-brand`, `.settings-actions`, `.hist-head-actions`, `.hist-head .filter-pill`, `.srv-v--amber`, `.chart-placeholder`, `.ntfy-prefix`, `.webhook-secret-wrap`, `.target-section-label--nowrap`, `.hmac-header-label`); redundant `border-left-color` on `.ctr.total` removed.
 
 ## Completed Work
 
@@ -164,9 +164,11 @@
 | Roam #54 | `Config.Validate`: `RepeatMinutes` clamped to `[0, MaxRepeatMinutes]` (10080 = 1 week) — negative values are normalised to 0 (once-only); values above `MaxRepeatMinutes` would overflow `time.Duration` when multiplied by `time.Minute`; `MaxRepeatMinutes` exported constant added; 3 new tests (`TestValidate_RepeatMinutesClampsNegative`, `_ClampsAboveMax`, `_PreservesValid`) | correctness, config, testing |
 | Roam #54 | `handlePutNotifyConfig`: notification targets are now validated before calling `UpdateNotifySettings` — unknown `type` values, non-http/https URL schemes, unknown trigger names, and out-of-range `repeat_minutes` each return 400 Bad Request with an index-keyed message instead of being silently stripped by `Config.Validate()` after the save (which returned 200 OK with no indication that targets were dropped); 5 new tests (`TestHandlePutNotifyConfig_InvalidTargetType_Returns400`, `_InvalidTargetURLScheme_Returns400`, `_InvalidTargetTrigger_Returns400`, `_OutOfRangeRepeatMinutes_Returns400`, `_ClearNotificationsWithEmptyArray`) | correctness, security, dashboard, testing |
 
+| Roam #55 | Dashboard `dashboard.html` inline style extraction: all static `style="..."` attributes in HTML and JS templates moved to named CSS classes — `.footer-brand` (JetBrains Mono nav brand), `.settings-actions` (save/test flex row), `.hist-head-actions` (history modal header right side), `.hist-head .filter-pill` scoped size override, `.srv-v--amber` (Grace Left amber value), `.chart-placeholder` (collecting-data overlay), `.ntfy-prefix` (static styles only; `display:` kept inline), `.webhook-secret-wrap` (static styles; `display:` kept inline), `.webhook-secret-wrap .settings-input` (`flex:1`), `.target-section-label--nowrap` modifier (HMAC Secret heading), `.hmac-header-label` (X-DrainCtl-Signature span), `.settings-num-label` reused for repeat interval unit; redundant `style="border-left-color:var(--accent)"` removed from `.ctr.total` (already set by CSS rule) | code quality, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #54.)*
+*(All tracked items complete — nothing pending after Roam #55.)*
 
 ## Key Learnings
 
