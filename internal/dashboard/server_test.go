@@ -1450,6 +1450,90 @@ func TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil(t *testing.T) {
 	}
 }
 
+func TestHandlePutNotifyConfig_OutOfRangeThreshold_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"session_warning_threshold":150}` // > 100, invalid
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for threshold=150", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_NegativeThreshold_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"session_warning_threshold":-1}` // < 0, invalid
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for threshold=-1", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_OutOfRangeGracePeriod_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"grace_period":2000}` // > 1440, invalid
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for grace_period=2000", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_ZeroGracePeriod_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"grace_period":0}` // < 1, invalid
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for grace_period=0", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
 // ── securityMiddleware ────────────────────────────────────────────────────────
 
 func TestSecurityMiddleware_SetsExpectedHeaders(t *testing.T) {

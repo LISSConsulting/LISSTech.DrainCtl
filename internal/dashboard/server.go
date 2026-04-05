@@ -336,6 +336,16 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Validate numeric fields before persisting; return 400 (client error) not 500.
+	if in.SessionWarningThreshold != nil && (*in.SessionWarningThreshold < 0 || *in.SessionWarningThreshold > 100) {
+		http.Error(w, "session_warning_threshold must be 0–100", http.StatusBadRequest)
+		return
+	}
+	if in.GracePeriod != nil && (*in.GracePeriod < 1 || *in.GracePeriod > 1440) {
+		http.Error(w, "grace_period must be 1–1440", http.StatusBadRequest)
+		return
+	}
+
 	if ds.testPutNotifyConfigFunc != nil {
 		if err := ds.testPutNotifyConfigFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
 			dc.LogMsg(ds.log, dc.LvlERR, "update config failed (test hook)", fmt.Sprintf("error=%q", err))
