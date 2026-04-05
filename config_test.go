@@ -3,6 +3,7 @@
 package drainctl
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -686,6 +687,23 @@ func TestDefaultDataDir_FallsBackWhenProgramDataEmpty(t *testing.T) {
 	want := `C:\ProgramData\LISS Technologies\LISSTech DrainCtl`
 	if got != want {
 		t.Errorf("DefaultDataDir() = %q, want %q", got, want)
+	}
+}
+
+// ── DefaultConfigPath ─────────────────────────────────────────────────────────
+
+func TestDefaultConfigPath_EndsWithConfigJSON(t *testing.T) {
+	path := DefaultConfigPath()
+	if !strings.HasSuffix(path, `\config.json`) {
+		t.Errorf("DefaultConfigPath() = %q, want suffix '\\config.json'", path)
+	}
+}
+
+func TestDefaultConfigPath_ContainsDataDir(t *testing.T) {
+	path := DefaultConfigPath()
+	dir := DefaultDataDir()
+	if !strings.HasPrefix(path, dir) {
+		t.Errorf("DefaultConfigPath() = %q, want prefix %q", path, dir)
 	}
 }
 
