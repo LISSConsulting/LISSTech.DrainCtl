@@ -5608,9 +5608,16 @@
                     ntfyPrefix.style.display = isN ? "inline" : "none";
                     secretWrap.style.display = isN ? "none" : "flex";
                     urlInput.placeholder = isN ? "my-drainctl-alerts" : "https://hooks.example.com/...";
-                    // If switching to ntfy and URL has full ntfy.sh URL, strip it
-                    if (isN && urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
-                        urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
+                    if (isN) {
+                        // Switching to ntfy: strip https://ntfy.sh/ prefix if present
+                        if (urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
+                            urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
+                        }
+                    } else {
+                        // Switching to webhook: clear field if it looks like a topic name, not a URL
+                        if (!urlInput.value.match(/^https?:\/\//)) {
+                            urlInput.value = "";
+                        }
                     }
                 });
 
@@ -5692,13 +5699,18 @@
                 return targets;
             }
             async function loadNotifyConfig() {
-                document.getElementById("target-list").innerHTML =
+                const targetList = document.getElementById("target-list");
+                targetList.innerHTML =
                     '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
                 try {
                     const r = await fetch("/api/v1/notify-config");
-                    if (!r.ok) return;
+                    if (!r.ok) {
+                        targetList.innerHTML =
+                            '<div style="color:var(--red);padding:8px 0">Failed to load configuration (' + r.status + '). Try closing and reopening settings.</div>';
+                        return;
+                    }
                     const c = await r.json();
-                    document.getElementById("target-list").innerHTML = "";
+                    targetList.innerHTML = "";
                     targetCounter = 0;
                     const targets = c.notifications || [];
                     if (targets.length === 0) addTargetRow();
@@ -5712,6 +5724,8 @@
                     syncPills("threshold-pills", th, "val");
                 } catch (e) {
                     console.error("loadNotifyConfig:", e);
+                    targetList.innerHTML =
+                        '<div style="color:var(--red);padding:8px 0">Failed to load configuration. Try closing and reopening settings.</div>';
                 }
             }
             async function saveNotifyConfig() {
