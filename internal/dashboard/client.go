@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -125,6 +126,7 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: report rejected",
 			fmt.Sprintf("status=%d host=%s", resp.StatusCode, result.Host))
@@ -152,6 +154,7 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	if resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
 	// Acquire SSPI client credentials and generate a Negotiate token.
@@ -255,6 +258,7 @@ func RemoveServer(url string) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != 200 && resp.StatusCode != 204 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

@@ -220,6 +220,19 @@ func (c *Config) Validate(log LogFunc) {
 		c.SessionWarningThreshold = 100
 	}
 
+	// Strip notification targets with unknown types (must be "webhook" or "ntfy").
+	// A target with an unrecognised type would silently never fire — reject it early.
+	c.Notifications = slices.DeleteFunc(c.Notifications, func(t NotificationTarget) bool {
+		if t.Type != "webhook" && t.Type != "ntfy" {
+			if log != nil {
+				LogMsg(log, LvlWRN, "notification target has unknown type, ignored",
+					fmt.Sprintf("type=%q url=%s", t.Type, t.URL))
+			}
+			return true
+		}
+		return false
+	})
+
 	// Strip notification targets with invalid URL schemes (must be http or https).
 	c.Notifications = slices.DeleteFunc(c.Notifications, func(t NotificationTarget) bool {
 		if t.URL == "" {
