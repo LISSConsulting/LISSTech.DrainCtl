@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -408,6 +409,25 @@ func TestHandleRegister_IdempotentReRegister(t *testing.T) {
 	servers := ds.state.All()
 	if len(servers) != 1 {
 		t.Errorf("expected 1 server after 3 registrations of the same host, got %d", len(servers))
+	}
+}
+
+// TestHandleRegister_AuthenticatedUser_Returns200 verifies that handleRegister
+// succeeds and does not panic when the request carries SSPI auth info in its
+// context (the auth != nil branch in the handler).
+func TestHandleRegister_AuthenticatedUser_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", strings.NewReader(`{"hostname":"SRV01"}`))
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "DOMAIN\\alice", Groups: []string{"Domain Admins"}}))
+	ds.handleRegister(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !ds.state.IsRegistered("SRV01") {
+		t.Error("SRV01 should be registered after authenticated register call")
 	}
 }
 
@@ -1672,6 +1692,42 @@ func TestHandlePutNotifyConfig_ClearNotificationsWithEmptyArray(t *testing.T) {
 	}
 	if len(*capturedNotifs) != 0 {
 		t.Errorf("len(*capturedNotifs) = %d, want 0", len(*capturedNotifs))
+	}
+}
+
+// TestHandlePutNotifyConfig_AuthenticatedUser_Returns200 verifies that
+// handlePutNotifyConfig succeeds when the request carries SSPI auth info
+// (the auth != nil branch that logs the username).
+func TestHandlePutNotifyConfig_AuthenticatedUser_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		return nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(`{}`))
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "DOMAIN\\bob"}))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+// TestHandleNotifyTest_AuthenticatedUser_Returns200 verifies that
+// handleNotifyTest succeeds and does not panic when the request carries SSPI
+// auth info in its context (covers the auth != nil branch).
+func TestHandleNotifyTest_AuthenticatedUser_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testNotifyFunc = func() error { return nil }
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "DOMAIN\\carol"}))
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
 	}
 }
 
