@@ -411,6 +411,10 @@
                 color: var(--muted);
                 line-height: 1.55;
             }
+            .features-grid--2col {
+                grid-template-columns: repeat(2, 1fr);
+                margin-bottom: 0;
+            }
             @media (max-width: 768px) {
                 .features-hero {
                     grid-template-columns: 1fr;
@@ -421,6 +425,9 @@
             }
             @media (max-width: 480px) {
                 .features-grid {
+                    grid-template-columns: 1fr;
+                }
+                .features-grid--2col {
                     grid-template-columns: 1fr;
                 }
             }
@@ -660,17 +667,37 @@
             }
 
             /* ── Install ──────────────────────────────────────────── */
+            .wrap--wide {
+                max-width: 1200px;
+            }
+            .install-cards {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 18px;
+            }
+            .install-cta {
+                margin-top: auto;
+                padding-top: 16px;
+            }
+            .btn--block {
+                display: flex;
+                justify-content: center;
+                font-size: 0.85rem;
+                width: 100%;
+            }
+            .btn-psgallery {
+                background: #2e71b8;
+                color: #fff;
+            }
             .install-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 gap: 18px;
             }
             @media (max-width: 640px) {
-                .install-grid {
+                .install-grid,
+                .install-cards {
                     grid-template-columns: 1fr;
-                }
-                #install .wrap > div[style*="grid"] {
-                    grid-template-columns: 1fr !important;
                 }
             }
             .install-card {
@@ -710,6 +737,17 @@
             }
             .install-card li {
                 margin-bottom: 4px;
+            }
+
+            /* ── Sections ─────────────────────────────────────────── */
+            .section--bordered {
+                border-top: var(--bw) solid var(--border);
+                border-bottom: var(--bw) solid var(--border);
+            }
+            .section--shaded {
+                background: var(--surface);
+                border-top: var(--bw) solid var(--border);
+                border-bottom: var(--bw) solid var(--border);
             }
 
             /* ── Footer ───────────────────────────────────────────── */
@@ -950,15 +988,7 @@
         </section>
 
         <!-- How it works -->
-        <section
-            class="section"
-            id="how"
-            style="
-                background: var(--surface);
-                border-top: var(--bw) solid var(--border);
-                border-bottom: var(--bw) solid var(--border);
-            "
-        >
+        <section class="section section--shaded" id="how">
             <div class="wrap">
                 <div class="section-label">Architecture</div>
                 <div class="section-title">Three signals. One answer.</div>
@@ -1004,11 +1034,7 @@
         </section>
 
         <!-- What's New -->
-        <section
-            class="section"
-            id="new"
-            style="border-top: var(--bw) solid var(--border); border-bottom: var(--bw) solid var(--border)"
-        >
+        <section class="section section--bordered" id="new">
             <div class="wrap">
                 <div class="section-label">Highlights</div>
                 <div class="section-title serif" style="font-style: italic">Built for production RDSH farms.</div>
@@ -1117,7 +1143,7 @@
                     </picture>
                 </div>
 
-                <div class="features-grid" style="margin-bottom: 0; grid-template-columns: repeat(2, 1fr)">
+                <div class="features-grid features-grid--2col">
                     <div class="feature card">
                         <div class="icon">&#128268;</div>
                         <h3>One Command Setup</h3>
@@ -1258,23 +1284,15 @@
         </section>
 
         <!-- Install -->
-        <section
-            class="section"
-            id="install"
-            style="
-                background: var(--surface);
-                border-top: var(--bw) solid var(--border);
-                border-bottom: var(--bw) solid var(--border);
-            "
-        >
-            <div class="wrap" style="max-width: 1200px">
+        <section class="section section--shaded" id="install">
+            <div class="wrap wrap--wide">
                 <div class="section-label">Installation</div>
                 <div class="section-title">Three ways to install. Zero guesswork.</div>
-                <div class="section-desc" style="max-width: 720px">
+                <div class="section-desc">
                     Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the
                     PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px">
+                <div class="install-cards">
                     <div class="install-card card">
                         <h3>&#128230; MSI Installer</h3>
                         <p>
@@ -1287,18 +1305,11 @@
                             <li>Installs service + CLI + PS module</li>
                             <li>Also supports silent deploy</li>
                         </ul>
-                        <div style="margin-top: auto; padding-top: 16px">
+                        <div class="install-cta">
                             <a
                                 href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
-                                class="btn btn-fill"
-                                style="
-                                    display: flex;
-                                    justify-content: center;
-                                    text-decoration: none;
-                                    font-size: 0.85rem;
-                                    width: 100%;
-                                "
-                                >Download MSI</a
+                                class="btn btn-fill btn--block"
+                                >Download MSI</
                             >
                         </div>
                     </div>
@@ -1315,18 +1326,11 @@
                             <li>PowerShell module registered</li>
                             <li><a href="guide.html#install">MSI property reference</a></li>
                         </ul>
-                        <div style="margin-top: auto; padding-top: 16px">
+                        <div class="install-cta">
                             <a
                                 href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
-                                class="btn btn-fill"
-                                style="
-                                    display: flex;
-                                    justify-content: center;
-                                    text-decoration: none;
-                                    font-size: 0.85rem;
-                                    width: 100%;
-                                "
-                                >Download MSI</a
+                                class="btn btn-fill btn--block"
+                                >Download MSI</
                             >
                         </div>
                     </div>
@@ -1344,19 +1348,10 @@
                                 >
                             </li>
                         </ul>
-                        <div style="margin-top: auto; padding-top: 16px">
+                        <div class="install-cta">
                             <a
                                 href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"
-                                class="btn"
-                                style="
-                                    display: flex;
-                                    justify-content: center;
-                                    text-decoration: none;
-                                    font-size: 0.85rem;
-                                    width: 100%;
-                                    background: #2e71b8;
-                                    color: #fff;
-                                "
+                                class="btn btn-psgallery btn--block"
                                 >View on PSGallery</a
                             >
                         </div>
