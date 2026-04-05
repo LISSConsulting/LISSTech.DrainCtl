@@ -69,6 +69,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	if result.Transition && result.TransitionFrom != "" {
 		payload["previous_mode"] = result.TransitionFrom
 	}
+	if result.Sessions != nil {
+		payload["sessions"] = result.Sessions
+	}
 
 	for _, target := range targets {
 		if target.URL == "" || !target.HasTrigger(trigger) {
@@ -121,7 +124,15 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			case "Grace":
 				tags = "warning"
 			}
-			if err := sendNtfy(target.URL, title, result.Message, priority, tags); err != nil {
+			ntfyMsg := result.Message
+			if trigger == TriggerSessionWarning && result.Sessions != nil {
+				sess := result.Sessions
+				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
+					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
+				priority = "default"
+				tags = "busts_in_silhouette"
+			}
+			if err := sendNtfy(target.URL, title, ntfyMsg, priority, tags); err != nil {
 				LogMsg(log, LvlWRN, "ntfy notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
 			} else {
 				log(LvlINF, "notify=ntfy", fmt.Sprintf("event=%s url=%s", trigger, target.URL))

@@ -462,3 +462,114 @@ func TestSendNotification_CallsNtfy(t *testing.T) {
 		t.Errorf("ntfy endpoint called %d times, want 1", atomic.LoadInt32(&count))
 	}
 }
+
+// TestSendNotification_WebhookPayloadIncludesSessions verifies that session data is
+// included in the webhook payload when the result contains a SessionSummary.
+func TestSendNotification_WebhookPayloadIncludesSessions(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerSessionWarning}},
+	}
+	result := newTestResult("SRV01", "Healthy")
+	result.Sessions = &SessionSummary{
+		ActiveSessions:       8,
+		DisconnectedSessions: 2,
+		TotalSessions:        10,
+		MaxSessions:          12,
+		UtilizationPct:       83,
+	}
+
+	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	sessRaw, ok := payload["sessions"]
+	if !ok {
+		t.Fatal("payload missing 'sessions' field")
+	}
+	sessMap, ok := sessRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("payload['sessions'] is %T, want map", sessRaw)
+	}
+	if got := sessMap["total_sessions"]; got != float64(10) {
+		t.Errorf("sessions.total_sessions = %v, want 10", got)
+	}
+	if got := sessMap["utilization_pct"]; got != float64(83) {
+		t.Errorf("sessions.utilization_pct = %v, want 83", got)
+	}
+}
+
+// TestSendNotification_WebhookPayloadOmitsSessionsWhenNil verifies that when there
+// is no session data, the 'sessions' field is absent from the webhook payload.
+func TestSendNotification_WebhookPayloadOmitsSessionsWhenNil(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
+	}
+	result := newTestResult("SRV01", "Healthy")
+	// result.Sessions is nil — no session data available.
+
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if _, ok := payload["sessions"]; ok {
+		t.Error("payload should not contain 'sessions' when result.Sessions is nil")
+	}
+}
+
+// TestSendNotification_NtfySessionWarningMessage verifies that the ntfy body for
+// session_warning includes the utilization percentage and session counts rather
+// than the generic status message.
+func TestSendNotification_NtfySessionWarningMessage(t *testing.T) {
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 4096)
+		n, _ := r.Body.Read(buf)
+		capturedBody = string(buf[:n])
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{TriggerSessionWarning}},
+	}
+	result := newTestResult("SRV01", "Healthy")
+	result.Sessions = &SessionSummary{
+		ActiveSessions: 9,
+		TotalSessions:  9,
+		MaxSessions:    10,
+		UtilizationPct: 90,
+	}
+
+	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "", nil)
+
+	if !strings.Contains(capturedBody, "90%") {
+		t.Errorf("ntfy body %q should contain utilization percentage", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "9/10") {
+		t.Errorf("ntfy body %q should contain session counts", capturedBody)
+	}
+}
