@@ -5475,8 +5475,7 @@
                             (detail ? "  " : "") +
                             "sess=" +
                             e.sessions.total_sessions +
-                            "/" +
-                            e.sessions.max_sessions;
+                            (e.sessions.max_sessions > 0 ? "/" + e.sessions.max_sessions : "");
                     h += '<div class="hist-entry' + (e.transition ? " hist-entry-transition" : "") + '">';
                     h += '<div class="hist-ts">' + ts + "</div>";
                     h += e.transition ? '<div class="hist-transition-dot" aria-hidden="true"></div>' : "";

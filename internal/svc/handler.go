@@ -260,6 +260,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			dashConfigFailures = 0
 			useRemoteConfig = true
 			applyRemoteConfig(remote, &cfg, &notifyTargets)
+			handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=notify-config-fetched targets=%d threshold=%d grace=%d",
 				len(remote.Notifications), remote.SessionWarningThreshold, remote.GracePeriod))
 		}
@@ -335,6 +336,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					dashConfigFailures = 0
 					useRemoteConfig = true
 					applyRemoteConfig(remote, &cfg, &notifyTargets)
+					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
 				}
 			}
 			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)

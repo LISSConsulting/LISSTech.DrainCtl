@@ -1201,6 +1201,37 @@ func TestHandleGetNotifyConfig_EmptyNotificationsReturnsEmptyArray(t *testing.T)
 	}
 }
 
+func TestHandleGetNotifyConfig_NilNotificationsReturnsEmptyArray(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.Notifications = nil // simulate old config file with no notifications field
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Decode into a raw map so we can distinguish null from [].
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	notifRaw, ok := raw["notifications"]
+	if !ok {
+		t.Fatal("notifications field missing from response")
+	}
+	// Must be "[]" not "null".
+	if string(notifRaw) == "null" {
+		t.Error("notifications serialized as null; want empty JSON array []")
+	}
+}
+
 func TestHandleGetNotifyConfig_LoadConfigError_Returns500(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
