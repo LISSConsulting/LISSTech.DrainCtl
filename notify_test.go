@@ -1105,3 +1105,116 @@ func TestSendTestNotification_NtfyError_ReturnsError(t *testing.T) {
 		t.Errorf("error message missing target URL (%s): %s", srv.URL, err)
 	}
 }
+
+// TestSendNotification_WebhookErrorIsLogged verifies that when sendWebhook
+// returns an error (non-2xx status), SendNotification logs a WRN entry and
+// does not propagate the error to the caller (fire-and-forget semantics).
+func TestSendNotification_WebhookErrorIsLogged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	var warnLogged bool
+	log := func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warnLogged = true
+		}
+	}
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
+	}
+	state := &NotifyState{}
+	result := newTestResult("HOST", "Healthy")
+	SendNotification(targets, state, result, TriggerDrainOn, "", log)
+
+	if !warnLogged {
+		t.Error("expected WRN log entry for webhook error, got none")
+	}
+}
+
+// TestSendNotification_NtfyErrorIsLogged verifies that when sendNtfy returns
+// an error (non-2xx status), SendNotification logs a WRN entry.
+func TestSendNotification_NtfyErrorIsLogged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	var warnLogged bool
+	log := func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warnLogged = true
+		}
+	}
+
+	targets := []NotificationTarget{
+		{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
+	}
+	state := &NotifyState{}
+	result := newTestResult("HOST", "Healthy")
+	SendNotification(targets, state, result, TriggerDrainOn, "", log)
+
+	if !warnLogged {
+		t.Error("expected WRN log entry for ntfy error, got none")
+	}
+}
+
+// TestSendTestNotification_SkipsEmptyURLTarget verifies that targets with an
+// empty URL are skipped via the continue branch, while targets with a real URL
+// are still dispatched.
+func TestSendTestNotification_SkipsEmptyURLTarget(t *testing.T) {
+	var called int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&called, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// First target has empty URL (should be skipped); second has a real URL.
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: ""},
+		{Type: "webhook", URL: srv.URL},
+	}
+	err := SendTestNotification(targets, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if atomic.LoadInt32(&called) != 1 {
+		t.Errorf("expected 1 webhook call, got %d", called)
+	}
+}
+
+// TestSendWebhook_DoFails_ReturnsError verifies that sendWebhook returns an
+// error wrapping "http post" when the underlying HTTP Do call fails (e.g.
+// because the server has been closed and the connection is refused).
+func TestSendWebhook_DoFails_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	url := srv.URL
+	srv.Close() // close before use — Do will get connection refused
+
+	err := sendWebhook(url, "", map[string]any{"event": "test"})
+	if err == nil {
+		t.Fatal("expected error when connection refused, got nil")
+	}
+	if !strings.Contains(err.Error(), "http post") {
+		t.Errorf("error = %q, want prefix 'http post'", err)
+	}
+}
+
+// TestSendNtfy_DoFails_ReturnsError verifies that sendNtfy returns an error
+// wrapping "http post" when the HTTP Do call fails.
+func TestSendNtfy_DoFails_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	url := srv.URL
+	srv.Close() // close before use — Do will get connection refused
+
+	err := sendNtfy(url, "Test", "msg", "default", "test_tube")
+	if err == nil {
+		t.Fatal("expected error when connection refused, got nil")
+	}
+	if !strings.Contains(err.Error(), "http post") {
+		t.Errorf("error = %q, want prefix 'http post'", err)
+	}
+}

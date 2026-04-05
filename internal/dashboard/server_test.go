@@ -996,6 +996,27 @@ func TestHandleDeleteServer_IdempotentDeleteReturns404(t *testing.T) {
 	}
 }
 
+// TestHandleDeleteServer_AuthenticatedUser_Returns200 verifies that
+// handleDeleteServer succeeds and does not panic when the request carries SSPI
+// auth info in its context (covers the auth != nil branch that logs the username).
+func TestHandleDeleteServer_AuthenticatedUser_Returns200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV-AUTH")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/SRV-AUTH", nil)
+	r.SetPathValue("host", "SRV-AUTH")
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "DOMAIN\\alice"}))
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if ds.state.IsRegistered("SRV-AUTH") {
+		t.Error("server should have been removed")
+	}
+}
+
 // ── handleNotifyTest ──────────────────────────────────────────────────────────
 
 func TestHandleNotifyTest_NoTargets_Returns400(t *testing.T) {
