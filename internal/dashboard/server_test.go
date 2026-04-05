@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -2223,5 +2225,112 @@ func TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_LoadError(t *testing.T) 
 	}
 	if !strings.Contains(w.Body.String(), "config unavailable") {
 		t.Errorf("body %q should contain %q", w.Body.String(), "config unavailable")
+	}
+}
+
+// ── production config-path coverage ──────────────────────────────────────────
+//
+// The following tests exercise the "else" branches in handlers that call
+// dc.LoadConfig / dc.UpdateNotifySettings directly when testLoadConfigFunc /
+// testPutNotifyConfigFunc are nil. They use t.Setenv("ProgramData", …) to
+// redirect all config I/O to a temp directory so no machine-wide state is
+// affected.
+
+// TestHandleGetNotifyConfig_ProductionPathLoadsConfig exercises the
+// dc.LoadConfig branch (testLoadConfigFunc == nil). A fresh config is written
+// on first access; the handler must return 200 with valid JSON.
+func TestHandleGetNotifyConfig_ProductionPathLoadsConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	ds := newTestServer(t)
+	// testLoadConfigFunc is nil — production dc.LoadConfig is used.
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
+	ds.handleGetNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+		GracePeriod             int                     `json:"grace_period"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Notifications == nil {
+		t.Error("expected non-nil notifications array")
+	}
+}
+
+// TestHandlePutNotifyConfig_ProductionPathUpdatesConfig exercises the
+// dc.UpdateNotifySettings branch (testPutNotifyConfigFunc == nil). A valid
+// grace_period update is sent; the handler must return 200.
+func TestHandlePutNotifyConfig_ProductionPathUpdatesConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	ds := newTestServer(t)
+	// testPutNotifyConfigFunc is nil — production dc.UpdateNotifySettings is used.
+
+	body := `{"grace_period":10}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandlePutNotifyConfig_ProductionPath_UpdateError_Returns500 exercises the
+// error-return branch in the else block (testPutNotifyConfigFunc == nil). A
+// directory placed at config.json causes LoadConfig inside UpdateNotifySettings
+// to fail with a non-not-exist error, which propagates as 500.
+func TestHandlePutNotifyConfig_ProductionPath_UpdateError_Returns500(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	// Create the data dir and place a directory where config.json should be,
+	// so os.ReadFile returns an error that is NOT os.IsNotExist.
+	dataDir := filepath.Join(dir, "LISS Technologies", "LISSTech DrainCtl")
+	if err := os.MkdirAll(filepath.Join(dataDir, "config.json"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	ds := newTestServer(t)
+	// testPutNotifyConfigFunc is nil — production dc.UpdateNotifySettings used.
+
+	body := `{"grace_period":10}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleNotifyTest_BothHooksNil_UsesProductionLoad exercises the inner
+// testLoadConfigFunc==nil branch inside handleNotifyTest when testNotifyFunc is
+// also nil. The fresh default config has no notification targets so
+// SendTestNotification returns "no targets" and the handler returns 400.
+func TestHandleNotifyTest_BothHooksNil_UsesProductionLoad(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	ds := newTestServer(t)
+	// Both testNotifyFunc and testLoadConfigFunc are nil — production load path.
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	// Fresh default config has no notification targets → 400 "no targets".
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
 }

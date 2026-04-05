@@ -421,6 +421,37 @@ func TestClose_IdempotentOnSecondCall(t *testing.T) {
 	}
 }
 
+// TestOpenMemAuditStore_NilLog verifies that passing nil as the log function
+// does not panic — the nil guard replaces it with a discard logger.
+func TestOpenMemAuditStore_NilLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	st, err := OpenMemAuditStore(path, nil)
+	if err != nil {
+		t.Fatalf("OpenMemAuditStore with nil log: %v", err)
+	}
+	_ = st.Close()
+}
+
+// TestOpenMemAuditStore_MkdirAllError verifies that OpenMemAuditStore returns
+// an error when the directory cannot be created because a plain file already
+// exists at the would-be directory path.
+func TestOpenMemAuditStore_MkdirAllError(t *testing.T) {
+	dir := t.TempDir()
+	// Place a regular file where the subdirectory should be created.
+	blockingFile := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	path := filepath.Join(blockingFile, "audit.jsonl") // blocked\audit.jsonl
+
+	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err == nil {
+		t.Fatal("expected error when directory cannot be created, got nil")
+	}
+}
+
 // TestOpenMemAuditStore_LoadError_OversizedLine verifies that OpenMemAuditStore
 // returns an error (wrapping the load error) when the audit file contains a
 // line that exceeds the 64 KiB scanner buffer limit.
