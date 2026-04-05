@@ -5599,7 +5599,7 @@
                           });
                     let detail = "";
                     if (e.transition && e.transition_from)
-                        detail += mode(e.transition_from) + " \u2192 " + mode(e.drain_mode);
+                        detail += esc(mode(e.transition_from)) + " \u2192 " + esc(mode(e.drain_mode));
                     else if (e.drain_mode) detail += "mode=" + esc(mode(e.drain_mode));
                     if (e.state_duration_seconds != null)
                         detail += (detail ? "  " : "") + "dur=" + dur(e.state_duration_seconds);
