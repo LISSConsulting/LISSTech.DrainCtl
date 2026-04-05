@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Eighteenth roam-mode pass complete.** Code quality sweep: extracted `classifyState()` helper (eliminating triple-duplicate state classification in `svc`), extracted `setNotifyTarget()` (deduplicating set-webhook/set-ntfy CLI commands), settings modal UX polish (auto-dismiss save message, disabled save button during fetch, refresh on open, loading indicator), PS module consistency (`$null =` everywhere), and resolved 4 pre-existing golangci-lint warnings (unused func, redundant type annotation, unchecked decode errors). **Eighteenth pass:** `Config.Validate` tightened — `Dashboard.Port` guard widened from `== 0` to full 1–65535 range, `Dashboard.Group` trimmed before empty check so all-whitespace values fall back to default (silent SSPI auth failure); 4 new tests.
+> Current state: **Nineteenth roam-mode pass complete.** Three targeted improvements: (1) dark/light mode manual toggle in the dashboard nav — moon☽/sun☀ button sets `html[data-theme]`, overrides OS preference, persists to `localStorage`, FOUC-prevention inline `<head>` script; (2) `QueryRegistryChangeUser` now uses `exec.CommandContext` with a 15 s deadline so a slow/large Security event log cannot hang the service check cycle; (3) per-IP token-bucket rate limiter (`ipRateLimiter`) wraps all dashboard routes — 10 req/s sustained, burst 60 — plus 7 new unit tests.
 
 ## Completed Work
 
@@ -50,10 +50,13 @@
 | Roam #17 | PS module: 3 unused `$result` and `\| Out-Null` occurrences replaced with `$null =` in `Install-RDSHDrainAudit`, `Enable-RDSHDrainDashboard`, `Disable-RDSHDrainDashboard` | code quality, ps |
 | Roam #17 | Lint: removed unused `ptr()` helper from `audit_filter_test.go`; dropped redundant `http.Handler` type annotation in `server.go`; added `json.Decode` error checks in `server_test.go` (4 pre-existing golangci-lint warnings cleared; lint now reports 0 issues) | code quality, testing |
 | Roam #18 | `Config.Validate`: `Dashboard.Port` guard widened from `== 0` to `< 1 \|\| > 65535` — negative or out-of-range values in config.json were silently accepted and caused bind failures; `Dashboard.Group` trimmed before empty check — all-whitespace strings passed the guard but broke SSPI group matching silently; 4 new tests (`TestValidate_DashboardPortClamped`, `TestValidate_DashboardPortPreservesValid`, `TestValidate_DashboardGroupTrimsWhitespace`, `TestValidate_DashboardGroupPreservesNormal`) | correctness, config, testing |
+| Roam #19 | Dashboard UI: dark/light mode manual toggle — moon/sun button in nav; `html[data-theme]` attribute overrides the OS `prefers-color-scheme` media query; preference persisted in `localStorage`; FOUC-prevention inline script in `<head>`; chart rebuilt on toggle to pick up recomputed CSS vars | UX, dashboard |
+| Roam #19 | `QueryRegistryChangeUser`: replaced bare `exec.Command` with `exec.CommandContext` and a 15 s timeout — previously a large or slow Security event log could block the service check cycle indefinitely without any deadline | correctness, svc |
+| Roam #19 | `ipRateLimiter` (token bucket, per-IP) added to `internal/dashboard/ratelimit.go`; `rateLimitMiddleware` wraps all routes (10 req/s sustained, burst 60) — prevents runaway clients from hammering the unauthenticated `/api/v1/health` endpoint or triggering excessive SSPI negotiations; lazy pruning of stale buckets after 5 min; 7 new tests (`TestRateLimiter_AllowsWithinBurst`, `_RejectsAfterBurst`, `_IndependentIPs`, `_TokensRefill`, `_Middleware_Allows`, `_Middleware_Rejects`, `_Middleware_BadRemoteAddr`) | security, dashboard, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #18.)*
+*(All tracked items complete — nothing pending after Roam #19.)*
 
 ## Key Learnings
 
