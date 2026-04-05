@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// ptr builds a minimal AuditRecord with the given timestamp and changed flag.
+// Used as a compact helper in table-driven tests.
+func ptr(ts time.Time, changed bool) AuditRecord {
+	return AuditRecord{Timestamp: ts, Host: "test-host", Changed: changed}
+}
+
 // writeTestRecords writes a slice of AuditRecords to a temp file and returns
 // an open AuditStore backed by that file. The caller is responsible for closing
 // the store and removing the file.

@@ -1118,3 +1118,159 @@ func TestLoadConfig_FreshInstall_WriteDefaultError(t *testing.T) {
 		t.Errorf("error = %q, want message containing 'write default config'", err.Error())
 	}
 }
+
+// ── InstallCertificate ────────────────────────────────────────────────────────
+
+// TestInstallCertificate_HappyPath verifies that InstallCertificate copies the
+// source cert and key into the data directory and updates config.json with the
+// new TLSCert and TLSKey paths.
+func TestInstallCertificate_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	// Bootstrap a default config.json — this also creates the data directory.
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	srcCert := filepath.Join(dir, "src.crt")
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	if err := InstallCertificate(srcCert, srcKey, nil); err != nil {
+		t.Fatalf("InstallCertificate: %v", err)
+	}
+
+	// Config must have TLSCert and TLSKey populated.
+	cfg, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig after install: %v", err)
+	}
+	if cfg.Dashboard.TLSCert == "" {
+		t.Error("TLSCert not set after InstallCertificate")
+	}
+	if cfg.Dashboard.TLSKey == "" {
+		t.Error("TLSKey not set after InstallCertificate")
+	}
+
+	// Destination files must exist in the data directory.
+	dataDir := DefaultDataDir()
+	for _, name := range []string{`dashboard-tls.crt`, `dashboard-tls.key`} {
+		if _, err := os.Stat(dataDir + `\` + name); err != nil {
+			t.Errorf("expected %s in data dir: %v", name, err)
+		}
+	}
+}
+
+// TestInstallCertificate_MissingCert verifies that InstallCertificate returns a
+// "file not found" error when the source certificate file does not exist.
+func TestInstallCertificate_MissingCert(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	err := InstallCertificate(filepath.Join(dir, "nonexistent.crt"), srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error for missing cert, got nil")
+	}
+	if !strings.Contains(err.Error(), "file not found") {
+		t.Errorf("error = %q, want 'file not found' in message", err.Error())
+	}
+}
+
+// TestInstallCertificate_MissingKey verifies that InstallCertificate returns a
+// "file not found" error when the source key file does not exist.
+func TestInstallCertificate_MissingKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcCert := filepath.Join(dir, "src.crt")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, filepath.Join(dir, "nonexistent.key"), nil)
+	if err == nil {
+		t.Fatal("expected error for missing key, got nil")
+	}
+	if !strings.Contains(err.Error(), "file not found") {
+		t.Errorf("error = %q, want 'file not found' in message", err.Error())
+	}
+}
+
+// TestInstallCertificate_WriteCertError verifies that InstallCertificate returns
+// a "write cert" error when the destination cert path is blocked by a directory.
+func TestInstallCertificate_WriteCertError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcCert := filepath.Join(dir, "src.crt")
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	// Create the data dir, then block the cert destination.
+	dataDir := DefaultDataDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll dataDir: %v", err)
+	}
+	dstCert := dataDir + `\dashboard-tls.crt`
+	if err := os.MkdirAll(dstCert, 0o755); err != nil {
+		t.Fatalf("MkdirAll dstCert block: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error when cert destination is blocked, got nil")
+	}
+	if !strings.Contains(err.Error(), "write cert") {
+		t.Errorf("error = %q, want 'write cert' in message", err.Error())
+	}
+}
+
+// TestInstallCertificate_WriteKeyError verifies that InstallCertificate returns
+// a "write key" error when the destination key path is blocked by a directory.
+func TestInstallCertificate_WriteKeyError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcCert := filepath.Join(dir, "src.crt")
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	// Create the data dir, then block the key destination.
+	dataDir := DefaultDataDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll dataDir: %v", err)
+	}
+	dstKey := dataDir + `\dashboard-tls.key`
+	if err := os.MkdirAll(dstKey, 0o755); err != nil {
+		t.Fatalf("MkdirAll dstKey block: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error when key destination is blocked, got nil")
+	}
+	if !strings.Contains(err.Error(), "write key") {
+		t.Errorf("error = %q, want 'write key' in message", err.Error())
+	}
+}
