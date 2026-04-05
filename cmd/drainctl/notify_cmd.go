@@ -41,8 +41,16 @@ func notifyCmd() *cobra.Command {
 				for j, tr := range effectiveTriggers {
 					triggers[j] = string(tr)
 				}
-				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d",
-					i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes))
+				hmacNote := ""
+				if t.Type == "webhook" {
+					if t.Secret != "" {
+						hmacNote = " hmac_secret=set"
+					} else {
+						hmacNote = " hmac_secret=unset"
+					}
+				}
+				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
+					i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
 			}
 			if fileCfg.HasTargets() {
 				log(dc.LvlOK, "notifications=enabled")

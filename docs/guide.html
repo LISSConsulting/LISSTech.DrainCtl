@@ -746,7 +746,11 @@ drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
                 When called with flags (e.g., by the MSI installer during silent install), it applies the values
                 directly and writes <code>config.json</code> without prompting:
             </p>
-            <pre><code>drainctl configure --grace-period 120 --mode dashboard --dashboard-port 49470</code></pre>
+            <pre><code>drainctl configure --grace-period 120 --mode dashboard --dashboard-port 49470
+
+# Agent registration with session warning threshold and custom poll interval
+drainctl configure --mode registration --dashboard-url https://dash:49470 \
+  --session-warning-threshold 90 --poll-interval 30 --retention-days 90</code></pre>
 
             <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
             <h2 id="powershell">6. PowerShell Module</h2>
@@ -985,11 +989,15 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
             <p>
                 When session utilization exceeds the configured threshold, DrainCtl fires a
                 <code>session_warning</code> notification. The default threshold is <strong>80%</strong> &mdash; change
-                it in <code>config.json</code>:
+                it via the CLI or in <code>config.json</code>:
             </p>
 
-            <pre><code>{
-  "session_warning_threshold": 80
+            <pre><code># Via CLI (0 = disabled)
+drainctl configure --session-warning-threshold 90
+
+# Or in config.json directly
+{
+  "session_warning_threshold": 90
 }</code></pre>
 
             <p>
@@ -1510,7 +1518,7 @@ drainctl service uninstall</code></pre>
             <ul>
                 <li>Make sure the dashboard URL is in the browser's Intranet zone (or Trusted Sites)</li>
                 <li>
-                    Try using the FQDN (e.g., <code>http://server.domain.com:49470</code>) &mdash; Kerberos needs the
+                    Try using the FQDN (e.g., <code>https://server.domain.com:49470</code>) &mdash; Kerberos needs the
                     full hostname
                 </li>
                 <li>Verify your account is in the configured DashboardGroup (default: Domain Admins)</li>
