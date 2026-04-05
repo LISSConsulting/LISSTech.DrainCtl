@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-seventh roam-mode pass complete.** Code quality + docs: `clear()` built-in replaces manual `for/delete` loops in `notify.go` (`LastAlertNotify` reset on healthy/drain-off) and `internal/svc/check.go` (`resetSessionWarnCooldown`); `docs/guide.html` now documents `--since`/`--until` RFC 3339 time-bounded history queries, the `drainctl configure` interactive wizard (and flag-driven mode used by the MSI), and `drainctl service status` alongside the existing `Get-Service DrainCtl` snippet.
+> Current state: **Forty-eighth roam-mode pass complete.** Code organization: `cmd/drainctl/main.go` (929 lines) split into 8 focused command-group files; `main.go` reduced to 53 lines of package setup and root wiring. Bug fix: `runConfigureFlags` now upserts webhook/ntfy targets instead of appending, preventing duplicates when `drainctl configure --webhook-url` is run more than once.
 
 ## Completed Work
 
@@ -142,10 +142,12 @@
 | Roam #46 | Fixed two malformed `</` closing tags (missing `a`) in install-card anchor buttons — pre-existing bug that caused `prettier` to error out on every `just fmt-web` run since the Roam #44 pass; also corrected `justfile` `fmt-web` glob from `internal/dashboard/*.js` to `internal/dashboard/testdata/*.js` after mock.js was relocated in Roam #44 | correctness, code quality, docs |
 | Roam #47 | `notify.go`: `for k := range state.LastAlertNotify { delete(...) }` → `clear(state.LastAlertNotify)` — idiomatic Go 1.21+ map reset (two maps are now separate, no filter needed); `internal/svc/check.go` `resetSessionWarnCooldown`: same `for/delete` → `clear(state.LastSessionWarnNotify)` | code quality |
 | Roam #47 | `docs/guide.html` CLI Usage — added `--since`/`--until` RFC 3339 examples to the history section; added `drainctl configure` subsection covering both interactive wizard and flag-driven mode; Service Management — added `drainctl service status` line above `Get-Service DrainCtl` | docs |
+| Roam #48 | `cmd/drainctl/main.go` (929 lines) split into 8 focused command-group files — `check_cmd.go` (103), `history_cmd.go` (111), `audit_cmd.go` (31), `notify_cmd.go` (143), `service_cmd.go` (91), `register_cmd.go` (83), `dashboard_cmd.go` (171), `configure_cmd.go` (214); `main.go` reduced to package setup + root wiring (53 lines) | code quality, code organization |
+| Roam #48 | `runConfigureFlags` bug fix: webhook/ntfy URLs were appended unconditionally, so running `drainctl configure --webhook-url X` twice produced duplicate notification targets; replaced with `upsertNotifyTarget` helper (update first matching type or append new) shared with `setNotifyTarget` | correctness, CLI |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #47.)*
+*(All tracked items complete — nothing pending after Roam #48.)*
 
 ## Key Learnings
 
