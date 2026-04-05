@@ -3,6 +3,7 @@
 package store
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -502,5 +503,81 @@ func TestConcurrentAppendAndRead(t *testing.T) {
 	got := st.History(0)
 	if len(got) != goroutines*recordsEach {
 		t.Errorf("want %d records after concurrent appends, got %d", goroutines*recordsEach, len(got))
+	}
+}
+
+// ── load empty-line skip ──────────────────────────────────────────────────────
+
+// TestLoad_EmptyLineSkipped verifies that load skips blank lines in the JSONL
+// file and still returns both surrounding valid records.
+// This exercises the `if len(line) == 0 { continue }` branch in load.
+func TestLoad_EmptyLineSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	now := time.Now().Truncate(time.Millisecond)
+	r1 := dc.AuditRecord{Timestamp: now, Host: "h1", DrainLabel: "AllowAll"}
+	r2 := dc.AuditRecord{Timestamp: now.Add(time.Second), Host: "h1", DrainLabel: "AllowAll"}
+	data1, _ := json.Marshal(r1)
+	data2, _ := json.Marshal(r2)
+
+	// Embed a bare blank line between two valid JSONL records.
+	content := string(data1) + "\n\n" + string(data2) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err != nil {
+		t.Fatalf("OpenMemAuditStore: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	got := st.History(0)
+	if len(got) != 2 {
+		t.Errorf("want 2 records (empty line skipped), got %d", len(got))
+	}
+}
+
+// ── flushLocked seek error ────────────────────────────────────────────────────
+
+// TestFlushLocked_SeekError verifies that flushLocked (called via Flush) returns
+// an error when the underlying file handle is closed — exercising the
+// `m.file.Seek(0, 2)` error-return path in flushLocked.
+func TestFlushLocked_SeekError(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup() // cleanup ignores errors from Close — safe even after file close
+
+	// Mark the store dirty so flushLocked proceeds past the dirty==0 guard.
+	st.Append(rec(dc.AllowAll, time.Now(), false))
+
+	// Force a file-level error by closing the OS file without going through Close().
+	// flushLocked will attempt Seek on the now-closed handle and must return an error.
+	_ = st.file.Close()
+
+	if err := st.Flush(); err == nil {
+		t.Fatal("expected error from Flush after file close, got nil")
+	}
+}
+
+// ── Prune seek error ──────────────────────────────────────────────────────────
+
+// TestPrune_SeekError verifies that Prune returns (0, error) when the
+// underlying file cannot be seeked — exercising the `m.file.Seek(0, 0)`
+// error-return path in Prune.
+func TestPrune_SeekError(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup()
+
+	// Add an old record so Prune finds something to remove and reaches the
+	// rewrite stage (Seek + Truncate).
+	st.Append(rec(dc.AllowAll, time.Now().Add(-48*time.Hour), false))
+
+	// Close the file to force I/O errors on the rewrite seek.
+	_ = st.file.Close()
+
+	_, err := st.Prune(12 * time.Hour)
+	if err == nil {
+		t.Fatal("expected error from Prune after file close, got nil")
 	}
 }
