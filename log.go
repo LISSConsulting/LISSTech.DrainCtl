@@ -40,7 +40,11 @@ func DiscardLogger() LogFunc {
 }
 
 // LogMsg is a convenience for a level + freeform message + optional kv pairs.
+// A nil log is silently ignored.
 func LogMsg(log LogFunc, l Level, msg string, fields ...string) {
+	if log == nil {
+		return
+	}
 	all := append([]string{fmt.Sprintf("msg=%q", msg)}, fields...)
 	log(l, all...)
 }
