@@ -858,6 +858,89 @@ func TestScanRecords_OpenError(t *testing.T) {
 	}
 }
 
+// ── GetHistory ────────────────────────────────────────────────────────────────
+
+// TestGetHistory_ReturnsAllRecords verifies the basic happy path: records written
+// to the JSONL file are returned in newest-first order.
+func TestGetHistory_ReturnsAllRecords(t *testing.T) {
+	store, cleanup := writeTestRecords(t, []AuditRecord{
+		ptr(time.Now().Add(-2*time.Hour), false),
+		ptr(time.Now().Add(-time.Hour), false),
+		ptr(time.Now(), true),
+	})
+	defer cleanup()
+
+	recs, err := GetHistory(HistoryOptions{DBPath: store.path})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 3 {
+		t.Errorf("len = %d, want 3", len(recs))
+	}
+}
+
+// TestGetHistory_ChangesOnly verifies that setting ChangesOnly=true returns only
+// records where Changed is true.
+func TestGetHistory_ChangesOnly(t *testing.T) {
+	store, cleanup := writeTestRecords(t, []AuditRecord{
+		ptr(time.Now().Add(-2*time.Hour), false),
+		ptr(time.Now().Add(-time.Hour), true),
+		ptr(time.Now(), false),
+	})
+	defer cleanup()
+
+	recs, err := GetHistory(HistoryOptions{DBPath: store.path, ChangesOnly: true})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Errorf("len = %d, want 1 (only changed records)", len(recs))
+	}
+	if !recs[0].Changed {
+		t.Error("expected Changed=true on returned record")
+	}
+}
+
+// TestGetHistory_LimitRespected verifies that the Limit field caps results.
+func TestGetHistory_LimitRespected(t *testing.T) {
+	var raws []AuditRecord
+	base := time.Now()
+	for i := range 5 {
+		raws = append(raws, ptr(base.Add(time.Duration(i)*time.Second), false))
+	}
+	store, cleanup := writeTestRecords(t, raws)
+	defer cleanup()
+
+	recs, err := GetHistory(HistoryOptions{DBPath: store.path, Limit: 2})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("len = %d, want 2 (limit applied)", len(recs))
+	}
+}
+
+// TestGetHistory_InvalidPath verifies that GetHistory returns an error when the
+// audit file directory cannot be created (a file already exists at the would-be
+// directory path), exercising the "open audit store" error return.
+func TestGetHistory_InvalidPath(t *testing.T) {
+	dir := t.TempDir()
+	// Place a file where the directory would need to exist so MkdirAll fails.
+	blockingFile := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	badPath := filepath.Join(blockingFile, "audit.jsonl")
+
+	_, err := GetHistory(HistoryOptions{DBPath: badPath})
+	if err == nil {
+		t.Fatal("expected error for invalid path, got nil")
+	}
+	if !strings.Contains(err.Error(), "open audit store") {
+		t.Errorf("error = %q, want 'open audit store' in message", err.Error())
+	}
+}
+
 // TestPrune_RenameError verifies that Prune returns an error containing
 // "rename temp file" when os.Rename fails. This is forced by holding an
 // exclusive (no-share-delete) Windows handle on the destination file so that
