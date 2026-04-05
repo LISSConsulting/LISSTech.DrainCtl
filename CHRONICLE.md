@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-first roam-mode pass complete.** Three hardening fixes: `PollInterval` gains an upper bound (`MaxPollInterval = 86400 s`) in `Config.Validate` — a hand-edited config.json could previously set an arbitrarily large interval, effectively disabling monitoring silently; 2 new tests. Dashboard `renderHistoryModal` transition branch now wraps `mode()` calls in `esc()`, matching the non-transition branch that already did so — defence-in-depth against a future unknown drain-mode value containing HTML-special characters.
+> Current state: **Fifty-second roam-mode pass complete.** Webhook payload enriched with three new fields: `grace_period_seconds` (the configured alerting threshold — lets consumers compute Grace time remaining), `connections_allowed` (boolean — direct flag rather than requiring status string parsing), `version` (reporting agent version — useful for debugging mixed-version deployments); 2 new tests.
 
 ## Completed Work
 
@@ -154,9 +154,11 @@
 | Roam #51 | `Config.Validate`: `PollInterval` guard widened from `< 10` to `< 10 \|\| > MaxPollInterval` (`MaxPollInterval = 86400 s`) — a hand-edited config.json with an arbitrarily large poll interval was silently accepted, effectively halting state monitoring; `MaxPollInterval` exported so callers and tests can reference it; 2 new tests (`TestValidate_PollIntervalClamped`, `TestValidate_PollIntervalPreservesValid`) | correctness, config, testing |
 | Roam #51 | Dashboard `renderHistoryModal` XSS consistency: transition branch now wraps `mode()` with `esc()` (`esc(mode(e.transition_from)) + " → " + esc(mode(e.drain_mode))`) — the non-transition branch already used `esc(mode(...))` but the transition branch injected the `mode()` result directly into `innerHTML`; drain-mode values are currently alphanumeric constants but defence-in-depth requires escaping all server-sourced strings | security, dashboard |
 
+| Roam #52 | `SendNotification` webhook payload: added `grace_period_seconds` (configured alerting threshold in seconds), `connections_allowed` (boolean — true only when drain mode is off), and `version` (reporting agent version) — webhook consumers previously had to parse `status` to determine if connections were blocked and had no way to know the alerting threshold or compute Grace time remaining; 2 new tests (`TestSendNotification_WebhookPayloadContextFields`, `TestSendNotification_ConnectionsAllowedTrueWhenHealthy`) | feature, notify, testing |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #51.)*
+*(All tracked items complete — nothing pending after Roam #52.)*
 
 ## Key Learnings
 
