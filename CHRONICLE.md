@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Twenty-fifth roam-mode pass complete.** Three correctness/quality fixes: (1) `handlePutNotifyConfig` now uses a single atomic `UpdateNotifySettings` call instead of three separate LoadConfig+save cycles, and uses `*[]NotificationTarget` so an absent `notifications` field is a no-op instead of silently clearing all targets; (2) `MemAuditStore.Prune` now skips records that fail `json.Marshal` (was writing empty lines) — consistent with `flushLocked`; (3) `ipRateLimiter.Allow` pruning loop drops the redundant `addr != ip` guard since the current IP's `lastSeen` is always `now` (never stale).
+> Current state: **Twenty-seventh roam-mode pass complete.** Two improvements: (1) wall-clock config re-fetch timer — `backoffTicks(int) int` replaced by `backoffDuration(int) time.Duration` (5 min base, doubles per failure, 160 min cap); `pollsSinceConfigFetch` counter replaced by `lastConfigFetch time.Time` so re-fetch interval is independent of `PollInterval` runtime changes; (2) uPlot chart `setData()` optimisation — 30 s data-only updates now call `chartInstance.setData()` instead of destroy+recreate, eliminating per-poll repaint flicker; stale `now` closure in x-axis formatter fixed to recompute `Date.now() / 1000` on each draw.
 
 ## Completed Work
 
@@ -78,10 +78,12 @@
 | Roam #25 | `ipRateLimiter.Allow`: removed redundant `addr != ip` guard in prune loop; current IP's `lastSeen` is always `now` after refill so it is never pruned regardless | code quality, dashboard |
 | Roam #26 | `ipRateLimiter.Allow` returns `(bool, time.Duration)` — `rateLimitMiddleware` now sets `Retry-After: N` (whole seconds, RFC 7231 SHOULD) on 429 responses so well-behaved clients back off correctly; 1 new test `TestRateLimiter_Middleware_Rejects_SetsRetryAfterHeader`; 4 existing tests updated for new signature | correctness, security, dashboard, testing |
 | Roam #26 | `handlePutNotifyConfig`: validates `session_warning_threshold` (0–100) and `grace_period` (1–1440) before calling `UpdateNotifySettings` — out-of-range values now return 400 Bad Request instead of 500 Internal Server Error; 4 new tests | correctness, dashboard, testing |
+| Roam #27 | Wall-clock config re-fetch timer: `backoffTicks(int) int` → `backoffDuration(int) time.Duration` (5 min base, doubles per failure, 160 min cap); `pollsSinceConfigFetch` counter → `lastConfigFetch time.Time` — re-fetch interval now independent of `PollInterval` runtime changes; `backoff_test.go` updated; log message changed from `next_retry_polls=N` to `next_retry_in=Xm` | correctness, svc |
+| Roam #27 | uPlot chart `setData()` optimisation: `buildChartData()` extracted; `renderChart()` compares container width + CSS colour fingerprint against last-creation values — data-only 30 s updates call `chartInstance.setData()` instead of destroy+recreate (no per-poll flicker); stale `now` closure in x-axis formatter fixed to recompute `Date.now()/1000` on each axis draw | perf, UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #26.)*
+*(All tracked items complete — nothing pending after Roam #27.)*
 
 ## Key Learnings
 
@@ -90,7 +92,7 @@
 - **Health endpoint design**: Placed at `GET /api/v1/health` with no auth so load balancers and uptime monitors can probe without Kerberos. Returns `ok`, `version`, `servers`, `healthy`, `alerting`, `unknown` counts.
 - **URL scheme validation**: Added to `Config.Validate` so it applies uniformly on every config load/save path. Empty URLs are preserved (existing behaviour handles them downstream).
 - **`svc/handler.go` is large** (800+ lines) — split into sub-files would improve navigability but isn't blocking anything yet.
-- **Dashboard backoff is poll-count-based, not time-based**: `backoffTicks(n)` returns polls-until-next-retry so it composes cleanly with the existing `pollsSinceConfigFetch` counter. Time-based backoff would require an extra timer or timestamp comparison.
+- **Dashboard backoff is now wall-clock-based**: `backoffDuration(n)` returns `time.Duration` (5 min base, doubles per failure, 160 min cap); `lastConfigFetch time.Time` compared via `time.Since()`. This is independent of `PollInterval` changes at runtime, unlike the old poll-count approach.
 - **pflag flag detection**: `cmd.Flags().NFlag()` counts explicitly set flags (cobra/pflag); `NChanged()` does not exist. The pattern `NFlag() == 0` reliably separates interactive from scripted invocation.
 - **History ring is in-memory only** — `ServerState.history` is not persisted to `servers.json`. It resets on service restart. This keeps the implementation simple; records reaccumulate as reports arrive. Persisting 100×N `CheckResult` JSON per host would bloat `servers.json` significantly.
 - **Dashboard handler tests need no `devmode` tag**: handlers are methods on `*DashboardServer`; calling them directly with `httptest.NewRecorder` bypasses all middleware. Auth is only injected by the mux wrappers, not by the handlers themselves.
