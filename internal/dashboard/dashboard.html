@@ -5057,13 +5057,21 @@
                         '<div class="srv-row"><span class="srv-k">Duration</span><span class="srv-v">' +
                         d +
                         "</span></div>";
-                    if (s === "grace" && graceMinutes !== null && r && r.state_duration_seconds != null) {
-                        const remainSec = Math.max(0, graceMinutes * 60 - r.state_duration_seconds);
-                        const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
-                        html +=
-                            '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v" style="color:var(--amber)">' +
-                            remainLabel +
-                            "</span></div>";
+                    if (s === "grace" && r && r.state_duration_seconds != null) {
+                        // Prefer the grace period reported by this server's last
+                        // check (already in seconds); fall back to the dashboard-
+                        // wide graceMinutes for servers running older agent versions.
+                        const gpSec = (r.grace_period_seconds > 0)
+                            ? r.grace_period_seconds
+                            : (graceMinutes !== null ? graceMinutes * 60 : null);
+                        if (gpSec !== null) {
+                            const remainSec = Math.max(0, gpSec - r.state_duration_seconds);
+                            const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
+                            html +=
+                                '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v" style="color:var(--amber)">' +
+                                remainLabel +
+                                "</span></div>";
+                        }
                     }
                     html +=
                         '<div class="srv-row"><span class="srv-k">Changed By</span><span class="srv-v">' +
@@ -5117,6 +5125,16 @@
                 document.getElementById("status-pill").textContent = "Live";
                 document.getElementById("status-pill").style.borderColor = "var(--green)";
                 document.getElementById("status-pill").style.color = "var(--green)";
+
+                // Page title: show alert/grace count so the tab conveys status
+                // at a glance when the window is not focused.
+                if (c.alert > 0) {
+                    document.title = c.alert + " alert \u00b7 DrainCtl";
+                } else if (c.grace > 0) {
+                    document.title = c.grace + " grace \u00b7 DrainCtl";
+                } else {
+                    document.title = "DrainCtl Dashboard";
+                }
             }
 
             let chartInstance = null;
@@ -5333,6 +5351,10 @@
                     if (r.status === 401 || r.status === 403) {
                         document.getElementById("grid").innerHTML =
                             '<div class="empty"><h2>Access Denied</h2><p>Your account is not authorized.</p></div>';
+                        const pill = document.getElementById("status-pill");
+                        pill.textContent = "Auth Error";
+                        pill.style.borderColor = "var(--amber)";
+                        pill.style.color = "var(--amber)";
                         return;
                     }
                     if (!r.ok) throw new Error("HTTP " + r.status);
