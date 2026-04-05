@@ -38,6 +38,56 @@ and saves config.json without prompting.`,
 		},
 	}
 
+	cmd.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "Show current configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
+			fileCfg, err := dc.LoadConfig(log)
+			if err != nil {
+				return err
+			}
+
+			log(dc.LvlINF, fmt.Sprintf("version=%s", dc.Version), fmt.Sprintf("config_path=%s", dc.DefaultConfigPath()))
+
+			// Service settings
+			log(dc.LvlINF,
+				fmt.Sprintf("grace_period=%dm", fileCfg.GracePeriod),
+				fmt.Sprintf("poll_interval=%ds", fileCfg.PollInterval),
+				fmt.Sprintf("retention_days=%d", fileCfg.RetentionDays),
+			)
+			if fileCfg.SessionWarningThreshold > 0 {
+				log(dc.LvlINF, fmt.Sprintf("session_warning_threshold=%d%%", fileCfg.SessionWarningThreshold))
+			} else {
+				log(dc.LvlINF, "session_warning_threshold=disabled")
+			}
+
+			// Dashboard server (this machine serves the dashboard)
+			if fileCfg.Dashboard.Enabled {
+				log(dc.LvlINF, fmt.Sprintf("dashboard_server=enabled port=%d group=%q", fileCfg.Dashboard.Port, fileCfg.Dashboard.Group))
+			} else {
+				log(dc.LvlINF, "dashboard_server=disabled")
+			}
+
+			// Dashboard agent registration (this machine reports to a dashboard)
+			if fileCfg.Dashboard.URL != "" {
+				certNote := "cert=not_pinned"
+				if fileCfg.Dashboard.TLSFingerprint != "" {
+					certNote = fmt.Sprintf("cert=pinned fingerprint=%s", fileCfg.Dashboard.TLSFingerprint)
+				}
+				autoPinNote := ""
+				if fileCfg.Dashboard.AutoPin != nil && *fileCfg.Dashboard.AutoPin {
+					autoPinNote = " auto_pin=true"
+				}
+				log(dc.LvlINF, fmt.Sprintf("dashboard_url=%q %s%s", fileCfg.Dashboard.URL, certNote, autoPinNote))
+			}
+
+			// Notification targets
+			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
+			return nil
+		},
+	})
+
 	cmd.Flags().String("mode", "standalone", "Install mode: dashboard, registration, standalone")
 	cmd.Flags().String("webhook-url", "", "Webhook notification URL")
 	cmd.Flags().String("ntfy-url", "", "ntfy.sh notification URL")

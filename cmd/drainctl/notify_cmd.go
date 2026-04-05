@@ -26,37 +26,7 @@ func notifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(fileCfg.Notifications) == 0 {
-				log(dc.LvlWRN, "notifications=disabled (no targets configured)")
-				return nil
-			}
-			for i, t := range fileCfg.Notifications {
-				effectiveTriggers := t.Triggers
-				triggerNote := ""
-				if len(effectiveTriggers) == 0 {
-					effectiveTriggers = dc.DefaultTriggers
-					triggerNote = " (default)"
-				}
-				triggers := make([]string, len(effectiveTriggers))
-				for j, tr := range effectiveTriggers {
-					triggers[j] = string(tr)
-				}
-				hmacNote := ""
-				if t.Type == "webhook" {
-					if t.Secret != "" {
-						hmacNote = " hmac_secret=set"
-					} else {
-						hmacNote = " hmac_secret=unset"
-					}
-				}
-				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
-					i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
-			}
-			if fileCfg.HasTargets() {
-				log(dc.LvlOK, "notifications=enabled")
-			} else {
-				log(dc.LvlWRN, "notifications=disabled (no targets with URLs configured)")
-			}
+			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
 			return nil
 		},
 	})
@@ -138,6 +108,42 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, log dc.LogFunc) error 
 	}
 	log(dc.LvlOK, fmt.Sprintf("%s_url=%q", typ, url))
 	return nil
+}
+
+// printNotifyTargets logs each notification target and the overall enabled/disabled
+// status. Used by both "notify status" and "configure show".
+func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool, log dc.LogFunc) {
+	if len(targets) == 0 {
+		log(dc.LvlWRN, "notifications=disabled (no targets configured)")
+		return
+	}
+	for i, t := range targets {
+		effectiveTriggers := t.Triggers
+		triggerNote := ""
+		if len(effectiveTriggers) == 0 {
+			effectiveTriggers = dc.DefaultTriggers
+			triggerNote = " (default)"
+		}
+		triggers := make([]string, len(effectiveTriggers))
+		for j, tr := range effectiveTriggers {
+			triggers[j] = string(tr)
+		}
+		hmacNote := ""
+		if t.Type == "webhook" {
+			if t.Secret != "" {
+				hmacNote = " hmac_secret=set"
+			} else {
+				hmacNote = " hmac_secret=unset"
+			}
+		}
+		log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
+			i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
+	}
+	if hasTargets {
+		log(dc.LvlOK, "notifications=enabled")
+	} else {
+		log(dc.LvlWRN, "notifications=disabled (no targets with URLs configured)")
+	}
 }
 
 // upsertNotifyTarget updates the URL of the first target of typ, or appends a
