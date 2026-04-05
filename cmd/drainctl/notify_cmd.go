@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -238,15 +239,8 @@ func triggerList() string {
 	for tr := range dc.ValidTriggers {
 		names = append(names, string(tr))
 	}
-	// Sort for deterministic output.
-	sorted := make([]string, len(names))
-	copy(sorted, names)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	return strings.Join(sorted, ", ")
+	slices.Sort(names)
+	return strings.Join(names, ", ")
 }
 
 // printNotifyTargets logs each notification target and the overall enabled/disabled

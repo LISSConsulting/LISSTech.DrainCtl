@@ -869,6 +869,57 @@ func TestSendNotification_NtfyTitleIsReadable(t *testing.T) {
 	}
 }
 
+// TestSendNotification_ResetsOnDrainOff verifies that drain_off clears
+// LastAlertNotify the same way TriggerHealthy does, allowing the alert to
+// re-fire immediately on the next poll cycle.
+func TestSendNotification_ResetsOnDrainOff(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerAlert, TriggerDrainOff}, RepeatMinutes: 0},
+	}
+	state := &NotifyState{}
+
+	// Fire alert (once-only).
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+	// Drain off — clears alert tracking.
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerDrainOff, "", nil)
+	// Fire alert again — should fire again since tracking was reset.
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+
+	if atomic.LoadInt32(&count) != 3 {
+		t.Errorf("webhook called %d times, want 3 (alert, drain_off, alert-after-reset)", atomic.LoadInt32(&count))
+	}
+}
+
+// TestSendTestNotification_UnknownTypeSkipped verifies that a target with an
+// unrecognised type is silently skipped — no error, no panic — when the URL is
+// non-empty. This is an intentional no-op to allow forward-compatibility.
+func TestSendTestNotification_UnknownTypeSkipped(t *testing.T) {
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: "http://any", Triggers: DefaultTriggers}, // anchor so hasTargets is true
+		{Type: "future-backend", URL: "http://example.com/future", Triggers: DefaultTriggers},
+	}
+
+	// Replace the real HTTP call with a server that accepts all requests so
+	// we only care about whether the unknown type causes an error, not the
+	// network result.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	targets[0].URL = srv.URL
+
+	if err := SendTestNotification(targets, nil); err != nil {
+		t.Errorf("SendTestNotification with unknown type returned error: %v", err)
+	}
+}
+
 // TestSendTestNotification_WebhookPayloadSchemaComplete verifies that the test
 // notification payload contains the same top-level fields as a real notification
 // so webhook consumers can validate against a consistent schema.
