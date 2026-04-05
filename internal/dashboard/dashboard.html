@@ -871,7 +871,7 @@
                 cursor: pointer;
             }
             .settings-num {
-                width: 100px;
+                width: 80px;
                 font-family: "JetBrains Mono", monospace;
                 font-size: 0.8rem;
                 padding: 8px 12px;
@@ -1109,6 +1109,7 @@
                 gap: 6px;
                 width: 50%;
                 padding: 10px;
+                margin-top: 12px;
                 font-family: "JetBrains Mono", monospace;
                 font-size: 0.78rem;
                 font-weight: 700;
@@ -1130,6 +1131,26 @@
                 background: var(--border);
                 margin: 18px 0;
                 opacity: 0.4;
+            }
+            .settings-cfg-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 28px;
+                margin-bottom: 24px;
+            }
+            .settings-group--flush {
+                margin-bottom: 0;
+            }
+            .settings-num-label {
+                font-size: 0.75rem;
+                color: var(--muted);
+            }
+            .repeat-pill--dashed {
+                border-style: dashed;
+                font-size: 0.7rem;
+            }
+            .repeat-pill-extra {
+                margin-bottom: 10px;
             }
 
             /* History button */
@@ -1317,8 +1338,8 @@
                 .settings-modal {
                     padding: 20px 18px;
                 }
-                .settings-modal > div[style*="grid-template-columns"] {
-                    grid-template-columns: 1fr !important;
+                .settings-cfg-grid {
+                    grid-template-columns: 1fr;
                 }
                 .btn-add-target {
                     width: 100%;
@@ -1387,8 +1408,23 @@
             <div class="nav-in">
                 <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div>
                 <div class="nav-right" id="ns"></div>
-                <button class="btn-gear btn-theme" id="btn-theme" onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Switch to dark mode">☽</button>
-                <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings" aria-label="Open configuration settings" aria-haspopup="dialog">
+                <button
+                    class="btn-gear btn-theme"
+                    id="btn-theme"
+                    onclick="toggleTheme()"
+                    title="Toggle light/dark mode"
+                    aria-label="Switch to dark mode"
+                >
+                    ☽
+                </button>
+                <button
+                    class="btn-gear"
+                    id="btn-gear"
+                    onclick="toggleSettings()"
+                    title="Notification Settings"
+                    aria-label="Open configuration settings"
+                    aria-haspopup="dialog"
+                >
                     CONFIG
                 </button>
             </div>
@@ -1437,7 +1473,9 @@
                 <div class="section-label">Event Log</div>
                 <div class="log-bar">
                     <input class="log-search" id="log-search" placeholder="Search events..." oninput="filterLog()" />
-                    <button class="btn-expand" id="btn-exp" onclick="toggleExpand()" aria-label="Expand event log">⤢ Expand</button>
+                    <button class="btn-expand" id="btn-exp" onclick="toggleExpand()" aria-label="Expand event log">
+                        ⤢ Expand
+                    </button>
                 </div>
                 <div class="log" id="log" role="log" aria-live="polite" aria-label="Event log">
                     <div class="log-restore" onclick="toggleExpand()">Click or press ESC to restore</div>
@@ -1447,14 +1485,24 @@
             </div>
 
             <div class="section-label">Servers</div>
-            <div class="srv-bar" id="srv-bar" style="display:none">
+            <div class="srv-bar" id="srv-bar" style="display: none">
                 <input class="log-search" id="srv-search" placeholder="Filter servers..." oninput="filterGrid()" />
                 <div class="filter-pills" id="status-filter" role="group" aria-label="Filter by status">
-                    <span class="filter-pill active" data-status="all" role="button" tabindex="0" aria-pressed="true">All</span>
-                    <span class="filter-pill" data-status="ok" role="button" tabindex="0" aria-pressed="false">Healthy</span>
-                    <span class="filter-pill" data-status="grace" role="button" tabindex="0" aria-pressed="false">Grace</span>
-                    <span class="filter-pill" data-status="alert" role="button" tabindex="0" aria-pressed="false">Alert</span>
-                    <span class="filter-pill" data-status="off" role="button" tabindex="0" aria-pressed="false">Offline</span>
+                    <span class="filter-pill active" data-status="all" role="button" tabindex="0" aria-pressed="true"
+                        >All</span
+                    >
+                    <span class="filter-pill" data-status="ok" role="button" tabindex="0" aria-pressed="false"
+                        >Healthy</span
+                    >
+                    <span class="filter-pill" data-status="grace" role="button" tabindex="0" aria-pressed="false"
+                        >Grace</span
+                    >
+                    <span class="filter-pill" data-status="alert" role="button" tabindex="0" aria-pressed="false"
+                        >Alert</span
+                    >
+                    <span class="filter-pill" data-status="off" role="button" tabindex="0" aria-pressed="false"
+                        >Offline</span
+                    >
                 </div>
             </div>
             <div class="grid-toast" id="grid-toast" role="alert" aria-live="assertive"></div>
@@ -1463,15 +1511,24 @@
             </div>
         </div>
 
-        <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div
+            class="settings-overlay"
+            id="settings-overlay"
+            onclick="toggleSettings()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+        >
             <div class="settings-modal" id="settings-drawer" onclick="event.stopPropagation()">
                 <div class="settings-title">
                     <span id="settings-title">Dashboard Configuration</span
-                    ><button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">&times;</button>
+                    ><button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">
+                        &times;
+                    </button>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 24px">
-                    <div class="settings-group" style="margin-bottom: 0">
+                <div class="settings-cfg-grid">
+                    <div class="settings-group settings-group--flush">
                         <div class="settings-label">Grace Period</div>
                         <p class="target-desc">How long drain mode can stay active before it becomes an alert.</p>
                         <div class="repeat-pills" id="grace-pills">
@@ -1482,19 +1539,11 @@
                             <span class="repeat-pill" data-mins="240">4 hours</span>
                         </div>
                         <div class="target-repeat">
-                            <input
-                                class="settings-num"
-                                id="cfg-grace"
-                                type="number"
-                                min="1"
-                                max="1440"
-                                value="60"
-                                style="width: 80px"
-                            />
-                            <span style="font-size: 0.75rem; color: var(--muted)">minutes (custom)</span>
+                            <input class="settings-num" id="cfg-grace" type="number" min="1" max="1440" value="60" />
+                            <span class="settings-num-label">minutes (custom)</span>
                         </div>
                     </div>
-                    <div class="settings-group" style="margin-bottom: 0">
+                    <div class="settings-group settings-group--flush">
                         <div class="settings-label">Session Warning Threshold</div>
                         <p class="target-desc">Alert when sessions on any server exceed this percentage.</p>
                         <div class="repeat-pills" id="threshold-pills">
@@ -1503,26 +1552,14 @@
                             <span class="repeat-pill" data-val="90">90%</span>
                             <span class="repeat-pill" data-val="95">95%</span>
                         </div>
-                        <div style="margin-bottom: 10px">
-                            <span
-                                class="repeat-pill"
-                                data-val="0"
-                                id="threshold-off"
-                                style="border-style: dashed; font-size: 0.7rem"
+                        <div class="repeat-pill-extra">
+                            <span class="repeat-pill repeat-pill--dashed" data-val="0" id="threshold-off"
                                 >Disable session warnings</span
                             >
                         </div>
                         <div class="target-repeat">
-                            <input
-                                class="settings-num"
-                                id="cfg-threshold"
-                                type="number"
-                                min="0"
-                                max="100"
-                                value="80"
-                                style="width: 80px"
-                            />
-                            <span style="font-size: 0.75rem; color: var(--muted)">percent (custom)</span>
+                            <input class="settings-num" id="cfg-threshold" type="number" min="0" max="100" value="80" />
+                            <span class="settings-num-label">percent (custom)</span>
                         </div>
                     </div>
                 </div>
@@ -1532,7 +1569,13 @@
                 <div class="settings-group">
                     <div class="settings-label">Notification Targets</div>
                     <div class="target-list" id="target-list"></div>
-                    <button class="btn-add-target" onclick="addTargetRow(); _cfgDirty = true;" style="margin-top: 12px">
+                    <button
+                        class="btn-add-target"
+                        onclick="
+                            addTargetRow();
+                            _cfgDirty = true;
+                        "
+                    >
                         + Add Target
                     </button>
                 </div>
@@ -1547,16 +1590,35 @@
             </div>
         </div>
 
-        <div class="hist-overlay" id="hist-overlay" onclick="closeHistory()" role="dialog" aria-modal="true" aria-labelledby="hist-title-label">
+        <div
+            class="hist-overlay"
+            id="hist-overlay"
+            onclick="closeHistory()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hist-title-label"
+        >
             <div class="hist-modal" onclick="event.stopPropagation()">
                 <div class="hist-head">
                     <div>
                         <div class="hist-title" id="hist-title-label">Server History</div>
                         <div class="hist-hostname" id="hist-hostname"></div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <button class="filter-pill" id="hist-transitions-btn" role="button" tabindex="0" aria-pressed="false" style="font-size:0.68rem;padding:4px 10px" onclick="toggleHistTransitions()">Transitions only</button>
-                        <button class="settings-close" onclick="closeHistory()" aria-label="Close history">&times;</button>
+                    <div style="display: flex; align-items: center; gap: 10px">
+                        <button
+                            class="filter-pill"
+                            id="hist-transitions-btn"
+                            role="button"
+                            tabindex="0"
+                            aria-pressed="false"
+                            style="font-size: 0.68rem; padding: 4px 10px"
+                            onclick="toggleHistTransitions()"
+                        >
+                            Transitions only
+                        </button>
+                        <button class="settings-close" onclick="closeHistory()" aria-label="Close history">
+                            &times;
+                        </button>
                     </div>
                 </div>
                 <div class="hist-body" id="hist-body"></div>
@@ -5006,8 +5068,14 @@
                 // This prevents stale state from showing as a false "transition" if a
                 // server is removed and later re-added.
                 if (servers) {
-                    const cur = new Set(servers.map(function (s) { return s.hostname; }));
-                    Object.keys(prev).forEach(function (h) { if (!cur.has(h)) delete prev[h]; });
+                    const cur = new Set(
+                        servers.map(function (s) {
+                            return s.hostname;
+                        }),
+                    );
+                    Object.keys(prev).forEach(function (h) {
+                        if (!cur.has(h)) delete prev[h];
+                    });
                 }
                 if (evts.length > MAX_EVT) evts.length = MAX_EVT;
                 renderLog();
@@ -5062,9 +5130,12 @@
                         // Prefer the grace period reported by this server's last
                         // check (already in seconds); fall back to the dashboard-
                         // wide graceMinutes for servers running older agent versions.
-                        const gpSec = (r.grace_period_seconds > 0)
-                            ? r.grace_period_seconds
-                            : (graceMinutes !== null ? graceMinutes * 60 : null);
+                        const gpSec =
+                            r.grace_period_seconds > 0
+                                ? r.grace_period_seconds
+                                : graceMinutes !== null
+                                  ? graceMinutes * 60
+                                  : null;
                         if (gpSec !== null) {
                             const remainSec = Math.max(0, gpSec - r.state_duration_seconds);
                             const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
@@ -5382,7 +5453,9 @@
                 el.textContent = msg;
                 el.style.display = "";
                 clearTimeout(el._t);
-                el._t = setTimeout(function () { el.style.display = "none"; }, 5000);
+                el._t = setTimeout(function () {
+                    el.style.display = "none";
+                }, 5000);
             }
             async function rmConfirmed(h) {
                 try {
@@ -5430,21 +5503,32 @@
                     loadNotifyConfig();
                 } else {
                     _cfgDirty = false;
-                    if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); _cfgAbortCtrl = null; }
+                    if (_cfgAbortCtrl) {
+                        _cfgAbortCtrl.abort();
+                        _cfgAbortCtrl = null;
+                    }
                     document.getElementById("btn-gear").focus();
                 }
             }
             function closeHistory() {
                 histOpen = false;
                 _histHostname = null;
-                if (_histAbortCtrl) { _histAbortCtrl.abort(); _histAbortCtrl = null; }
+                if (_histAbortCtrl) {
+                    _histAbortCtrl.abort();
+                    _histAbortCtrl = null;
+                }
                 document.getElementById("hist-overlay").classList.remove("open");
-                if (_histTrigger) { _histTrigger.focus(); _histTrigger = null; }
+                if (_histTrigger) {
+                    _histTrigger.focus();
+                    _histTrigger = null;
+                }
             }
             async function loadHistory(hostname) {
                 // Cancel any in-flight request so a stale response cannot
                 // overwrite the results of a newer one (e.g. rapid toggle).
-                if (_histAbortCtrl) { _histAbortCtrl.abort(); }
+                if (_histAbortCtrl) {
+                    _histAbortCtrl.abort();
+                }
                 _histAbortCtrl = new AbortController();
                 const signal = _histAbortCtrl.signal;
                 document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
@@ -5568,7 +5652,7 @@
                 if (isNtfy && displayUrl.match(/^https?:\/\/ntfy\.sh\//)) {
                     displayUrl = displayUrl.replace(/^https?:\/\/ntfy\.sh\//, "");
                 }
-                var secretVal = (!isNtfy && t.secret) ? t.secret : "";
+                var secretVal = !isNtfy && t.secret ? t.secret : "";
                 row.innerHTML =
                     '<div class="target-row-head">' +
                     '<select class="target-type" data-field="type"><option value="webhook"' +
@@ -5586,7 +5670,9 @@
                     '">' +
                     '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
                     "</div>" +
-                    '<div class="webhook-secret-wrap" style="display:' + (isNtfy ? "none" : "flex") + ';align-items:center;gap:10px;margin-bottom:14px">' +
+                    '<div class="webhook-secret-wrap" style="display:' +
+                    (isNtfy ? "none" : "flex") +
+                    ';align-items:center;gap:10px;margin-bottom:14px">' +
                     '<div class="target-section-label" style="margin-bottom:0;white-space:nowrap">HMAC Secret</div>' +
                     '<input class="settings-input" data-field="secret" type="password" value="' +
                     secretVal.replace(/"/g, "&quot;") +
@@ -5636,7 +5722,7 @@
                     '<div class="target-repeat">' +
                     '<input class="settings-num" data-field="repeat" type="number" min="0" value="' +
                     rv +
-                    '" style="width:80px">' +
+                    '">' +
                     '<span style="font-size:.75rem;color:var(--muted)">minutes (custom value)</span></div>';
 
                 // Wire up events
@@ -5700,10 +5786,14 @@
                     });
                     _cfgDirty = true;
                 });
-                urlInput.addEventListener("input", function () { _cfgDirty = true; });
+                urlInput.addEventListener("input", function () {
+                    _cfgDirty = true;
+                });
                 var secretInput = row.querySelector('[data-field="secret"]');
                 if (secretInput) {
-                    secretInput.addEventListener("input", function () { _cfgDirty = true; });
+                    secretInput.addEventListener("input", function () {
+                        _cfgDirty = true;
+                    });
                 }
 
                 document.getElementById("target-list").appendChild(row);
@@ -5732,7 +5822,9 @@
                         try {
                             var parsed = new URL(url);
                             schemeOk = parsed.protocol === "http:" || parsed.protocol === "https:";
-                        } catch (_) { /* invalid URL */ }
+                        } catch (_) {
+                            /* invalid URL */
+                        }
                         if (!schemeOk) {
                             urlInput.style.borderColor = "var(--red)";
                             valid = false;
@@ -5742,7 +5834,7 @@
                     urlInput.style.borderColor = "";
                     const repeat = parseInt(row.querySelector('[data-field="repeat"]').value) || 0;
                     const secretInput = row.querySelector('[data-field="secret"]');
-                    const secret = (type === "webhook" && secretInput) ? secretInput.value : "";
+                    const secret = type === "webhook" && secretInput ? secretInput.value : "";
                     const triggers = [];
                     row.querySelectorAll("input[data-trigger]").forEach((cb) => {
                         if (cb.checked) triggers.push(cb.dataset.trigger);
@@ -5758,17 +5850,20 @@
                 // Cancel any in-flight request so a stale response cannot
                 // overwrite the UI when settings is closed and reopened quickly.
                 _cfgDirty = false;
-                if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); }
+                if (_cfgAbortCtrl) {
+                    _cfgAbortCtrl.abort();
+                }
                 _cfgAbortCtrl = new AbortController();
                 const signal = _cfgAbortCtrl.signal;
                 const targetList = document.getElementById("target-list");
-                targetList.innerHTML =
-                    '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
+                targetList.innerHTML = '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
                 try {
                     const r = await fetch("/api/v1/notify-config", { signal });
                     if (!r.ok) {
                         targetList.innerHTML =
-                            '<div style="color:var(--red);padding:8px 0">Failed to load configuration (' + r.status + '). Try closing and reopening settings.</div>';
+                            '<div style="color:var(--red);padding:8px 0">Failed to load configuration (' +
+                            r.status +
+                            "). Try closing and reopening settings.</div>";
                         return;
                     }
                     const c = await r.json();
@@ -5941,7 +6036,10 @@
             // Remove uses a two-stage inline confirm: first click → "Sure?", second click → delete.
             document.getElementById("grid").addEventListener("click", function (e) {
                 const hist = e.target.closest(".btn-hist");
-                if (hist && hist.dataset.host) { showHistory(hist.dataset.host, hist); return; }
+                if (hist && hist.dataset.host) {
+                    showHistory(hist.dataset.host, hist);
+                    return;
+                }
                 const rmBtn = e.target.closest(".btn-rm");
                 if (rmBtn && rmBtn.dataset.host) {
                     const h = rmBtn.dataset.host;
@@ -5988,9 +6086,14 @@
                 filterGrid();
             }
             document.querySelectorAll("#status-filter .filter-pill").forEach(function (pill) {
-                pill.addEventListener("click", function () { activateFilterPill(pill); });
+                pill.addEventListener("click", function () {
+                    activateFilterPill(pill);
+                });
                 pill.addEventListener("keydown", function (e) {
-                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activateFilterPill(pill); }
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        activateFilterPill(pill);
+                    }
                 });
             });
 
@@ -6004,7 +6107,10 @@
                 }
                 if (savedSearch) {
                     var el = document.getElementById("srv-search");
-                    if (el) { el.value = savedSearch; filterGrid(); }
+                    if (el) {
+                        el.value = savedSearch;
+                        filterGrid();
+                    }
                 }
             })();
 

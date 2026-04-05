@@ -190,6 +190,9 @@
                 line-height: 1.15;
                 margin-bottom: 16px;
             }
+            .section-title--italic {
+                font-style: italic;
+            }
             .section-desc {
                 font-size: 1.05rem;
                 color: var(--muted);
@@ -262,6 +265,33 @@
             }
             .ps-copy-btn.copied {
                 color: #4ade80;
+            }
+
+            /* ── Hero PS one-liner ───────────────────────────────── */
+            .hero-ps {
+                margin-top: 24px;
+                max-width: 640px;
+                margin-left: auto;
+                margin-right: auto;
+            }
+            .ps-oneliner {
+                display: flex;
+                align-items: center;
+                gap: 0;
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                overflow: hidden;
+                background: var(--code-bg);
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.88rem;
+            }
+            .ps-oneliner code {
+                flex: 1;
+                padding: 12px 16px;
+                color: var(--code-fg);
+                white-space: nowrap;
+                overflow-x: auto;
             }
 
             /* ── Hero ─────────────────────────────────────────────── */
@@ -414,6 +444,21 @@
             .features-grid--2col {
                 grid-template-columns: repeat(2, 1fr);
                 margin-bottom: 0;
+            }
+            .dashboard-ss {
+                margin-bottom: 28px;
+            }
+            .dashboard-ss img {
+                width: 100%;
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+            }
+            .section-cta {
+                margin-top: 18px;
+                display: flex;
+                gap: 14px;
+                flex-wrap: wrap;
             }
             @media (max-width: 768px) {
                 .features-hero {
@@ -625,6 +670,19 @@
                 font-size: 1.8rem;
                 margin-bottom: 8px;
             }
+            .comic-icon--lg {
+                font-size: 2.5rem;
+            }
+            .comic-body--row {
+                display: flex;
+                align-items: center;
+                gap: 24px;
+                flex-wrap: wrap;
+            }
+            .comic-text {
+                flex: 1;
+                min-width: 200px;
+            }
             .comic-code {
                 display: inline-block;
                 font-family: "JetBrains Mono", monospace;
@@ -780,7 +838,14 @@
         <nav class="nav">
             <div class="wrap">
                 <a href="#" class="nav-brand"
-                    ><img src="logo.png" alt="" width="24" height="24" style="vertical-align: middle; margin-right: 6px" /> DrainCtl <span>by LISS Technologies</span></a
+                    ><img
+                        src="logo.png"
+                        alt=""
+                        width="24"
+                        height="24"
+                        style="vertical-align: middle; margin-right: 6px"
+                    />
+                    DrainCtl <span>by LISS Technologies</span></a
                 >
                 <button
                     class="nav-toggle"
@@ -788,7 +853,9 @@
                     aria-label="Open navigation menu"
                     aria-expanded="false"
                     aria-controls="nav-links"
-                >≡</button>
+                >
+                    ≡
+                </button>
                 <ul class="nav-links" id="nav-links" role="list">
                     <li><a href="#features">Features</a></li>
                     <li><a href="#how">How It Works</a></li>
@@ -818,31 +885,9 @@
                     >
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
                 </div>
-                <div class="hero-ps" style="margin-top: 24px; max-width: 640px; margin-left: auto; margin-right: auto">
-                    <div
-                        class="ps-oneliner"
-                        style="
-                            display: flex;
-                            align-items: center;
-                            gap: 0;
-                            border: var(--bw) solid var(--border);
-                            border-radius: var(--r);
-                            box-shadow: var(--so) var(--so) 0 var(--shadow);
-                            overflow: hidden;
-                            background: var(--code-bg);
-                            font-family: &quot;JetBrains Mono&quot;, monospace;
-                            font-size: 0.88rem;
-                        "
-                    >
-                        <code
-                            style="
-                                flex: 1;
-                                padding: 12px 16px;
-                                color: var(--code-fg);
-                                white-space: nowrap;
-                                overflow-x: auto;
-                            "
-                            id="ps-install"
+                <div class="hero-ps">
+                    <div class="ps-oneliner">
+                        <code id="ps-install"
                             >irm https://lissconsulting.github.io/LISSTech.DrainCtl/install.ps1 | iex</code
                         >
                         <button onclick="copyPS()" class="ps-copy-btn" id="ps-copy-btn" title="Copy to clipboard">
@@ -1037,7 +1082,7 @@
         <section class="section section--bordered" id="new">
             <div class="wrap">
                 <div class="section-label">Highlights</div>
-                <div class="section-title serif" style="font-style: italic">Built for production RDSH farms.</div>
+                <div class="section-title serif section-title--italic">Built for production RDSH farms.</div>
                 <div class="comic">
                     <!-- Row 1: big hero + tall side panel -->
                     <div class="comic-panel comic-hero">
@@ -1100,9 +1145,9 @@
                     <!-- Row 3: wide cinematic panel -->
                     <div class="comic-panel comic-wide">
                         <div class="comic-caption">The installer arrives&hellip;</div>
-                        <div class="comic-body" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap">
-                            <div class="comic-icon" style="font-size: 2.5rem">&#128230;</div>
-                            <div style="flex: 1; min-width: 200px">
+                        <div class="comic-body comic-body--row">
+                            <div class="comic-icon comic-icon--lg">&#128230;</div>
+                            <div class="comic-text">
                                 <h3>MSI with Superpowers</h3>
                                 <p>
                                     Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>,
@@ -1127,18 +1172,12 @@
                     dashboard, add one DNS SRV record, done.
                 </div>
 
-                <div style="margin-bottom: 28px">
+                <div class="dashboard-ss">
                     <picture>
                         <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)" />
                         <img
                             src="dashboard-screenshot.png"
                             alt="DrainCtl Dashboard showing server overview, state history chart, and server cards with session gauges"
-                            style="
-                                width: 100%;
-                                border: var(--bw) solid var(--border);
-                                border-radius: var(--r);
-                                box-shadow: var(--so) var(--so) 0 var(--shadow);
-                            "
                         />
                     </picture>
                 </div>
@@ -1175,7 +1214,7 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap">
+                <div class="section-cta">
                     <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
                 </div>
             </div>
@@ -1309,7 +1348,7 @@
                             <a
                                 href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
                                 class="btn btn-fill btn--block"
-                                >Download MSI</
+                                >Download MSI</a
                             >
                         </div>
                     </div>
@@ -1330,7 +1369,7 @@
                             <a
                                 href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
                                 class="btn btn-fill btn--block"
-                                >Download MSI</
+                                >Download MSI</a
                             >
                         </div>
                     </div>

@@ -321,7 +321,7 @@ fmt:
 
 # Format frontend HTML/CSS/JS with Prettier
 fmt-web:
-    npx --yes prettier --write "docs/**/*.html" "internal/dashboard/*.html" "internal/dashboard/*.js" --print-width 120 --no-bracket-same-line
+    npx --yes prettier --write "docs/**/*.html" "internal/dashboard/*.html" "internal/dashboard/testdata/*.js" --print-width 120 --no-bracket-same-line
 
 # ── Test ─────────────────────────────────────────────────────────────────────
 
