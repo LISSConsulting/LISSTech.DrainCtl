@@ -87,6 +87,7 @@ func Register(dashboardURL string, log dc.LogFunc) (*RegisterResult, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: register rejected",
 			fmt.Sprintf("status=%d", resp.StatusCode))
 		return nil, fmt.Errorf("register: status %d", resp.StatusCode)
@@ -216,6 +217,7 @@ func FetchNotifyConfig(dashboardURL string, log dc.LogFunc) (*RemoteNotifyConfig
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: fetch notify config rejected",
 			fmt.Sprintf("status=%d", resp.StatusCode))
 		return nil, fmt.Errorf("fetch notify config: status %d", resp.StatusCode)
@@ -237,6 +239,7 @@ func FetchServers(url string) ([]ServerInfo, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	var servers []ServerInfo
