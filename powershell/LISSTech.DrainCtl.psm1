@@ -373,7 +373,7 @@ function Install-RDSHDrainAudit {
     }
 
     $ptr = [DrainCtlNative]::DrainCtl_AuditSetup()
-    $result = Invoke-DrainCtlNative -Ptr $ptr
+    $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose 'Registry auditing configured. Event ID 4657 will now record TSServerDrainMode changes.'
 }
@@ -712,7 +712,7 @@ function Enable-RDSHDrainDashboard {
     )
     if (-not $PSCmdlet.ShouldProcess('DrainCtl Dashboard', 'Enable')) { return }
     $ptr = [DrainCtlNative]::DrainCtl_EnableDashboard($Port, $Group)
-    $result = Invoke-DrainCtlNative -Ptr $ptr
+    $null = Invoke-DrainCtlNative -Ptr $ptr
     Write-Host "Dashboard enabled on port $Port for group '$Group'."
     Write-Host 'Restart the DrainCtl service to activate: Restart-Service DrainCtl'
 }
@@ -729,7 +729,7 @@ function Disable-RDSHDrainDashboard {
     param()
     if (-not $PSCmdlet.ShouldProcess('DrainCtl Dashboard', 'Disable')) { return }
     $ptr = [DrainCtlNative]::DrainCtl_DisableDashboard()
-    Invoke-DrainCtlNative -Ptr $ptr | Out-Null
+    $null = Invoke-DrainCtlNative -Ptr $ptr
     Write-Host 'Dashboard disabled. Restart the DrainCtl service to apply: Restart-Service DrainCtl'
 }
 
