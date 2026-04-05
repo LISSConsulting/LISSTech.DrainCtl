@@ -104,6 +104,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
 	})))
+	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
 	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
