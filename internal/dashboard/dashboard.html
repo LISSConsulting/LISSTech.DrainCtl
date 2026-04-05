@@ -5038,7 +5038,11 @@
                                   " total (" +
                                   sess.utilization_pct +
                                   "%)"
-                                : sess.active_sessions + " active, " + sess.total_sessions + " total"
+                                : sess.active_sessions +
+                                  " active" +
+                                  (sess.disconnected_sessions > 0
+                                      ? ", " + sess.disconnected_sessions + " disconnected"
+                                      : "")
                             : "";
                         const durInfo =
                             r && r.state_duration_seconds ? "duration=" + dur(r.state_duration_seconds) : "";
