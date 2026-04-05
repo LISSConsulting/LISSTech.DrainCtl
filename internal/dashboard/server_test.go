@@ -1573,6 +1573,144 @@ func TestSecurityMiddleware_DoesNotSetHSTS(t *testing.T) {
 	}
 }
 
+func TestHandleHistory_ChangesOnly_ReturnsOnlyTransitions(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	// 3 non-transition records + 2 transition records
+	for i := range 3 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:       "SRV01",
+			Status:     "Healthy",
+			Transition: false,
+			Timestamp:  time.Unix(int64(1000+i), 0),
+		})
+	}
+	ds.state.Update("SRV01", &dc.CheckResult{
+		Host:           "SRV01",
+		Status:         "Grace",
+		Transition:     true,
+		TransitionFrom: "Healthy",
+		Timestamp:      time.Unix(1010, 0),
+	})
+	ds.state.Update("SRV01", &dc.CheckResult{
+		Host:           "SRV01",
+		Status:         "Alert",
+		Transition:     true,
+		TransitionFrom: "Grace",
+		Timestamp:      time.Unix(1020, 0),
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01?changes_only=1", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2 (only transitions)", len(records))
+	}
+	for _, rec := range records {
+		if !rec.Transition {
+			t.Errorf("record %q has Transition=false, want true", rec.Status)
+		}
+	}
+}
+
+func TestHandleHistory_ChangesOnly_EmptyWhenNoTransitions(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	for i := range 5 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:       "SRV01",
+			Status:     "Healthy",
+			Transition: false,
+			Timestamp:  time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01?changes_only=true", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("len(records) = %d, want 0", len(records))
+	}
+}
+
+func TestHandleHistory_ChangesOnly_RespectsLimit(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	// Insert 5 transition records.
+	for i := range 5 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:       "SRV01",
+			Status:     "Alert",
+			Transition: true,
+			Timestamp:  time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01?changes_only=1&limit=3", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 3 {
+		t.Errorf("len(records) = %d, want 3 (limit applied after filter)", len(records))
+	}
+}
+
+func TestHandleHistory_DefaultLimitIs20(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	// Insert 30 records.
+	for i := range 30 {
+		ds.state.Update("SRV01", &dc.CheckResult{
+			Host:      "SRV01",
+			Status:    "Healthy",
+			Timestamp: time.Unix(int64(1000+i), 0),
+		})
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	var records []dc.CheckResult
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) != 20 {
+		t.Errorf("len(records) = %d, want 20 (default limit)", len(records))
+	}
+}
+
 func TestHSTSMiddleware_SetsSTSHeader(t *testing.T) {
 	handler := hstsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

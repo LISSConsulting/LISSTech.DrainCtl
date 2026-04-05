@@ -31,7 +31,7 @@ type PipeResponse struct {
 
 // PipeHandler provides the data the pipe server needs to answer requests.
 type PipeHandler interface {
-	HandleStatus(gracePeriod time.Duration) *dc.CheckResult
+	HandleStatus() *dc.CheckResult
 	HandleHistory(limit int, changesOnly bool) []dc.AuditRecord
 }
 
@@ -94,7 +94,7 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 	var resp PipeResponse
 	switch req.Cmd {
 	case "status":
-		result := handler.HandleStatus(0) // grace period from service config
+		result := handler.HandleStatus()
 		if result != nil {
 			raw, _ := json.Marshal(result)
 			resp = PipeResponse{OK: true, Data: raw}

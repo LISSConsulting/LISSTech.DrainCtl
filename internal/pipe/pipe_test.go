@@ -17,7 +17,7 @@ type mockHandler struct {
 	historyResult []dc.AuditRecord
 }
 
-func (m *mockHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult {
+func (m *mockHandler) HandleStatus() *dc.CheckResult {
 	return m.statusResult
 }
 
@@ -208,7 +208,7 @@ type captureHandler struct {
 	onHistory func(limit int, changesOnly bool) []dc.AuditRecord
 }
 
-func (c *captureHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult {
+func (c *captureHandler) HandleStatus() *dc.CheckResult {
 	return &dc.CheckResult{Status: "Healthy"}
 }
 

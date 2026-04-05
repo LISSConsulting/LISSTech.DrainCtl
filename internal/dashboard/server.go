@@ -473,8 +473,11 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 
 // handleHistory serves GET /api/v1/history/{host}.
 // Returns the last N CheckResult records for the named host, newest first.
-// Optional query param: limit (1–100, default 50). Requires group membership.
-// Returns 404 if the host is not registered.
+// Optional query params:
+//   - limit:        1–100, default 20
+//   - changes_only: "1" or "true" — return only records where Transition=true
+//
+// Requires group membership. Returns 404 if the host is not registered.
 func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
 	if host == "" {
@@ -487,7 +490,7 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	limit := 50
+	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > historyMax {
@@ -497,9 +500,29 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 		limit = n
 	}
 
-	records := ds.state.HostHistory(host, limit)
+	changesOnly := false
+	if v := r.URL.Query().Get("changes_only"); v == "1" || v == "true" {
+		changesOnly = true
+	}
+
+	// Fetch the full ring buffer so filtering has the full picture, then apply limit.
+	records := ds.state.HostHistory(host, historyMax)
 	if records == nil {
 		records = []dc.CheckResult{}
+	}
+
+	if changesOnly {
+		filtered := records[:0]
+		for _, rec := range records {
+			if rec.Transition {
+				filtered = append(filtered, rec)
+			}
+		}
+		records = filtered
+	}
+
+	if limit < len(records) {
+		records = records[:limit]
 	}
 
 	w.Header().Set("Content-Type", "application/json")
