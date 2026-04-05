@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Seventeenth roam-mode pass complete.** Code quality sweep: extracted `classifyState()` helper (eliminating triple-duplicate state classification in `svc`), extracted `setNotifyTarget()` (deduplicating set-webhook/set-ntfy CLI commands), settings modal UX polish (auto-dismiss save message, disabled save button during fetch, refresh on open, loading indicator), PS module consistency (`$null =` everywhere), and resolved 4 pre-existing golangci-lint warnings (unused func, redundant type annotation, unchecked decode errors).
+> Current state: **Eighteenth roam-mode pass complete.** Code quality sweep: extracted `classifyState()` helper (eliminating triple-duplicate state classification in `svc`), extracted `setNotifyTarget()` (deduplicating set-webhook/set-ntfy CLI commands), settings modal UX polish (auto-dismiss save message, disabled save button during fetch, refresh on open, loading indicator), PS module consistency (`$null =` everywhere), and resolved 4 pre-existing golangci-lint warnings (unused func, redundant type annotation, unchecked decode errors). **Eighteenth pass:** `Config.Validate` tightened — `Dashboard.Port` guard widened from `== 0` to full 1–65535 range, `Dashboard.Group` trimmed before empty check so all-whitespace values fall back to default (silent SSPI auth failure); 4 new tests.
 
 ## Completed Work
 
@@ -49,10 +49,11 @@
 | Roam #17 | Dashboard settings modal UX: "Saved successfully" auto-dismisses after 4 s; save button disabled during fetch; `loadNotifyConfig()` called on modal open (always fresh data); loading placeholder shown while fetch is in-flight | UX, dashboard |
 | Roam #17 | PS module: 3 unused `$result` and `\| Out-Null` occurrences replaced with `$null =` in `Install-RDSHDrainAudit`, `Enable-RDSHDrainDashboard`, `Disable-RDSHDrainDashboard` | code quality, ps |
 | Roam #17 | Lint: removed unused `ptr()` helper from `audit_filter_test.go`; dropped redundant `http.Handler` type annotation in `server.go`; added `json.Decode` error checks in `server_test.go` (4 pre-existing golangci-lint warnings cleared; lint now reports 0 issues) | code quality, testing |
+| Roam #18 | `Config.Validate`: `Dashboard.Port` guard widened from `== 0` to `< 1 \|\| > 65535` — negative or out-of-range values in config.json were silently accepted and caused bind failures; `Dashboard.Group` trimmed before empty check — all-whitespace strings passed the guard but broke SSPI group matching silently; 4 new tests (`TestValidate_DashboardPortClamped`, `TestValidate_DashboardPortPreservesValid`, `TestValidate_DashboardGroupTrimsWhitespace`, `TestValidate_DashboardGroupPreservesNormal`) | correctness, config, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #17.)*
+*(All tracked items complete — nothing pending after Roam #18.)*
 
 ## Key Learnings
 
@@ -91,6 +92,8 @@
 - **History modal z-index ordering**: Settings overlay is z-index 150; log expanded is z-index 200; history modal uses z-index 160 so it can stack over settings but not over the log fullscreen view. ESC priority matches visual stack: history first, then settings, then log collapse.
 - **`encodeURIComponent` for history hostname**: The `/api/v1/history/{host}` path value accepts hostnames with dots and hyphens; `encodeURIComponent` encodes these safely even for edge cases like hostnames containing `%` or `#`.
 - **`NotifyState` shared-map bug**: Both `TriggerAlert` and `TriggerSessionWarning` originally stored repeat-tracking in `LastAlertNotify[target.URL]`. The cleanup on `TriggerHealthy` tried to preserve entries where `k == "session_warning"`, but `k` is a URL, so the guard was always false and all entries were deleted. Fix: split into `LastAlertNotify` (cleared on healthy) and `LastSessionWarnNotify` (never cleared). Writing a test that expected preservation exposed the bug immediately.
+- **`Config.Validate` port guard**: `== 0` only catches zero — hand-edited config files can have negative or `> 65535` values. Use `< 1 || > 65535` to reject the full invalid range. The service would otherwise silently accept the value and fail on bind, producing a cryptic "address already in use" or "invalid argument" error.
+- **Whitespace-only strings bypass empty checks**: `strings.TrimSpace` must be called *before* the `== ""` guard whenever the field comes from user-controlled input (JSON, CLI, config file). An all-whitespace `Dashboard.Group` passes the empty guard but causes silent SSPI group matching failures — the service starts but no user is ever authenticated.
 - **`parseInt("0") || default` is a falsy-zero trap**: In JS, `parseInt("0") || 80` evaluates to `80` because `0` is falsy. The "Disable session warnings" pill sets the input to `"0"`, so saving would silently send `80` instead. Always use explicit NaN/range checks (`isNaN(v) || v < min || v > max`) rather than `|| default` fallbacks for numeric inputs.
 - **Client-side URL validation with `new URL()`**: Wrap `new URL(s)` in a try/catch and check `.protocol === "http:" || "https:"` — this validates both parse correctness and scheme in one step. The server already strips invalid schemes via `Validate()`, but showing the error before the network round-trip is better UX.
 - **`classifyState` extraction boundary**: The helper lives in `check.go` (same `svc` package) so `handler.go` can call it without a new file. Both files carry `//go:build windows` — no import changes needed since `fmt` and `time` are already present.
