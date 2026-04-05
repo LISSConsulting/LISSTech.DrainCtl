@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+First-time install dialog sequence:
+ - WixUI_WelcomeDlg
+ - WixUI_LicenseAgreementDlg
+ - InstallModeDlg          (choose standalone / dashboard / registration)
+ - ModeConfigDlg            (mode-specific fields; skipped for standalone)
+ - WixUI_VerifyReadyDlg
+ - WixUI_DiskCostDlg
+
+Maintenance dialog sequence:
+ - WixUI_MaintenanceWelcomeDlg
+ - WixUI_MaintenanceTypeDlg
+ - WixUI_VerifyReadyDlg
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?foreach WIXUIARCH in X86;X64;A64?>
+  <Fragment>
+    <UI Id="DrainCtlUI_$(WIXUIARCH)">
+      <Publish Dialog="LicenseAgreementDlg" Control="Print" Event="DoAction"
+        Value="WixUIPrintEula_$(WIXUIARCH)" />
+    </UI>
+
+    <UIRef Id="DrainCtlUI" />
+  </Fragment>
+  <?endforeach?>
+
+  <Fragment>
+    <UI Id="DrainCtlUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Segoe UI" Size="9" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Segoe UI" Size="13" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Segoe UI" Size="11" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="DiskCostDlg" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return"
+        Order="999" />
+
+      <!-- Welcome → License -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+        Value="LicenseAgreementDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+      <!-- License → InstallMode -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog"
+        Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
+        Value="InstallModeDlg" Condition="LicenseAccepted = &quot;1&quot;" />
+
+      <!-- InstallMode → mode-specific config or VerifyReady -->
+      <Publish Dialog="InstallModeDlg" Control="Back" Event="NewDialog"
+        Value="LicenseAgreementDlg" />
+      <Publish Dialog="InstallModeDlg" Control="Next" Event="NewDialog"
+        Value="DashboardConfigDlg" Order="1"
+        Condition="INSTALL_MODE = &quot;dashboard&quot;" />
+      <Publish Dialog="InstallModeDlg" Control="Next" Event="NewDialog"
+        Value="RegistrationConfigDlg" Order="2"
+        Condition="INSTALL_MODE = &quot;registration&quot;" />
+      <Publish Dialog="InstallModeDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" Order="3"
+        Condition="INSTALL_MODE = &quot;standalone&quot;" />
+
+      <!-- DashboardConfig → VerifyReady -->
+      <Publish Dialog="DashboardConfigDlg" Control="Back" Event="NewDialog"
+        Value="InstallModeDlg" />
+      <Publish Dialog="DashboardConfigDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" />
+
+      <!-- RegistrationConfig → VerifyReady -->
+      <Publish Dialog="RegistrationConfigDlg" Control="Back" Event="NewDialog"
+        Value="InstallModeDlg" />
+      <Publish Dialog="RegistrationConfigDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" />
+
+      <!-- VerifyReady Back: depends on mode -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="DashboardConfigDlg" Order="1"
+        Condition="NOT Installed AND INSTALL_MODE = &quot;dashboard&quot;" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="RegistrationConfigDlg" Order="2"
+        Condition="NOT Installed AND INSTALL_MODE = &quot;registration&quot;" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="InstallModeDlg" Order="3"
+        Condition="NOT Installed AND INSTALL_MODE = &quot;standalone&quot;" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="MaintenanceTypeDlg" Order="4"
+        Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="WelcomeDlg" Order="5"
+        Condition="Installed AND PATCH" />
+
+      <!-- Maintenance -->
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog"
+        Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog"
+        Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog"
+        Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog"
+        Value="MaintenanceWelcomeDlg" />
+
+      <Property Id="ARPNOMODIFY" Value="1" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>

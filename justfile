@@ -54,8 +54,6 @@ bump:
         "drainctl.go",
         "installer/LISSTech.DrainCtl.wxs",
         "installer/LISSTech.DrainCtl.wixproj",
-        "installer/Bundle/LISSTech.DrainCtl.Bundle.wxs",
-        "installer/Bundle/LISSTech.DrainCtl.Bundle.wixproj",
         "powershell/LISSTech.DrainCtl.psd1",
         "README.md",
         "CLAUDE.md",
@@ -147,16 +145,6 @@ msi: psmodule
     $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi").Length / 1MB)
     Write-Host "   LISSTech.DrainCtl.msi ($size)" -ForegroundColor DarkGray
 
-# Build Burn bundle (wraps the MSI with branded UI)
-[script('pwsh', '-NoProfile')]
-[extension('.ps1')]
-bundle: msi
-    Write-Host "`n📦 Building Bundle" -ForegroundColor Cyan
-    & dotnet build "{{installer_dir}}/Bundle/LISSTech.DrainCtl.Bundle.wixproj" -c Release -p:Platform=x64 -nologo -v:q
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.exe").Length / 1MB)
-    Write-Host "   LISSTech.DrainCtl.exe ($size)" -ForegroundColor DarkGray
-
 # ── Sign ─────────────────────────────────────────────────────────────────────
 
 # Sign binaries and PS module files (before MSI packaging)
@@ -229,77 +217,32 @@ sign-msi:
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
 
-# Sign the Burn bundle EXE (detach engine → sign engine → reattach → sign bundle)
-[script('pwsh', '-NoProfile')]
-[extension('.ps1')]
-sign-bundle:
-    $thumbprint = "{{signing_thumbprint}}"
-    $timestampUrl = "{{timestamp_url}}"
-    $description = "{{sign_description}}"
-    $bundlePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
-    $enginePath = "{{dist_dir}}/engine.exe"
-
-    if (-not $thumbprint) {
-        Write-Host "`n⏭️  Skipping bundle signing (no certificate)" -ForegroundColor Yellow
-        exit 0
-    }
-
-    if (-not (Test-Path $bundlePath)) { Write-Error "Bundle not found: $bundlePath"; exit 1 }
-
-    Write-Host "`n🔏 Signing Bundle (detach/reattach)" -ForegroundColor Cyan
-
-    # 1. Detach the Burn engine
-    & wix burn detach $bundlePath -engine $enginePath
-    if ($LASTEXITCODE -ne 0) { Write-Error "wix burn detach failed"; exit $LASTEXITCODE }
-    Write-Host "   ✅ Engine detached" -ForegroundColor DarkGray
-
-    # 2. Sign the engine
-    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $enginePath 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to sign engine`n$out"; exit $LASTEXITCODE }
-    Write-Host "   ✅ Engine signed" -ForegroundColor DarkGray
-
-    # 3. Reattach the signed engine
-    & wix burn reattach $bundlePath -engine $enginePath -o $bundlePath
-    if ($LASTEXITCODE -ne 0) { Write-Error "wix burn reattach failed"; exit $LASTEXITCODE }
-    Write-Host "   ✅ Engine reattached" -ForegroundColor DarkGray
-
-    # 4. Sign the outer bundle
-    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $bundlePath 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to sign bundle`n$out"; exit $LASTEXITCODE }
-    Write-Host "   ✅ LISSTech.DrainCtl.exe (engine + bundle signed)" -ForegroundColor Green
-
-    # Cleanup
-    Remove-Item $enginePath -ErrorAction SilentlyContinue
-
 # ── Aggregate ────────────────────────────────────────────────────────────────
 
-# Build everything (CLI + DLL + PS module + MSI + Bundle), unsigned
-all: bundle
+# Build everything (CLI + DLL + PS module + MSI), unsigned
+all: msi
 
-# Build and sign everything: binaries → sign → MSI → sign MSI → Bundle → sign Bundle
+# Build and sign everything: binaries → sign → MSI → sign MSI
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: psmodule sign-binaries msi sign-msi bundle sign-bundle
+release: psmodule sign-binaries msi sign-msi
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
-    $bundle = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.exe"
     $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
     Write-Host ""
     Write-Host "🚀 Release complete" -ForegroundColor Green
     Write-Host ("   drainctl.exe  {0,5:N1} MB" -f ($exe.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   drainctl.dll  {0,5:N1} MB" -f ($dll.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   MSI           {0,5:N1} MB" -f ($msi.Length / 1MB)) -ForegroundColor DarkGray
-    Write-Host ("   Bundle        {0,5:N1} MB" -f ($bundle.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host "   Version       $($vi.FileVersion)" -ForegroundColor DarkGray
     Write-Host ""
 
-# Tag, create GH release, and upload signed MSI + Bundle (run after `just release`)
+# Tag, create GH release, and upload signed MSI (run after `just release`)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 publish:
     $msiPath = "{{dist_dir}}/LISSTech.DrainCtl.msi"
-    $bundlePath = "{{dist_dir}}/LISSTech.DrainCtl.exe"
     $cliPath = "{{bin_dir}}/drainctl.exe"
 
     if (-not (Test-Path $msiPath)) {
@@ -326,18 +269,8 @@ publish:
     if ($LASTEXITCODE -ne 0) { Write-Error "git push tag failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Tag $tag pushed" -ForegroundColor Green
 
-    # Build asset list: MSI always, bundle if it exists and is signed
+    # Create release with MSI
     $assets = @($msiPath)
-    if (Test-Path $bundlePath) {
-        $bsig = Get-AuthenticodeSignature $bundlePath
-        if ($bsig.Status -eq 'Valid') {
-            $assets += $bundlePath
-        } else {
-            Write-Host "   ⚠️  Bundle EXE is not signed, skipping" -ForegroundColor Yellow
-        }
-    }
-
-    # Create release with all assets
     & gh release create $tag @assets --title "LISSTech DrainCtl $version" --generate-notes
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Release created with $($assets.Count) asset(s)" -ForegroundColor Green

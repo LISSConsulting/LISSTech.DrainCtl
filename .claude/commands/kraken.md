@@ -18,7 +18,7 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - `just bump` — bumps CalVer across all version-bearing files + recompiles .syso.
 
 ### 4. Build & sign
-- `just release` — builds CLI, DLL, PS module, MSI, Bundle. Signs everything (binaries, MSI, Bundle with detach/reattach).
+- `just release` — builds CLI, DLL, PS module, MSI. Signs everything (binaries, MSI).
 - If build fails: diagnose, fix, retry.
 
 ### 5. Commit & push
@@ -31,8 +31,8 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - If FF fails: ask the user — trunk has diverged.
 
 ### 7. Publish
-- `just publish` — tags, creates GH release with MSI + Bundle EXE, publishes to PSGallery.
-- Verify: "Release created with 2 asset(s)" in output.
+- `just publish` — tags, creates GH release with MSI, publishes to PSGallery.
+- Verify: "Release created with 1 asset(s)" in output.
 
 ### 8. Verify sync
 - `git fetch origin`

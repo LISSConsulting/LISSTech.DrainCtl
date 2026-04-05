@@ -298,7 +298,7 @@
         <nav class="nav">
             <div class="wrap">
                 <a href="index.html" class="nav-brand"
-                    ><span class="emoji">&#x1F6B0;</span> DrainCtl <span>Guide</span></a
+                    ><img src="logo.png" alt="" width="24" height="24" style="vertical-align: middle; margin-right: 6px" /> DrainCtl <span>Guide</span></a
                 >
                 <ul class="nav-links">
                     <li><a href="index.html">Home</a></li>
@@ -1168,7 +1168,7 @@ drainctl register https://dashboard:49470 --pin</code></pre>
   }
 }</code></pre>
 
-            <p><strong>MSI/Bundle deployment:</strong> Pass <code>AUTO_PIN=1</code> as an MSI property:</p>
+            <p><strong>MSI deployment:</strong> Pass <code>AUTO_PIN=1</code> as an MSI property:</p>
             <pre><code>msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash:49470 AUTO_PIN=1</code></pre>
 
             <p>
