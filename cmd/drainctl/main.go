@@ -324,49 +324,11 @@ func notifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
 			url := ""
 			if len(args) > 0 {
 				url = args[0]
 			}
-
-			if url == "" {
-				// Remove all webhook targets.
-				filtered := fileCfg.Notifications[:0]
-				for _, t := range fileCfg.Notifications {
-					if t.Type != "webhook" {
-						filtered = append(filtered, t)
-					}
-				}
-				fileCfg.Notifications = filtered
-				if err := dc.SaveConfig(fileCfg, log); err != nil {
-					return err
-				}
-				log(dc.LvlINF, "webhook=disabled")
-				return nil
-			}
-
-			// Find first webhook target or create one.
-			found := false
-			for i := range fileCfg.Notifications {
-				if fileCfg.Notifications[i].Type == "webhook" {
-					fileCfg.Notifications[i].URL = url
-					found = true
-					break
-				}
-			}
-			if !found {
-				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
-					Type: "webhook",
-					URL:  url,
-				})
-			}
-
-			if err := dc.SaveConfig(fileCfg, log); err != nil {
-				return err
-			}
-			log(dc.LvlOK, fmt.Sprintf("webhook_url=%q", url))
-			return nil
+			return setNotifyTarget(fileCfg, "webhook", url, log)
 		},
 	})
 
@@ -380,49 +342,11 @@ func notifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
 			url := ""
 			if len(args) > 0 {
 				url = args[0]
 			}
-
-			if url == "" {
-				// Remove all ntfy targets.
-				filtered := fileCfg.Notifications[:0]
-				for _, t := range fileCfg.Notifications {
-					if t.Type != "ntfy" {
-						filtered = append(filtered, t)
-					}
-				}
-				fileCfg.Notifications = filtered
-				if err := dc.SaveConfig(fileCfg, log); err != nil {
-					return err
-				}
-				log(dc.LvlINF, "ntfy=disabled")
-				return nil
-			}
-
-			// Find first ntfy target or create one.
-			found := false
-			for i := range fileCfg.Notifications {
-				if fileCfg.Notifications[i].Type == "ntfy" {
-					fileCfg.Notifications[i].URL = url
-					found = true
-					break
-				}
-			}
-			if !found {
-				fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
-					Type: "ntfy",
-					URL:  url,
-				})
-			}
-
-			if err := dc.SaveConfig(fileCfg, log); err != nil {
-				return err
-			}
-			log(dc.LvlOK, fmt.Sprintf("ntfy_url=%q", url))
-			return nil
+			return setNotifyTarget(fileCfg, "ntfy", url, log)
 		},
 	})
 
@@ -440,6 +364,47 @@ func notifyCmd() *cobra.Command {
 	})
 
 	return cmd
+}
+
+// setNotifyTarget sets or clears the first notification target of typ.
+// If url is empty, all targets of typ are removed. Otherwise the first
+// existing target of typ is updated, or a new one appended.
+func setNotifyTarget(fileCfg *dc.Config, typ, url string, log dc.LogFunc) error {
+	if url == "" {
+		filtered := fileCfg.Notifications[:0]
+		for _, t := range fileCfg.Notifications {
+			if t.Type != typ {
+				filtered = append(filtered, t)
+			}
+		}
+		fileCfg.Notifications = filtered
+		if err := dc.SaveConfig(fileCfg, log); err != nil {
+			return err
+		}
+		log(dc.LvlINF, typ+"=disabled")
+		return nil
+	}
+
+	found := false
+	for i := range fileCfg.Notifications {
+		if fileCfg.Notifications[i].Type == typ {
+			fileCfg.Notifications[i].URL = url
+			found = true
+			break
+		}
+	}
+	if !found {
+		fileCfg.Notifications = append(fileCfg.Notifications, dc.NotificationTarget{
+			Type: typ,
+			URL:  url,
+		})
+	}
+
+	if err := dc.SaveConfig(fileCfg, log); err != nil {
+		return err
+	}
+	log(dc.LvlOK, fmt.Sprintf("%s_url=%q", typ, url))
+	return nil
 }
 
 // -- service ----------------------------------------------------------------
