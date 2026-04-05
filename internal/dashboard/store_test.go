@@ -502,3 +502,66 @@ func TestServerState_ConcurrentAccess(t *testing.T) {
 func hostname(n int) string {
 	return "SRV" + string(rune('A'+n))
 }
+
+// ── save() error paths ────────────────────────────────────────────────────────
+
+// TestSave_WriteFileError verifies that save() handles the case where the tmp
+// file cannot be written (here: a directory already exists at the tmp path).
+// The call must complete without panic and emit an ERR log.
+func TestSave_WriteFileError(t *testing.T) {
+	dir := t.TempDir()
+	// NewServerState stores data at filepath.Join(dir, "servers.json");
+	// the tmp path is filepath.Join(dir, "servers.json.tmp").
+	tmpPath := filepath.Join(dir, "servers.json.tmp")
+
+	// Create a directory at the tmp path so os.WriteFile fails.
+	if err := os.MkdirAll(tmpPath, 0o755); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", tmpPath, err)
+	}
+
+	var errLogged bool
+	log := dc.LogFunc(func(l dc.Level, _ ...string) {
+		if l == dc.LvlERR {
+			errLogged = true
+		}
+	})
+
+	s := NewServerState(dir, log)
+	s.Register("SRV01") // triggers save() → WriteFile should fail
+
+	if !errLogged {
+		t.Error("expected ERR log from save() WriteFile failure, got none")
+	}
+	// servers.json must not exist (Rename was never reached).
+	jsonPath := filepath.Join(dir, "servers.json")
+	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
+		t.Error("servers.json should not exist after WriteFile failure")
+	}
+}
+
+// TestSave_RenameError verifies that save() handles the case where the rename
+// from tmp to final path fails (here: the target path is a directory).
+// The call must complete without panic and emit an ERR log.
+func TestSave_RenameError(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "servers.json")
+
+	// Create a directory at the final path so os.Rename fails.
+	if err := os.MkdirAll(jsonPath, 0o755); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", jsonPath, err)
+	}
+
+	var errLogged bool
+	log := dc.LogFunc(func(l dc.Level, _ ...string) {
+		if l == dc.LvlERR {
+			errLogged = true
+		}
+	})
+
+	s := NewServerState(dir, log)
+	s.Register("SRV01") // triggers save() → WriteFile OK, Rename fails
+
+	if !errLogged {
+		t.Error("expected ERR log from save() Rename failure, got none")
+	}
+}

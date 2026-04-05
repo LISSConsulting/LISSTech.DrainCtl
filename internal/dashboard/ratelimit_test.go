@@ -63,6 +63,35 @@ func TestRateLimiter_TokensRefill(t *testing.T) {
 	}
 }
 
+// TestRateLimiter_TokensRefillClampedToCap verifies that token refill is capped
+// at the bucket capacity. When enough time has elapsed that the refill would
+// push tokens above cap, the bucket is clamped to cap.
+func TestRateLimiter_TokensRefillClampedToCap(t *testing.T) {
+	rl := newIPRateLimiter(10, 5) // 10 tokens/sec, burst cap 5
+
+	// Consume one token to create a non-full bucket.
+	if ok, _ := rl.Allow("9.9.9.9"); !ok {
+		t.Fatal("first request should be allowed")
+	}
+
+	// Backdate lastSeen by 10 seconds — at 10 tokens/sec that would add 100
+	// tokens, far above the cap of 5. The Allow call must clamp to 5.
+	rl.mu.Lock()
+	rl.buckets["9.9.9.9"].lastSeen = time.Now().Add(-10 * time.Second)
+	rl.mu.Unlock()
+
+	// Drain exactly cap (5) tokens — if clamping works, all 5 succeed.
+	for i := 0; i < 5; i++ {
+		if ok, _ := rl.Allow("9.9.9.9"); !ok {
+			t.Fatalf("request %d/%d should be allowed (bucket should be at cap)", i+1, 5)
+		}
+	}
+	// The 6th request must be denied — bucket should be empty, not overflowed.
+	if ok, _ := rl.Allow("9.9.9.9"); ok {
+		t.Error("6th request should be denied — tokens should have been clamped to cap")
+	}
+}
+
 // TestRateLimiter_Middleware_Allows verifies the middleware passes allowed requests.
 func TestRateLimiter_Middleware_Allows(t *testing.T) {
 	rl := newIPRateLimiter(10, 10)
