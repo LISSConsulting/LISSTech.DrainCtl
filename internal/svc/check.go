@@ -168,7 +168,13 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		// Session utilization warning.
 		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 && sess.UtilizationPct >= cfg.SessionWarningThreshold {
 			triggers = append(triggers, dc.TriggerSessionWarning)
-		} else {
+		} else if sess != nil && sess.MaxSessions > 0 {
+			// Session data is available and utilization is below threshold — reset
+			// the per-target cooldown so the warning fires again the next time
+			// utilization climbs above the threshold.
+			// Do NOT reset when sess==nil (WTS API error) or MaxSessions==0
+			// (uncapped server): in both cases we cannot confirm utilization is
+			// safe, so keeping the cooldown avoids spurious re-notifications.
 			resetSessionWarnCooldown(notifyState, cfg)
 		}
 

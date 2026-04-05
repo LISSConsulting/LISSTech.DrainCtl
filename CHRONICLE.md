@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-sixth roam-mode pass complete.** Dashboard inline style cleanup: all remaining static `style="..."` attributes in `dashboard.html` extracted to named CSS classes (`.footer-brand`, `.settings-actions`, `.hist-head-actions`, `.hist-head .filter-pill`, `.srv-v--amber`, `.chart-placeholder`, `.ntfy-prefix`, `.webhook-secret-wrap`, `.target-section-label--nowrap`, `.hmac-header-label`); redundant `border-left-color` on `.ctr.total` removed.
+> Current state: **Fifty-seventh roam-mode pass complete.** Three correctness/quality improvements: (1) `svcRunCheck` session-warning cooldown reset narrowed to only fire when session data is available and utilization is confirmed below threshold — previously reset on WTS API errors (`sess==nil`), risking duplicate notifications on recovery; (2) `SendTestNotification` accumulates all per-target errors via `errors.Join` instead of returning only `lastErr` — callers now see every failed target; (3) `handleUI` covered by 3 new tests (status, Content-Type, Cache-Control, body content); 1 new test for the multi-error accumulation path.
 
 ## Completed Work
 
@@ -171,9 +171,13 @@
 | Roam #56 | `docs/guide.html` configure section: expanded flag example to show `--session-warning-threshold`, `--poll-interval`, `--retention-days` (all three were added in Roam #49 but not reflected in the guide) | docs |
 | Roam #56 | `docs/guide.html` session utilization alerts: added `drainctl configure --session-warning-threshold N` as the primary way to change the threshold; config.json snippet retained as secondary reference | UX, docs |
 
+| Roam #57 | `svcRunCheck` session-warning cooldown reset: narrowed `else` branch to `else if sess != nil && sess.MaxSessions > 0` — previously `resetSessionWarnCooldown` was called whenever the utilization condition was false, including when `sess==nil` (WTS API error); a transient query failure cleared the per-target cooldown so the next successful poll re-fired the warning even though sessions had not recovered | correctness, svc, notify |
+| Roam #57 | `SendTestNotification`: switched from tracking `lastErr` to accumulating all per-target errors via `errors.Join` — callers now receive every failed-target URL in the error message instead of silently discarding all but the last failure; 1 new test `TestSendTestNotification_MultipleErrors_ReturnsAll` | correctness, notify, testing |
+| Roam #57 | `handleUI` tests: 3 new tests in `server_test.go` (`TestHandleUI_ReturnsHTML`, `TestHandleUI_NoCacheHeader`, `TestHandleUI_BodyContainsDashboard`) — the SPA entry-point handler previously had zero test coverage | testing, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #56.)*
+*(All tracked items complete — nothing pending after Roam #57.)*
 
 ## Key Learnings
 

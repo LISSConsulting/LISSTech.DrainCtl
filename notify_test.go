@@ -651,6 +651,34 @@ func TestSendTestNotification_MultipleTargets_CallsAll(t *testing.T) {
 	}
 }
 
+func TestSendTestNotification_MultipleErrors_ReturnsAll(t *testing.T) {
+	// Both targets return 500 — both errors must be present in the returned error.
+	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv1.Close()
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv2.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv1.URL},
+		{Type: "webhook", URL: srv2.URL},
+	}
+	err := SendTestNotification(targets, nil)
+	if err == nil {
+		t.Fatal("expected error when both targets fail, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, srv1.URL) {
+		t.Errorf("error message missing first target URL (%s): %s", srv1.URL, msg)
+	}
+	if !strings.Contains(msg, srv2.URL) {
+		t.Errorf("error message missing second target URL (%s): %s", srv2.URL, msg)
+	}
+}
+
 // TestSendNotification_WebhookPayloadContextFields verifies that
 // grace_period_seconds, connections_allowed, and version are always present in
 // the webhook payload so consumers can derive the alerting threshold and whether

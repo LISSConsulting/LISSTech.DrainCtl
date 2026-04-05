@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -176,7 +177,7 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 		"timestamp":              time.Now().Format(time.RFC3339),
 	}
 
-	var lastErr error
+	var errs []error
 
 	for _, target := range targets {
 		if target.URL == "" {
@@ -187,7 +188,7 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 		case "webhook":
 			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
 				LogMsg(log, LvlERR, "webhook test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
-				lastErr = err
+				errs = append(errs, fmt.Errorf("webhook %s: %w", target.URL, err))
 			} else {
 				log(LvlOK, "notify=webhook", fmt.Sprintf("test=sent url=%s", target.URL))
 			}
@@ -197,14 +198,14 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 			msg := "This is a test notification from DrainCtl."
 			if err := sendNtfy(target.URL, title, msg, "default", "test_tube"); err != nil {
 				LogMsg(log, LvlERR, "ntfy test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
-				lastErr = err
+				errs = append(errs, fmt.Errorf("ntfy %s: %w", target.URL, err))
 			} else {
 				log(LvlOK, "notify=ntfy", fmt.Sprintf("test=sent url=%s", target.URL))
 			}
 		}
 	}
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // sendWebhook performs an HTTP POST with a JSON payload to the given URL.
