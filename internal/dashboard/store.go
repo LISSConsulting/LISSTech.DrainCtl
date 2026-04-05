@@ -126,6 +126,18 @@ func (s *ServerState) HostHistory(hostname string, n int) []dc.CheckResult {
 	return out
 }
 
+// Get returns a snapshot of the named server, or nil if not registered.
+func (s *ServerState) Get(hostname string) *ServerInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	info, ok := s.servers[hostname]
+	if !ok {
+		return nil
+	}
+	copy := *info
+	return &copy
+}
+
 // All returns a snapshot of all servers sorted by hostname.
 func (s *ServerState) All() []ServerInfo {
 	s.mu.RLock()

@@ -2024,3 +2024,109 @@ func TestHandleHealth_ErrorStatusCountedAsUnknown(t *testing.T) {
 			resp.Healthy, resp.Alerting, resp.Grace)
 	}
 }
+
+// ── io.ReadAll error paths ────────────────────────────────────────────────────
+
+// errReader is an io.Reader that always returns an error, used to exercise
+// the io.ReadAll failure branch in request body handlers.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, fmt.Errorf("simulated read error") }
+
+func TestHandleReport_ReadBodyError_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/report", errReader{})
+
+	ds.handleReport(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandlePutNotifyConfig_ReadBodyError_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", errReader{})
+
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// ── handleGetServer ───────────────────────────────────────────────────────────
+
+func TestHandleGetServer_ReturnsServerInfo(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	result := &dc.CheckResult{Host: "SRV01", Status: "Healthy", DrainModeLabel: "AllowAll"}
+	ds.state.Update("SRV01", result)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+
+	ds.handleGetServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var info ServerInfo
+	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if info.Hostname != "SRV01" {
+		t.Errorf("hostname = %q, want SRV01", info.Hostname)
+	}
+	if info.LastResult == nil || info.LastResult.Status != "Healthy" {
+		t.Errorf("last_result.status = %v, want Healthy", info.LastResult)
+	}
+}
+
+func TestHandleGetServer_UnknownHostReturns404(t *testing.T) {
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/UNKNOWN", nil)
+	r.SetPathValue("host", "UNKNOWN")
+
+	ds.handleGetServer(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleGetServer_NoLastResultReturnsRegisteredHost(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV02")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/SRV02", nil)
+	r.SetPathValue("host", "SRV02")
+
+	ds.handleGetServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var info ServerInfo
+	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if info.Hostname != "SRV02" {
+		t.Errorf("hostname = %q, want SRV02", info.Hostname)
+	}
+	if info.LastResult != nil {
+		t.Errorf("last_result = %v, want nil for newly registered host", info.LastResult)
+	}
+}
