@@ -551,8 +551,12 @@ func TestHandleReport_HealthDashboardReflectsReport(t *testing.T) {
 	{
 		w := httptest.NewRecorder()
 		ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-		var resp struct{ Unknown int `json:"unknown"` }
-		json.NewDecoder(w.Body).Decode(&resp)
+		var resp struct {
+			Unknown int `json:"unknown"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
 		if resp.Unknown != 1 {
 			t.Fatalf("pre-report unknown = %d, want 1", resp.Unknown)
 		}
@@ -578,7 +582,9 @@ func TestHandleReport_HealthDashboardReflectsReport(t *testing.T) {
 			Unknown  int `json:"unknown"`
 			Alerting int `json:"alerting"`
 		}
-		json.NewDecoder(w.Body).Decode(&resp)
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
 		if resp.Unknown != 0 {
 			t.Errorf("post-report unknown = %d, want 0", resp.Unknown)
 		}
@@ -922,8 +928,8 @@ func TestHandleNotifyTest_MockWebhookReceivesRequest(t *testing.T) {
 	ds := newTestServer(t)
 	// Simulate what the real path does: send to a configured target.
 	target := dc.NotificationTarget{
-		Type:    "webhook",
-		URL:     webhookSrv.URL,
+		Type:     "webhook",
+		URL:      webhookSrv.URL,
 		Triggers: dc.DefaultTriggers,
 	}
 	ds.testNotifyFunc = func() error {
@@ -956,9 +962,9 @@ func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testin
 
 	ds := newTestServer(t)
 	target := dc.NotificationTarget{
-		Type:    "webhook",
-		URL:     webhookSrv.URL,
-		Secret:  "test-secret",
+		Type:     "webhook",
+		URL:      webhookSrv.URL,
+		Secret:   "test-secret",
 		Triggers: dc.DefaultTriggers,
 	}
 	ds.testNotifyFunc = func() error {

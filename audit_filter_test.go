@@ -34,16 +34,13 @@ func writeTestRecords(t *testing.T, records []AuditRecord) (*AuditStore, func())
 	return store, func() { _ = os.Remove(path) }
 }
 
-// ptr returns a pointer to a time.Time value (convenience helper).
-func ptr(t time.Time) *time.Time { return &t }
-
 func TestHistoryFiltered(t *testing.T) {
 	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
-	t1 := base                         // 10:00
-	t2 := base.Add(1 * time.Hour)      // 11:00
-	t3 := base.Add(2 * time.Hour)      // 12:00
-	t4 := base.Add(3 * time.Hour)      // 13:00
-	t5 := base.Add(4 * time.Hour)      // 14:00
+	t1 := base                    // 10:00
+	t2 := base.Add(1 * time.Hour) // 11:00
+	t3 := base.Add(2 * time.Hour) // 12:00
+	t4 := base.Add(3 * time.Hour) // 13:00
+	t5 := base.Add(4 * time.Hour) // 14:00
 
 	records := []AuditRecord{
 		{Timestamp: t1, Host: "h1", DrainMode: 0},
