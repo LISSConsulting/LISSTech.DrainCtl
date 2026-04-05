@@ -599,6 +599,23 @@ func TestFlushLocked_SeekError(t *testing.T) {
 	}
 }
 
+// ── load seek error ───────────────────────────────────────────────────────────
+
+// TestLoad_SeekError verifies that load returns an error when the underlying
+// file handle is closed — exercising the `m.file.Seek(0, 0)` error-return path
+// at the top of load.
+func TestLoad_SeekError(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup()
+
+	// Close the OS file handle so the Seek call inside load fails.
+	_ = st.file.Close()
+
+	if err := st.load(); err == nil {
+		t.Fatal("expected error from load after file close, got nil")
+	}
+}
+
 // ── Prune seek error ──────────────────────────────────────────────────────────
 
 // TestPrune_SeekError verifies that Prune returns (0, error) when the
