@@ -87,6 +87,18 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 	// ── Session tracking ───────────────────────────────────────────────
 	if sess := GetSessionSummary(); sess != nil {
 		res.Sessions = sess
+		if sess.MaxSessions > 0 {
+			log(LvlINF,
+				fmt.Sprintf("sessions=%d/%d", sess.TotalSessions, sess.MaxSessions),
+				fmt.Sprintf("utilization=%d%%", sess.UtilizationPct),
+			)
+		} else {
+			sessStr := fmt.Sprintf("active=%d", sess.ActiveSessions)
+			if sess.DisconnectedSessions > 0 {
+				sessStr += fmt.Sprintf(" disconnected=%d", sess.DisconnectedSessions)
+			}
+			log(LvlINF, "sessions="+sessStr)
+		}
 	}
 
 	// ── Open audit store ───────────────────────────────────────────────

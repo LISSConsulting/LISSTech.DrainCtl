@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-ninth roam-mode pass complete.** Three targeted improvements: `drainctl configure` flags path gains `--session-warning-threshold`, `--poll-interval`, `--retention-days` (only interactive wizard had these); `drainctl check` plain output now prints session data (capped: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`); dashboard event log sessInfo for unlimited servers now shows "N active[, M disconnected]" instead of "N active, T total", consistent with the server card.
+> Current state: **Fiftieth roam-mode pass complete.** Two correctness fixes: `dc.Check()` direct path now logs session data in plain output (fetched since Roam #1 but never surfaced — pipe path was fixed in Roam #49, direct path was missed); `generateSelfSigned` TLS cert write errors are now propagated with partial-file cleanup instead of being silently discarded.
 
 ## Completed Work
 
@@ -148,9 +148,12 @@
 | Roam #49 | `drainctl check` plain output (service-pipe path): session data now printed between grace_period and the final status line — capped server: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`; matches the information already present in the JSON/CSV paths | feature, CLI |
 | Roam #49 | Dashboard event log `sessInfo` (unlimited servers): changed from `"N active, T total"` to `"N active[, M disconnected]"` — consistent with the server card added in Roam #42; `total_sessions == active + disconnected` so the old form was redundant when no cap is set | correctness, UX, dashboard |
 
+| Roam #50 | `dc.Check()` direct path: session data now logged in plain output — capped server: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`; matches the pipe path output added in Roam #49 (fallback path fetched sessions into `res.Sessions` but never logged them) | correctness, CLI |
+| Roam #50 | `generateSelfSigned` TLS cert write: `pem.Encode` and `certOut.Close()` errors no longer silently ignored — on failure the partial cert file is removed before returning the error; previously a write failure left a corrupt empty cert on disk, causing `tls.LoadX509KeyPair` to fail on the next restart with no clear indication of the root cause | correctness, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #49.)*
+*(All tracked items complete — nothing pending after Roam #50.)*
 
 ## Key Learnings
 

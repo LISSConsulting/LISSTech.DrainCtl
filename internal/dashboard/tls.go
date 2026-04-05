@@ -135,8 +135,15 @@ func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certifica
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("write cert file: %w", err)
 	}
-	_ = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	_ = certOut.Close()
+	if encErr := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); encErr != nil {
+		_ = certOut.Close()
+		_ = os.Remove(certPath)
+		return tls.Certificate{}, fmt.Errorf("encode cert PEM: %w", encErr)
+	}
+	if closeErr := certOut.Close(); closeErr != nil {
+		_ = os.Remove(certPath)
+		return tls.Certificate{}, fmt.Errorf("flush cert file: %w", closeErr)
+	}
 
 	// Write key PEM with restricted ACL (SYSTEM + Administrators only).
 	keyDER, err := x509.MarshalECPrivateKey(key)
