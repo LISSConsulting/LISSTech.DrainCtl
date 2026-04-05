@@ -99,6 +99,8 @@ func Register(dashboardURL string, log dc.LogFunc) (*RegisterResult, error) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		// Non-fatal: registration succeeded even if we can't parse the fingerprint.
+		// Drain the body so the HTTP transport can reuse the connection.
+		_, _ = io.Copy(io.Discard, resp.Body)
 		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s (fingerprint unavailable)", dashboardURL))
 		return &RegisterResult{}, nil
 	}
@@ -225,6 +227,7 @@ func FetchNotifyConfig(dashboardURL string, log dc.LogFunc) (*RemoteNotifyConfig
 
 	var cfg RemoteNotifyConfig
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("decode notify config: %w", err)
 	}
 	return &cfg, nil
@@ -244,6 +247,7 @@ func FetchServers(url string) ([]ServerInfo, error) {
 	}
 	var servers []ServerInfo
 	if err := json.NewDecoder(resp.Body).Decode(&servers); err != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, err
 	}
 	return servers, nil

@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+        <link rel="icon" href="/favicon.ico" type="image/png" />
         <title>DrainCtl Dashboard</title>
         <script>
             /* Restore manual theme before first paint to avoid flash */
@@ -5091,10 +5091,13 @@
                             pct +
                             "%)</span></div>";
                     } else if (sess) {
+                        var sessVal = sess.active_sessions + " active";
+                        if (sess.disconnected_sessions > 0)
+                            sessVal += ", " + sess.disconnected_sessions + " disconnected";
                         html +=
                             '<div class="srv-row"><span class="srv-k">Sessions</span><span class="srv-v">' +
-                            sess.active_sessions +
-                            " active</span></div>";
+                            sessVal +
+                            "</span></div>";
                     }
                     html +=
                         '</div><div class="srv-act"><button class="btn-hist" data-host="' +
