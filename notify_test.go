@@ -651,6 +651,93 @@ func TestSendTestNotification_MultipleTargets_CallsAll(t *testing.T) {
 	}
 }
 
+// TestSendNotification_WebhookPayloadContextFields verifies that
+// grace_period_seconds, connections_allowed, and version are always present in
+// the webhook payload so consumers can derive the alerting threshold and whether
+// new connections are currently being blocked without parsing status strings.
+func TestSendNotification_WebhookPayloadContextFields(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerAlert}},
+	}
+	connAllowed := false
+	result := &CheckResult{
+		Host:                 "SRV-PROD",
+		Status:               "Alert",
+		DrainModeLabel:       "DrainAllSessions",
+		Message:              "Drain active.",
+		ConnectionsAllowed:   &connAllowed,
+		GracePeriodSeconds:   3600,
+		Version:              "26.95.0",
+		StateDurationSeconds: func() *float64 { v := 0.0; return &v }(),
+		Timestamp:            time.Now(),
+	}
+
+	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if got, ok := payload["grace_period_seconds"]; !ok {
+		t.Error("payload missing 'grace_period_seconds'")
+	} else if got != float64(3600) {
+		t.Errorf("grace_period_seconds = %v, want 3600", got)
+	}
+
+	if got, ok := payload["connections_allowed"]; !ok {
+		t.Error("payload missing 'connections_allowed'")
+	} else if got != false {
+		t.Errorf("connections_allowed = %v, want false (Alert state)", got)
+	}
+
+	if got, ok := payload["version"]; !ok {
+		t.Error("payload missing 'version'")
+	} else if got != "26.95.0" {
+		t.Errorf("version = %v, want 26.95.0", got)
+	}
+}
+
+// TestSendNotification_ConnectionsAllowedTrueWhenHealthy verifies that
+// connections_allowed is true when the result is Healthy (nil ConnectionsAllowed
+// defaults to false defensively).
+func TestSendNotification_ConnectionsAllowedTrueWhenHealthy(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerDrainOff}},
+	}
+	result := newTestResult("SRV01", "Healthy") // ConnectionsAllowed = true
+
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOff, "", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, ok := payload["connections_allowed"]; !ok {
+		t.Error("payload missing 'connections_allowed'")
+	} else if got != true {
+		t.Errorf("connections_allowed = %v, want true (Healthy state)", got)
+	}
+}
+
 // TestSendNotification_NtfySessionWarningMessage verifies that the ntfy body for
 // session_warning includes the utilization percentage and session counts rather
 // than the generic status message.

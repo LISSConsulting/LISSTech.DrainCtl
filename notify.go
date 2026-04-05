@@ -54,6 +54,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		stateDur = *result.StateDurationSeconds
 	}
 
+	connAllowed := result.ConnectionsAllowed != nil && *result.ConnectionsAllowed
 	payload := map[string]any{
 		"event":                  string(trigger),
 		"host":                   result.Host,
@@ -62,6 +63,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		"message":                result.Message,
 		"changed_by":             changedBy,
 		"state_duration_seconds": int(stateDur),
+		"grace_period_seconds":   result.GracePeriodSeconds,
+		"connections_allowed":    connAllowed,
+		"version":                result.Version,
 		"timestamp":              result.Timestamp.Format(time.RFC3339),
 	}
 	if result.Transition && result.TransitionFrom != "" {
