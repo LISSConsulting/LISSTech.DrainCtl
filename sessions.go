@@ -179,18 +179,14 @@ func ReadMaxSessions() int {
 	return int(v)
 }
 
-// GetSessionSummary returns an aggregate summary of current RDS sessions.
-// Returns nil (not an error) if session enumeration fails (e.g., non-admin).
-func GetSessionSummary() *SessionSummary {
-	sessions, err := EnumerateSessions()
-	if err != nil {
-		return nil
-	}
-
+// ComputeSessionSummary builds a SessionSummary from a pre-enumerated session
+// list and the configured max-sessions cap. Callers that already hold the
+// session list should use this instead of GetSessionSummary to avoid a second
+// WTS API call.
+func ComputeSessionSummary(sessions []SessionInfo, maxSessions int) *SessionSummary {
 	summary := &SessionSummary{
-		MaxSessions: ReadMaxSessions(),
+		MaxSessions: maxSessions,
 	}
-
 	for _, s := range sessions {
 		switch s.StateValue {
 		case wtsActive:
@@ -201,13 +197,21 @@ func GetSessionSummary() *SessionSummary {
 			summary.TotalSessions++
 		}
 	}
-
 	if summary.MaxSessions > 0 && summary.TotalSessions > 0 {
 		summary.UtilizationPct = (summary.TotalSessions * 100) / summary.MaxSessions
 		if summary.UtilizationPct > 100 {
 			summary.UtilizationPct = 100
 		}
 	}
-
 	return summary
+}
+
+// GetSessionSummary returns an aggregate summary of current RDS sessions.
+// Returns nil (not an error) if session enumeration fails (e.g., non-admin).
+func GetSessionSummary() *SessionSummary {
+	sessions, err := EnumerateSessions()
+	if err != nil {
+		return nil
+	}
+	return ComputeSessionSummary(sessions, ReadMaxSessions())
 }
