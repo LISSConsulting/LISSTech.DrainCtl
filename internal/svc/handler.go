@@ -52,24 +52,27 @@ const (
 	EvtCheckHealthy   = 1002
 	EvtConfigReloaded = 1003
 	EvtTransition     = 1004
+	EvtGenericInfo    = 1099
 	EvtCheckGrace     = 2000
+	EvtGenericWarning = 2099
 	EvtCheckAlert     = 3000
 	EvtRegistryFailed = 3001
 	EvtServiceError   = 3002
+	EvtGenericError   = 3099
 )
 
 // EventLogLogger returns a LogFunc that writes to the Windows Event Log
-// using generic event ID 1/2/3 for structured log messages.
+// using generic event IDs (1099/2099/3099) for structured log messages.
 func EventLogLogger(elog *eventlog.Log) dc.LogFunc {
 	return func(l dc.Level, fields ...string) {
 		msg := strings.Join(fields, " ")
 		switch l {
 		case dc.LvlERR:
-			_ = elog.Error(3, msg)
+			_ = elog.Error(EvtGenericError, msg)
 		case dc.LvlWRN:
-			_ = elog.Warning(2, msg)
+			_ = elog.Warning(EvtGenericWarning, msg)
 		default:
-			_ = elog.Info(1, msg)
+			_ = elog.Info(EvtGenericInfo, msg)
 		}
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
-	"unsafe"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/alexbrainman/sspi/negotiate"
@@ -93,27 +93,72 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 				"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
 		}
 
-		info := &AuthInfo{Username: username}
+		// Extract group memberships while sc is alive by impersonating on
+		// this OS thread. LockOSThread ensures the impersonation token stays
+		// on the thread that calls CheckTokenMembership.
+		groups := extractGroups(sc, log, username)
+
+		info := &AuthInfo{Username: username, Groups: groups}
 		ctx := context.WithValue(r.Context(), authInfoKey, info)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+// extractGroups impersonates the SSPI client on the current OS thread,
+// reads the token's group SIDs, reverts, and returns group names.
+func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string) []string {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if err := sc.ImpersonateUser(); err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "sspi: impersonate failed",
+			fmt.Sprintf("user=%s error=%q", username, err))
+		return nil
+	}
+	defer func() { _ = sc.RevertToSelf() }()
+
+	var token windows.Token
+	err := windows.OpenThreadToken(
+		windows.CurrentThread(),
+		windows.TOKEN_QUERY,
+		false, // open as client, not self
+		&token,
+	)
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "sspi: open thread token failed",
+			fmt.Sprintf("user=%s error=%q", username, err))
+		return nil
+	}
+	defer func() { _ = token.Close() }()
+
+	tokenGroups, err := token.GetTokenGroups()
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "sspi: get token groups failed",
+			fmt.Sprintf("user=%s error=%q", username, err))
+		return nil
+	}
+
+	var groups []string
+	for _, g := range tokenGroups.AllGroups() {
+		name, domain, _, err := g.Sid.LookupAccount("")
+		if err != nil {
+			continue
+		}
+		if domain != "" {
+			groups = append(groups, domain+`\`+name)
+		} else {
+			groups = append(groups, name)
+		}
+	}
+	return groups
+}
+
 // RequireGroup wraps an http.Handler and rejects requests where the
 // authenticated user is not a member of the specified Windows group.
 // The caller must wrap with NegotiateMiddleware first.
+// Group membership is checked against AuthInfo.Groups (populated by
+// NegotiateMiddleware), not via thread impersonation.
 func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler {
-	// Resolve the group SID once at setup time.
-	groupSID, _, _, err := windows.LookupSID("", group)
-	if err != nil {
-		dc.LogMsg(log, dc.LvlERR, "sspi: cannot resolve group SID",
-			fmt.Sprintf("group=%q error=%q", group, err))
-		// Return a handler that always rejects — broken config.
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "server configuration error", http.StatusInternalServerError)
-		})
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := GetAuthInfo(r)
 		if auth == nil {
@@ -121,15 +166,23 @@ func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler 
 			return
 		}
 
-		member, err := isGroupMember(groupSID)
-		_ = revertToSelf() // defensive: undo any SSPI thread impersonation
-		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "sspi: group check failed",
-				fmt.Sprintf("user=%s group=%s error=%q", auth.Username, group, err))
-			http.Error(w, "access denied", http.StatusForbidden)
-			return
+		// Check group membership from the pre-extracted groups list.
+		// Match on "DOMAIN\Group" or just "Group" (case-insensitive).
+		found := false
+		for _, g := range auth.Groups {
+			if strings.EqualFold(g, group) {
+				found = true
+				break
+			}
+			// Also match the bare group name (without domain prefix).
+			parts := strings.SplitN(g, `\`, 2)
+			if len(parts) == 2 && strings.EqualFold(parts[1], group) {
+				found = true
+				break
+			}
 		}
-		if !member {
+
+		if !found {
 			dc.LogMsg(log, dc.LvlWRN, "sspi: access denied",
 				fmt.Sprintf("user=%s group=%s", auth.Username, group))
 			http.Error(w, "access denied: not a member of "+group, http.StatusForbidden)
@@ -138,59 +191,4 @@ func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler 
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// isGroupMember checks whether the current thread token (after SSPI
-// impersonation) is a member of the specified group SID.
-func isGroupMember(groupSID *windows.SID) (bool, error) {
-	var token windows.Token
-	err := windows.OpenThreadToken(
-		windows.CurrentThread(),
-		windows.TOKEN_QUERY,
-		true, // open as self
-		&token,
-	)
-	if err != nil {
-		// Fall back to process token if no thread token.
-		err = windows.OpenProcessToken(
-			windows.CurrentProcess(),
-			windows.TOKEN_QUERY,
-			&token,
-		)
-		if err != nil {
-			return false, fmt.Errorf("open token: %w", err)
-		}
-	}
-	defer func() { _ = token.Close() }()
-
-	var isMember int32
-	err = checkTokenMembership(token, groupSID, &isMember)
-	if err != nil {
-		return false, fmt.Errorf("CheckTokenMembership: %w", err)
-	}
-	return isMember != 0, nil
-}
-
-var modAdvapi32 = windows.NewLazySystemDLL("advapi32.dll")
-var procCheckTokenMembership = modAdvapi32.NewProc("CheckTokenMembership")
-var procRevertToSelf = modAdvapi32.NewProc("RevertToSelf")
-
-func revertToSelf() error {
-	r1, _, err := procRevertToSelf.Call()
-	if r1 == 0 {
-		return err
-	}
-	return nil
-}
-
-func checkTokenMembership(token windows.Token, sidToCheck *windows.SID, isMember *int32) error {
-	r1, _, err := procCheckTokenMembership.Call(
-		uintptr(token),
-		uintptr(unsafe.Pointer(sidToCheck)),
-		uintptr(unsafe.Pointer(isMember)),
-	)
-	if r1 == 0 {
-		return err
-	}
-	return nil
 }
