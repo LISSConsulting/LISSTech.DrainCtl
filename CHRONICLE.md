@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-fifth roam-mode pass complete.** Dashboard inline style cleanup: all remaining static `style="..."` attributes in `dashboard.html` extracted to named CSS classes (`.footer-brand`, `.settings-actions`, `.hist-head-actions`, `.hist-head .filter-pill`, `.srv-v--amber`, `.chart-placeholder`, `.ntfy-prefix`, `.webhook-secret-wrap`, `.target-section-label--nowrap`, `.hmac-header-label`); redundant `border-left-color` on `.ctr.total` removed.
+> Current state: **Fifty-sixth roam-mode pass complete.** Dashboard inline style cleanup: all remaining static `style="..."` attributes in `dashboard.html` extracted to named CSS classes (`.footer-brand`, `.settings-actions`, `.hist-head-actions`, `.hist-head .filter-pill`, `.srv-v--amber`, `.chart-placeholder`, `.ntfy-prefix`, `.webhook-secret-wrap`, `.target-section-label--nowrap`, `.hmac-header-label`); redundant `border-left-color` on `.ctr.total` removed.
 
 ## Completed Work
 
@@ -166,9 +166,14 @@
 
 | Roam #55 | Dashboard `dashboard.html` inline style extraction: all static `style="..."` attributes in HTML and JS templates moved to named CSS classes — `.footer-brand` (JetBrains Mono nav brand), `.settings-actions` (save/test flex row), `.hist-head-actions` (history modal header right side), `.hist-head .filter-pill` scoped size override, `.srv-v--amber` (Grace Left amber value), `.chart-placeholder` (collecting-data overlay), `.ntfy-prefix` (static styles only; `display:` kept inline), `.webhook-secret-wrap` (static styles; `display:` kept inline), `.webhook-secret-wrap .settings-input` (`flex:1`), `.target-section-label--nowrap` modifier (HMAC Secret heading), `.hmac-header-label` (X-DrainCtl-Signature span), `.settings-num-label` reused for repeat interval unit; redundant `style="border-left-color:var(--accent)"` removed from `.ctr.total` (already set by CSS rule) | code quality, dashboard |
 
+| Roam #56 | `drainctl notify status`: webhook targets now show `hmac_secret=set` or `hmac_secret=unset` — operators can confirm HMAC signing is active without reading config.json; ntfy targets do not show the field (HMAC signing is webhook-specific) | UX, CLI |
+| Roam #56 | `docs/guide.html` troubleshooting: Kerberos 401 section used `http://server.domain.com:49470` as example FQDN; corrected to `https://` (dashboard always requires TLS) | correctness, docs |
+| Roam #56 | `docs/guide.html` configure section: expanded flag example to show `--session-warning-threshold`, `--poll-interval`, `--retention-days` (all three were added in Roam #49 but not reflected in the guide) | docs |
+| Roam #56 | `docs/guide.html` session utilization alerts: added `drainctl configure --session-warning-threshold N` as the primary way to change the threshold; config.json snippet retained as secondary reference | UX, docs |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #55.)*
+*(All tracked items complete — nothing pending after Roam #56.)*
 
 ## Key Learnings
 
