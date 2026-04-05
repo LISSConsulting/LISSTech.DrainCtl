@@ -72,6 +72,7 @@ func (s *ServerState) Remove(hostname string) bool {
 		return false
 	}
 	delete(s.servers, hostname)
+	delete(s.history, hostname)
 	s.save()
 	return true
 }
