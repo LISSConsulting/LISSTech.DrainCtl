@@ -12,12 +12,17 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
+
+// hostnameRE matches RFC 1123 hostnames: labels of alphanumerics and hyphens
+// (hyphen not at start/end), separated by dots.
+var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
 
 //go:embed dashboard.html
 var dashboardHTML []byte
@@ -184,7 +189,7 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	req.Hostname = strings.TrimSpace(req.Hostname)
-	if req.Hostname == "" || len(req.Hostname) > 253 {
+	if req.Hostname == "" || len(req.Hostname) > 253 || !hostnameRE.MatchString(req.Hostname) {
 		http.Error(w, "hostname invalid", http.StatusBadRequest)
 		return
 	}

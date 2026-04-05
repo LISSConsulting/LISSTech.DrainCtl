@@ -485,6 +485,22 @@
                 background: var(--red);
                 color: #fff;
             }
+            .btn-rm[data-confirm="1"] {
+                background: var(--red);
+                color: #fff;
+            }
+            /* Transient error toast above the server grid */
+            .grid-toast {
+                display: none;
+                padding: 8px 14px;
+                margin-bottom: 10px;
+                background: var(--card);
+                color: var(--red);
+                border: 1.5px solid var(--red);
+                border-radius: var(--r);
+                font-size: 0.8rem;
+                font-family: "JetBrains Mono", monospace;
+            }
 
             /* Event log */
             .log-section {
@@ -1429,6 +1445,7 @@
                     <span class="filter-pill" data-status="off" role="button" tabindex="0" aria-pressed="false">Offline</span>
                 </div>
             </div>
+            <div class="grid-toast" id="grid-toast" role="alert" aria-live="assertive"></div>
             <div class="grid" id="grid">
                 <div class="empty"><h2>Connecting...</h2></div>
             </div>
@@ -5274,14 +5291,21 @@
                     pill.style.color = "var(--red)";
                 }
             }
-            async function rm(h) {
-                if (!confirm("Remove " + h + "?")) return;
+            var _rmTimers = {};
+            function showGridToast(msg) {
+                var el = document.getElementById("grid-toast");
+                el.textContent = msg;
+                el.style.display = "";
+                clearTimeout(el._t);
+                el._t = setTimeout(function () { el.style.display = "none"; }, 5000);
+            }
+            async function rmConfirmed(h) {
                 try {
                     const r = await fetch("/api/v1/servers/" + encodeURIComponent(h), { method: "DELETE" });
                     if (r.ok) refresh();
-                    else alert("HTTP " + r.status);
+                    else showGridToast("Remove failed: HTTP " + r.status);
                 } catch (e) {
-                    alert(e.message);
+                    showGridToast("Remove failed: " + e.message);
                 }
             }
             function toggleTheme() {
@@ -5751,12 +5775,35 @@
                 });
             })();
 
-            // Event delegation for server card buttons — avoids inline onclick with interpolated hostnames
+            // Event delegation for server card buttons — avoids inline onclick with interpolated hostnames.
+            // Remove uses a two-stage inline confirm: first click → "Sure?", second click → delete.
             document.getElementById("grid").addEventListener("click", function (e) {
                 const hist = e.target.closest(".btn-hist");
                 if (hist && hist.dataset.host) { showHistory(hist.dataset.host, hist); return; }
                 const rmBtn = e.target.closest(".btn-rm");
-                if (rmBtn && rmBtn.dataset.host) { rm(rmBtn.dataset.host); }
+                if (rmBtn && rmBtn.dataset.host) {
+                    const h = rmBtn.dataset.host;
+                    if (rmBtn.dataset.confirm === "1") {
+                        // Second click — execute removal.
+                        clearTimeout(_rmTimers[h]);
+                        delete _rmTimers[h];
+                        rmConfirmed(h);
+                    } else {
+                        // First click — enter confirm state.
+                        rmBtn.dataset.confirm = "1";
+                        rmBtn.setAttribute("aria-label", "Confirm removal of " + h);
+                        rmBtn.textContent = "Sure?";
+                        // Auto-cancel after 5 s if no second click.
+                        _rmTimers[h] = setTimeout(function () {
+                            if (rmBtn.dataset.confirm === "1") {
+                                rmBtn.dataset.confirm = "";
+                                rmBtn.setAttribute("aria-label", "Remove " + h);
+                                rmBtn.textContent = "Remove";
+                            }
+                            delete _rmTimers[h];
+                        }, 5000);
+                    }
+                }
             });
 
             // Status filter pill wiring

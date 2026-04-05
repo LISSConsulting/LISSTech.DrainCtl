@@ -228,12 +228,22 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 }
 
 // applyRemoteConfig updates service config from dashboard-sourced notification settings.
+// Values are clamped to their valid ranges so a misconfigured or compromised dashboard
+// cannot inject out-of-range values into the service.
 func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConfig, targets *[]dc.NotificationTarget) {
 	*targets = remote.Notifications
 	if remote.SessionWarningThreshold >= 0 {
-		cfg.SessionWarningThreshold = remote.SessionWarningThreshold
+		t := remote.SessionWarningThreshold
+		if t > 100 {
+			t = 100
+		}
+		cfg.SessionWarningThreshold = t
 	}
 	if remote.GracePeriod > 0 {
-		cfg.GracePeriod = time.Duration(remote.GracePeriod) * time.Minute
+		gp := remote.GracePeriod
+		if gp > 1440 {
+			gp = 1440
+		}
+		cfg.GracePeriod = time.Duration(gp) * time.Minute
 	}
 }
