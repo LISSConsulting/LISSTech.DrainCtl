@@ -3,6 +3,8 @@
 package drainctl
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -723,5 +725,298 @@ func TestDefaultConfig_Defaults(t *testing.T) {
 	}
 	if cfg.Dashboard.Port != DefaultDashboardPort {
 		t.Errorf("Dashboard.Port = %d, want %d", cfg.Dashboard.Port, DefaultDashboardPort)
+	}
+}
+
+// ── SaveConfig / LoadConfig ───────────────────────────────────────────────────
+
+// TestSaveConfig_RoundTrip verifies that SaveConfig writes config.json and
+// LoadConfig reads it back with all fields intact.
+func TestSaveConfig_RoundTrip(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := DefaultConfig()
+	cfg.GracePeriod = 45
+	cfg.RetentionDays = 60
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook"},
+	}
+
+	if err := SaveConfig(cfg, nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.GracePeriod != 45 {
+		t.Errorf("GracePeriod = %d, want 45", got.GracePeriod)
+	}
+	if got.RetentionDays != 60 {
+		t.Errorf("RetentionDays = %d, want 60", got.RetentionDays)
+	}
+	if len(got.Notifications) != 1 || got.Notifications[0].URL != "https://example.com/hook" {
+		t.Errorf("Notifications = %v, want 1 webhook target", got.Notifications)
+	}
+}
+
+// TestSaveConfig_ValidatesBeforeSave verifies that SaveConfig clamps
+// out-of-range values via Validate before writing.
+func TestSaveConfig_ValidatesBeforeSave(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := DefaultConfig()
+	cfg.GracePeriod = 99999 // out of range — will be clamped to default
+
+	if err := SaveConfig(cfg, nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.GracePeriod == 99999 {
+		t.Errorf("GracePeriod = 99999 survived SaveConfig — Validate not called")
+	}
+}
+
+// TestLoadConfig_FreshInstall_ReturnsValidDefault verifies that LoadConfig
+// returns a valid config (either from registry migration or a fresh default)
+// when no config.json exists.
+func TestLoadConfig_FreshInstall_ReturnsValidDefault(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got == nil {
+		t.Fatal("LoadConfig returned nil config")
+	}
+	// A valid default must have a positive grace period.
+	if got.GracePeriod < 1 {
+		t.Errorf("GracePeriod = %d, want >= 1", got.GracePeriod)
+	}
+}
+
+// TestLoadConfig_ParseError verifies that LoadConfig returns an error
+// containing "parse" when config.json contains malformed JSON.
+func TestLoadConfig_ParseError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	path := DefaultConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{invalid json}"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := LoadConfig(nil)
+	if err == nil {
+		t.Fatal("expected parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Errorf("error = %q, want message containing 'parse'", err.Error())
+	}
+}
+
+// TestLoadConfig_ReadError verifies that LoadConfig returns a non-nil error
+// when the config path exists but cannot be read (directory where file expected).
+func TestLoadConfig_ReadError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	// Create a directory at the config file path — ReadFile will fail with a
+	// non-IsNotExist error, exercising the "read %s: %w" return.
+	path := DefaultConfigPath()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	_, err := LoadConfig(nil)
+	if err == nil {
+		t.Fatal("expected read error when config path is a directory, got nil")
+	}
+}
+
+// ── UpdateSessionThreshold ────────────────────────────────────────────────────
+
+// TestUpdateSessionThreshold_UpdatesConfig verifies that a valid percentage is
+// written to config.json and reads back correctly.
+func TestUpdateSessionThreshold_UpdatesConfig(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	if err := UpdateSessionThreshold(75, nil); err != nil {
+		t.Fatalf("UpdateSessionThreshold: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.SessionWarningThreshold != 75 {
+		t.Errorf("SessionWarningThreshold = %d, want 75", got.SessionWarningThreshold)
+	}
+}
+
+// TestUpdateSessionThreshold_InvalidRange verifies that out-of-range values
+// return an error without touching the config file.
+func TestUpdateSessionThreshold_InvalidRange(t *testing.T) {
+	for _, pct := range []int{-1, 101, 999} {
+		if err := UpdateSessionThreshold(pct, nil); err == nil {
+			t.Errorf("UpdateSessionThreshold(%d): expected error, got nil", pct)
+		}
+	}
+}
+
+// ── UpdateGracePeriod ─────────────────────────────────────────────────────────
+
+// TestUpdateGracePeriod_UpdatesConfig verifies that a valid minute value is
+// written to config.json and reads back correctly.
+func TestUpdateGracePeriod_UpdatesConfig(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	if err := UpdateGracePeriod(120, nil); err != nil {
+		t.Fatalf("UpdateGracePeriod: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.GracePeriod != 120 {
+		t.Errorf("GracePeriod = %d, want 120", got.GracePeriod)
+	}
+}
+
+// TestUpdateGracePeriod_InvalidRange verifies that out-of-range values return
+// an error without touching the config file.
+func TestUpdateGracePeriod_InvalidRange(t *testing.T) {
+	for _, m := range []int{0, -1, 1441, 9999} {
+		if err := UpdateGracePeriod(m, nil); err == nil {
+			t.Errorf("UpdateGracePeriod(%d): expected error, got nil", m)
+		}
+	}
+}
+
+// ── UpdateNotifications ───────────────────────────────────────────────────────
+
+// TestUpdateNotifications_ReplacesTargets verifies that notification targets in
+// config.json are fully replaced by the provided slice.
+func TestUpdateNotifications_ReplacesTargets(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://old.example.com/hook"},
+	}
+	if err := SaveConfig(cfg, nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	newTargets := []NotificationTarget{
+		{Type: "ntfy", URL: "https://ntfy.sh/new-topic"},
+	}
+	if err := UpdateNotifications(newTargets, nil); err != nil {
+		t.Fatalf("UpdateNotifications: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(got.Notifications) != 1 || got.Notifications[0].URL != "https://ntfy.sh/new-topic" {
+		t.Errorf("Notifications = %v, want single ntfy target", got.Notifications)
+	}
+}
+
+// ── UpdateNotifySettings ──────────────────────────────────────────────────────
+
+// TestUpdateNotifySettings_AllNilIsNoOp verifies that passing all nil
+// arguments leaves existing config values unchanged.
+func TestUpdateNotifySettings_AllNilIsNoOp(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.GracePeriod = 30
+	cfg.SessionWarningThreshold = 80
+	if err := SaveConfig(cfg, nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	if err := UpdateNotifySettings(nil, nil, nil, nil); err != nil {
+		t.Fatalf("UpdateNotifySettings(nil,nil,nil): %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.GracePeriod != 30 {
+		t.Errorf("GracePeriod = %d, want 30 (unchanged)", got.GracePeriod)
+	}
+	if got.SessionWarningThreshold != 80 {
+		t.Errorf("SessionWarningThreshold = %d, want 80 (unchanged)", got.SessionWarningThreshold)
+	}
+}
+
+// TestUpdateNotifySettings_UpdatesAllFields verifies that non-nil arguments
+// update the respective fields in config.json.
+func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	targets := []NotificationTarget{{Type: "webhook", URL: "https://example.com/hook"}}
+	threshold := 60
+	grace := 90
+
+	if err := UpdateNotifySettings(&targets, &threshold, &grace, nil); err != nil {
+		t.Fatalf("UpdateNotifySettings: %v", err)
+	}
+
+	got, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(got.Notifications) != 1 || got.Notifications[0].URL != "https://example.com/hook" {
+		t.Errorf("Notifications = %v, want 1 webhook", got.Notifications)
+	}
+	if got.SessionWarningThreshold != 60 {
+		t.Errorf("SessionWarningThreshold = %d, want 60", got.SessionWarningThreshold)
+	}
+	if got.GracePeriod != 90 {
+		t.Errorf("GracePeriod = %d, want 90", got.GracePeriod)
+	}
+}
+
+// TestUpdateNotifySettings_InvalidThreshold verifies that an out-of-range
+// session threshold returns an error.
+func TestUpdateNotifySettings_InvalidThreshold(t *testing.T) {
+	for _, pct := range []int{-1, 101} {
+		v := pct
+		if err := UpdateNotifySettings(nil, &v, nil, nil); err == nil {
+			t.Errorf("UpdateNotifySettings(threshold=%d): expected error, got nil", pct)
+		}
+	}
+}
+
+// TestUpdateNotifySettings_InvalidGracePeriod verifies that an out-of-range
+// grace period returns an error.
+func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
+	for _, m := range []int{0, 1441} {
+		v := m
+		if err := UpdateNotifySettings(nil, nil, &v, nil); err == nil {
+			t.Errorf("UpdateNotifySettings(grace=%d): expected error, got nil", m)
+		}
 	}
 }

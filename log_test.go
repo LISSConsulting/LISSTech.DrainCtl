@@ -122,3 +122,10 @@ func TestLogMsg_NoExtraFields(t *testing.T) {
 		t.Errorf("output %q does not contain msg field", out)
 	}
 }
+
+// TestLogMsg_NilLogIsNoOp verifies that LogMsg with a nil LogFunc does not
+// panic — nil is the documented "discard" sentinel throughout the package.
+func TestLogMsg_NilLogIsNoOp(t *testing.T) {
+	// Must not panic.
+	LogMsg(nil, LvlINF, "this should be silently ignored", "key=value")
+}
