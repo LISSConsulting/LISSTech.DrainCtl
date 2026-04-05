@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixteenth roam-mode pass complete.** Bug fix: `session_warning` repeat-tracking now uses `LastSessionWarnNotify` (separate from `LastAlertNotify`) so suppression survives healthy/drain_off transitions. Settings form: client-side webhook URL scheme validation and numeric bounds checks for threshold/grace. Three new tests in `notify_test.go`; three new tests in `config_test.go`.
+> Current state: **Seventeenth roam-mode pass complete.** Code quality sweep: extracted `classifyState()` helper (eliminating triple-duplicate state classification in `svc`), extracted `setNotifyTarget()` (deduplicating set-webhook/set-ntfy CLI commands), settings modal UX polish (auto-dismiss save message, disabled save button during fetch, refresh on open, loading indicator), PS module consistency (`$null =` everywhere), and resolved 4 pre-existing golangci-lint warnings (unused func, redundant type annotation, unchecked decode errors).
 
 ## Completed Work
 
@@ -44,10 +44,15 @@
 | Roam #16 | Dashboard settings: client-side validation in `readTargets()` — webhook URLs must pass `new URL()` parse with `http:` or `https:` protocol; invalid URLs get red border and block save with descriptive message | security, UX, dashboard |
 | Roam #16 | Dashboard settings: `saveNotifyConfig()` now validates session threshold (0–100) and grace period (1–1440) before submission — fixes silent bug where `parseInt("0") \|\| 80` silently overrode "Disable session warnings"; out-of-range inputs get red border + inline error | correctness, UX, dashboard |
 | Roam #16 | 5 new tests: `TestSendNotification_SessionWarningPreservedThroughHealthy`, `TestSendNotification_IndependentTargetState` (notify_test.go); `TestValidate_EmptyTriggersDefaulted`, `TestValidate_StripsUnknownTriggers`, `TestValidate_PreservesValidTriggers` (config_test.go) | testing |
+| Roam #17 | `classifyState(drainActive bool, stateDur, gracePeriod time.Duration) (status, message string, exitCode int)` — extracted from `svc/check.go` and `svc/handler.go`; replaces 3 duplicate if/else blocks | code quality, svc |
+| Roam #17 | `setNotifyTarget(fileCfg *dc.Config, typ, url string, log dc.LogFunc) error` — extracted from `cmd/drainctl/main.go`; `set-webhook` and `set-ntfy` RunE bodies reduced to 5 lines each | code quality, CLI |
+| Roam #17 | Dashboard settings modal UX: "Saved successfully" auto-dismisses after 4 s; save button disabled during fetch; `loadNotifyConfig()` called on modal open (always fresh data); loading placeholder shown while fetch is in-flight | UX, dashboard |
+| Roam #17 | PS module: 3 unused `$result` and `\| Out-Null` occurrences replaced with `$null =` in `Install-RDSHDrainAudit`, `Enable-RDSHDrainDashboard`, `Disable-RDSHDrainDashboard` | code quality, ps |
+| Roam #17 | Lint: removed unused `ptr()` helper from `audit_filter_test.go`; dropped redundant `http.Handler` type annotation in `server.go`; added `json.Decode` error checks in `server_test.go` (4 pre-existing golangci-lint warnings cleared; lint now reports 0 issues) | code quality, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #16.)*
+*(All tracked items complete — nothing pending after Roam #17.)*
 
 ## Key Learnings
 
@@ -88,3 +93,8 @@
 - **`NotifyState` shared-map bug**: Both `TriggerAlert` and `TriggerSessionWarning` originally stored repeat-tracking in `LastAlertNotify[target.URL]`. The cleanup on `TriggerHealthy` tried to preserve entries where `k == "session_warning"`, but `k` is a URL, so the guard was always false and all entries were deleted. Fix: split into `LastAlertNotify` (cleared on healthy) and `LastSessionWarnNotify` (never cleared). Writing a test that expected preservation exposed the bug immediately.
 - **`parseInt("0") || default` is a falsy-zero trap**: In JS, `parseInt("0") || 80` evaluates to `80` because `0` is falsy. The "Disable session warnings" pill sets the input to `"0"`, so saving would silently send `80` instead. Always use explicit NaN/range checks (`isNaN(v) || v < min || v > max`) rather than `|| default` fallbacks for numeric inputs.
 - **Client-side URL validation with `new URL()`**: Wrap `new URL(s)` in a try/catch and check `.protocol === "http:" || "https:"` — this validates both parse correctness and scheme in one step. The server already strips invalid schemes via `Validate()`, but showing the error before the network round-trip is better UX.
+- **`classifyState` extraction boundary**: The helper lives in `check.go` (same `svc` package) so `handler.go` can call it without a new file. Both files carry `//go:build windows` — no import changes needed since `fmt` and `time` are already present.
+- **`setNotifyTarget` pattern**: Find-or-create by type + save + log is a stable pattern for single-type CLI setters. Parameterising by `typ string` keeps it to one function; callers pass `"webhook"` or `"ntfy"`. The log key is derived as `typ+"=disabled"` / `typ+"_url=%q"`.
+- **Settings modal refresh-on-open**: Calling `loadNotifyConfig()` in `toggleSettings` whenever `isOpen` ensures the form always shows current server state, not the page-load snapshot. The cost is one extra API call per modal open — acceptable for an admin tool.
+- **Auto-dismiss with guard**: `setTimeout(() => { if (st.className === "settings-status ok") { clear } }, 4000)` guards against clearing a subsequently-shown error message. Comparing `className` is safer than using a flag variable.
+- **golangci-lint errcheck in tests**: Test files are subject to `errcheck` — `json.NewDecoder(w.Body).Decode(&resp)` without capturing the error triggers a warning. Wrap in `if err := ...; err != nil { t.Fatalf(...) }` to both check the error and make test failures descriptive.
