@@ -612,6 +612,25 @@ func TestToDashboardConfig_CopiesFields(t *testing.T) {
 	}
 }
 
+// ── Validate AuditPath ────────────────────────────────────────────────────────
+
+func TestValidate_SetsDefaultAuditPath(t *testing.T) {
+	cfg := &Config{AuditPath: ""}
+	cfg.Validate(nil)
+	if cfg.AuditPath != DefaultAuditPath() {
+		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, DefaultAuditPath())
+	}
+}
+
+func TestValidate_PreservesExistingAuditPath(t *testing.T) {
+	const custom = `C:\custom\audit.jsonl`
+	cfg := &Config{AuditPath: custom}
+	cfg.Validate(nil)
+	if cfg.AuditPath != custom {
+		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, custom)
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {

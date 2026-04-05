@@ -547,6 +547,49 @@ func TestCheckResultWrite_CSV(t *testing.T) {
 	if !strings.Contains(out, "admin") {
 		t.Errorf("CSV missing changed_by: %s", out)
 	}
+	// Session columns present in header (even when Sessions is nil).
+	if !strings.Contains(lines[0], "active_sessions") {
+		t.Errorf("CSV missing active_sessions header: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "max_sessions") {
+		t.Errorf("CSV missing max_sessions header: %s", lines[0])
+	}
+}
+
+func TestCheckResultWrite_CSV_WithSessions(t *testing.T) {
+	r := makeCheckResult()
+	r.Sessions = &SessionSummary{
+		ActiveSessions:       3,
+		DisconnectedSessions: 1,
+		TotalSessions:        4,
+		MaxSessions:          10,
+	}
+	var buf bytes.Buffer
+	r.Write(&buf, FormatCSV)
+	out := buf.String()
+	if !strings.Contains(out, ",3,") {
+		t.Errorf("CSV missing active_sessions value (3): %s", out)
+	}
+	if !strings.Contains(out, ",1,") {
+		t.Errorf("CSV missing disconnected_sessions value (1): %s", out)
+	}
+	if !strings.Contains(out, ",10") {
+		t.Errorf("CSV missing max_sessions value (10): %s", out)
+	}
+}
+
+func TestCheckResultWrite_CSV_NilSessionsAreEmpty(t *testing.T) {
+	r := makeCheckResult() // Sessions is nil by default
+	var buf bytes.Buffer
+	r.Write(&buf, FormatCSV)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CSV line count = %d, want ≥ 2", len(lines))
+	}
+	// Data row should end with four empty fields: ,,,,
+	if !strings.HasSuffix(lines[1], ",,,,") {
+		t.Errorf("nil Sessions should produce empty session columns; data row: %q", lines[1])
+	}
 }
 
 func TestCheckResultWrite_Table(t *testing.T) {
@@ -819,6 +862,29 @@ func TestFormatSessionSummaryLine_Uncapped(t *testing.T) {
 	}
 	if strings.Contains(got, "%") {
 		t.Errorf("should omit utilization when uncapped: %s", got)
+	}
+}
+
+func TestFormatSessionSummaryLine_Nil(t *testing.T) {
+	got := formatSessionSummaryLine(nil)
+	if got != "" {
+		t.Errorf("formatSessionSummaryLine(nil) = %q, want empty string", got)
+	}
+}
+
+func TestWriteSessions_Plain_NilSummary(t *testing.T) {
+	sessions, _ := makeTestSessions()
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, nil, FormatPlain)
+	out := buf.String()
+	// Each session line is present; no summary line (nil summary → empty string
+	// from formatSessionSummaryLine, still written as a blank line by Fprintf).
+	if !strings.Contains(out, "alice") {
+		t.Errorf("missing alice session: %s", out)
+	}
+	// The summary line will be an empty string (no "sessions" keyword).
+	if strings.Contains(out, "sessions active=") {
+		t.Errorf("nil summary should not emit session counts: %s", out)
 	}
 }
 
