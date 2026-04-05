@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // writeTestRecords and ptr are defined in audit_filter_test.go.
@@ -825,5 +827,50 @@ func TestScanRecords_OpenError(t *testing.T) {
 	}
 	if recs != nil {
 		t.Errorf("records = %v, want nil on error", recs)
+	}
+}
+
+// TestPrune_RenameError verifies that Prune returns an error containing
+// "rename temp file" when os.Rename fails. This is forced by holding an
+// exclusive (no-share-delete) Windows handle on the destination file so that
+// MoveFileEx cannot replace it.
+func TestPrune_RenameError(t *testing.T) {
+	now := time.Now().UTC()
+	records := []AuditRecord{
+		{Timestamp: now.Add(-48 * time.Hour), Host: "srv1"}, // old — would be pruned
+		{Timestamp: now, Host: "srv1"},                      // recent — kept
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	// Open the audit file without FILE_SHARE_DELETE so that os.Rename to it
+	// fails with a sharing violation.
+	pathPtr, err := windows.UTF16PtrFromString(store.path)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathPtr,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ, // intentionally omit FILE_SHARE_DELETE
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile exclusive: %v", err)
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+
+	pruned, err := store.Prune(24 * time.Hour)
+	if err == nil {
+		t.Fatal("expected error from Prune when rename fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "rename temp file") {
+		t.Errorf("error = %q, want 'rename temp file' in message", err)
+	}
+	if pruned != 0 {
+		t.Errorf("pruned = %d, want 0 on error", pruned)
 	}
 }

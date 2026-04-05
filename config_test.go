@@ -647,6 +647,48 @@ func TestValidate_PreservesExistingAuditPath(t *testing.T) {
 	}
 }
 
+// ── Validate — URL scheme warning logging ────────────────────────────────────
+
+// TestValidate_InvalidURLSchemeLogsWarning verifies that Validate emits a
+// warning log when a notification target has an invalid URL scheme and a
+// non-nil log function is provided.
+func TestValidate_InvalidURLSchemeLogsWarning(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "ftp://bad.example.com"},
+		{Type: "webhook", URL: "https://good.example.com"},
+	}
+
+	var warned bool
+	cfg.Validate(func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warned = true
+		}
+	})
+
+	if !warned {
+		t.Error("expected Validate to log a warning for invalid URL scheme, got none")
+	}
+	// The invalid-scheme target should be stripped; only the valid one survives.
+	if len(cfg.Notifications) != 1 {
+		t.Errorf("expected 1 notification after stripping invalid scheme, got %d", len(cfg.Notifications))
+	}
+}
+
+// ── DefaultDataDir ────────────────────────────────────────────────────────────
+
+// TestDefaultDataDir_FallsBackWhenProgramDataEmpty verifies that DefaultDataDir
+// uses the hard-coded C:\ProgramData fallback when the ProgramData environment
+// variable is not set.
+func TestDefaultDataDir_FallsBackWhenProgramDataEmpty(t *testing.T) {
+	t.Setenv("ProgramData", "")
+	got := DefaultDataDir()
+	want := `C:\ProgramData\LISS Technologies\LISSTech DrainCtl`
+	if got != want {
+		t.Errorf("DefaultDataDir() = %q, want %q", got, want)
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {
