@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -370,5 +371,38 @@ func TestSetNotifyTarget_EmptyURL_PreservesOtherTypes(t *testing.T) {
 	}
 	if len(cfg.Notifications) != 1 || cfg.Notifications[0].Type != "ntfy" {
 		t.Errorf("expected only ntfy target to remain, got %v", cfg.Notifications)
+	}
+}
+
+// TestSetNotifyTarget_SaveError_EmptyURL_ReturnsError verifies that a SaveConfig
+// failure on the empty-URL (remove) path is propagated as an error.
+func TestSetNotifyTarget_SaveError_EmptyURL_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+	if err := os.MkdirAll(dc.DefaultConfigPath()+".tmp", 0o755); err != nil {
+		t.Fatalf("setup blocking dir: %v", err)
+	}
+
+	cfg := dc.DefaultConfig()
+	cfg.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook.example.com/"},
+	}
+	if err := setNotifyTarget(cfg, "webhook", "", notifyOverrides{}, dc.DiscardLogger()); err == nil {
+		t.Fatal("expected SaveConfig error, got nil")
+	}
+}
+
+// TestSetNotifyTarget_SaveError_URL_ReturnsError verifies that a SaveConfig
+// failure on the set-URL path is propagated as an error.
+func TestSetNotifyTarget_SaveError_URL_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+	if err := os.MkdirAll(dc.DefaultConfigPath()+".tmp", 0o755); err != nil {
+		t.Fatalf("setup blocking dir: %v", err)
+	}
+
+	cfg := dc.DefaultConfig()
+	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", notifyOverrides{}, dc.DiscardLogger()); err == nil {
+		t.Fatal("expected SaveConfig error, got nil")
 	}
 }
