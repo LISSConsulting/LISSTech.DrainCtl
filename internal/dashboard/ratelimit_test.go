@@ -128,6 +128,31 @@ func TestRateLimiter_Middleware_Rejects_SetsRetryAfterHeader(t *testing.T) {
 	}
 }
 
+// TestRateLimiter_StaleBucketPruned verifies that a bucket not accessed for
+// longer than pruneAfter is removed from the map on the next Allow call.
+func TestRateLimiter_StaleBucketPruned(t *testing.T) {
+	rl := newIPRateLimiter(10, 10)
+
+	// Seed a bucket for IP "1.2.3.4".
+	rl.Allow("1.2.3.4")
+
+	// Age the bucket past the 5-minute prune window.
+	rl.mu.Lock()
+	rl.buckets["1.2.3.4"].lastSeen = time.Now().Add(-10 * time.Minute)
+	rl.mu.Unlock()
+
+	// Trigger pruning via an Allow call from a different IP.
+	rl.Allow("5.6.7.8")
+
+	rl.mu.Lock()
+	_, exists := rl.buckets["1.2.3.4"]
+	rl.mu.Unlock()
+
+	if exists {
+		t.Error("stale bucket for 1.2.3.4 was not pruned after 10 minutes of inactivity")
+	}
+}
+
 // TestRateLimiter_Middleware_BadRemoteAddr verifies graceful handling of malformed RemoteAddr.
 func TestRateLimiter_Middleware_BadRemoteAddr(t *testing.T) {
 	rl := newIPRateLimiter(10, 10)
