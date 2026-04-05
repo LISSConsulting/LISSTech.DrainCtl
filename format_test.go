@@ -590,3 +590,181 @@ func TestCheckResultWrite_Plain_NoOp(t *testing.T) {
 		t.Errorf("FormatPlain Write should produce no output, got: %q", buf.String())
 	}
 }
+
+// ── WriteSessions ─────────────────────────────────────────────────────────────
+
+func makeTestSessions() ([]SessionInfo, *SessionSummary) {
+	sessions := []SessionInfo{
+		{SessionID: 1, UserName: "DOMAIN\\alice", Station: "RDP-Tcp#0", State: "Active", StateValue: wtsActive},
+		{SessionID: 2, UserName: "DOMAIN\\bob", Station: "RDP-Tcp#1", State: "Disconnected", StateValue: wtsDisconnected},
+	}
+	summary := &SessionSummary{
+		ActiveSessions:       1,
+		DisconnectedSessions: 1,
+		TotalSessions:        2,
+		MaxSessions:          10,
+		UtilizationPct:       20,
+	}
+	return sessions, summary
+}
+
+func TestWriteSessions_JSON_ValidJSON(t *testing.T) {
+	sessions, summary := makeTestSessions()
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, summary, FormatJSON)
+	var out struct {
+		Sessions []SessionInfo   `json:"sessions"`
+		Summary  *SessionSummary `json:"summary"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("JSON unmarshal error: %v\noutput: %s", err, buf.String())
+	}
+	if len(out.Sessions) != 2 {
+		t.Errorf("sessions len = %d, want 2", len(out.Sessions))
+	}
+	if out.Sessions[0].UserName != "DOMAIN\\alice" {
+		t.Errorf("sessions[0].UserName = %q, want %q", out.Sessions[0].UserName, "DOMAIN\\alice")
+	}
+	if out.Summary == nil {
+		t.Fatal("summary is nil")
+	}
+	if out.Summary.MaxSessions != 10 {
+		t.Errorf("summary.MaxSessions = %d, want 10", out.Summary.MaxSessions)
+	}
+}
+
+func TestWriteSessions_JSON_EmptySessionsArray(t *testing.T) {
+	var buf bytes.Buffer
+	WriteSessions(&buf, nil, nil, FormatJSON)
+	var out struct {
+		Sessions []SessionInfo `json:"sessions"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("JSON unmarshal error: %v", err)
+	}
+	if out.Sessions == nil {
+		t.Error("sessions field should be [] not null for empty input")
+	}
+}
+
+func TestWriteSessions_CSV_HeaderAndData(t *testing.T) {
+	sessions, summary := makeTestSessions()
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, summary, FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 CSV lines, got %d: %s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "session_id") {
+		t.Errorf("CSV missing header; first line: %q", lines[0])
+	}
+	if !strings.Contains(out, "alice") {
+		t.Errorf("CSV missing alice: %s", out)
+	}
+	if !strings.Contains(out, "Disconnected") {
+		t.Errorf("CSV missing Disconnected state: %s", out)
+	}
+}
+
+func TestWriteSessions_Table_ColumnsAndValues(t *testing.T) {
+	sessions, summary := makeTestSessions()
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, summary, FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "SESSION ID") {
+		t.Errorf("table missing SESSION ID column: %s", out)
+	}
+	if !strings.Contains(out, "USER NAME") {
+		t.Errorf("table missing USER NAME column: %s", out)
+	}
+	if !strings.Contains(out, "alice") {
+		t.Errorf("table missing alice: %s", out)
+	}
+	if !strings.Contains(out, "Active") {
+		t.Errorf("table missing Active state: %s", out)
+	}
+	// Summary line should appear after the table.
+	if !strings.Contains(out, "sessions") {
+		t.Errorf("table missing summary line: %s", out)
+	}
+	if !strings.Contains(out, "10") {
+		t.Errorf("table summary missing max_sessions=10: %s", out)
+	}
+}
+
+func TestWriteSessions_Plain_LogLines(t *testing.T) {
+	sessions, summary := makeTestSessions()
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, summary, FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	// 2 session lines + 1 summary line
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 plain lines, got %d: %s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "alice") {
+		t.Errorf("first plain line missing alice: %s", lines[0])
+	}
+	if !strings.Contains(lines[2], "sessions") {
+		t.Errorf("summary line missing 'sessions': %s", lines[2])
+	}
+}
+
+func TestWriteSessions_Table_NoSummaryWhenNil(t *testing.T) {
+	sessions := []SessionInfo{
+		{SessionID: 1, UserName: "user", Station: "RDP-Tcp#0", State: "Active", StateValue: wtsActive},
+	}
+	var buf bytes.Buffer
+	WriteSessions(&buf, sessions, nil, FormatTable)
+	out := buf.String()
+	// Should have the table header and one data row but no summary line.
+	if !strings.Contains(out, "SESSION ID") {
+		t.Errorf("table missing header: %s", out)
+	}
+	if strings.Contains(out, "sessions") {
+		t.Errorf("table should have no summary when summary is nil: %s", out)
+	}
+}
+
+func TestFormatSessionSummaryLine_Capped(t *testing.T) {
+	s := &SessionSummary{
+		ActiveSessions:       3,
+		DisconnectedSessions: 1,
+		TotalSessions:        4,
+		MaxSessions:          10,
+		UtilizationPct:       40,
+	}
+	got := formatSessionSummaryLine(s)
+	if !strings.Contains(got, "active=3") {
+		t.Errorf("missing active=3: %s", got)
+	}
+	if !strings.Contains(got, "disconnected=1") {
+		t.Errorf("missing disconnected=1: %s", got)
+	}
+	if !strings.Contains(got, "10") {
+		t.Errorf("missing max_sessions: %s", got)
+	}
+	if !strings.Contains(got, "40%") {
+		t.Errorf("missing utilization: %s", got)
+	}
+}
+
+func TestFormatSessionSummaryLine_Uncapped(t *testing.T) {
+	s := &SessionSummary{
+		ActiveSessions:       5,
+		DisconnectedSessions: 0,
+		TotalSessions:        5,
+		MaxSessions:          0,
+	}
+	got := formatSessionSummaryLine(s)
+	if !strings.Contains(got, "active=5") {
+		t.Errorf("missing active=5: %s", got)
+	}
+	if strings.Contains(got, "disconnected") {
+		t.Errorf("should omit disconnected when 0: %s", got)
+	}
+	if strings.Contains(got, "%") {
+		t.Errorf("should omit utilization when uncapped: %s", got)
+	}
+}

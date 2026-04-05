@@ -346,6 +346,95 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 }
 
 // ---------------------------------------------------------------------------
+// Session list
+// ---------------------------------------------------------------------------
+
+// WriteSessions renders a session list to w in the specified format.
+// summary may be nil if session counts are unavailable.
+func WriteSessions(w io.Writer, sessions []SessionInfo, summary *SessionSummary, format OutputFormat) {
+	switch format {
+	case FormatJSON:
+		out := struct {
+			Sessions []SessionInfo   `json:"sessions"`
+			Summary  *SessionSummary `json:"summary,omitempty"`
+		}{
+			Sessions: sessions,
+			Summary:  summary,
+		}
+		if out.Sessions == nil {
+			out.Sessions = []SessionInfo{}
+		}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(out)
+
+	case FormatCSV:
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"session_id", "user_name", "station", "state", "state_value"})
+		for _, s := range sessions {
+			_ = cw.Write([]string{
+				fmt.Sprintf("%d", s.SessionID),
+				s.UserName,
+				s.Station,
+				s.State,
+				fmt.Sprintf("%d", s.StateValue),
+			})
+		}
+		cw.Flush()
+
+	case FormatTable:
+		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "SESSION ID\tUSER NAME\tSTATION\tSTATE")
+		_, _ = fmt.Fprintln(tw, "----------\t---------\t-------\t-----")
+		for _, s := range sessions {
+			_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n",
+				s.SessionID,
+				or(s.UserName, "-"),
+				or(s.Station, "-"),
+				s.State,
+			)
+		}
+		_ = tw.Flush()
+		if summary != nil {
+			_, _ = fmt.Fprintln(w, formatSessionSummaryLine(summary))
+		}
+
+	case FormatPlain:
+		for _, s := range sessions {
+			fields := []string{
+				fmt.Sprintf("session_id=%d", s.SessionID),
+				fmt.Sprintf("station=%s", or(s.Station, "-")),
+				fmt.Sprintf("state=%s", s.State),
+			}
+			if s.UserName != "" {
+				fields = append([]string{fmt.Sprintf("user=%s", s.UserName)}, fields[1:]...)
+				fields[1] = fmt.Sprintf("session_id=%d", s.SessionID)
+			}
+			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, joinFields(fields))
+		}
+		if summary != nil {
+			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, formatSessionSummaryLine(summary))
+		}
+	}
+}
+
+// formatSessionSummaryLine returns a human-readable summary of session counts.
+func formatSessionSummaryLine(s *SessionSummary) string {
+	if s == nil {
+		return ""
+	}
+	line := fmt.Sprintf("sessions active=%d", s.ActiveSessions)
+	if s.DisconnectedSessions > 0 {
+		line += fmt.Sprintf(" disconnected=%d", s.DisconnectedSessions)
+	}
+	line += fmt.Sprintf(" total=%d", s.TotalSessions)
+	if s.MaxSessions > 0 {
+		line += fmt.Sprintf("/%d utilization=%d%%", s.MaxSessions, s.UtilizationPct)
+	}
+	return line
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
