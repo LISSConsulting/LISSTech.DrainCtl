@@ -1077,7 +1077,20 @@ drainctl register --auto</code></pre>
                 <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.
             </p>
 
-            <pre><code># PowerShell — create the SRV record in AD-integrated DNS
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; margin: 20px 0">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px">
+                    <div>
+                        <label for="srv-domain" style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px">AD Domain</label>
+                        <input id="srv-domain" type="text" value="contoso.com" spellcheck="false"
+                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.85rem; background: var(--bg); color: var(--fg); box-sizing: border-box" />
+                    </div>
+                    <div>
+                        <label for="srv-host" style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px">Dashboard Server FQDN</label>
+                        <input id="srv-host" type="text" value="dashboard.contoso.com" spellcheck="false"
+                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.85rem; background: var(--bg); color: var(--fg); box-sizing: border-box" />
+                    </div>
+                </div>
+                <pre style="margin: 0"><code id="srv-snippet"># PowerShell &#x2014; create the SRV record in AD-integrated DNS
 Add-DnsServerResourceRecord -ZoneName "contoso.com" `
   -Name "_drainctl._tcp" -Srv `
   -DomainName "dashboard.contoso.com" `
@@ -1085,6 +1098,32 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
 
 # Verify
 Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
+                <button onclick="navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent)"
+                    style="margin-top: 10px; padding: 4px 14px; font-size: 0.8rem; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); cursor: pointer">
+                    Copy to clipboard
+                </button>
+            </div>
+            <script>
+            (function() {
+                var domain = document.getElementById('srv-domain');
+                var host = document.getElementById('srv-host');
+                var snippet = document.getElementById('srv-snippet');
+                function update() {
+                    var d = domain.value || 'contoso.com';
+                    var h = host.value || 'dashboard.contoso.com';
+                    snippet.textContent =
+                        '# PowerShell \u2014 create the SRV record in AD-integrated DNS\n' +
+                        'Add-DnsServerResourceRecord -ZoneName "' + d + '" `\n' +
+                        '  -Name "_drainctl._tcp" -Srv `\n' +
+                        '  -DomainName "' + h + '" `\n' +
+                        '  -Port 49470 -Priority 0 -Weight 0\n\n' +
+                        '# Verify\n' +
+                        'Resolve-DnsName -Name "_drainctl._tcp.' + d + '" -Type SRV';
+                }
+                domain.addEventListener('input', update);
+                host.addEventListener('input', update);
+            })();
+            </script>
 
             <p>
                 Once the SRV record exists, agents discover the dashboard without any per-machine config. Just install
