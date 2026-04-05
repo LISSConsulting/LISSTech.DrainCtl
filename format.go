@@ -76,7 +76,15 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 			"state_since", "state_duration_seconds",
 			"grace_period_seconds", "status", "connections_allowed",
 			"transition", "transition_from", "changed_by", "message", "exit_code",
+			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
 		})
+		activeSess, disconnSess, totalSess, maxSess := "", "", "", ""
+		if r.Sessions != nil {
+			activeSess = fmt.Sprintf("%d", r.Sessions.ActiveSessions)
+			disconnSess = fmt.Sprintf("%d", r.Sessions.DisconnectedSessions)
+			totalSess = fmt.Sprintf("%d", r.Sessions.TotalSessions)
+			maxSess = fmt.Sprintf("%d", r.Sessions.MaxSessions)
+		}
 		_ = cw.Write([]string{
 			r.Timestamp.Format(time.RFC3339),
 			r.Host,
@@ -92,6 +100,7 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 			r.ChangedBy,
 			r.Message,
 			fmt.Sprintf("%d", r.ExitCode),
+			activeSess, disconnSess, totalSess, maxSess,
 		})
 		cw.Flush()
 

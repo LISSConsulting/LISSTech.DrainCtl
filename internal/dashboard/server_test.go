@@ -1912,3 +1912,59 @@ func TestHandleUI_BodyContainsDashboard(t *testing.T) {
 		t.Error("response body does not contain expected dashboard content")
 	}
 }
+
+// ── handleHealth Grace + default branch ───────────────────────────────────────
+
+func TestHandleHealth_GraceServerCounted(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Grace"})
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Grace    int `json:"grace"`
+		Healthy  int `json:"healthy"`
+		Alerting int `json:"alerting"`
+		Unknown  int `json:"unknown"`
+		Offline  int `json:"offline"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Grace != 1 {
+		t.Errorf("grace = %d, want 1", resp.Grace)
+	}
+	if resp.Healthy != 0 || resp.Alerting != 0 || resp.Unknown != 0 || resp.Offline != 0 {
+		t.Errorf("unexpected counts: healthy=%d alerting=%d unknown=%d offline=%d",
+			resp.Healthy, resp.Alerting, resp.Unknown, resp.Offline)
+	}
+}
+
+func TestHandleHealth_ErrorStatusCountedAsUnknown(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	// "Error" is not a recognised status value — falls through to default: unknown++.
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Error"})
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Unknown  int `json:"unknown"`
+		Healthy  int `json:"healthy"`
+		Alerting int `json:"alerting"`
+		Grace    int `json:"grace"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Unknown != 1 {
+		t.Errorf("unknown = %d, want 1 (Error status should default to unknown)", resp.Unknown)
+	}
+	if resp.Healthy != 0 || resp.Alerting != 0 || resp.Grace != 0 {
+		t.Errorf("unexpected counts: healthy=%d alerting=%d grace=%d",
+			resp.Healthy, resp.Alerting, resp.Grace)
+	}
+}
