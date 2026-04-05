@@ -39,7 +39,7 @@ func backoffDuration(failures int) time.Duration {
 		shift = 5 // cap doubling at 2^5 = 32×
 	}
 	d := configFetchBase << shift
-	if d > configFetchMax {
+	if d >= configFetchMax {
 		return configFetchMax
 	}
 	return d
