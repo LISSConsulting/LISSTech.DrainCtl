@@ -1582,6 +1582,7 @@ func TestSecurityMiddleware_SetsExpectedHeaders(t *testing.T) {
 		"X-Frame-Options":         "SAMEORIGIN",
 		"Referrer-Policy":         "strict-origin-when-cross-origin",
 		"Permissions-Policy":      "camera=(), microphone=(), geolocation=()",
+		"Cache-Control":           "no-store",
 	}
 	for name, want := range headers {
 		if got := w.Header().Get(name); got != want {

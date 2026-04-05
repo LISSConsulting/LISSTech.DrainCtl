@@ -554,6 +554,10 @@ const cspHeader = "default-src 'none'; " +
 	"form-action 'self'"
 
 // securityMiddleware adds defensive HTTP security headers to all responses.
+// Cache-Control is set to no-store by default so that authenticated API
+// responses (server list, health data, notify config) are never stored in
+// browser or intermediate caches. The UI handler overrides this to no-cache,
+// and the favicon handler overrides it to public, max-age=86400.
 func securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", cspHeader)
@@ -561,6 +565,7 @@ func securityMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }
