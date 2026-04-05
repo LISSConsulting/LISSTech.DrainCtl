@@ -5407,7 +5407,7 @@
                                 : "off";
                     const d = new Date(e.time);
                     const ts = isNaN(d)
-                        ? e.time
+                        ? esc(e.time)
                         : d.toLocaleString("en-US", {
                               month: "short",
                               day: "numeric",

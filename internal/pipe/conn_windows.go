@@ -35,7 +35,7 @@ func (c *pipeConn) RemoteAddr() net.Addr        { return pipeAddr(PipeName) }
 
 func (c *pipeConn) SetDeadline(t time.Time) error {
 	c.deadline = t
-	return nil
+	return c.file.SetDeadline(t)
 }
 func (c *pipeConn) SetReadDeadline(t time.Time) error  { return c.SetDeadline(t) }
 func (c *pipeConn) SetWriteDeadline(t time.Time) error { return c.SetDeadline(t) }
