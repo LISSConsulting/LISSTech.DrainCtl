@@ -14,18 +14,18 @@ import (
 // AuditRecord represents a single point-in-time observation, serialized as
 // one JSON object per line in the audit trail file.
 type AuditRecord struct {
-	Timestamp      time.Time `json:"ts"`
-	Host           string    `json:"host"`
-	DrainMode      DrainMode `json:"mode"`
-	DrainLabel     string    `json:"mode_label"`
-	KeyModified    time.Time `json:"key_modified,omitempty"`
-	Changed        bool      `json:"changed,omitempty"`
-	ChangedBy      string    `json:"changed_by,omitempty"`
-	ActiveSessions       int `json:"active_sessions,omitempty"`
-	DisconnectedSessions int `json:"disconnected_sessions,omitempty"`
-	TotalSessions        int `json:"total_sessions,omitempty"`
-	MaxSessions          int `json:"max_sessions,omitempty"`
-	ExitCode       int       `json:"exit"`
+	Timestamp            time.Time `json:"ts"`
+	Host                 string    `json:"host"`
+	DrainMode            DrainMode `json:"mode"`
+	DrainLabel           string    `json:"mode_label"`
+	KeyModified          time.Time `json:"key_modified,omitempty"`
+	Changed              bool      `json:"changed,omitempty"`
+	ChangedBy            string    `json:"changed_by,omitempty"`
+	ActiveSessions       int       `json:"active_sessions,omitempty"`
+	DisconnectedSessions int       `json:"disconnected_sessions,omitempty"`
+	TotalSessions        int       `json:"total_sessions,omitempty"`
+	MaxSessions          int       `json:"max_sessions,omitempty"`
+	ExitCode             int       `json:"exit"`
 }
 
 // AuditStore manages the JSONL-based audit trail.

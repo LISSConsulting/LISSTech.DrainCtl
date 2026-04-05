@@ -688,6 +688,16 @@ drainctl sessions --format json
 # CSV — for spreadsheet import or RMM custom fields
 drainctl sessions --format csv</code></pre>
 
+            <h3>Inspect current configuration</h3>
+            <pre><code># Print all settings at a glance — no prompts, no side-effects
+drainctl configure show</code></pre>
+            <p>
+                Prints version, config path, grace period, poll interval, retention days,
+                session warning threshold, dashboard settings, and all notification targets.
+                Useful for confirming what is active on a machine without opening
+                <code>config.json</code> or running the interactive wizard.
+            </p>
+
             <h3>Exit codes</h3>
             <table>
                 <thead>
@@ -761,6 +771,19 @@ drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
 # Agent registration with session warning threshold and custom poll interval
 drainctl configure --mode registration --dashboard-url https://dash:49470 \
   --session-warning-threshold 90 --poll-interval 30 --retention-days 90</code></pre>
+
+            <h3>Inspect current configuration</h3>
+            <p>
+                To review every active setting at a glance without prompting or making changes,
+                use the read-only <code>configure show</code> subcommand:
+            </p>
+            <pre><code>drainctl configure show</code></pre>
+            <p>
+                Output covers: version, config file path, grace period, poll interval,
+                retention days, session warning threshold, dashboard server status,
+                agent registration URL, TLS pin status, and all notification targets
+                (with HMAC signing status for webhook targets).
+            </p>
 
             <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
             <h2 id="powershell">6. PowerShell Module</h2>
