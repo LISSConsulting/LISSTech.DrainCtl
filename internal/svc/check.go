@@ -80,6 +80,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 	if sess != nil {
 		rec.ActiveSessions = sess.ActiveSessions
+		rec.DisconnectedSessions = sess.DisconnectedSessions
 		rec.TotalSessions = sess.TotalSessions
 		rec.MaxSessions = sess.MaxSessions
 	}

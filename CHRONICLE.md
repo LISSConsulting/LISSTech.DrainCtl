@@ -1,7 +1,7 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixty-third roam-mode pass complete.** `docs/guide.html` documentation gap closed: `drainctl sessions` (added in Roam #61) was entirely absent from the guide; added "List current sessions" subsection to CLI Usage (Section 5) with table/json/csv examples, and a "drainctl sessions" subsection to Session Tracking (Section 8) with example output and format notes.
+> Current state: **Sixty-fourth roam-mode pass complete.** `disconnected_sessions` data-loss gap closed: the field was present in `SessionSummary` and logged in CLI/dashboard output but never persisted to the JSONL audit trail (`AuditRecord`) or history structures (`HistoryRecord`). Added field to both structs, updated `check.go` + `svc/check.go` to record it, and added `active_sessions`/`disconnected_sessions`/`total_sessions`/`max_sessions` columns to the CSV output of `WriteHistory` and `WriteHistoryRecords` (previously all session data was omitted from CSV history exports). 3 new tests.
 
-Previous state: Sixty-first pass — `drainctl sessions` command added — lists current RDS sessions via `WTSEnumerateSessionsW` with table (default), JSON, CSV, and plain output formats; `WriteSessions` + `formatSessionSummaryLine` added to `format.go`; 13 new tests in `format_test.go`.
+Previous state: Sixty-third pass — `docs/guide.html` documentation gap closed: `drainctl sessions` (added in Roam #61) was entirely absent from the guide; added "List current sessions" subsection to CLI Usage (Section 5) with table/json/csv examples, and a "drainctl sessions" subsection to Session Tracking (Section 8) with example output and format notes.
 
 ## Completed Work
 
@@ -185,10 +185,11 @@ Previous state: Sixty-first pass — `drainctl sessions` command added — lists
 | Roam #61 | `drainctl sessions` — new subcommand lists current RDS sessions via `WTSEnumerateSessionsW`; shows session ID, username, station, and state; default format is table; supports JSON, CSV, and plain formats; `WriteSessions(w, sessions, summary, format)` + `formatSessionSummaryLine` added to `format.go` following the `WriteHistory` pattern; 13 new tests in `format_test.go` (JSON valid/empty, CSV header+data, table columns+values+summary, plain log lines, nil-summary omission, summary line capped/uncapped) | feature, CLI, testing |
 | Roam #62 | `ComputeSessionSummary(sessions, maxSessions)` extracted from `GetSessionSummary` — eliminates double WTS API call in `sessions_cmd.go` (previously `EnumerateSessions` was called twice: once directly, once inside `GetSessionSummary`); pure function enables unit testing without syscall mocks; `GetSessionSummary` now delegates to it; 7 new tests in `sessions_test.go` covering `wtsStateName` (all 10 named states + unknown fallback) and `ComputeSessionSummary` (empty list, active+disconnected counts, non-counted states ignored, utilization capped at 100%, no max); dashboard favicon MIME type corrected from `image/png` to `image/x-icon` | correctness, testing, dashboard |
 | Roam #63 | `docs/guide.html` CLI Usage: added "List current sessions" subsection after "View audit history" — shows `drainctl sessions` with `--format json`/`--format csv` examples; guide Section 8 Session Tracking: added "drainctl sessions" subsection as the first h3 with example table output and format notes — `drainctl sessions` (added in Roam #61) was entirely absent from the guide | docs |
+| Roam #64 | `AuditRecord` + `HistoryRecord`: added `disconnected_sessions` field (`omitempty`, backward-compatible) — disconnected session counts were tracked in `SessionSummary` and logged in CLI/dashboard output but never persisted to the JSONL audit trail or included in the history data structures; `check.go` and `internal/svc/check.go` record `DisconnectedSessions` when sessions are available; `WriteHistory` and `WriteHistoryRecords` CSV output updated to include `active_sessions`, `disconnected_sessions`, `total_sessions`, `max_sessions` columns (previously all session data was omitted from CSV history exports); 3 new tests (`TestAuditToHistory_CopiesDisconnectedSessions`, `TestWriteHistory_CSV_IncludesSessionColumns`, `TestWriteHistoryRecords_CSV_IncludesSessionColumns`) | correctness, testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #63.)*
+*(All tracked items complete — nothing pending after Roam #64.)*
 
 ## Key Learnings
 

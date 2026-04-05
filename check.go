@@ -197,6 +197,7 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 		}
 		if res.Sessions != nil {
 			rec.ActiveSessions = res.Sessions.ActiveSessions
+			rec.DisconnectedSessions = res.Sessions.DisconnectedSessions
 			rec.TotalSessions = res.Sessions.TotalSessions
 			rec.MaxSessions = res.Sessions.MaxSessions
 		}

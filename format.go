@@ -129,6 +129,7 @@ type HistoryRecord struct {
 	Changed              bool   `json:"changed"`
 	ChangedBy            string `json:"changed_by,omitempty"`
 	ActiveSessions       int    `json:"active_sessions,omitempty"`
+	DisconnectedSessions int    `json:"disconnected_sessions,omitempty"`
 	TotalSessions        int    `json:"total_sessions,omitempty"`
 	MaxSessions          int    `json:"max_sessions,omitempty"`
 	ExitCode             int    `json:"exit_code"`
@@ -172,6 +173,7 @@ func AuditToHistory(rec AuditRecord, stateDur *int) HistoryRecord {
 		ChangedBy:            rec.ChangedBy,
 		StateDurationSeconds: stateDur,
 		ActiveSessions:       rec.ActiveSessions,
+		DisconnectedSessions: rec.DisconnectedSessions,
 		TotalSessions:        rec.TotalSessions,
 		MaxSessions:          rec.MaxSessions,
 		ExitCode:             rec.ExitCode,
@@ -201,7 +203,9 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 		_ = cw.Write([]string{
 			"timestamp", "host", "drain_mode", "drain_mode_value",
 			"key_modified", "state_duration_seconds",
-			"changed", "changed_by", "exit_code",
+			"changed", "changed_by",
+			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
+			"exit_code",
 		})
 		for i, r := range records {
 			hr := AuditToHistory(r, &durations[i])
@@ -215,6 +219,10 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 				hr.KeyModified,
 				fmt.Sprintf("%d", durations[i]),
 				ch, hr.ChangedBy,
+				fmt.Sprintf("%d", hr.ActiveSessions),
+				fmt.Sprintf("%d", hr.DisconnectedSessions),
+				fmt.Sprintf("%d", hr.TotalSessions),
+				fmt.Sprintf("%d", hr.MaxSessions),
 				fmt.Sprintf("%d", hr.ExitCode),
 			})
 		}
@@ -279,7 +287,9 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 		_ = cw.Write([]string{
 			"timestamp", "host", "drain_mode", "drain_mode_value",
 			"key_modified", "state_duration_seconds",
-			"changed", "changed_by", "exit_code",
+			"changed", "changed_by",
+			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
+			"exit_code",
 		})
 		for _, hr := range records {
 			ch := ""
@@ -295,6 +305,10 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 				fmt.Sprintf("%d", hr.DrainValue),
 				hr.KeyModified, dur,
 				ch, hr.ChangedBy,
+				fmt.Sprintf("%d", hr.ActiveSessions),
+				fmt.Sprintf("%d", hr.DisconnectedSessions),
+				fmt.Sprintf("%d", hr.TotalSessions),
+				fmt.Sprintf("%d", hr.MaxSessions),
 				fmt.Sprintf("%d", hr.ExitCode),
 			})
 		}
