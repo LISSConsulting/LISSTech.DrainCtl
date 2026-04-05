@@ -14,6 +14,28 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
+// classifyState derives the status string, human-readable message, and exit
+// code from the three fundamental drain inputs.
+//
+//   - drainActive:  drain mode is not AllowAll
+//   - stateDur:     how long the current mode has been active
+//   - gracePeriod:  configured grace period
+func classifyState(drainActive bool, stateDur, gracePeriod time.Duration) (status, message string, exitCode int) {
+	if drainActive && stateDur > gracePeriod {
+		return "Alert",
+			fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
+				stateDur.Truncate(time.Second), gracePeriod),
+			1
+	}
+	if drainActive {
+		remaining := gracePeriod - stateDur
+		return "Grace",
+			fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second)),
+			0
+	}
+	return "Healthy", "All connections allowed.", 0
+}
+
 // svcRunCheck performs a single check cycle in service mode.
 func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
 	state, err := dc.ReadDrainMode()
@@ -56,16 +78,14 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	// Determine exit code and status.
 	drainActive := state.Mode != dc.AllowAll
-	exitCode := 0
 	stateDur := time.Duration(0)
 	if since := st.StateSince(state.Mode); since != nil {
 		stateDur = time.Since(*since).Truncate(time.Second)
 	}
-	if drainActive {
-		if stateDur > cfg.GracePeriod {
-			exitCode = 1
-		}
-	}
+
+	var status, message string
+	var exitCode int
+	status, message, exitCode = classifyState(drainActive, stateDur, cfg.GracePeriod)
 
 	// Session tracking.
 	sess := dc.GetSessionSummary()
@@ -104,8 +124,8 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 			state.Host, transitionFrom, state.Mode, cb))
 	}
 
-	if drainActive && exitCode == 1 {
-		// Alert: drain mode exceeded grace period.
+	switch status {
+	case "Alert":
 		cb := changedBy
 		if cb == "" {
 			cb = "unknown"
@@ -113,31 +133,18 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		_ = elog.Error(EvtCheckAlert, fmt.Sprintf(
 			"ALERT: Drain mode active on %s for %s, exceeding grace period of %s. Mode: %s. Changed by: %s.",
 			state.Host, stateDur, cfg.GracePeriod, state.Mode, cb))
-	} else if drainActive {
-		// Grace: within grace period.
+	case "Grace":
 		remaining := cfg.GracePeriod - stateDur
 		_ = elog.Warning(EvtCheckGrace, fmt.Sprintf(
 			"Drain mode active on %s, within grace period (%s remaining). Mode: %s.",
 			state.Host, remaining.Truncate(time.Second), state.Mode))
-	} else {
-		// Healthy.
+	default:
 		_ = elog.Info(EvtCheckHealthy, fmt.Sprintf(
 			"Drain mode check: %s on %s. All connections allowed. State duration: %s.",
 			state.Mode, state.Host, stateDur))
 	}
 
 	// Build CheckResult for notifications and dashboard reporting.
-	status := "Healthy"
-	message := "All connections allowed."
-	if drainActive && exitCode == 1 {
-		status = "Alert"
-		message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
-			stateDur, cfg.GracePeriod)
-	} else if drainActive {
-		remaining := cfg.GracePeriod - stateDur
-		status = "Grace"
-		message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
-	}
 
 	dur := stateDur.Seconds()
 	connAllowed := !drainActive
