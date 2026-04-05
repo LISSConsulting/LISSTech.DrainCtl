@@ -1,6 +1,10 @@
-# 🚰 LISSTech DrainCtl
+<p align="center">
+  <img src="docs/logo.png" width="96" alt="DrainCtl" />
+</p>
 
-**Real-time Remote Desktop Session Host drain mode monitoring for Windows Server.**
+<h1 align="center">LISSTech DrainCtl</h1>
+
+<p align="center"><strong>Real-time Remote Desktop Session Host drain mode monitoring for Windows Server.</strong></p>
 
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
@@ -127,7 +131,7 @@ The MSI installs:
 
 > **Upgrading from v26?** The first run auto-migrates your registry configuration to `config.json`. Existing installs upgrade seamlessly — no manual steps required.
 
-The bundle installer (`LISSTech.DrainCtl.exe`) provides a branded setup wizard with license acceptance and configuration options. For unattended deployment, MSI properties can be passed directly:
+The MSI installer provides a setup wizard with license acceptance, install mode selection, and configuration options. For unattended deployment, MSI properties can be passed directly:
 
 ```powershell
 msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=registration DASHBOARD_URL=https://dash.example.com:49470 WEBHOOK_URL=https://hooks.example.com/drain

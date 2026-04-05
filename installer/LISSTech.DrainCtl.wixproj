@@ -8,10 +8,10 @@
     <Cultures>;</Cultures>
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <PropertyGroup>
     <DefineConstants>ProductVersion=26.94.5</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Bundle\**</DefaultItemExcludes>
-  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
 </Project>

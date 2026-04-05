@@ -1,14 +1,15 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
     <Package Name="LISSTech DrainCtl"
         Manufacturer="LISS Consulting, Corp."
-        Version="26.94.5"
+        Version="$(var.ProductVersion)"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
         Scope="perMachine">
 
         <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
 
-        <!-- Hide from Programs and Features -->
-        <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+        <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
+        <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
 
         <!--
             Prevent Restart Manager from cascading service shutdowns during uninstall.
@@ -24,7 +25,7 @@
             Cabinet="LISSTech.DrainCtl.cab"
             EmbedCab="yes" />
 
-        <!-- MSI properties for unattended / bundle-driven install -->
+        <!-- MSI properties for unattended install -->
         <Property Id="INSTALL_MODE" Value="standalone" Secure="yes" />
         <Property Id="WEBHOOK_URL" Secure="yes" />
         <Property Id="NTFY_URL" Secure="yes" />
@@ -32,6 +33,20 @@
         <Property Id="DASHBOARD_PORT" Value="49470" Secure="yes" />
         <Property Id="DASHBOARD_GROUP" Value="Domain Admins" Secure="yes" />
         <Property Id="GRACE_PERIOD" Value="60" Secure="yes" />
+
+        <!-- UI: custom wizard with install mode selection -->
+        <ui:WixUI Id="DrainCtlUI" />
+        <WixVariable Id="WixUILicenseRtf" Value="resources\license.rtf" />
+        <WixVariable Id="WixUIDialogBmp" Value="resources\dialog.bmp" />
+        <WixVariable Id="WixUIBannerBmp" Value="resources\banner.bmp" />
+
+        <UI>
+            <ComboBox Property="INSTALL_MODE">
+                <ListItem Value="standalone" Text="Standalone — monitor only" />
+                <ListItem Value="dashboard" Text="Dashboard — run dashboard server" />
+                <ListItem Value="registration" Text="Registration — register with dashboard" />
+            </ComboBox>
+        </UI>
 
         <!-- Custom action: run drainctl configure after install commits -->
         <CustomAction Id="ConfigureAction"

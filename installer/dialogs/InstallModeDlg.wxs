@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <UI>
+      <Dialog Id="InstallModeDlg" Width="370" Height="270"
+        Title="!(loc.InstallModeDlg_Title)">
+
+        <!-- Banner -->
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+          TabSkip="no" Text="[ProductName] Setup" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <!-- Header -->
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.InstallModeDlgTitle)" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.InstallModeDlgDescription)" />
+
+        <!-- Install Mode -->
+        <Control Id="ModeLabel" Type="Text" X="20" Y="56" Width="100" Height="17"
+          NoPrefix="yes" Text="!(loc.InstallModeDlgModeLabel)" />
+        <Control Id="ModeCombo" Type="ComboBox" X="20" Y="73" Width="200" Height="17"
+          Property="INSTALL_MODE" Sorted="no" ComboList="yes" />
+
+        <!-- Grace Period -->
+        <Control Id="GraceLabel" Type="Text" X="20" Y="103" Width="100" Height="17"
+          NoPrefix="yes" Text="!(loc.InstallModeDlgGraceLabel)" />
+        <Control Id="GraceEdit" Type="Edit" X="20" Y="120" Width="60" Height="18"
+          Property="GRACE_PERIOD" />
+        <Control Id="GraceHint" Type="Text" X="85" Y="122" Width="80" Height="17"
+          NoPrefix="yes" Text="!(loc.InstallModeDlgGraceHint)" />
+
+        <!-- Webhook URL -->
+        <Control Id="WebhookLabel" Type="Text" X="20" Y="148" Width="100" Height="17"
+          NoPrefix="yes" Text="!(loc.InstallModeDlgWebhookLabel)" />
+        <Control Id="WebhookEdit" Type="Edit" X="20" Y="165" Width="330" Height="18"
+          Property="WEBHOOK_URL" />
+
+        <!-- ntfy URL -->
+        <Control Id="NtfyLabel" Type="Text" X="20" Y="193" Width="100" Height="17"
+          NoPrefix="yes" Text="!(loc.InstallModeDlgNtfyLabel)" />
+        <Control Id="NtfyEdit" Type="Edit" X="20" Y="210" Width="330" Height="18"
+          Property="NTFY_URL" />
+
+        <!-- Navigation -->
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+          Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+          Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+          Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+    </UI>
+  </Fragment>
+</Wix>

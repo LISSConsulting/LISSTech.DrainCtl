@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <UI>
+      <!-- Dashboard mode: port + AD group -->
+      <Dialog Id="DashboardConfigDlg" Width="370" Height="270"
+        Title="!(loc.ModeConfigDlg_Title)">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+          TabSkip="no" Text="[ProductName] Setup" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.DashboardConfigDlgTitle)" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.DashboardConfigDlgDescription)" />
+
+        <Control Id="PortLabel" Type="Text" X="20" Y="60" Width="330" Height="17"
+          NoPrefix="yes" Text="!(loc.ModeConfigDlgPortLabel)" />
+        <Control Id="PortEdit" Type="Edit" X="20" Y="80" Width="80" Height="18"
+          Property="DASHBOARD_PORT" />
+
+        <Control Id="GroupLabel" Type="Text" X="20" Y="110" Width="330" Height="17"
+          NoPrefix="yes" Text="!(loc.ModeConfigDlgGroupLabel)" />
+        <Control Id="GroupEdit" Type="Edit" X="20" Y="130" Width="200" Height="18"
+          Property="DASHBOARD_GROUP" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+          Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+          Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+          Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Registration mode: dashboard URL -->
+      <Dialog Id="RegistrationConfigDlg" Width="370" Height="270"
+        Title="!(loc.ModeConfigDlg_Title)">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+          TabSkip="no" Text="[ProductName] Setup" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.RegistrationConfigDlgTitle)" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15"
+          Transparent="yes" NoPrefix="yes" Text="!(loc.RegistrationConfigDlgDescription)" />
+
+        <Control Id="DashUrlLabel" Type="Text" X="20" Y="60" Width="330" Height="30"
+          NoPrefix="yes" Text="!(loc.ModeConfigDlgDashUrlLabel)" />
+        <Control Id="DashUrlEdit" Type="Edit" X="20" Y="100" Width="330" Height="18"
+          Property="DASHBOARD_URL" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+          Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+          Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+          Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+    </UI>
+  </Fragment>
+</Wix>

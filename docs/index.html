@@ -742,7 +742,7 @@
         <nav class="nav">
             <div class="wrap">
                 <a href="#" class="nav-brand"
-                    ><span class="emoji">🚰</span> DrainCtl <span>by LISS Technologies</span></a
+                    ><img src="logo.png" alt="" width="24" height="24" style="vertical-align: middle; margin-right: 6px" /> DrainCtl <span>by LISS Technologies</span></a
                 >
                 <button
                     class="nav-toggle"
@@ -777,11 +777,6 @@
                         href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
                         class="btn btn-fill"
                         >Download MSI</a
-                    >
-                    <a
-                        href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe"
-                        class="btn btn-fill"
-                        >Download EXE</a
                     >
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
                 </div>
@@ -1086,7 +1081,7 @@
                                 <p>
                                     Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>,
                                     <code>WEBHOOK_URL=...</code> &mdash; configure everything from the command line.
-                                    Burn bundle with branded UI and RTF license.
+                                    Setup wizard with install mode selection and RTF license.
                                 </p>
                             </div>
                         </div>
@@ -1281,20 +1276,20 @@
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px">
                     <div class="install-card card">
-                        <h3>&#128230; EXE Bundle</h3>
+                        <h3>&#128230; MSI Installer</h3>
                         <p>
-                            Branded setup wizard with license, configuration options, and progress UI. The recommended
-                            way to install interactively.
+                            Setup wizard with license acceptance, install mode selection, and configuration options. The
+                            recommended way to install interactively.
                         </p>
                         <ul>
-                            <li>Configuration wizard</li>
+                            <li>Install mode wizard</li>
                             <li>License acceptance</li>
                             <li>Installs service + CLI + PS module</li>
-                            <li>Branded UI</li>
+                            <li>Also supports silent deploy</li>
                         </ul>
                         <div style="margin-top: auto; padding-top: 16px">
                             <a
-                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.exe"
+                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
                                 class="btn btn-fill"
                                 style="
                                     display: flex;
@@ -1303,14 +1298,14 @@
                                     font-size: 0.85rem;
                                     width: 100%;
                                 "
-                                >Download EXE</a
+                                >Download MSI</a
                             >
                         </div>
                     </div>
                     <div class="install-card card">
                         <h3>&#9881; MSI (Silent)</h3>
                         <p>
-                            Direct MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via
+                            Same MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via
                             properties.
                         </p>
                         <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>

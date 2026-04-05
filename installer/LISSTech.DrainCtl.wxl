@@ -2,4 +2,35 @@
     Culture="en-US">
     <String Id="DowngradeError"
         Value="A newer version of [ProductName] is already installed." />
+
+    <!-- InstallModeDlg -->
+    <String Id="InstallModeDlg_Title" Value="[ProductName] Setup" />
+    <String Id="InstallModeDlgTitle"
+        Value="{\WixUI_Font_Title}Install Mode and Notifications" />
+    <String Id="InstallModeDlgDescription"
+        Value="Choose how this machine participates in monitoring." />
+    <String Id="InstallModeDlgModeLabel" Value="Install mode:" />
+    <String Id="InstallModeDlgGraceLabel" Value="Grace period:" />
+    <String Id="InstallModeDlgGraceHint" Value="minutes" />
+    <String Id="InstallModeDlgWebhookLabel" Value="Webhook URL (optional):" />
+    <String Id="InstallModeDlgNtfyLabel" Value="ntfy URL (optional):" />
+
+    <!-- ModeConfigDlg (shared) -->
+    <String Id="ModeConfigDlg_Title" Value="[ProductName] Setup" />
+    <String Id="ModeConfigDlgPortLabel" Value="Dashboard listen port:" />
+    <String Id="ModeConfigDlgGroupLabel" Value="Active Directory group allowed to access the dashboard:" />
+    <String Id="ModeConfigDlgDashUrlLabel"
+        Value="URL of the dashboard server this machine should register with:" />
+
+    <!-- DashboardConfigDlg -->
+    <String Id="DashboardConfigDlgTitle"
+        Value="{\WixUI_Font_Title}Dashboard Configuration" />
+    <String Id="DashboardConfigDlgDescription"
+        Value="Configure the dashboard server settings." />
+
+    <!-- RegistrationConfigDlg -->
+    <String Id="RegistrationConfigDlgTitle"
+        Value="{\WixUI_Font_Title}Dashboard Registration" />
+    <String Id="RegistrationConfigDlgDescription"
+        Value="Specify which dashboard server to register with." />
 </WixLocalization>
