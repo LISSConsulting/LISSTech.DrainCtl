@@ -5,6 +5,13 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="/favicon.ico" type="image/x-icon" />
         <title>DrainCtl Dashboard</title>
+        <script>
+            /* Restore manual theme before first paint to avoid flash */
+            (function () {
+                var t = localStorage.getItem("drainctl-theme");
+                if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+            })();
+        </script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -98,6 +105,29 @@
                     --surface: #1f1414;
                     --code-bg: #0d0808;
                 }
+            }
+            /* Manual theme overrides — take precedence over media query */
+            html[data-theme="dark"] {
+                --bg: #110a0a;
+                --fg: #f5e8e8;
+                --card: #1f1414;
+                --border: #4a3535;
+                --shadow: #000;
+                --muted: #c4a8a8;
+                --subtle: #6b5050;
+                --surface: #1f1414;
+                --code-bg: #0d0808;
+            }
+            html[data-theme="light"] {
+                --bg: #fdf8f6;
+                --fg: #2d1a1a;
+                --card: #fffaf8;
+                --border: #2d1a1a;
+                --shadow: #2d1a1a;
+                --muted: #7a5a5a;
+                --subtle: #a68e8e;
+                --surface: #f5ebe8;
+                --code-bg: #1a0e0e;
             }
             *,
             *::before,
@@ -727,6 +757,12 @@
                 box-shadow: calc(var(--so)+1px) calc(var(--so)+1px) 0 var(--shadow);
                 color: var(--accent);
             }
+            .btn-theme {
+                width: 40px;
+                padding: 6px;
+                font-size: 1.05rem;
+                line-height: 1;
+            }
 
             /* Settings modal */
             .settings-overlay {
@@ -1319,6 +1355,7 @@
             <div class="nav-in">
                 <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div>
                 <div class="nav-right" id="ns"></div>
+                <button class="btn-gear btn-theme" id="btn-theme" onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Switch to dark mode">☽</button>
                 <button class="btn-gear" id="btn-gear" onclick="toggleSettings()" title="Notification Settings" aria-label="Open configuration settings" aria-haspopup="dialog">
                     CONFIG
                 </button>
@@ -5241,6 +5278,28 @@
                     alert(e.message);
                 }
             }
+            function toggleTheme() {
+                const root = document.documentElement;
+                const explicit = root.dataset.theme;
+                const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+                const isDark = explicit === "dark" || (!explicit && prefersDark);
+                const next = isDark ? "light" : "dark";
+                root.dataset.theme = next;
+                localStorage.setItem("drainctl-theme", next);
+                updateThemeBtn();
+                if (chartInstance && stateHistory.length) renderChart();
+            }
+            function updateThemeBtn() {
+                const root = document.documentElement;
+                const explicit = root.dataset.theme;
+                const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+                const isDark = explicit === "dark" || (!explicit && prefersDark);
+                const btn = document.getElementById("btn-theme");
+                if (!btn) return;
+                btn.textContent = isDark ? "☀" : "☽";
+                btn.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+                btn.setAttribute("title", isDark ? "Switch to light mode" : "Switch to dark mode");
+            }
             function toggleSettings() {
                 const overlay = document.getElementById("settings-overlay");
                 const isOpen = overlay.classList.toggle("open");
@@ -5703,6 +5762,8 @@
                     filterGrid();
                 });
             });
+
+            updateThemeBtn();
 
             if (location.search === "?mock") {
                 var s = document.createElement("script");

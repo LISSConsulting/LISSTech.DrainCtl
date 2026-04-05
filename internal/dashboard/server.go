@@ -64,6 +64,11 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		log:   log,
 	}
 
+	// Per-IP rate limiter: 10 req/s sustained, burst 60.
+	// Generous enough for normal agent reporting and browser use;
+	// prevents runaway scripts from hammering the public health endpoint.
+	rl := newIPRateLimiter(10, 60)
+
 	mux := http.NewServeMux()
 
 	// wrapAuth/wrapGroup are determined at compile time via build tags.
@@ -72,26 +77,28 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	wa := func(h http.Handler) http.Handler { return wrapAuth(h, cfg.Group, log) }
 	wg := func(h http.Handler) http.Handler { return wrapGroup(h, cfg.Group, log) }
 
+	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
+
 	// Public routes — no authentication required.
-	mux.HandleFunc("GET /api/v1/health", ds.handleHealth)
+	mux.Handle("GET /api/v1/health", rlw(http.HandlerFunc(ds.handleHealth)))
 
 	// Agent routes — any authenticated domain identity.
-	mux.Handle("POST /api/v1/register", wa(http.HandlerFunc(ds.handleRegister)))
-	mux.Handle("POST /api/v1/report", wa(http.HandlerFunc(ds.handleReport)))
+	mux.Handle("POST /api/v1/register", rlw(wa(http.HandlerFunc(ds.handleRegister))))
+	mux.Handle("POST /api/v1/report", rlw(wa(http.HandlerFunc(ds.handleReport))))
 
 	// Management / UI routes — require group membership.
-	mux.Handle("GET /api/v1/history/{host}", wg(http.HandlerFunc(ds.handleHistory)))
-	mux.Handle("GET /api/v1/servers", wg(http.HandlerFunc(ds.handleServers)))
-	mux.Handle("DELETE /api/v1/servers/{host}", wg(http.HandlerFunc(ds.handleDeleteServer)))
-	mux.Handle("GET /api/v1/notify-config", wg(http.HandlerFunc(ds.handleGetNotifyConfig)))
-	mux.Handle("PUT /api/v1/notify-config", wg(http.HandlerFunc(ds.handlePutNotifyConfig)))
-	mux.Handle("POST /api/v1/notify-test", wg(http.HandlerFunc(ds.handleNotifyTest)))
-	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/v1/history/{host}", rlw(wg(http.HandlerFunc(ds.handleHistory))))
+	mux.Handle("GET /api/v1/servers", rlw(wg(http.HandlerFunc(ds.handleServers))))
+	mux.Handle("DELETE /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleDeleteServer))))
+	mux.Handle("GET /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handleGetNotifyConfig))))
+	mux.Handle("PUT /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handlePutNotifyConfig))))
+	mux.Handle("POST /api/v1/notify-test", rlw(wg(http.HandlerFunc(ds.handleNotifyTest))))
+	mux.Handle("GET /favicon.ico", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
-	})
-	mux.Handle("GET /", wg(http.HandlerFunc(ds.handleUI)))
+	})))
+	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 

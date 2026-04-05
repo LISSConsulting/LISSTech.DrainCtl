@@ -3,6 +3,7 @@
 package drainctl
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"os/exec"
@@ -58,7 +59,10 @@ func QueryRegistryChangeUser(since time.Time) string {
 		sinceUTC,
 	)
 
-	cmd := exec.Command("wevtutil", "qe", "Security",
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "wevtutil", "qe", "Security",
 		"/q:"+xpath,
 		"/c:20",
 		"/f:xml",
