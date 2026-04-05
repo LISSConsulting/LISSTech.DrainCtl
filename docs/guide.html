@@ -678,6 +678,16 @@ drainctl history --limit 10 --format json
 drainctl history --since 2025-01-01T00:00:00Z
 drainctl history --since 2025-06-01T00:00:00Z --until 2025-06-30T23:59:59Z</code></pre>
 
+            <h3>List current sessions</h3>
+            <pre><code># Table view (default) — session ID, user, station, state + summary line
+drainctl sessions
+
+# JSON — structured output with sessions array and summary object
+drainctl sessions --format json
+
+# CSV — for spreadsheet import or RMM custom fields
+drainctl sessions --format csv</code></pre>
+
             <h3>Exit codes</h3>
             <table>
                 <thead>
@@ -994,6 +1004,25 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
             <p>
                 DrainCtl monitors active RDS sessions via <code>WTSEnumerateSessionsW</code> and exposes utilization
                 data alongside drain mode state.
+            </p>
+
+            <h3>drainctl sessions</h3>
+            <p>
+                The <code>drainctl sessions</code> command lists every active RDS session on the local server in real
+                time, including session ID, username, station name, and connection state. A summary line shows totals
+                and utilization when a session cap is configured.
+            </p>
+            <pre><code>drainctl sessions</code></pre>
+            <p>Example output (table format):</p>
+            <pre><code>ID   USER            STATION    STATE
+---  ----            -------    -----
+1    alice           RDP-Tcp#0  Active
+2    bob             RDP-Tcp#1  Active
+3    carol           RDP-Tcp#2  Disconnected
+Summary: 3/50 sessions (6% utilization)</code></pre>
+            <p>
+                Use <code>--format json</code> for structured output (a <code>sessions</code> array plus a
+                <code>summary</code> object), or <code>--format csv</code> for spreadsheet import.
             </p>
 
             <h3>Session data in CLI output</h3>
