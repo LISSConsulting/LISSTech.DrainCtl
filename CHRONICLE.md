@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-third roam-mode pass complete.** Three dashboard UX improvements: (1) dynamic page title — `document.title` is updated in `render()` to show "N alert · DrainCtl" or "N grace · DrainCtl" when servers are in Alert or Grace, and "DrainCtl Dashboard" when all are healthy, so the browser tab conveys status at a glance without focus; (2) per-server grace period for Grace Left — the Grace Left row now reads `r.grace_period_seconds` from each server's last CheckResult (already sent in every report) instead of the globally-fetched `graceMinutes`, with a fallback to `graceMinutes * 60` for older agent versions that do not send the field; (3) status pill on auth failure — a 401/403 response from `/api/v1/servers` now sets the status pill to "Auth Error" in amber instead of leaving it at the previous stale value.
+> Current state: **Forty-fourth roam-mode pass complete.** Two code-quality items from the deferred backlog: (B5) landing page `docs/index.html` — all targeted inline styles replaced with named CSS classes (`.section--shaded`, `.section--bordered`, `.install-cards`, `.wrap--wide`, `.install-cta`, `.btn--block`, `.btn-psgallery`, `.features-grid--2col`); fragile `[style*="grid"] !important` media query replaced with the new `.install-cards` class selector; (B9) `internal/dashboard/mock.js` relocated to `testdata/mock.js`; `mock_dev.go` / `mock_prod.go` compile-time pair added — devmode builds embed the fixture and serve it at `GET /mock.js` so `?mock` mode works via the dev server.
 
 ## Completed Work
 
@@ -134,10 +134,12 @@
 | Roam #43 | Dashboard dynamic page title: `render()` updates `document.title` to "N alert · DrainCtl" when any servers are in Alert, "N grace · DrainCtl" when any are in Grace (but none Alert), or "DrainCtl Dashboard" when all healthy — the browser tab now conveys status at a glance without the window needing focus | UX, dashboard |
 | Roam #43 | Dashboard Grace Left per-server grace period: server cards in Grace state now read `r.grace_period_seconds` from each server's last CheckResult (present in every report since the initial implementation) rather than the globally-fetched `graceMinutes`; falls back to `graceMinutes * 60` for older agent versions; Grace Left now displays immediately on first data load rather than waiting for the notify-config fetch | correctness, UX, dashboard |
 | Roam #43 | Dashboard status pill on auth failure: a 401 or 403 response from `/api/v1/servers` now sets the status pill to "Auth Error" (amber) instead of leaving it at its previous stale "Live" value — operators can distinguish an authentication failure from a connectivity loss | correctness, UX, dashboard |
+| Roam #44 | B5: landing page inline styles eliminated — `.section--shaded` (background + top/bottom border on `#how`, `#install`), `.section--bordered` (border-only on `#new`), `.install-cards` (3-col install grid), `.wrap--wide` (1200px), `.install-cta` (push-to-bottom CTA in install cards), `.btn--block` (full-width flex install buttons), `.btn-psgallery` (PSGallery blue), `.features-grid--2col` (dashboard 2-col features grid); `@media (max-width:640px)` fragile `[style*="grid"] !important` attribute selector replaced with `.install-cards` class rule | code quality, docs |
+| Roam #44 | B9: `internal/dashboard/mock.js` → `testdata/mock.js`; `mock_dev.go` + `mock_prod.go` compile-time pair added — devmode builds (−tags devmode) embed `testdata/mock.js` and register `GET /mock.js` on the server mux so the `?mock` developer mode works end-to-end via the dev server; production builds compile a no-op stub | code quality, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #43.)*
+*(All tracked items complete — nothing pending after Roam #44.)*
 
 ## Key Learnings
 
