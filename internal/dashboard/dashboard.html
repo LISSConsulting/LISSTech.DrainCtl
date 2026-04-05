@@ -4963,20 +4963,22 @@
                         const m = r ? mode(r.drain_mode) : "";
                         const sess = r && r.sessions;
                         const sessInfo = sess
-                            ? sess.active_sessions +
-                              " active, " +
-                              sess.total_sessions +
-                              "/" +
-                              sess.max_sessions +
-                              " total (" +
-                              sess.utilization_pct +
-                              "%)"
+                            ? sess.max_sessions > 0
+                                ? sess.active_sessions +
+                                  " active, " +
+                                  sess.total_sessions +
+                                  "/" +
+                                  sess.max_sessions +
+                                  " total (" +
+                                  sess.utilization_pct +
+                                  "%)"
+                                : sess.active_sessions + " active, " + sess.total_sessions + " total"
                             : "";
                         const durInfo =
                             r && r.state_duration_seconds ? "duration=" + dur(r.state_duration_seconds) : "";
                         if (p2 && p2 !== s) {
                             // Transition event — prominent, like format plain
-                            let msg = "status=" + stLabel(s) + " \u2192 from " + stLabel(p2);
+                            let msg = stLabel(p2) + " \u2192 " + stLabel(s);
                             if (m) msg += " mode=" + m;
                             if (by) msg += " changed_by=" + by;
                             if (sessInfo) msg += " sessions=" + sessInfo;
