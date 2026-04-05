@@ -4,6 +4,8 @@ package drainctl
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -566,5 +568,170 @@ func TestScanRecords_SkipsMalformedLines(t *testing.T) {
 	// Only the 2 valid records should be returned.
 	if len(recs) != 2 {
 		t.Errorf("got %d records, want 2 (malformed line should be skipped)", len(recs))
+	}
+}
+
+// ── OpenAuditStore error path ─────────────────────────────────────────────────
+
+// TestOpenAuditStore_MkdirAllError verifies that OpenAuditStore returns an error
+// when the parent directory cannot be created (here: a regular file exists at the
+// directory path, blocking os.MkdirAll).
+func TestOpenAuditStore_MkdirAllError(t *testing.T) {
+	parent := t.TempDir()
+	// Create a regular file where the audit directory should be.
+	blocker := filepath.Join(parent, "datadir")
+	if err := os.WriteFile(blocker, []byte{}, 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// The audit path is inside "blocker" (a file, not a dir) — MkdirAll should fail.
+	_, err := OpenAuditStore(filepath.Join(blocker, "audit.jsonl"))
+	if err == nil {
+		t.Fatal("expected error from OpenAuditStore when parent cannot be created, got nil")
+	}
+	if !strings.Contains(err.Error(), "create audit directory") {
+		t.Errorf("error = %q, want 'create audit directory' in message", err)
+	}
+}
+
+// ── Record error path ─────────────────────────────────────────────────────────
+
+// TestRecord_OpenFileError verifies that Record returns an error when the audit
+// file path points to a directory (os.OpenFile for writing fails on a directory).
+func TestRecord_OpenFileError(t *testing.T) {
+	dir := t.TempDir()
+	// Create a directory at the audit file path so os.OpenFile fails.
+	auditPath := filepath.Join(dir, "audit.jsonl")
+	if err := os.Mkdir(auditPath, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store := &AuditStore{path: auditPath}
+	rec := &AuditRecord{Timestamp: time.Now(), Host: "srv1"}
+	err := store.Record(rec)
+	if err == nil {
+		t.Fatal("expected error from Record when path is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "open audit file") {
+		t.Errorf("error = %q, want 'open audit file' in message", err)
+	}
+}
+
+// ── scanRecords empty-line handling ──────────────────────────────────────────
+
+// TestScanRecords_EmptyLineSkipped verifies that scanRecords skips blank lines
+// (len(line)==0) without treating them as malformed records.
+func TestScanRecords_EmptyLineSkipped(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_emptyline_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	_ = f.Close()
+
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	good := AuditRecord{Timestamp: base, Host: "srv1", DrainMode: AllowAll}
+	good2 := AuditRecord{Timestamp: base.Add(time.Hour), Host: "srv1", DrainMode: 1}
+
+	store := &AuditStore{path: path}
+	_ = store.Record(&good)
+	// Inject a blank line between the two valid records.
+	fh, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = fh.WriteString("\n")
+	_ = fh.Close()
+	_ = store.Record(&good2)
+
+	recs, err := store.History(0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("got %d records, want 2 (blank line should be skipped)", len(recs))
+	}
+}
+
+// ── scanRecords / History error propagation ───────────────────────────────────
+
+// TestHistory_ScanError verifies that History propagates a scanner error when a
+// line in the JSONL file exceeds the 64 KiB scanner buffer limit.
+func TestHistory_ScanError(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_longerr_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	store := &AuditStore{path: path}
+	_ = store.Record(&AuditRecord{Timestamp: base, Host: "srv1"})
+	// Append a line longer than the 64 KiB scanner buffer — bufio.ErrTooLong.
+	fh, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = fh.WriteString(strings.Repeat("x", 64*1024+1) + "\n")
+	_ = fh.Close()
+
+	_, err = store.History(10)
+	if err == nil {
+		t.Fatal("expected scanner error from History on oversized line, got nil")
+	}
+}
+
+// ── Prune error paths ─────────────────────────────────────────────────────────
+
+// TestPrune_ScanError verifies that Prune propagates a scanner error (here:
+// an oversized line in the JSONL file) and returns (0, err).
+func TestPrune_ScanError(t *testing.T) {
+	f, err := os.CreateTemp("", "audit_test_prunescane_*.jsonl")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+
+	// Write one old record, then a line that overflows the scanner buffer.
+	store := &AuditStore{path: path}
+	old := AuditRecord{Timestamp: time.Now().Add(-48 * time.Hour), Host: "srv1"}
+	_ = store.Record(&old)
+	fh, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = fh.WriteString(strings.Repeat("y", 64*1024+1) + "\n")
+	_ = fh.Close()
+
+	pruned, err := store.Prune(24 * time.Hour)
+	if err == nil {
+		t.Fatal("expected scanner error from Prune on oversized line, got nil")
+	}
+	if pruned != 0 {
+		t.Errorf("pruned = %d, want 0 on scan error", pruned)
+	}
+}
+
+// TestPrune_CreateTempError verifies that Prune returns an error when the
+// temporary file cannot be created (here: a directory already exists at the
+// tmp path blocking os.Create).
+func TestPrune_CreateTempError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	store := &AuditStore{path: path}
+	// Write two records with timestamps more than 24 h apart.
+	old := AuditRecord{Timestamp: time.Now().Add(-48 * time.Hour), Host: "srv1"}
+	recent := AuditRecord{Timestamp: time.Now(), Host: "srv1"}
+	_ = store.Record(&old)
+	_ = store.Record(&recent)
+
+	// Create a directory at the tmp path so os.Create fails.
+	tmpPath := path + ".tmp"
+	if err := os.Mkdir(tmpPath, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	pruned, err := store.Prune(24 * time.Hour)
+	if err == nil {
+		t.Fatal("expected error from Prune when tmp file cannot be created, got nil")
+	}
+	if !strings.Contains(err.Error(), "create temp file") {
+		t.Errorf("error = %q, want 'create temp file' in message", err)
+	}
+	if pruned != 0 {
+		t.Errorf("pruned = %d, want 0 on error", pruned)
 	}
 }

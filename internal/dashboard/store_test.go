@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -563,5 +564,67 @@ func TestSave_RenameError(t *testing.T) {
 
 	if !errLogged {
 		t.Error("expected ERR log from save() Rename failure, got none")
+	}
+}
+
+// TestSave_MkdirAllError verifies that save() handles the case where the data
+// directory cannot be created (here: a regular file blocks the directory path).
+func TestSave_MkdirAllError(t *testing.T) {
+	parent := t.TempDir()
+	// Create a regular file where the data directory should be.
+	blocker := filepath.Join(parent, "subdir")
+	if err := os.WriteFile(blocker, []byte{}, 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	var errLogged bool
+	log := dc.LogFunc(func(l dc.Level, _ ...string) {
+		if l == dc.LvlERR {
+			errLogged = true
+		}
+	})
+
+	// Bypass NewServerState to avoid triggering load(); set path directly so
+	// filepath.Dir(s.path) == blocker (a file, not a directory).
+	s := &ServerState{
+		servers: make(map[string]*ServerInfo),
+		history: make(map[string][]dc.CheckResult),
+		path:    filepath.Join(blocker, "servers.json"),
+		log:     log,
+	}
+	s.servers["SRV01"] = &ServerInfo{Hostname: "SRV01", RegisteredAt: time.Now()}
+	s.save()
+
+	if !errLogged {
+		t.Error("expected ERR log from save() MkdirAll failure, got none")
+	}
+}
+
+// TestSave_MarshalError verifies that save() handles the case where
+// json.MarshalIndent fails (here: a NaN float64 in a server's last result).
+func TestSave_MarshalError(t *testing.T) {
+	dir := t.TempDir()
+
+	var errLogged bool
+	log := dc.LogFunc(func(l dc.Level, _ ...string) {
+		if l == dc.LvlERR {
+			errLogged = true
+		}
+	})
+
+	s := NewServerState(dir, log)
+	s.Register("SRV01")
+
+	// Inject a NaN float64 into the server's last result — json.MarshalIndent
+	// returns an error for NaN/Inf values, exercising the marshal-error path.
+	nan := math.NaN()
+	s.mu.Lock()
+	s.servers["SRV01"].LastResult = &dc.CheckResult{StateDurationSeconds: &nan}
+	s.mu.Unlock()
+
+	s.save()
+
+	if !errLogged {
+		t.Error("expected ERR log from save() marshal failure, got none")
 	}
 }
