@@ -3,6 +3,9 @@
 package drainctl
 
 import (
+	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -236,5 +239,354 @@ func TestJoinFields_Single(t *testing.T) {
 func TestJoinFields_Multiple(t *testing.T) {
 	if got := joinFields([]string{"a", "b", "c"}); got != "a b c" {
 		t.Errorf("joinFields([\"a\",\"b\",\"c\"]) = %q, want %q", got, "a b c")
+	}
+}
+
+// ── WriteHistory ──────────────────────────────────────────────────────────────
+
+func makeAuditRecords() []AuditRecord {
+	ts := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	return []AuditRecord{
+		{
+			Timestamp:  ts.Add(time.Minute),
+			Host:       "SRV01",
+			DrainMode:  PreventNewLogon,
+			DrainLabel: "PreventNewLogon",
+			Changed:    true,
+			ChangedBy:  "admin",
+			ExitCode:   1,
+		},
+		{
+			Timestamp:  ts,
+			Host:       "SRV01",
+			DrainMode:  AllowAll,
+			DrainLabel: "AllowAll",
+			Changed:    false,
+			ExitCode:   0,
+		},
+	}
+}
+
+func TestWriteHistory_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeAuditRecords(), FormatJSON)
+	out := buf.String()
+	if !strings.Contains(out, `"PreventNewLogon"`) {
+		t.Errorf("JSON output missing drain_mode: %s", out)
+	}
+	if !strings.Contains(out, `"changed": true`) {
+		t.Errorf("JSON output missing changed field: %s", out)
+	}
+	if !strings.Contains(out, `"admin"`) {
+		t.Errorf("JSON output missing changed_by: %s", out)
+	}
+	// Verify it's valid JSON.
+	var records []HistoryRecord
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &records); err != nil {
+		t.Fatalf("WriteHistory JSON is not valid JSON: %v\n%s", err, out)
+	}
+	if len(records) != 2 {
+		t.Errorf("JSON record count = %d, want 2", len(records))
+	}
+}
+
+func TestWriteHistory_CSV(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeAuditRecords(), FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 3 { // header + 2 records
+		t.Fatalf("CSV line count = %d, want ≥ 3; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "timestamp") {
+		t.Errorf("CSV missing header; first line: %q", lines[0])
+	}
+	if !strings.Contains(out, "PreventNewLogon") {
+		t.Errorf("CSV missing drain mode: %s", out)
+	}
+	if !strings.Contains(out, "admin") {
+		t.Errorf("CSV missing changed_by: %s", out)
+	}
+}
+
+func TestWriteHistory_Table(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeAuditRecords(), FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "DRAIN MODE") {
+		t.Errorf("table missing DRAIN MODE column header: %s", out)
+	}
+	if !strings.Contains(out, "STATE DURATION") {
+		t.Errorf("table missing STATE DURATION column header: %s", out)
+	}
+	if !strings.Contains(out, "PreventNewLogon") {
+		t.Errorf("table missing drain mode value: %s", out)
+	}
+	if !strings.Contains(out, "YES") {
+		t.Errorf("table missing YES for changed record: %s", out)
+	}
+	if !strings.Contains(out, "admin") {
+		t.Errorf("table missing changed_by: %s", out)
+	}
+}
+
+func TestWriteHistory_Plain(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeAuditRecords(), FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("plain line count = %d, want 2; output:\n%s", len(lines), out)
+	}
+	// First record is drain-active → exit=1 → ERR level.
+	if !strings.Contains(lines[0], "[ERR]") {
+		t.Errorf("alert record should have ERR level: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "drain_mode=PreventNewLogon") {
+		t.Errorf("plain missing drain_mode: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "changed=true") {
+		t.Errorf("plain missing changed=true: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "changed_by=admin") {
+		t.Errorf("plain missing changed_by: %s", lines[0])
+	}
+	// Second record is healthy → exit=0 → INF level.
+	if !strings.Contains(lines[1], "[INF]") {
+		t.Errorf("healthy record should have INF level: %s", lines[1])
+	}
+}
+
+func TestWriteHistory_Empty(t *testing.T) {
+	for _, fmt := range []OutputFormat{FormatJSON, FormatCSV, FormatTable, FormatPlain} {
+		var buf bytes.Buffer
+		WriteHistory(&buf, nil, fmt)
+		// No panic — that's all we require.
+		_ = buf.String()
+	}
+}
+
+// ── WriteHistoryRecords ───────────────────────────────────────────────────────
+
+func makeHistoryRecords() []HistoryRecord {
+	dur0, dur60 := 0, 60
+	return []HistoryRecord{
+		{
+			Timestamp:            "2026-04-01T10:01:00+00:00",
+			Host:                 "SRV01",
+			DrainMode:            "PreventNewLogon",
+			DrainValue:           1,
+			StateDurationSeconds: &dur0,
+			Changed:              true,
+			ChangedBy:            "operator",
+			ExitCode:             1,
+		},
+		{
+			Timestamp:            "2026-04-01T10:00:00+00:00",
+			Host:                 "SRV01",
+			DrainMode:            "AllowAll",
+			DrainValue:           0,
+			StateDurationSeconds: &dur60,
+			Changed:              false,
+			ExitCode:             0,
+		},
+	}
+}
+
+func TestWriteHistoryRecords_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeHistoryRecords(), FormatJSON)
+	out := buf.String()
+	if !strings.Contains(out, `"PreventNewLogon"`) {
+		t.Errorf("JSON missing drain_mode: %s", out)
+	}
+	if !strings.Contains(out, `"operator"`) {
+		t.Errorf("JSON missing changed_by: %s", out)
+	}
+	var records []HistoryRecord
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &records); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	if len(records) != 2 {
+		t.Errorf("record count = %d, want 2", len(records))
+	}
+}
+
+func TestWriteHistoryRecords_CSV(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeHistoryRecords(), FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("CSV line count = %d, want ≥ 3; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "timestamp") {
+		t.Errorf("CSV missing header; first line: %q", lines[0])
+	}
+	if !strings.Contains(out, "PreventNewLogon") {
+		t.Errorf("CSV missing drain mode: %s", out)
+	}
+	if !strings.Contains(out, "operator") {
+		t.Errorf("CSV missing changed_by: %s", out)
+	}
+}
+
+func TestWriteHistoryRecords_Table(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeHistoryRecords(), FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "DRAIN MODE") {
+		t.Errorf("table missing DRAIN MODE column: %s", out)
+	}
+	if !strings.Contains(out, "STATE DURATION") {
+		t.Errorf("table missing STATE DURATION column: %s", out)
+	}
+	if !strings.Contains(out, "PreventNewLogon") {
+		t.Errorf("table missing drain mode value: %s", out)
+	}
+	if !strings.Contains(out, "YES") {
+		t.Errorf("table missing YES for changed record: %s", out)
+	}
+	if !strings.Contains(out, "operator") {
+		t.Errorf("table missing changed_by: %s", out)
+	}
+}
+
+func TestWriteHistoryRecords_Plain(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeHistoryRecords(), FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("plain line count = %d, want 2; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "drain_mode=PreventNewLogon") {
+		t.Errorf("plain missing drain_mode: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "changed=true") {
+		t.Errorf("plain missing changed=true: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "changed_by=operator") {
+		t.Errorf("plain missing changed_by: %s", lines[0])
+	}
+}
+
+func TestWriteHistoryRecords_Plain_ErrorLevel(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeHistoryRecords(), FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	// First record: exit_code=1 → ERR level.
+	if !strings.Contains(lines[0], "[ERR]") {
+		t.Errorf("non-zero exit record should have ERR level: %s", lines[0])
+	}
+	// Second record: exit_code=0 → INF level.
+	if !strings.Contains(lines[1], "[INF]") {
+		t.Errorf("zero-exit record should have INF level: %s", lines[1])
+	}
+}
+
+// ── CheckResult.Write ─────────────────────────────────────────────────────────
+
+func makeCheckResult() *CheckResult {
+	ts := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	stateSince := ts.Add(-5 * time.Minute)
+	dur := 300.0
+	connAllowed := false
+	return &CheckResult{
+		Version:              "26.91.0",
+		Timestamp:            ts,
+		Host:                 "SRV01",
+		DrainModeLabel:       "PreventNewLogon",
+		DrainModeValue:       1,
+		GracePeriodSeconds:   120,
+		StateSince:           &stateSince,
+		StateDurationSeconds: &dur,
+		Status:               "Alert",
+		ConnectionsAllowed:   &connAllowed,
+		Transition:           true,
+		TransitionFrom:       "AllowAll",
+		ChangedBy:            "admin",
+		Message:              "Drain mode active for 5m0s, exceeding grace period.",
+		ExitCode:             1,
+	}
+}
+
+func TestCheckResultWrite_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	makeCheckResult().Write(&buf, FormatJSON)
+	out := buf.String()
+	if !strings.Contains(out, `"Alert"`) {
+		t.Errorf("JSON missing status: %s", out)
+	}
+	if !strings.Contains(out, `"SRV01"`) {
+		t.Errorf("JSON missing host: %s", out)
+	}
+	if !strings.Contains(out, `"PreventNewLogon"`) {
+		t.Errorf("JSON missing drain_mode: %s", out)
+	}
+	if !strings.Contains(out, `"admin"`) {
+		t.Errorf("JSON missing changed_by: %s", out)
+	}
+	var result CheckResult
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &result); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	if result.Status != "Alert" {
+		t.Errorf("status = %q, want Alert", result.Status)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit_code = %d, want 1", result.ExitCode)
+	}
+}
+
+func TestCheckResultWrite_CSV(t *testing.T) {
+	var buf bytes.Buffer
+	makeCheckResult().Write(&buf, FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CSV line count = %d, want ≥ 2; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "timestamp") {
+		t.Errorf("CSV missing header; first line: %q", lines[0])
+	}
+	if !strings.Contains(out, "Alert") {
+		t.Errorf("CSV missing status value: %s", out)
+	}
+	if !strings.Contains(out, "SRV01") {
+		t.Errorf("CSV missing host: %s", out)
+	}
+	if !strings.Contains(out, "admin") {
+		t.Errorf("CSV missing changed_by: %s", out)
+	}
+}
+
+func TestCheckResultWrite_Table(t *testing.T) {
+	var buf bytes.Buffer
+	makeCheckResult().Write(&buf, FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "HOST") {
+		t.Errorf("table missing HOST column: %s", out)
+	}
+	if !strings.Contains(out, "STATUS") {
+		t.Errorf("table missing STATUS column: %s", out)
+	}
+	if !strings.Contains(out, "SRV01") {
+		t.Errorf("table missing host value: %s", out)
+	}
+	if !strings.Contains(out, "Alert") {
+		t.Errorf("table missing status value: %s", out)
+	}
+	if !strings.Contains(out, "admin") {
+		t.Errorf("table missing changed_by: %s", out)
+	}
+}
+
+func TestCheckResultWrite_Plain_NoOp(t *testing.T) {
+	var buf bytes.Buffer
+	makeCheckResult().Write(&buf, FormatPlain)
+	if buf.Len() != 0 {
+		t.Errorf("FormatPlain Write should produce no output, got: %q", buf.String())
 	}
 }
