@@ -89,7 +89,7 @@ type serviceHandler struct {
 	cfg   atomic.Pointer[dc.ServiceConfig]
 }
 
-func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult {
+func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 	state, err := dc.ReadDrainMode()
 	if err != nil {
 		return &dc.CheckResult{
@@ -102,9 +102,6 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult
 	}
 
 	gp := h.cfg.Load().GracePeriod
-	if gracePeriod > 0 {
-		gp = gracePeriod
-	}
 
 	res := &dc.CheckResult{
 		Version:            dc.Version,

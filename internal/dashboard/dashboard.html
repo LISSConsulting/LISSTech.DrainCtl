@@ -1542,7 +1542,10 @@
                         <div class="hist-title" id="hist-title-label">Server History</div>
                         <div class="hist-hostname" id="hist-hostname"></div>
                     </div>
-                    <button class="settings-close" onclick="closeHistory()" aria-label="Close history">&times;</button>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <button class="filter-pill" id="hist-transitions-btn" role="button" tabindex="0" aria-pressed="false" style="font-size:0.68rem;padding:4px 10px" onclick="toggleHistTransitions()">Transitions only</button>
+                        <button class="settings-close" onclick="closeHistory()" aria-label="Close history">&times;</button>
+                    </div>
                 </div>
                 <div class="hist-body" id="hist-body"></div>
             </div>
@@ -4803,6 +4806,8 @@
                 stateHistory = [],
                 graceMinutes = null,
                 histOpen = false,
+                histTransitions = false,
+                _histHostname = null,
                 activeFilter = "all",
                 _histTrigger = null;
             const ML = {
@@ -5380,19 +5385,16 @@
             }
             function closeHistory() {
                 histOpen = false;
+                _histHostname = null;
                 document.getElementById("hist-overlay").classList.remove("open");
                 if (_histTrigger) { _histTrigger.focus(); _histTrigger = null; }
             }
-            async function showHistory(hostname, trigger) {
-                _histTrigger = trigger || null;
-                histOpen = true;
-                const histHostEl = document.getElementById("hist-hostname");
-                histHostEl.textContent = hostname.split(".")[0];
-                histHostEl.title = hostname;
+            async function loadHistory(hostname) {
                 document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
-                document.getElementById("hist-overlay").classList.add("open");
+                var url = "/api/v1/history/" + encodeURIComponent(hostname) + "?limit=20";
+                if (histTransitions) url += "&changes_only=1";
                 try {
-                    const r = await fetch("/api/v1/history/" + encodeURIComponent(hostname) + "?limit=20");
+                    const r = await fetch(url);
                     if (!r.ok) throw new Error("HTTP " + r.status);
                     const entries = await r.json();
                     renderHistoryModal(entries || []);
@@ -5400,6 +5402,27 @@
                     document.getElementById("hist-body").innerHTML =
                         '<div class="hist-empty">Error: ' + esc(e.message) + "</div>";
                 }
+            }
+            function toggleHistTransitions() {
+                histTransitions = !histTransitions;
+                const btn = document.getElementById("hist-transitions-btn");
+                btn.classList.toggle("active", histTransitions);
+                btn.setAttribute("aria-pressed", histTransitions ? "true" : "false");
+                if (_histHostname) loadHistory(_histHostname);
+            }
+            async function showHistory(hostname, trigger) {
+                _histTrigger = trigger || null;
+                _histHostname = hostname;
+                histOpen = true;
+                histTransitions = false;
+                const btn = document.getElementById("hist-transitions-btn");
+                btn.classList.remove("active");
+                btn.setAttribute("aria-pressed", "false");
+                const histHostEl = document.getElementById("hist-hostname");
+                histHostEl.textContent = hostname.split(".")[0];
+                histHostEl.title = hostname;
+                document.getElementById("hist-overlay").classList.add("open");
+                loadHistory(hostname);
             }
             function renderHistoryModal(entries) {
                 const body = document.getElementById("hist-body");

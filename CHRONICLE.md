@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Thirty-second roam-mode pass complete.** Two correctness fixes: (1) `Config.Validate` now strips `NotificationTarget` entries with unknown `Type` (anything other than `"webhook"` or `"ntfy"`) — such targets silently never fired; (2) `internal/dashboard/client.go` now drains response bodies in `negotiateRequest` (401 path), `ReportState` (success path), and `RemoveServer` (success path) before `Close()`, enabling HTTP keep-alive connection reuse. 3 new tests.
+> Current state: **Thirty-third roam-mode pass complete.** Three improvements: (1) `PipeHandler.HandleStatus` interface parameter `gracePeriod time.Duration` removed — was always called with `0` and the implementation already read from the stored service config, making the parameter dead code; (2) `GET /api/v1/history/{host}` gains `?changes_only=1` query parameter — filters the history ring buffer to transition records only (Transition=true), with `limit` applied after filtering; default limit lowered from 50 to 20 to match the UI default; (3) Dashboard history modal gains a "Transitions only" toggle button — calls `loadHistory()` with `changes_only=1` when active, resets to all-entries when the modal is reopened. 4 new tests.
 
 ## Completed Work
 
@@ -93,10 +93,13 @@
 | Roam #31 | Dashboard `stateHistory` bug fix: `push` is now conditional on `t > 0` — polls while no servers are registered produced `{ t: 0 }` entries; `renderChart` exits early when `stateHistory[0].t === 0`, so the chart would not appear for up to 30 minutes (MAX_HIST × 30 s) after the first servers registered on a fresh install | correctness, dashboard |
 | Roam #32 | `Config.Validate`: unknown `NotificationTarget.Type` values now stripped with a warning log — a target whose `Type` was neither `"webhook"` nor `"ntfy"` was previously saved to config and silently never fired notifications; 3 new tests (`TestValidate_StripsUnknownType`, `_UnknownTypeLogsWarning`, `_PreservesValidTypes`) | correctness, config, testing |
 | Roam #32 | `internal/dashboard/client.go` body drain: `negotiateRequest` 401 branch, `ReportState` success path, and `RemoveServer` success path now drain response bodies via `io.Copy(io.Discard, ...)` before `Close()` — Go's `http.Transport` requires the body to be fully read before connection reuse; `notify.go` already did this but the dashboard client did not | correctness, performance |
+| Roam #33 | `PipeHandler.HandleStatus` interface simplified: removed dead `gracePeriod time.Duration` parameter — always passed as `0` via the pipe, implementation always reads from `serviceHandler.cfg` store; `serviceHandler.HandleStatus`, `pipe_test.go` mock and capture handlers updated accordingly | code quality, svc |
+| Roam #33 | `GET /api/v1/history/{host}` gains `?changes_only=1` (or `true`) query parameter — fetches the full ring buffer, filters to `Transition=true` records, then applies `limit`; default limit lowered from 50 → 20 to match the UI's fetch; 4 new tests (`TestHandleHistory_ChangesOnly_ReturnsOnlyTransitions`, `_EmptyWhenNoTransitions`, `_RespectsLimit`, `TestHandleHistory_DefaultLimitIs20`) | feature, dashboard, testing |
+| Roam #33 | Dashboard history modal: "Transitions only" toggle button added next to the close button — when active, re-fetches with `?changes_only=1&limit=20`; resets to inactive (all entries) each time the modal is opened for a new host | feature, UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #32.)*
+*(All tracked items complete — nothing pending after Roam #33.)*
 
 ## Key Learnings
 
