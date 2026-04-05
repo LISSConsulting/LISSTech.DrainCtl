@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Thirty-fourth roam-mode pass complete.** Three improvements: (1) `PipeHandler.HandleStatus` interface parameter `gracePeriod time.Duration` removed — was always called with `0` and the implementation already read from the stored service config, making the parameter dead code; (2) `GET /api/v1/history/{host}` gains `?changes_only=1` query parameter — filters the history ring buffer to transition records only (Transition=true), with `limit` applied after filtering; default limit lowered from 50 to 20 to match the UI default; (3) Dashboard history modal gains a "Transitions only" toggle button — calls `loadHistory()` with `changes_only=1` when active, resets to all-entries when the modal is reopened. 4 new tests.
+> Current state: **Thirty-seventh roam-mode pass complete.** Two dashboard bug fixes: (1) `loadNotifyConfig()` now shows an inline error message in the target-list area on HTTP error or JS exception — previously left "Loading…" visible indefinitely on any failure path; (2) `addTargetRow()` type-switch now clears the URL field when switching from ntfy → webhook if the value is not already an http(s) URL — a bare ntfy topic name is invalid as a webhook URL and would cause a confusing red-border failure at save time.
 
 ## Completed Work
 
@@ -107,9 +107,12 @@
 | Roam #36 | `handleGetNotifyConfig`: nil `cfg.Notifications` (old config file missing the "notifications" JSON field) normalised to `[]dc.NotificationTarget{}` before serialisation — prevented `"notifications": null` in the API response; 1 new test `TestHandleGetNotifyConfig_NilNotificationsReturnsEmptyArray` | correctness, dashboard, testing |
 | Roam #36 | Dashboard history modal: `sess=N/0` display suppressed when `max_sessions==0` (unlimited, i.e. `MaxInstanceCount` not configured in Terminal Server registry) — now shows `sess=N` only when max is not configured, `sess=N/M` when a cap is set | correctness, UX, dashboard |
 
+| Roam #37 | `loadNotifyConfig()` error handling: `if (!r.ok) return` path and the catch block both now write an inline error message to the target-list div instead of leaving "Loading…" visible indefinitely — users can see the failure and close/reopen settings to retry | correctness, UX, dashboard |
+| Roam #37 | `addTargetRow()` type-switch: when switching from ntfy → webhook, the URL field is cleared if the value is not already an `http(s)://` URL — a bare ntfy topic name is invalid as a webhook URL and would produce a confusing red-border validation error at save time with no clear explanation | correctness, UX, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #36.)*
+*(All tracked items complete — nothing pending after Roam #37.)*
 
 ## Key Learnings
 
@@ -190,3 +193,5 @@
 - **`atomic.Pointer[T]` does not protect the pointed-to value**: `handler.cfg.Store(&cfg)` establishes a happens-before relationship so that all writes preceding the `Store` in goroutine A are visible to goroutine B after a matching `Load`. But it only does this if `Store` is actually called. Calling `applyRemoteConfig(remote, &cfg, ...)` mutates `cfg` in place — without a subsequent `handler.cfg.Store(&cfg)`, the mutation is not released to the pipe handler goroutine. Every write-then-publish pattern requires the atomic store even when storing the same pointer address.
 - **nil slice vs empty slice in JSON API**: `json.Marshal([]T(nil))` produces `null`; `json.Marshal([]T{})` produces `[]`. API consumers defensively guard with `|| []` in JS, but the server should return a correct JSON array regardless. Normalise nil to empty slice before encoding when the field semantically represents a list.
 - **`max_sessions=0` means unlimited, not zero**: `ReadMaxSessions` returns 0 when `MaxInstanceCount` is absent from the registry (unlimited sessions). UI code that shows `N/max` must guard `max > 0` before including the denominator — showing `sess=3/0` implies an error rather than unlimited capacity.
+- **Async loading state must be cleared on all failure paths**: When a JS function shows a "Loading…" placeholder and then performs an `await`, every early-return path (including `if (!r.ok) return`) must either populate the UI or replace the placeholder with an error message — a bare `return` leaves the spinner/message visible forever since there is no timeout. Apply the same discipline to `catch` blocks: `console.error(...)` alone is invisible to the user.
+- **Type-switch URL field clearing**: A settings UI with multiple mutually-exclusive types (ntfy topic vs webhook URL) must consider what happens to the URL field when the user switches types mid-entry. An ntfy topic name (`my-alerts`) is not a valid webhook URL — preserving it on type switch causes a confusing red-border validation error at save time. The right heuristic: if the current value doesn't look like the new type's expected format, clear it. The reverse direction (ntfy stripping `https://ntfy.sh/`) was already handled.
