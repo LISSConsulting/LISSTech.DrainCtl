@@ -18,7 +18,7 @@ import (
 func marshalJSON(v any) *C.char {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return C.CString(`{"error":"` + err.Error() + `"}`)
+		return marshalError(err)
 	}
 	return C.CString(string(data))
 }
