@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixty-second roam-mode pass complete.** `ComputeSessionSummary` extracted from `GetSessionSummary` — eliminates double WTS enumeration in `sessions_cmd.go` and enables unit testing; 7 new tests in `sessions_test.go` covering `wtsStateName` and `ComputeSessionSummary`; dashboard favicon MIME type corrected from `image/png` to `image/x-icon`.
+> Current state: **Sixty-third roam-mode pass complete.** `docs/guide.html` documentation gap closed: `drainctl sessions` (added in Roam #61) was entirely absent from the guide; added "List current sessions" subsection to CLI Usage (Section 5) with table/json/csv examples, and a "drainctl sessions" subsection to Session Tracking (Section 8) with example output and format notes.
 
 Previous state: Sixty-first pass — `drainctl sessions` command added — lists current RDS sessions via `WTSEnumerateSessionsW` with table (default), JSON, CSV, and plain output formats; `WriteSessions` + `formatSessionSummaryLine` added to `format.go`; 13 new tests in `format_test.go`.
 
@@ -184,10 +184,11 @@ Previous state: Sixty-first pass — `drainctl sessions` command added — lists
 
 | Roam #61 | `drainctl sessions` — new subcommand lists current RDS sessions via `WTSEnumerateSessionsW`; shows session ID, username, station, and state; default format is table; supports JSON, CSV, and plain formats; `WriteSessions(w, sessions, summary, format)` + `formatSessionSummaryLine` added to `format.go` following the `WriteHistory` pattern; 13 new tests in `format_test.go` (JSON valid/empty, CSV header+data, table columns+values+summary, plain log lines, nil-summary omission, summary line capped/uncapped) | feature, CLI, testing |
 | Roam #62 | `ComputeSessionSummary(sessions, maxSessions)` extracted from `GetSessionSummary` — eliminates double WTS API call in `sessions_cmd.go` (previously `EnumerateSessions` was called twice: once directly, once inside `GetSessionSummary`); pure function enables unit testing without syscall mocks; `GetSessionSummary` now delegates to it; 7 new tests in `sessions_test.go` covering `wtsStateName` (all 10 named states + unknown fallback) and `ComputeSessionSummary` (empty list, active+disconnected counts, non-counted states ignored, utilization capped at 100%, no max); dashboard favicon MIME type corrected from `image/png` to `image/x-icon` | correctness, testing, dashboard |
+| Roam #63 | `docs/guide.html` CLI Usage: added "List current sessions" subsection after "View audit history" — shows `drainctl sessions` with `--format json`/`--format csv` examples; guide Section 8 Session Tracking: added "drainctl sessions" subsection as the first h3 with example table output and format notes — `drainctl sessions` (added in Roam #61) was entirely absent from the guide | docs |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #62.)*
+*(All tracked items complete — nothing pending after Roam #63.)*
 
 ## Key Learnings
 
