@@ -410,6 +410,10 @@
                 font-family: "JetBrains Mono", monospace;
                 font-size: 0.88rem;
                 font-weight: 700;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                min-width: 0;
             }
             .badge {
                 font-size: 0.62rem;
@@ -1417,12 +1421,12 @@
             <div class="section-label">Servers</div>
             <div class="srv-bar" id="srv-bar" style="display:none">
                 <input class="log-search" id="srv-search" placeholder="Filter servers..." oninput="filterGrid()" />
-                <div class="filter-pills" id="status-filter">
-                    <span class="filter-pill active" data-status="all">All</span>
-                    <span class="filter-pill" data-status="ok">Healthy</span>
-                    <span class="filter-pill" data-status="grace">Grace</span>
-                    <span class="filter-pill" data-status="alert">Alert</span>
-                    <span class="filter-pill" data-status="off">Offline</span>
+                <div class="filter-pills" id="status-filter" role="group" aria-label="Filter by status">
+                    <span class="filter-pill active" data-status="all" role="button" tabindex="0" aria-pressed="true">All</span>
+                    <span class="filter-pill" data-status="ok" role="button" tabindex="0" aria-pressed="false">Healthy</span>
+                    <span class="filter-pill" data-status="grace" role="button" tabindex="0" aria-pressed="false">Grace</span>
+                    <span class="filter-pill" data-status="alert" role="button" tabindex="0" aria-pressed="false">Alert</span>
+                    <span class="filter-pill" data-status="off" role="button" tabindex="0" aria-pressed="false">Offline</span>
                 </div>
             </div>
             <div class="grid" id="grid">
@@ -4782,7 +4786,8 @@
                 stateHistory = [],
                 graceMinutes = null,
                 histOpen = false,
-                activeFilter = "all";
+                activeFilter = "all",
+                _histTrigger = null;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -5314,8 +5319,10 @@
             function closeHistory() {
                 histOpen = false;
                 document.getElementById("hist-overlay").classList.remove("open");
+                if (_histTrigger) { _histTrigger.focus(); _histTrigger = null; }
             }
-            async function showHistory(hostname) {
+            async function showHistory(hostname, trigger) {
+                _histTrigger = trigger || null;
                 histOpen = true;
                 document.getElementById("hist-hostname").textContent = hostname.split(".")[0];
                 document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
@@ -5746,20 +5753,26 @@
             // Event delegation for server card buttons — avoids inline onclick with interpolated hostnames
             document.getElementById("grid").addEventListener("click", function (e) {
                 const hist = e.target.closest(".btn-hist");
-                if (hist && hist.dataset.host) { showHistory(hist.dataset.host); return; }
+                if (hist && hist.dataset.host) { showHistory(hist.dataset.host, hist); return; }
                 const rmBtn = e.target.closest(".btn-rm");
                 if (rmBtn && rmBtn.dataset.host) { rm(rmBtn.dataset.host); }
             });
 
             // Status filter pill wiring
+            function activateFilterPill(pill) {
+                activeFilter = pill.dataset.status;
+                document.querySelectorAll("#status-filter .filter-pill").forEach(function (p) {
+                    p.classList.remove("active");
+                    p.setAttribute("aria-pressed", "false");
+                });
+                pill.classList.add("active");
+                pill.setAttribute("aria-pressed", "true");
+                filterGrid();
+            }
             document.querySelectorAll("#status-filter .filter-pill").forEach(function (pill) {
-                pill.addEventListener("click", function () {
-                    activeFilter = pill.dataset.status;
-                    document.querySelectorAll("#status-filter .filter-pill").forEach(function (p) {
-                        p.classList.remove("active");
-                    });
-                    pill.classList.add("active");
-                    filterGrid();
+                pill.addEventListener("click", function () { activateFilterPill(pill); });
+                pill.addEventListener("keydown", function (e) {
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activateFilterPill(pill); }
                 });
             });
 

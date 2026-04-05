@@ -170,7 +170,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	cfg := fullCfg.ToServiceConfig()
 	dashCfg := fullCfg.ToDashboardConfig()
 	notifyTargets := fullCfg.Notifications
-	notifyState := &dc.NotifyState{LastAlertNotify: make(map[string]time.Time)}
+	notifyState := &dc.NotifyState{
+		LastAlertNotify:       make(map[string]time.Time),
+		LastSessionWarnNotify: make(map[string]time.Time),
+	}
 
 	s.log(dc.LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
 		dc.Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
