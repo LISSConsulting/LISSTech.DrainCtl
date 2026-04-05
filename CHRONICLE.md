@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fortieth roam-mode pass complete.** Four dashboard JS correctness fixes and 5 new tests: (1) `loadNotifyConfig` uses `AbortController` so closing and reopening settings cancels any in-flight fetch — same pattern already in use by `loadHistory`; (2) `saveNotifyConfig` dismiss timer is cancelled before reassignment so rapid saves cannot leave a stale timeout that clears an error message; (3) remove-confirm auto-cancel callback re-queries the button by `data-host` attribute instead of using the captured `rmBtn` variable, which may point to a detached DOM node when the 30 s grid refresh fires during the 5 s confirm window; (4) `location.host` in empty-state hint wrapped in `esc()` for defence-in-depth; (5) 5 new `SendTestNotification` tests covering no-targets error, empty-URL error, webhook success with payload verification, webhook error, ntfy success, and multiple-targets all-called.
+> Current state: **Forty-first roam-mode pass complete.** Two fixes: (1) HTTP response-body drain added to three error paths in `internal/dashboard/client.go` (`Register`, `FetchNotifyConfig`, `FetchServers`) — without draining before `Close()`, Go's `http.Transport` cannot reuse keep-alive connections when the dashboard returns a non-2xx status, causing a new TCP connection on every retry; (2) unused Fraunces font family removed from the dashboard Google Fonts link — the dashboard CSS only references Work Sans, DM Serif Display, and JetBrains Mono; Fraunces was loaded on every page load without ever being applied.
 
 ## Completed Work
 
@@ -125,9 +125,12 @@
 | Roam #40 | Dashboard empty-state hint: `location.host` wrapped in `esc()` — hostname never contains HTML-special characters, but all browser/server-provided values injected into `innerHTML` must be escaped for defence-in-depth | security, dashboard |
 | Roam #40 | 5 new `SendTestNotification` tests — `_NoTargets_ReturnsError`, `_EmptyURLTargets_ReturnsError`, `_WebhookSuccess` (payload `event=test` verified), `_WebhookError_ReturnsError`, `_NtfySuccess`, `_MultipleTargets_CallsAll`; `SendTestNotification` previously had zero test coverage | testing, notify |
 
+| Roam #41 | `internal/dashboard/client.go` body drain: `Register`, `FetchNotifyConfig`, and `FetchServers` error paths now drain the response body via `io.Copy(io.Discard, ...)` before returning — without draining, `http.Transport` aborts the connection on non-2xx responses instead of returning it to the pool for reuse; `ReportState` and `RemoveServer` already did this correctly | correctness, performance |
+| Roam #41 | Dashboard Google Fonts: Fraunces removed from the `<link>` URL — the dashboard CSS uses only Work Sans, DM Serif Display, and JetBrains Mono; Fraunces was loaded on every page load but never referenced in any CSS rule | perf, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #40.)*
+*(All tracked items complete — nothing pending after Roam #41.)*
 
 ## Key Learnings
 
@@ -221,3 +224,4 @@
 - **Dismiss timers must be cancelled before reassignment**: A `setTimeout` that auto-clears a status message is harmless if only one save can be in flight at a time. But if the user saves twice in rapid succession, the first timer fires after 4 s and clears the second save's message. Fix: store the timer ID, cancel it at the top of the success branch, then set a new one. The `className` guard already prevents clearing an error — this prevents clearing a stale timer's success message.
 - **Captured DOM references in setTimeout callbacks become stale on re-render**: A `const btn = ...` captured in a closure and used 5 s later may refer to a detached DOM node if the grid refreshed in the interim. Re-query the element inside the callback using a stable selector (e.g. `[data-host="..."]`) rather than relying on the closure. The captured `h` (hostname string) is stable; the DOM node is not.
 - **`SendTestNotification` test surface**: The function accepts `[]NotificationTarget` and iterates, dispatching each via the same `sendWebhook`/`sendNtfy` helpers as `SendNotification`. Tests can use `httptest.NewServer` for both types. The "no targets" and "empty URL" cases are the only two early-return paths; all other tests exercise the full dispatch loop. Verify that `event=test` is in the webhook payload and that multiple targets each receive exactly one call.
+- **Body drain coverage must include error paths**: `io.Copy(io.Discard, resp.Body)` is required before any early-return that does not read the body (e.g., non-2xx status checks). If the body is only drained in the success path (via `json.Decode`) and not in error paths, failed requests prevent connection reuse. Audit every `negotiateRequest` caller and every direct `dashClientPtr.Load().Do()` call. The rule applies even to paths that are relatively rare (e.g., dashboard returning 403/500) since those are exactly the paths taken during failure modes when connection pool pressure is highest.
