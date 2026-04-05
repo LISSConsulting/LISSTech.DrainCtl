@@ -297,12 +297,16 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 		return
 	}
 
+	notifications := cfg.Notifications
+	if notifications == nil {
+		notifications = []dc.NotificationTarget{}
+	}
 	out := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
 	}{
-		Notifications:           cfg.Notifications,
+		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 	}
