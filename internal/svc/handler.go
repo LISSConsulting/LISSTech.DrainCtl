@@ -130,21 +130,7 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult
 		stateDur = time.Duration(*res.StateDurationSeconds) * time.Second
 	}
 
-	if drainActive && stateDur > gp {
-		res.Status = "Alert"
-		res.Message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
-			stateDur.Truncate(time.Second), gp)
-		res.ExitCode = 1
-	} else if drainActive {
-		remaining := gp - stateDur
-		res.Status = "Grace"
-		res.Message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
-		res.ExitCode = 0
-	} else {
-		res.Status = "Healthy"
-		res.Message = "All connections allowed."
-		res.ExitCode = 0
-	}
+	res.Status, res.Message, res.ExitCode = classifyState(drainActive, stateDur, gp)
 
 	// Session tracking.
 	if sess := dc.GetSessionSummary(); sess != nil {
