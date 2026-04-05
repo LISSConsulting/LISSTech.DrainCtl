@@ -962,8 +962,26 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
   "message": "Drain mode active, within grace period (45m remaining).",
   "changed_by": "MDS\\lissadmin",
   "state_duration_seconds": 900,
-  "timestamp": "2026-04-03T14:30:00-04:00"
+  "grace_period_seconds": 3600,
+  "connections_allowed": false,
+  "version": "26.95.0",
+  "timestamp": "2026-04-03T14:30:00-04:00",
+  "sessions": {
+    "active_sessions": 12,
+    "disconnected_sessions": 3,
+    "total_sessions": 15,
+    "max_sessions": 20,
+    "utilization_pct": 75
+  }
 }</code></pre>
+            <p>
+                <code>previous_mode</code> is only present on <code>transition</code> events.
+                <code>sessions</code> is only present when session monitoring is active (see
+                <a href="#sessions">Session Tracking</a>).
+                The <code>connections_allowed</code> field is <code>false</code> when drain mode is blocking new
+                connections, <code>true</code> when all connections are allowed &mdash; use this instead of parsing
+                <code>status</code> to gate automation.
+            </p>
 
             <p>
                 ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and

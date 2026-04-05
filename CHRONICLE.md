@@ -1,7 +1,7 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-ninth roam-mode pass complete.** 14 new tests in `format_test.go` covering `WriteHistory`, `WriteHistoryRecords`, and `CheckResult.Write` output format paths that previously had zero test coverage — see Roam #59 entry below.
+> Current state: **Sixtieth roam-mode pass complete.** Two fixes: (1) `SendTestNotification` webhook payload aligned with production schema — `grace_period_seconds`, `connections_allowed`, and `version` fields added; (2) `docs/guide.html` webhook payload example updated to current full schema including new fields and `sessions` object — see Roam #60 entry below.
 
-Previous state: Fifty-eighth pass — Two improvements: (1) dashboard `.empty h2` CSS bug fixed — `Fraunces` font family was referenced but not loaded in the Google Fonts link (removed in a prior roam); changed to `DM Serif Display` so "Connecting…", "Access Denied", and "No servers registered yet" headings render with the designed typeface; (2) 17 new tests in `config_test.go` covering previously untested paths: `Validate` SessionWarningThreshold clamping (< 0 and > 100), `HasTargets` (empty, with URL, empty URL, mixed), `ToServiceConfig` unit conversions (GracePeriod minutes→Duration, PollInterval seconds→Duration, field copies), `ToDashboardConfig` nil/true/false AutoPin and field copies.
+Previous state: Fifty-ninth pass — 14 new tests in `format_test.go` covering `WriteHistory`, `WriteHistoryRecords`, and `CheckResult.Write` output format paths that previously had zero test coverage.
 
 ## Completed Work
 
@@ -179,10 +179,12 @@ Previous state: Fifty-eighth pass — Two improvements: (1) dashboard `.empty h2
 | Roam #58 | Dashboard `.empty h2` CSS bug: `Fraunces` was removed from the Google Fonts link in Roam #55 but the CSS reference was not updated — "Connecting…", "Access Denied", and "No servers registered yet" headings fell back to the browser's generic serif; changed to `DM Serif Display` to match the dashboard design | correctness, dashboard |
 | Roam #58 | 17 new tests in `config_test.go` — `Validate` SessionWarningThreshold clamping (negative → 0, > 100 → 100, valid 0–100 preserved); `HasTargets` (empty, with URL, empty URL, mixed); `ToServiceConfig` unit conversions (GracePeriod int-minutes → Duration, PollInterval int-seconds → Duration, field copies); `ToDashboardConfig` AutoPin nil/&true/&false semantics and field copies | testing |
 | Roam #59 | 14 new tests in `format_test.go` covering three previously untested output-format functions: `WriteHistory` (JSON valid-JSON array + field checks, CSV header+data, Table columns+values, Plain log-format lines with ERR level for non-zero exit, Empty/no-panic across all formats); `WriteHistoryRecords` (same 5 coverage points for the pipe-path pre-computed variant, plus Plain_ErrorLevel confirming ERR vs INF level selection); `CheckResult.Write` (JSON round-trip via `json.Unmarshal`, CSV header+status/host/changed_by, Table HOST/STATUS column headers + values, Plain_NoOp confirming `FormatPlain` intentionally writes nothing) | testing |
+| Roam #60 | `SendTestNotification` webhook payload: added `grace_period_seconds` (0), `connections_allowed` (true), and `version` (`Version` constant) — test payload was structurally different from the production payload (Roam #52 added these three fields to `SendNotification` but not to `SendTestNotification`); webhook consumers that validate schema against real notifications would receive a different field set for tests; 1 new test `TestSendTestNotification_WebhookPayloadSchemaComplete` (verifies all 11 required top-level fields are present, plus `event="test"`, `connections_allowed=true`, `grace_period_seconds=0`, and non-empty `version`) | correctness, notify, testing |
+| Roam #60 | `docs/guide.html` webhook payload example: updated from 9 fields (pre-Roam #52) to full current schema — added `grace_period_seconds`, `connections_allowed`, `version`, and `sessions` object; added explanatory note that `previous_mode` is transition-only, `sessions` is monitoring-only, and `connections_allowed` is the recommended field to check for automation gating instead of parsing `status` | docs |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #59.)*
+*(All tracked items complete — nothing pending after Roam #60.)*
 
 ## Key Learnings
 
