@@ -298,7 +298,10 @@ func TestHandleRegister_HostnameTooLong(t *testing.T) {
 
 func TestHandleRegister_MaxLengthHostname(t *testing.T) {
 	ds := newTestServer(t)
-	hostname := strings.Repeat("a", 253) // exactly at limit
+	// Build a valid 253-char hostname: four RFC-1123 labels of 63+63+63+61 chars.
+	label63 := strings.Repeat("a", 63)
+	label61 := strings.Repeat("a", 61)
+	hostname := label63 + "." + label63 + "." + label63 + "." + label61 // 253 chars
 	body := `{"hostname":"` + hostname + `"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", strings.NewReader(body))
@@ -306,7 +309,60 @@ func TestHandleRegister_MaxLengthHostname(t *testing.T) {
 	ds.handleRegister(w, r)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d (253-char hostname should be accepted)", w.Code, http.StatusOK)
+		t.Errorf("status = %d, want %d (253-char valid hostname should be accepted)", w.Code, http.StatusOK)
+	}
+}
+
+func TestHandleRegister_InvalidCharacters(t *testing.T) {
+	cases := []struct {
+		name     string
+		hostname string
+	}{
+		{"leading hyphen", "-server"},
+		{"trailing hyphen", "server-"},
+		{"underscore", "my_server"},
+		{"slash", "path/server"},
+		{"null byte", "server\x00"},
+		{"space in middle", "my server"},
+		{"at sign", "server@domain"},
+		{"dot only", "."},
+		{"empty label", "server..domain"},
+		{"label too long", strings.Repeat("a", 64)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := newTestServer(t)
+			body, _ := json.Marshal(map[string]string{"hostname": tc.hostname})
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/register", bytes.NewReader(body))
+			ds.handleRegister(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("hostname %q: status = %d, want %d", tc.hostname, w.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestHandleRegister_ValidHostnameFormats(t *testing.T) {
+	cases := []string{
+		"SRV01",
+		"server.domain.com",
+		"rdsh-1",
+		"1server",
+		"a",
+		"a1",
+	}
+	for _, hostname := range cases {
+		t.Run(hostname, func(t *testing.T) {
+			ds := newTestServer(t)
+			body, _ := json.Marshal(map[string]string{"hostname": hostname})
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/register", bytes.NewReader(body))
+			ds.handleRegister(w, r)
+			if w.Code != http.StatusOK {
+				t.Errorf("hostname %q: status = %d, want %d (should be accepted)", hostname, w.Code, http.StatusOK)
+			}
+		})
 	}
 }
 
