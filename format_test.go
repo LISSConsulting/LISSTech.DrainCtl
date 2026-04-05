@@ -768,3 +768,101 @@ func TestFormatSessionSummaryLine_Uncapped(t *testing.T) {
 		t.Errorf("should omit utilization when uncapped: %s", got)
 	}
 }
+
+// ── DisconnectedSessions in AuditRecord / HistoryRecord ───────────────────────
+
+func TestAuditToHistory_CopiesDisconnectedSessions(t *testing.T) {
+	dur := 30
+	rec := AuditRecord{
+		Timestamp:            time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC),
+		Host:                 "SRV01",
+		DrainMode:            AllowAll,
+		DrainLabel:           "AllowAll",
+		ActiveSessions:       3,
+		DisconnectedSessions: 2,
+		TotalSessions:        5,
+		MaxSessions:          20,
+		ExitCode:             0,
+	}
+	hr := AuditToHistory(rec, &dur)
+	if hr.ActiveSessions != 3 {
+		t.Errorf("ActiveSessions = %d, want 3", hr.ActiveSessions)
+	}
+	if hr.DisconnectedSessions != 2 {
+		t.Errorf("DisconnectedSessions = %d, want 2", hr.DisconnectedSessions)
+	}
+	if hr.TotalSessions != 5 {
+		t.Errorf("TotalSessions = %d, want 5", hr.TotalSessions)
+	}
+	if hr.MaxSessions != 20 {
+		t.Errorf("MaxSessions = %d, want 20", hr.MaxSessions)
+	}
+}
+
+func TestWriteHistory_CSV_IncludesSessionColumns(t *testing.T) {
+	ts := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	records := []AuditRecord{
+		{
+			Timestamp:            ts,
+			Host:                 "SRV01",
+			DrainMode:            AllowAll,
+			DrainLabel:           "AllowAll",
+			ActiveSessions:       4,
+			DisconnectedSessions: 2,
+			TotalSessions:        6,
+			MaxSessions:          20,
+			ExitCode:             0,
+		},
+	}
+	var buf bytes.Buffer
+	WriteHistory(&buf, records, FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CSV line count = %d, want ≥ 2; output:\n%s", len(lines), out)
+	}
+	for _, col := range []string{"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions"} {
+		if !strings.Contains(lines[0], col) {
+			t.Errorf("CSV header missing %q; header: %s", col, lines[0])
+		}
+	}
+	if !strings.Contains(lines[1], "4") {
+		t.Errorf("CSV data row missing active_sessions=4: %s", lines[1])
+	}
+	if !strings.Contains(lines[1], "2") {
+		t.Errorf("CSV data row missing disconnected_sessions=2: %s", lines[1])
+	}
+}
+
+func TestWriteHistoryRecords_CSV_IncludesSessionColumns(t *testing.T) {
+	dur := 0
+	records := []HistoryRecord{
+		{
+			Timestamp:            "2026-04-01T10:00:00Z",
+			Host:                 "SRV01",
+			DrainMode:            "AllowAll",
+			DrainValue:           0,
+			StateDurationSeconds: &dur,
+			ActiveSessions:       4,
+			DisconnectedSessions: 2,
+			TotalSessions:        6,
+			MaxSessions:          20,
+			ExitCode:             0,
+		},
+	}
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, records, FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CSV line count = %d, want ≥ 2; output:\n%s", len(lines), out)
+	}
+	for _, col := range []string{"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions"} {
+		if !strings.Contains(lines[0], col) {
+			t.Errorf("CSV header missing %q; header: %s", col, lines[0])
+		}
+	}
+	if !strings.Contains(lines[1], "2") {
+		t.Errorf("CSV data row missing disconnected_sessions=2: %s", lines[1])
+	}
+}

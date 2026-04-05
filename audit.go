@@ -21,9 +21,10 @@ type AuditRecord struct {
 	KeyModified    time.Time `json:"key_modified,omitempty"`
 	Changed        bool      `json:"changed,omitempty"`
 	ChangedBy      string    `json:"changed_by,omitempty"`
-	ActiveSessions int       `json:"active_sessions,omitempty"`
-	TotalSessions  int       `json:"total_sessions,omitempty"`
-	MaxSessions    int       `json:"max_sessions,omitempty"`
+	ActiveSessions       int `json:"active_sessions,omitempty"`
+	DisconnectedSessions int `json:"disconnected_sessions,omitempty"`
+	TotalSessions        int `json:"total_sessions,omitempty"`
+	MaxSessions          int `json:"max_sessions,omitempty"`
 	ExitCode       int       `json:"exit"`
 }
 
