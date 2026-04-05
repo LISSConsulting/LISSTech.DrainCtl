@@ -433,7 +433,11 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 	fn := ds.testNotifyFunc
 	if fn == nil {
 		fn = func() error {
-			cfg, err := dc.LoadConfig(ds.log)
+			loadFn := ds.testLoadConfigFunc
+			if loadFn == nil {
+				loadFn = func() (*dc.Config, error) { return dc.LoadConfig(ds.log) }
+			}
+			cfg, err := loadFn()
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}

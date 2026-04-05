@@ -2130,3 +2130,77 @@ func TestHandleGetServer_NoLastResultReturnsRegisteredHost(t *testing.T) {
 		t.Errorf("last_result = %v, want nil for newly registered host", info.LastResult)
 	}
 }
+
+// TestHandleRegister_ReadBodyError_Returns400 verifies that handleRegister
+// returns 400 when the request body cannot be read.
+func TestHandleRegister_ReadBodyError_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", errReader{})
+	ds.handleRegister(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestHandleGetServer_EmptyHost_Returns400 verifies that handleGetServer
+// returns 400 when the host path value is empty.
+func TestHandleGetServer_EmptyHost_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	// Do not call r.SetPathValue so host remains "".
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/", nil)
+	ds.handleGetServer(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_Success verifies that when
+// testNotifyFunc is nil, handleNotifyTest uses testLoadConfigFunc to load
+// config and calls SendTestNotification with the returned targets.
+func TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_Success(t *testing.T) {
+	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer webhookSrv.Close()
+
+	ds := newTestServer(t)
+	// testNotifyFunc is intentionally nil — exercises the real load path.
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := &dc.Config{}
+		cfg.Notifications = []dc.NotificationTarget{
+			{Type: "webhook", URL: webhookSrv.URL, Triggers: dc.DefaultTriggers},
+		}
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+// TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_LoadError verifies that
+// when testNotifyFunc is nil and testLoadConfigFunc returns an error,
+// handleNotifyTest returns 400 with the error message.
+func TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_LoadError(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		return nil, fmt.Errorf("config unavailable")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)
+	ds.handleNotifyTest(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "config unavailable") {
+		t.Errorf("body %q should contain %q", w.Body.String(), "config unavailable")
+	}
+}
