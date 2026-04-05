@@ -408,6 +408,34 @@ func UpdateGracePeriod(minutes int, log LogFunc) error {
 	return saveConfigToFile(cfg, log)
 }
 
+// UpdateNotifySettings atomically updates notification targets, session warning
+// threshold, and/or grace period in a single config load+save cycle.
+// Any nil argument is left unchanged. This is the preferred API for the
+// dashboard PUT /api/v1/notify-config handler.
+func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, log LogFunc) error {
+	cfg, err := LoadConfig(log)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if notifications != nil {
+		cfg.Notifications = *notifications
+	}
+	if sessionThreshold != nil {
+		if *sessionThreshold < 0 || *sessionThreshold > 100 {
+			return fmt.Errorf("threshold must be 0-100, got %d", *sessionThreshold)
+		}
+		cfg.SessionWarningThreshold = *sessionThreshold
+	}
+	if gracePeriod != nil {
+		if *gracePeriod < 1 || *gracePeriod > 1440 {
+			return fmt.Errorf("grace period must be 1-1440 minutes, got %d", *gracePeriod)
+		}
+		cfg.GracePeriod = *gracePeriod
+	}
+	cfg.Validate(log)
+	return saveConfigToFile(cfg, log)
+}
+
 // InstallCertificate copies a PEM cert and key into the data directory and
 // updates config.json so the dashboard uses them. The key file is written
 // with restrictive permissions (0600).
