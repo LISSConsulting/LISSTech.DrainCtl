@@ -246,30 +246,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	var useRemoteConfig bool
 	var lastConfigFetch time.Time // zero → fetch on first poll
 	dashConfigFailures := 0       // consecutive dashboard config-fetch failures
+	dashRegistered := false       // true once Register succeeds; retried on each poll until it does
 
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
-		regResult, regErr := dashboard.Register(dashCfg.URL, s.log)
-		if regErr != nil {
-			dc.LogMsg(s.log, dc.LvlWRN, "dashboard registration failed (will retry on report)", fmt.Sprintf("error=%q", regErr))
-		} else {
-			s.log(dc.LvlINF, "dashboard=registered")
-			// Auto-pin: save the dashboard's TLS fingerprint if enabled and we don't have one yet.
-			if dashCfg.AutoPin && dashCfg.TLSFingerprint == "" && regResult.TLSFingerprint != "" {
-				dashCfg.TLSFingerprint = regResult.TLSFingerprint
-				dashboard.InitDashClient(dashCfg.TLSFingerprint)
-				s.log(dc.LvlINF, fmt.Sprintf("dashboard=auto-pinned fingerprint=%s", dashCfg.TLSFingerprint))
-				// Persist to config.json so pinning survives restarts.
-				if fileCfg, err := dc.LoadConfig(s.log); err == nil {
-					fileCfg.Dashboard.TLSFingerprint = dashCfg.TLSFingerprint
-					if err := dc.SaveConfig(fileCfg, s.log); err != nil {
-						dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to save fingerprint to config", fmt.Sprintf("error=%q", err))
-					}
-				}
-			}
-		}
+		dashRegistered = registerWithDashboard(&dashCfg, s.log)
 
 		// Fetch notification config from dashboard (replaces local targets).
+		// Independent of registration — global config, not host-specific.
 		if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", err))
 		} else {
@@ -323,6 +307,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
+			// Retry registration if the startup attempt failed (e.g. dashboard was
+			// not yet available). Once registered, dashRegistered stays true and
+			// this branch is skipped for the lifetime of the service. Forcing
+			// lastConfigFetch to zero ensures a config fetch follows immediately.
+			if dashCfg.URL != "" && !dashRegistered {
+				if registerWithDashboard(&dashCfg, s.log) {
+					dashRegistered = true
+					lastConfigFetch = time.Time{} // trigger config fetch on this tick
+					dashConfigFailures = 0
+				}
+			}
+
 			// Periodically re-fetch notification config from dashboard.
 			// Uses wall-clock time so the interval is independent of PollInterval
 			// changes at runtime. The interval doubles on each consecutive failure
@@ -363,6 +359,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					dashboard.InitDashClient(newDashCfg.TLSFingerprint)
 					lastConfigFetch = time.Time{} // force re-fetch on next poll
 					dashConfigFailures = 0        // reset backoff on URL change
+					dashRegistered = false        // re-register against new URL
 				}
 			}
 
@@ -384,6 +381,32 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			_ = st.FlushIfDirty()
 		}
 	}
+}
+
+// registerWithDashboard registers this host with the dashboard and performs
+// auto-pin if enabled. Returns true on success. Safe to call multiple times;
+// the dashboard treats re-registration as a no-op for already-known hosts.
+func registerWithDashboard(dashCfg *dc.DashboardConfig, log dc.LogFunc) bool {
+	regResult, err := dashboard.Register(dashCfg.URL, log)
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "dashboard: registration failed, will retry on next poll", fmt.Sprintf("error=%q", err))
+		return false
+	}
+	log(dc.LvlINF, "dashboard=registered")
+	// Auto-pin: save the dashboard's TLS fingerprint if enabled and we don't have one yet.
+	if dashCfg.AutoPin && dashCfg.TLSFingerprint == "" && regResult.TLSFingerprint != "" {
+		dashCfg.TLSFingerprint = regResult.TLSFingerprint
+		dashboard.InitDashClient(dashCfg.TLSFingerprint)
+		log(dc.LvlINF, fmt.Sprintf("dashboard=auto-pinned fingerprint=%s", dashCfg.TLSFingerprint))
+		// Persist to config.json so pinning survives restarts.
+		if fileCfg, err := dc.LoadConfig(log); err == nil {
+			fileCfg.Dashboard.TLSFingerprint = dashCfg.TLSFingerprint
+			if err := dc.SaveConfig(fileCfg, log); err != nil {
+				dc.LogMsg(log, dc.LvlWRN, "dashboard: failed to save fingerprint to config", fmt.Sprintf("error=%q", err))
+			}
+		}
+	}
+	return true
 }
 
 // RunService starts the Windows service. Called by the CLI's hidden
