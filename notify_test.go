@@ -799,3 +799,54 @@ func TestSendNotification_NtfySessionWarningMessage(t *testing.T) {
 		t.Errorf("ntfy body %q should contain session counts", capturedBody)
 	}
 }
+
+// TestSendTestNotification_WebhookPayloadSchemaComplete verifies that the test
+// notification payload contains the same top-level fields as a real notification
+// so webhook consumers can validate against a consistent schema.
+func TestSendTestNotification_WebhookPayloadSchemaComplete(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
+	}
+	if err := SendTestNotification(targets, nil); err != nil {
+		t.Fatalf("SendTestNotification error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+
+	// Fields required in every real notification payload.
+	requiredFields := []string{
+		"event", "host", "drain_mode", "status", "message",
+		"changed_by", "state_duration_seconds",
+		"grace_period_seconds", "connections_allowed", "version", "timestamp",
+	}
+	for _, field := range requiredFields {
+		if _, ok := payload[field]; !ok {
+			t.Errorf("test payload missing required field %q", field)
+		}
+	}
+
+	if got := payload["event"]; got != "test" {
+		t.Errorf("event = %v, want 'test'", got)
+	}
+	if got := payload["connections_allowed"]; got != true {
+		t.Errorf("connections_allowed = %v, want true (test is not a drain state)", got)
+	}
+	if got, ok := payload["version"].(string); !ok || got == "" {
+		t.Errorf("version = %v, want non-empty string", payload["version"])
+	}
+	if got := payload["grace_period_seconds"]; got != float64(0) {
+		t.Errorf("grace_period_seconds = %v, want 0", got)
+	}
+}

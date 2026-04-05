@@ -174,6 +174,9 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 		"message":                "This is a test notification from DrainCtl.",
 		"changed_by":             "",
 		"state_duration_seconds": 0,
+		"grace_period_seconds":   0,
+		"connections_allowed":    true,
+		"version":                Version,
 		"timestamp":              time.Now().Format(time.RFC3339),
 	}
 
