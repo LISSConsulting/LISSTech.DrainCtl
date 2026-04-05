@@ -374,6 +374,76 @@ func TestFlushIfDirty_SkipsWhenClean(t *testing.T) {
 	}
 }
 
+// TestFlushIfDirty_FlushesWhenDirty verifies the dirty>0 path: FlushIfDirty
+// must call Flush and persist the record when there are unflushed appends.
+func TestFlushIfDirty_FlushesWhenDirty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	st.Append(rec(dc.AllowAll, time.Now(), false))
+
+	if err := st.FlushIfDirty(); err != nil {
+		t.Fatalf("FlushIfDirty: %v", err)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if fi.Size() == 0 {
+		t.Error("file is empty after FlushIfDirty — dirty record was not flushed")
+	}
+}
+
+// TestClose_IdempotentOnSecondCall verifies the file==nil guard in Close:
+// calling Close a second time must be a no-op and must not panic.
+func TestClose_IdempotentOnSecondCall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	if err := st.Close(); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	// Second close — exercises the `if m.file == nil { return nil }` path.
+	if err := st.Close(); err != nil {
+		t.Errorf("second close returned error: %v", err)
+	}
+}
+
+// TestOpenMemAuditStore_LoadError_OversizedLine verifies that OpenMemAuditStore
+// returns an error (wrapping the load error) when the audit file contains a
+// line that exceeds the 64 KiB scanner buffer limit.
+func TestOpenMemAuditStore_LoadError_OversizedLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	// Write a single line that exceeds the 64 KiB scanner buffer.
+	oversized := make([]byte, 65*1024+1)
+	for i := range oversized {
+		oversized[i] = 'x'
+	}
+	oversized[len(oversized)-1] = '\n'
+	if err := os.WriteFile(path, oversized, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err == nil {
+		t.Fatal("expected error when audit file has oversized line, got nil")
+	}
+}
+
 // ── Concurrent access ────────────────────────────────────────────────────────
 
 func TestConcurrentAppendAndRead(t *testing.T) {

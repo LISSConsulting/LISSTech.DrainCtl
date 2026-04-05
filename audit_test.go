@@ -14,6 +14,34 @@ import (
 
 // writeTestRecords and ptr are defined in audit_filter_test.go.
 
+// ── scanRecords ───────────────────────────────────────────────────────────────
+
+// TestScanRecords_EarlyStop verifies that scanRecords stops iterating as soon
+// as the callback returns false. This exercises the `if !fn(rec) { break }`
+// branch which no production caller currently triggers (all callers always
+// return true), but is required for correctness of the streaming contract.
+func TestScanRecords_EarlyStop(t *testing.T) {
+	records := []AuditRecord{
+		{Timestamp: time.Now().Add(-2 * time.Second), Host: "srv1"},
+		{Timestamp: time.Now().Add(-1 * time.Second), Host: "srv1"},
+		{Timestamp: time.Now(), Host: "srv1"},
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	var seen int
+	err := store.scanRecords(func(_ AuditRecord) bool {
+		seen++
+		return false // stop after first record
+	})
+	if err != nil {
+		t.Fatalf("scanRecords: %v", err)
+	}
+	if seen != 1 {
+		t.Errorf("seen = %d, want 1 (early stop after first record)", seen)
+	}
+}
+
 // ── LastObservation ───────────────────────────────────────────────────────────
 
 func TestLastObservation_Empty(t *testing.T) {
