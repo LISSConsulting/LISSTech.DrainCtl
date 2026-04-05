@@ -19,30 +19,30 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
-// configFetchInterval is the baseline number of poll ticks between dashboard
-// notification-config refreshes (~5 min at the default 30 s poll interval).
-// The actual interval grows exponentially after consecutive failures.
+// configFetchBase is the baseline interval between dashboard notification-config
+// refreshes. The actual interval grows exponentially after consecutive failures
+// up to configFetchMax.
 const (
-	configFetchInterval    = 10  // baseline ticks
-	maxConfigFetchInterval = 320 // ceiling ticks (~160 min at 30 s)
+	configFetchBase = 5 * time.Minute   // baseline re-fetch interval
+	configFetchMax  = 160 * time.Minute // ceiling (~maxConfigFetchInterval * 30s)
 )
 
-// backoffTicks returns the number of poll ticks to wait before the next
-// dashboard config fetch attempt.  failures is the count of consecutive
-// failures; the interval doubles per failure up to maxConfigFetchInterval.
-func backoffTicks(failures int) int {
+// backoffDuration returns the time interval to wait before the next dashboard
+// config fetch attempt. failures is the count of consecutive failures; the
+// interval doubles per failure up to configFetchMax.
+func backoffDuration(failures int) time.Duration {
 	if failures <= 0 {
-		return configFetchInterval
+		return configFetchBase
 	}
 	shift := failures
 	if shift > 5 {
 		shift = 5 // cap doubling at 2^5 = 32×
 	}
-	n := configFetchInterval << shift
-	if n > maxConfigFetchInterval {
-		return maxConfigFetchInterval
+	d := configFetchBase << shift
+	if d > configFetchMax {
+		return configFetchMax
 	}
-	return n
+	return d
 }
 
 // Event IDs matching assets/drainctl.mc message file.
@@ -247,8 +247,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// service keeps using the last successfully fetched targets (or falls
 	// back to local config.json targets if no fetch ever succeeded).
 	var useRemoteConfig bool
-	pollsSinceConfigFetch := 0
-	dashConfigFailures := 0 // consecutive dashboard config-fetch failures
+	var lastConfigFetch time.Time // zero → fetch on first poll
+	dashConfigFailures := 0       // consecutive dashboard config-fetch failures
 
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
@@ -327,22 +327,21 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-pollTicker.C:
 			// Periodically re-fetch notification config from dashboard.
-			// The interval doubles on each consecutive failure (exponential backoff)
-			// so a downed dashboard does not generate log spam every poll.
-			if dashCfg.URL != "" {
-				pollsSinceConfigFetch++
-				if pollsSinceConfigFetch >= backoffTicks(dashConfigFailures) {
-					pollsSinceConfigFetch = 0
-					if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
-						dashConfigFailures++
-						nextIn := backoffTicks(dashConfigFailures)
-						dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
-							fmt.Sprintf("error=%q next_retry_polls=%d", err, nextIn))
-					} else {
-						dashConfigFailures = 0
-						useRemoteConfig = true
-						applyRemoteConfig(remote, &cfg, &notifyTargets)
-					}
+			// Uses wall-clock time so the interval is independent of PollInterval
+			// changes at runtime. The interval doubles on each consecutive failure
+			// (exponential backoff) so a downed dashboard does not generate log
+			// spam every poll.
+			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashConfigFailures) {
+				lastConfigFetch = time.Now()
+				if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
+					dashConfigFailures++
+					nextIn := backoffDuration(dashConfigFailures)
+					dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
+						fmt.Sprintf("error=%q next_retry_in=%s", err, nextIn.Round(time.Minute)))
+				} else {
+					dashConfigFailures = 0
+					useRemoteConfig = true
+					applyRemoteConfig(remote, &cfg, &notifyTargets)
 				}
 			}
 			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
@@ -365,8 +364,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if newDashCfg.URL != dashCfg.URL || newDashCfg.TLSFingerprint != dashCfg.TLSFingerprint {
 				if newDashCfg.URL != "" {
 					dashboard.InitDashClient(newDashCfg.TLSFingerprint)
-					pollsSinceConfigFetch = configFetchInterval // force re-fetch next poll
-					dashConfigFailures = 0                      // reset backoff on URL change
+					lastConfigFetch = time.Time{} // force re-fetch on next poll
+					dashConfigFailures = 0        // reset backoff on URL change
 				}
 			}
 
