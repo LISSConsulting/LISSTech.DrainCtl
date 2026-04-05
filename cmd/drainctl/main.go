@@ -32,6 +32,7 @@ func main() {
 
 	root.AddCommand(checkCmd())
 	root.AddCommand(historyCmd())
+	root.AddCommand(sessionsCmd())
 	root.AddCommand(auditSetupCmd())
 	root.AddCommand(serviceCmd())
 	root.AddCommand(notifyCmd())
