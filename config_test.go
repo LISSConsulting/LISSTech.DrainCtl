@@ -4,6 +4,7 @@ package drainctl
 
 import (
 	"testing"
+	"time"
 )
 
 // ── ClampRetention ────────────────────────────────────────────────────────────
@@ -440,6 +441,174 @@ func TestValidate_RepeatMinutesPreservesValid(t *testing.T) {
 		if cfg.Notifications[0].RepeatMinutes != rm {
 			t.Errorf("RepeatMinutes %d: expected unchanged after Validate, got %d", rm, cfg.Notifications[0].RepeatMinutes)
 		}
+	}
+}
+
+// ── SessionWarningThreshold clamping ─────────────────────────────────────────
+
+func TestValidate_SessionWarningThresholdClampsNegative(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SessionWarningThreshold = -1
+	cfg.Validate(nil)
+	if cfg.SessionWarningThreshold != 0 {
+		t.Errorf("SessionWarningThreshold -1: expected 0 after Validate, got %d", cfg.SessionWarningThreshold)
+	}
+}
+
+func TestValidate_SessionWarningThresholdClampsAbove100(t *testing.T) {
+	for _, v := range []int{101, 200, 999} {
+		cfg := DefaultConfig()
+		cfg.SessionWarningThreshold = v
+		cfg.Validate(nil)
+		if cfg.SessionWarningThreshold != 100 {
+			t.Errorf("SessionWarningThreshold %d: expected 100 after Validate, got %d", v, cfg.SessionWarningThreshold)
+		}
+	}
+}
+
+func TestValidate_SessionWarningThresholdPreservesValid(t *testing.T) {
+	for _, v := range []int{0, 1, 50, 80, 100} {
+		cfg := DefaultConfig()
+		cfg.SessionWarningThreshold = v
+		cfg.Validate(nil)
+		if cfg.SessionWarningThreshold != v {
+			t.Errorf("SessionWarningThreshold %d: expected unchanged after Validate, got %d", v, cfg.SessionWarningThreshold)
+		}
+	}
+}
+
+// ── HasTargets ────────────────────────────────────────────────────────────────
+
+func TestHasTargets_NoTargets(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.HasTargets() {
+		t.Error("HasTargets: expected false for config with no notifications")
+	}
+}
+
+func TestHasTargets_TargetWithURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook"},
+	}
+	if !cfg.HasTargets() {
+		t.Error("HasTargets: expected true for config with a webhook URL")
+	}
+}
+
+func TestHasTargets_TargetWithEmptyURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: ""},
+	}
+	if cfg.HasTargets() {
+		t.Error("HasTargets: expected false for config with empty URL")
+	}
+}
+
+func TestHasTargets_MixedURLs(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: ""},
+		{Type: "ntfy", URL: "https://ntfy.sh/my-alerts"},
+	}
+	if !cfg.HasTargets() {
+		t.Error("HasTargets: expected true when at least one target has a URL")
+	}
+}
+
+// ── ToServiceConfig ───────────────────────────────────────────────────────────
+
+func TestToServiceConfig_ConvertsGracePeriodToMinutes(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.GracePeriod = 30 // 30 minutes
+	svc := cfg.ToServiceConfig()
+	want := 30 * time.Minute
+	if svc.GracePeriod != want {
+		t.Errorf("GracePeriod = %v, want %v", svc.GracePeriod, want)
+	}
+}
+
+func TestToServiceConfig_ConvertsPollIntervalToSeconds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PollInterval = 60 // 60 seconds
+	svc := cfg.ToServiceConfig()
+	want := 60 * time.Second
+	if svc.PollInterval != want {
+		t.Errorf("PollInterval = %v, want %v", svc.PollInterval, want)
+	}
+}
+
+func TestToServiceConfig_CopiesFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RetentionDays = 42
+	cfg.SessionWarningThreshold = 75
+	cfg.AuditPath = `C:\some\path.jsonl`
+	svc := cfg.ToServiceConfig()
+	if svc.RetentionDays != 42 {
+		t.Errorf("RetentionDays = %d, want 42", svc.RetentionDays)
+	}
+	if svc.SessionWarningThreshold != 75 {
+		t.Errorf("SessionWarningThreshold = %d, want 75", svc.SessionWarningThreshold)
+	}
+	if svc.AuditPath != `C:\some\path.jsonl` {
+		t.Errorf("AuditPath = %q, want C:\\some\\path.jsonl", svc.AuditPath)
+	}
+}
+
+// ── ToDashboardConfig ─────────────────────────────────────────────────────────
+
+func TestToDashboardConfig_NilAutoPinIsFalse(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Dashboard.AutoPin = nil
+	dash := cfg.ToDashboardConfig()
+	if dash.AutoPin {
+		t.Error("AutoPin: expected false when Dashboard.AutoPin is nil")
+	}
+}
+
+func TestToDashboardConfig_TrueAutoPin(t *testing.T) {
+	cfg := DefaultConfig()
+	v := true
+	cfg.Dashboard.AutoPin = &v
+	dash := cfg.ToDashboardConfig()
+	if !dash.AutoPin {
+		t.Error("AutoPin: expected true when Dashboard.AutoPin is &true")
+	}
+}
+
+func TestToDashboardConfig_FalseAutoPin(t *testing.T) {
+	cfg := DefaultConfig()
+	v := false
+	cfg.Dashboard.AutoPin = &v
+	dash := cfg.ToDashboardConfig()
+	if dash.AutoPin {
+		t.Error("AutoPin: expected false when Dashboard.AutoPin is &false")
+	}
+}
+
+func TestToDashboardConfig_CopiesFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Dashboard.Enabled = true
+	cfg.Dashboard.Port = 12345
+	cfg.Dashboard.Group = "RDS Admins"
+	cfg.Dashboard.URL = "https://dash:49470"
+	cfg.Dashboard.TLSFingerprint = "aa:bb:cc"
+	dash := cfg.ToDashboardConfig()
+	if !dash.Enabled {
+		t.Error("Enabled: expected true")
+	}
+	if dash.Port != 12345 {
+		t.Errorf("Port = %d, want 12345", dash.Port)
+	}
+	if dash.Group != "RDS Admins" {
+		t.Errorf("Group = %q, want \"RDS Admins\"", dash.Group)
+	}
+	if dash.URL != "https://dash:49470" {
+		t.Errorf("URL = %q, want \"https://dash:49470\"", dash.URL)
+	}
+	if dash.TLSFingerprint != "aa:bb:cc" {
+		t.Errorf("TLSFingerprint = %q, want \"aa:bb:cc\"", dash.TLSFingerprint)
 	}
 }
 
