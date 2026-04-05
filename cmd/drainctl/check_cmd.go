@@ -53,6 +53,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				)
 			}
 			log(dc.LvlINF, fmt.Sprintf("grace_period=%s", (time.Duration(result.GracePeriodSeconds)*time.Second).String()))
+			if sess := result.Sessions; sess != nil {
+				if sess.MaxSessions > 0 {
+					log(dc.LvlINF, fmt.Sprintf("sessions=%d/%d", sess.TotalSessions, sess.MaxSessions),
+						fmt.Sprintf("utilization=%d%%", sess.UtilizationPct))
+				} else {
+					sessStr := fmt.Sprintf("active=%d", sess.ActiveSessions)
+					if sess.DisconnectedSessions > 0 {
+						sessStr += fmt.Sprintf(" disconnected=%d", sess.DisconnectedSessions)
+					}
+					log(dc.LvlINF, "sessions="+sessStr)
+				}
+			}
 
 			// Final status line
 			switch result.Status {

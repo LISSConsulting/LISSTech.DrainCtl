@@ -43,7 +43,10 @@ and saves config.json without prompting.`,
 	cmd.Flags().String("dashboard-url", "", "Dashboard URL for agent registration")
 	cmd.Flags().Int("dashboard-port", dc.DefaultDashboardPort, "Dashboard listen port")
 	cmd.Flags().String("dashboard-group", dc.DefaultDashboardGroup, "AD group for dashboard access")
-	cmd.Flags().Int("grace-period", 60, "Grace period in minutes")
+	cmd.Flags().Int("grace-period", dc.DefaultGracePeriod, "Grace period in minutes (1–1440)")
+	cmd.Flags().Int("session-warning-threshold", dc.DefaultSessionWarningThreshold, "Session utilization warning threshold percent (0=disabled, 1–100)")
+	cmd.Flags().Int("poll-interval", dc.DefaultPollInterval, "Poll interval in seconds (≥10)")
+	cmd.Flags().Int("retention-days", dc.DefaultRetentionDays, "Audit retention in days (1–365)")
 	cmd.Flags().Bool("auto-pin", false, "Auto-pin dashboard TLS certificate on registration")
 
 	return cmd
@@ -170,10 +173,22 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config, log dc.LogFunc) e
 	dashPort, _ := cmd.Flags().GetInt("dashboard-port")
 	dashGroup, _ := cmd.Flags().GetString("dashboard-group")
 	grace, _ := cmd.Flags().GetInt("grace-period")
+	sessionThreshold, _ := cmd.Flags().GetInt("session-warning-threshold")
+	pollInterval, _ := cmd.Flags().GetInt("poll-interval")
+	retentionDays, _ := cmd.Flags().GetInt("retention-days")
 	autoPin, _ := cmd.Flags().GetBool("auto-pin")
 
 	if cmd.Flags().Changed("grace-period") {
 		fileCfg.GracePeriod = grace
+	}
+	if cmd.Flags().Changed("session-warning-threshold") {
+		fileCfg.SessionWarningThreshold = sessionThreshold
+	}
+	if cmd.Flags().Changed("poll-interval") {
+		fileCfg.PollInterval = pollInterval
+	}
+	if cmd.Flags().Changed("retention-days") {
+		fileCfg.RetentionDays = retentionDays
 	}
 
 	switch mode {
