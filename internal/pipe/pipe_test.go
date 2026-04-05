@@ -4,7 +4,9 @@ package pipe
 
 import (
 	"encoding/json"
+	"math"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,6 +202,48 @@ func TestHandlePipeConn_InvalidJSON(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandlePipeConn_ConnectionClosed verifies that handlePipeConn returns
+// cleanly when the client closes the connection before sending any data.
+// This exercises the `err != nil || n == 0` early-return path at the top of
+// handlePipeConn.
+func TestHandlePipeConn_ConnectionClosed(t *testing.T) {
+	client, server := net.Pipe()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handlePipeConn(server, &mockHandler{}, nil)
+	}()
+
+	// Close the client immediately — no data written.
+	_ = client.Close()
+	<-done // handlePipeConn must return without hanging.
+}
+
+// TestHandlePipeConn_StatusMarshalError verifies that handlePipeConn returns
+// {ok:false, error:"marshal result: ..."} when json.Marshal fails on the
+// status result.  A NaN in StateDurationSeconds (*float64) triggers
+// json.UnsupportedValueError, which is the only reliable way to force a
+// CheckResult marshal failure.
+func TestHandlePipeConn_StatusMarshalError(t *testing.T) {
+	nan := math.NaN()
+	handler := &mockHandler{
+		statusResult: &dc.CheckResult{
+			Status:               "Healthy",
+			StateDurationSeconds: &nan,
+		},
+	}
+
+	resp := pipeCall(t, PipeRequest{Cmd: "status"}, handler)
+
+	if resp.OK {
+		t.Fatal("expected OK=false when marshal fails")
+	}
+	if !strings.Contains(resp.Error, "marshal result") {
+		t.Errorf("error = %q, want 'marshal result' prefix", resp.Error)
 	}
 }
 

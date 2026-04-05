@@ -735,3 +735,95 @@ func TestPrune_CreateTempError(t *testing.T) {
 		t.Errorf("pruned = %d, want 0 on error", pruned)
 	}
 }
+
+// ── HistoryFiltered / ChangesFiltered / Changes scan-error paths ──────────────
+
+// overSizedLine writes a line longer than the scanner's 64 KiB buffer to
+// trigger bufio.ErrTooLong from scanRecords, producing a non-nil error return.
+func writeOverSizedLine(t *testing.T, path string) {
+	t.Helper()
+	fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("writeOverSizedLine: open %s: %v", path, err)
+	}
+	_, _ = fh.WriteString(strings.Repeat("z", 64*1024+1) + "\n")
+	_ = fh.Close()
+}
+
+// TestHistoryFiltered_ScanError verifies that HistoryFiltered propagates a
+// scanner error and returns (nil, err).
+func TestHistoryFiltered_ScanError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	store := &AuditStore{path: path}
+
+	rec := AuditRecord{Timestamp: time.Now(), Host: "srv1"}
+	_ = store.Record(&rec)
+	writeOverSizedLine(t, path)
+
+	recs, err := store.HistoryFiltered(10, nil, nil)
+	if err == nil {
+		t.Fatal("expected scanner error from HistoryFiltered, got nil")
+	}
+	if recs != nil {
+		t.Errorf("records = %v, want nil on error", recs)
+	}
+}
+
+// TestChangesFiltered_ScanError verifies that ChangesFiltered propagates a
+// scanner error and returns (nil, err).
+func TestChangesFiltered_ScanError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	store := &AuditStore{path: path}
+
+	rec := AuditRecord{Timestamp: time.Now(), Host: "srv1", Changed: true}
+	_ = store.Record(&rec)
+	writeOverSizedLine(t, path)
+
+	recs, err := store.ChangesFiltered(10, nil, nil)
+	if err == nil {
+		t.Fatal("expected scanner error from ChangesFiltered, got nil")
+	}
+	if recs != nil {
+		t.Errorf("records = %v, want nil on error", recs)
+	}
+}
+
+// TestChanges_ScanError verifies that Changes propagates a scanner error and
+// returns (nil, err).
+func TestChanges_ScanError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	store := &AuditStore{path: path}
+
+	rec := AuditRecord{Timestamp: time.Now(), Host: "srv1", Changed: true}
+	_ = store.Record(&rec)
+	writeOverSizedLine(t, path)
+
+	recs, err := store.Changes(10)
+	if err == nil {
+		t.Fatal("expected scanner error from Changes, got nil")
+	}
+	if recs != nil {
+		t.Errorf("records = %v, want nil on error", recs)
+	}
+}
+
+// TestScanRecords_OpenError verifies that scanRecords returns a wrapped error
+// (not nil) when os.Open fails with a non-NotExist error (here: a null byte in
+// the path produces syscall.EINVAL which is not os.IsNotExist).
+func TestScanRecords_OpenError(t *testing.T) {
+	store := &AuditStore{path: "invalid\x00path"}
+
+	recs, err := store.History(1)
+	if err == nil {
+		t.Fatal("expected error from History with invalid path, got nil")
+	}
+	if !strings.Contains(err.Error(), "open audit file") {
+		t.Errorf("error = %q, want 'open audit file' in message", err)
+	}
+	if recs != nil {
+		t.Errorf("records = %v, want nil on error", recs)
+	}
+}
