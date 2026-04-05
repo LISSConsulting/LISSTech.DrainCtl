@@ -1000,23 +1000,41 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 }
 
 // TestUpdateNotifySettings_InvalidThreshold verifies that an out-of-range
-// session threshold returns an error.
+// session threshold returns a descriptive validation error.
 func TestUpdateNotifySettings_InvalidThreshold(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
 	for _, pct := range []int{-1, 101} {
 		v := pct
-		if err := UpdateNotifySettings(nil, &v, nil, nil); err == nil {
+		err := UpdateNotifySettings(nil, &v, nil, nil)
+		if err == nil {
 			t.Errorf("UpdateNotifySettings(threshold=%d): expected error, got nil", pct)
+			continue
+		}
+		if !strings.Contains(err.Error(), "threshold") {
+			t.Errorf("UpdateNotifySettings(threshold=%d): error = %q, want message containing 'threshold'", pct, err.Error())
 		}
 	}
 }
 
 // TestUpdateNotifySettings_InvalidGracePeriod verifies that an out-of-range
-// grace period returns an error.
+// grace period returns a descriptive validation error.
 func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
 	for _, m := range []int{0, 1441} {
 		v := m
-		if err := UpdateNotifySettings(nil, nil, &v, nil); err == nil {
+		err := UpdateNotifySettings(nil, nil, &v, nil)
+		if err == nil {
 			t.Errorf("UpdateNotifySettings(grace=%d): expected error, got nil", m)
+			continue
+		}
+		if !strings.Contains(err.Error(), "grace period") {
+			t.Errorf("UpdateNotifySettings(grace=%d): error = %q, want message containing 'grace period'", m, err.Error())
 		}
 	}
 }

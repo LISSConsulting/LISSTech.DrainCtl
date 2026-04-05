@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -453,6 +454,44 @@ func TestOpenMemAuditStore_MkdirAllError(t *testing.T) {
 	}
 }
 
+// TestOpenMemAuditStore_InvalidPathError verifies that OpenMemAuditStore returns
+// an "invalid path" error when the path contains a null byte, which causes
+// windows.UTF16PtrFromString to fail with EINVAL.
+func TestOpenMemAuditStore_InvalidPathError(t *testing.T) {
+	dir := t.TempDir()
+	// Embed a null byte — UTF16PtrFromString rejects paths containing \x00.
+	path := filepath.Join(dir, "audit\x00.jsonl")
+
+	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err == nil {
+		t.Fatal("expected error for null-byte path, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid path") {
+		t.Errorf("error = %q, want message containing 'invalid path'", err.Error())
+	}
+}
+
+// TestOpenMemAuditStore_CreateFileError verifies that OpenMemAuditStore returns
+// an "open audit file" error when windows.CreateFile fails because a directory
+// already exists at the file path — OPEN_ALWAYS with GENERIC_WRITE on a
+// directory returns ERROR_ACCESS_DENIED on Windows.
+func TestOpenMemAuditStore_CreateFileError(t *testing.T) {
+	dir := t.TempDir()
+	// Create a directory at the exact audit-file path so CreateFile fails.
+	path := filepath.Join(dir, "audit.jsonl")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err == nil {
+		t.Fatal("expected error when CreateFile targets a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "open audit file") {
+		t.Errorf("error = %q, want message containing 'open audit file'", err.Error())
+	}
+}
+
 // TestOpenMemAuditStore_LoadError_OversizedLine verifies that OpenMemAuditStore
 // returns an error (wrapping the load error) when the audit file contains a
 // line that exceeds the 64 KiB scanner buffer limit.
@@ -579,5 +618,21 @@ func TestPrune_SeekError(t *testing.T) {
 	_, err := st.Prune(12 * time.Hour)
 	if err == nil {
 		t.Fatal("expected error from Prune after file close, got nil")
+	}
+}
+
+// TestPrune_EmptyStoreReturnsZero verifies the len(m.records)==0 early-return
+// path in Prune: calling Prune on a store that has never had records appended
+// must return (0, nil) without touching the file.
+func TestPrune_EmptyStoreReturnsZero(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup()
+
+	pruned, err := st.Prune(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("Prune on empty store: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("want 0 pruned, got %d", pruned)
 	}
 }
