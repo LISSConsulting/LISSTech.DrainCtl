@@ -95,6 +95,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	// Management / UI routes — require group membership.
 	mux.Handle("GET /api/v1/history/{host}", rlw(wg(http.HandlerFunc(ds.handleHistory))))
 	mux.Handle("GET /api/v1/servers", rlw(wg(http.HandlerFunc(ds.handleServers))))
+	mux.Handle("GET /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleGetServer))))
 	mux.Handle("DELETE /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleDeleteServer))))
 	mux.Handle("GET /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handleGetNotifyConfig))))
 	mux.Handle("PUT /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handlePutNotifyConfig))))
@@ -255,6 +256,27 @@ func (ds *DashboardServer) handleServers(w http.ResponseWriter, r *http.Request)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(servers)
+}
+
+// handleGetServer returns GET /api/v1/servers/{host} as a JSON object.
+// Returns 404 if the host is not registered.
+func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Request) {
+	host := r.PathValue("host")
+	if host == "" {
+		http.Error(w, "host parameter required", http.StatusBadRequest)
+		return
+	}
+
+	info := ds.state.Get(host)
+	if info == nil {
+		http.Error(w, "host not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(info)
 }
 
 // handleDeleteServer processes DELETE /api/v1/servers/{host}.

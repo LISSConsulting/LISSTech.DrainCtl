@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1064,6 +1065,23 @@ func TestSendNtfy_InvalidURL_ReturnsError(t *testing.T) {
 	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default", "test_tube")
 	if err == nil {
 		t.Error("expected error for invalid URL, got nil")
+	}
+}
+
+// TestSendWebhook_MarshalError_ReturnsError verifies that sendWebhook returns
+// an error when the payload contains an unmarshalable value (e.g. NaN float).
+// json.Marshal rejects IEEE 754 NaN/Inf because JSON has no representation for
+// them.
+func TestSendWebhook_MarshalError_ReturnsError(t *testing.T) {
+	payload := map[string]any{
+		"event": math.NaN(), // json.Marshal returns UnsupportedValueError for NaN
+	}
+	err := sendWebhook("http://example.com/hook", "", payload)
+	if err == nil {
+		t.Fatal("expected error for NaN payload, got nil")
+	}
+	if !strings.Contains(err.Error(), "marshal payload") {
+		t.Errorf("error = %q, want prefix 'marshal payload'", err)
 	}
 }
 
