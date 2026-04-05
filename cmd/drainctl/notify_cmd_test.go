@@ -258,3 +258,117 @@ func TestPrintNotifyTargets_DisabledWhenNoURLs(t *testing.T) {
 		t.Errorf("expected 'disabled' when hasTargets=false, got %v", lc.lines)
 	}
 }
+
+// ── setNotifyTarget ───────────────────────────────────────────────────────────
+
+// TestSetNotifyTarget_SetsURL verifies that a non-empty URL is upserted and
+// saved; the OK log line includes the URL.
+func TestSetNotifyTarget_SetsURL(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", notifyOverrides{}, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if !lc.contains("https://hook.example.com/") {
+		t.Errorf("expected URL in log output, got %v", lc.lines)
+	}
+	if len(cfg.Notifications) == 0 {
+		t.Fatal("expected at least one notification target in cfg")
+	}
+	if cfg.Notifications[0].URL != "https://hook.example.com/" {
+		t.Errorf("URL = %q, want https://hook.example.com/", cfg.Notifications[0].URL)
+	}
+}
+
+// TestSetNotifyTarget_AppliesSecret verifies that a non-nil Secret override is
+// written to the target after upsert.
+func TestSetNotifyTarget_AppliesSecret(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	secret := "s3cr3t"
+	ov := notifyOverrides{Secret: &secret}
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", ov, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if cfg.Notifications[0].Secret != "s3cr3t" {
+		t.Errorf("Secret = %q, want s3cr3t", cfg.Notifications[0].Secret)
+	}
+}
+
+// TestSetNotifyTarget_AppliesTriggers verifies that a non-nil Triggers override
+// replaces the target's trigger list.
+func TestSetNotifyTarget_AppliesTriggers(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	trigs := []dc.Trigger{dc.TriggerAlert}
+	ov := notifyOverrides{Triggers: &trigs}
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", ov, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if len(cfg.Notifications[0].Triggers) != 1 || cfg.Notifications[0].Triggers[0] != dc.TriggerAlert {
+		t.Errorf("Triggers = %v, want [alert]", cfg.Notifications[0].Triggers)
+	}
+}
+
+// TestSetNotifyTarget_AppliesRepeatMinutes verifies that a non-nil RepeatMinutes
+// override is stored on the target.
+func TestSetNotifyTarget_AppliesRepeatMinutes(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	repeat := 30
+	ov := notifyOverrides{RepeatMinutes: &repeat}
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", ov, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if cfg.Notifications[0].RepeatMinutes != 30 {
+		t.Errorf("RepeatMinutes = %d, want 30", cfg.Notifications[0].RepeatMinutes)
+	}
+}
+
+// TestSetNotifyTarget_EmptyURL_RemovesTarget verifies that an empty URL removes
+// all targets of the given type and logs a disabled message.
+func TestSetNotifyTarget_EmptyURL_RemovesTarget(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	cfg.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://old.example.com/"},
+	}
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "", notifyOverrides{}, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if len(cfg.Notifications) != 0 {
+		t.Errorf("expected notifications to be empty, got %v", cfg.Notifications)
+	}
+	if !lc.contains("webhook=disabled") {
+		t.Errorf("expected 'webhook=disabled' in log, got %v", lc.lines)
+	}
+}
+
+// TestSetNotifyTarget_EmptyURL_PreservesOtherTypes verifies that clearing a type
+// leaves other types' targets intact.
+func TestSetNotifyTarget_EmptyURL_PreservesOtherTypes(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	cfg.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook.example.com/"},
+		{Type: "ntfy", URL: "https://ntfy.sh/alerts"},
+	}
+	var lc logCapture
+	if err := setNotifyTarget(cfg, "webhook", "", notifyOverrides{}, lc.logFunc); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if len(cfg.Notifications) != 1 || cfg.Notifications[0].Type != "ntfy" {
+		t.Errorf("expected only ntfy target to remain, got %v", cfg.Notifications)
+	}
+}

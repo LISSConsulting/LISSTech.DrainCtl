@@ -1020,3 +1020,83 @@ func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
 		}
 	}
 }
+
+// ── UpdateX_LoadError ─────────────────────────────────────────────────────────
+
+// blockConfigRead sets up a temp ProgramData and places a directory at the
+// config.json path so that os.ReadFile returns a non-IsNotExist error.
+func blockConfigRead(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+	path := DefaultConfigPath()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("blockConfigRead: MkdirAll: %v", err)
+	}
+}
+
+// TestUpdateNotifications_LoadError verifies that UpdateNotifications propagates
+// a LoadConfig error (config path is a directory, not a file).
+func TestUpdateNotifications_LoadError(t *testing.T) {
+	blockConfigRead(t)
+	if err := UpdateNotifications(nil, nil); err == nil {
+		t.Fatal("expected error from UpdateNotifications when LoadConfig fails, got nil")
+	}
+}
+
+// TestUpdateSessionThreshold_LoadError verifies that UpdateSessionThreshold
+// propagates a LoadConfig error.
+func TestUpdateSessionThreshold_LoadError(t *testing.T) {
+	blockConfigRead(t)
+	if err := UpdateSessionThreshold(75, nil); err == nil {
+		t.Fatal("expected error from UpdateSessionThreshold when LoadConfig fails, got nil")
+	}
+}
+
+// TestUpdateGracePeriod_LoadError verifies that UpdateGracePeriod propagates
+// a LoadConfig error.
+func TestUpdateGracePeriod_LoadError(t *testing.T) {
+	blockConfigRead(t)
+	if err := UpdateGracePeriod(30, nil); err == nil {
+		t.Fatal("expected error from UpdateGracePeriod when LoadConfig fails, got nil")
+	}
+}
+
+// TestUpdateNotifySettings_LoadError verifies that UpdateNotifySettings
+// propagates a LoadConfig error.
+func TestUpdateNotifySettings_LoadError(t *testing.T) {
+	blockConfigRead(t)
+	if err := UpdateNotifySettings(nil, nil, nil, nil); err == nil {
+		t.Fatal("expected error from UpdateNotifySettings when LoadConfig fails, got nil")
+	}
+}
+
+// ── LoadConfig_FreshInstall_WriteDefaultError ─────────────────────────────────
+
+// TestLoadConfig_FreshInstall_WriteDefaultError verifies that LoadConfig returns
+// a "write default config" error when no config.json exists but the temp file
+// write in saveConfigToFile is blocked (a directory placed at the tmp path).
+func TestLoadConfig_FreshInstall_WriteDefaultError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	path := DefaultConfigPath()
+	// Create the data directory so os.ReadFile gets IsNotExist on config.json
+	// and os.MkdirAll in saveConfigToFile succeeds.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Place a directory at the tmp file path so os.WriteFile fails.
+	tmpPath := path + ".tmp"
+	if err := os.MkdirAll(tmpPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll tmpPath: %v", err)
+	}
+
+	_, err := LoadConfig(nil)
+	if err == nil {
+		t.Fatal("expected error when default config write fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "write default config") {
+		t.Errorf("error = %q, want message containing 'write default config'", err.Error())
+	}
+}
