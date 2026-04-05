@@ -388,3 +388,77 @@ func TestSendNotification_IndependentTargetState(t *testing.T) {
 		t.Errorf("srv2 should remain suppressed independently, got count2=%d", count2)
 	}
 }
+
+// ── sendNtfy ──────────────────────────────────────────────────────────────────
+
+func TestSendNtfy_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := sendNtfy(srv.URL, "DrainCtl: Alert on SRV01", "Drain active.", "high", "warning"); err != nil {
+		t.Fatalf("sendNtfy error: %v", err)
+	}
+}
+
+func TestSendNtfy_NonSuccessStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := sendNtfy(srv.URL, "title", "msg", "default", "white_check_mark")
+	if err == nil {
+		t.Error("expected error for 500 response, got nil")
+	}
+}
+
+func TestSendNtfy_SetsHeaders(t *testing.T) {
+	var captured *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := sendNtfy(srv.URL, "My Title", "My Message", "high", "warning"); err != nil {
+		t.Fatalf("sendNtfy error: %v", err)
+	}
+
+	checks := map[string]string{
+		"Title":    "My Title",
+		"Priority": "high",
+		"Tags":     "warning",
+	}
+	for header, want := range checks {
+		if got := captured.Header.Get(header); got != want {
+			t.Errorf("header %s = %q, want %q", header, got, want)
+		}
+	}
+	if ua := captured.Header.Get("User-Agent"); !strings.HasPrefix(ua, "DrainCtl/") {
+		t.Errorf("User-Agent = %q, expected DrainCtl/ prefix", ua)
+	}
+}
+
+// TestSendNotification_CallsNtfy verifies that ntfy-type targets are dispatched.
+func TestSendNotification_CallsNtfy(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{TriggerAlert}},
+	}
+	state := &NotifyState{}
+	result := newTestResult("SRV01", "Alert")
+
+	SendNotification(targets, state, result, TriggerAlert, "", nil)
+
+	if atomic.LoadInt32(&count) != 1 {
+		t.Errorf("ntfy endpoint called %d times, want 1", atomic.LoadInt32(&count))
+	}
+}
