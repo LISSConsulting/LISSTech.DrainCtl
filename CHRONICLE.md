@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fiftieth roam-mode pass complete.** Two correctness fixes: `dc.Check()` direct path now logs session data in plain output (fetched since Roam #1 but never surfaced — pipe path was fixed in Roam #49, direct path was missed); `generateSelfSigned` TLS cert write errors are now propagated with partial-file cleanup instead of being silently discarded.
+> Current state: **Fifty-first roam-mode pass complete.** Three hardening fixes: `PollInterval` gains an upper bound (`MaxPollInterval = 86400 s`) in `Config.Validate` — a hand-edited config.json could previously set an arbitrarily large interval, effectively disabling monitoring silently; 2 new tests. Dashboard `renderHistoryModal` transition branch now wraps `mode()` calls in `esc()`, matching the non-transition branch that already did so — defence-in-depth against a future unknown drain-mode value containing HTML-special characters.
 
 ## Completed Work
 
@@ -151,9 +151,12 @@
 | Roam #50 | `dc.Check()` direct path: session data now logged in plain output — capped server: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`; matches the pipe path output added in Roam #49 (fallback path fetched sessions into `res.Sessions` but never logged them) | correctness, CLI |
 | Roam #50 | `generateSelfSigned` TLS cert write: `pem.Encode` and `certOut.Close()` errors no longer silently ignored — on failure the partial cert file is removed before returning the error; previously a write failure left a corrupt empty cert on disk, causing `tls.LoadX509KeyPair` to fail on the next restart with no clear indication of the root cause | correctness, dashboard |
 
+| Roam #51 | `Config.Validate`: `PollInterval` guard widened from `< 10` to `< 10 \|\| > MaxPollInterval` (`MaxPollInterval = 86400 s`) — a hand-edited config.json with an arbitrarily large poll interval was silently accepted, effectively halting state monitoring; `MaxPollInterval` exported so callers and tests can reference it; 2 new tests (`TestValidate_PollIntervalClamped`, `TestValidate_PollIntervalPreservesValid`) | correctness, config, testing |
+| Roam #51 | Dashboard `renderHistoryModal` XSS consistency: transition branch now wraps `mode()` with `esc()` (`esc(mode(e.transition_from)) + " → " + esc(mode(e.drain_mode))`) — the non-transition branch already used `esc(mode(...))` but the transition branch injected the `mode()` result directly into `innerHTML`; drain-mode values are currently alphanumeric constants but defence-in-depth requires escaping all server-sourced strings | security, dashboard |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #50.)*
+*(All tracked items complete — nothing pending after Roam #51.)*
 
 ## Key Learnings
 

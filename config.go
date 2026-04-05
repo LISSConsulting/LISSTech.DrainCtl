@@ -25,7 +25,8 @@ const (
 	DefaultRetentionDays  = 90
 	MaxRetentionDays      = 365
 	MinRetentionDays      = 1
-	DefaultPollInterval   = 300 // seconds
+	DefaultPollInterval   = 300   // seconds
+	MaxPollInterval       = 86400 // seconds (1 day)
 	DefaultDashboardPort  = 49470
 	DefaultDashboardGroup = "Domain Admins"
 
@@ -200,7 +201,7 @@ func (c *Config) Validate(log LogFunc) {
 	if c.GracePeriod < 1 || c.GracePeriod > 1440 {
 		c.GracePeriod = DefaultGracePeriod
 	}
-	if c.PollInterval < 10 {
+	if c.PollInterval < 10 || c.PollInterval > MaxPollInterval {
 		c.PollInterval = DefaultPollInterval
 	}
 	if c.AuditPath == "" {

@@ -382,6 +382,30 @@ func TestValidate_PreservesValidTypes(t *testing.T) {
 	}
 }
 
+// ── Validate — poll interval range ───────────────────────────────────────────
+
+func TestValidate_PollIntervalClamped(t *testing.T) {
+	for _, interval := range []int{0, -1, 9, MaxPollInterval + 1, 999999} {
+		cfg := DefaultConfig()
+		cfg.PollInterval = interval
+		cfg.Validate(nil)
+		if cfg.PollInterval != DefaultPollInterval {
+			t.Errorf("poll_interval %d: expected default %d after Validate, got %d", interval, DefaultPollInterval, cfg.PollInterval)
+		}
+	}
+}
+
+func TestValidate_PollIntervalPreservesValid(t *testing.T) {
+	for _, interval := range []int{10, 60, DefaultPollInterval, 3600, MaxPollInterval} {
+		cfg := DefaultConfig()
+		cfg.PollInterval = interval
+		cfg.Validate(nil)
+		if cfg.PollInterval != interval {
+			t.Errorf("poll_interval %d: expected value unchanged after Validate, got %d", interval, cfg.PollInterval)
+		}
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {
