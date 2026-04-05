@@ -135,3 +135,88 @@ func TestApplyRemoteConfig_GracePeriodZeroSkipped(t *testing.T) {
 		t.Errorf("GracePeriod = %v, want %v (zero should be skipped)", cfg.GracePeriod, 30*time.Minute)
 	}
 }
+
+// ── pruneNotifyState ──────────────────────────────────────────────────────────
+
+func TestPruneNotifyState_RemovesStaleAlertEntry(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{"https://old.example.com": time.Now()},
+		LastSessionWarnNotify: map[string]time.Time{},
+	}
+	targets := []dc.NotificationTarget{
+		{URL: "https://active.example.com"},
+	}
+	pruneNotifyState(state, targets)
+	if _, ok := state.LastAlertNotify["https://old.example.com"]; ok {
+		t.Error("stale alert entry should have been pruned")
+	}
+}
+
+func TestPruneNotifyState_KeepsActiveAlertEntry(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{"https://active.example.com": time.Now()},
+		LastSessionWarnNotify: map[string]time.Time{},
+	}
+	targets := []dc.NotificationTarget{
+		{URL: "https://active.example.com"},
+	}
+	pruneNotifyState(state, targets)
+	if _, ok := state.LastAlertNotify["https://active.example.com"]; !ok {
+		t.Error("active alert entry should have been kept")
+	}
+}
+
+func TestPruneNotifyState_RemovesStaleSessionWarnEntry(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{},
+		LastSessionWarnNotify: map[string]time.Time{"https://old.example.com": time.Now()},
+	}
+	targets := []dc.NotificationTarget{
+		{URL: "https://active.example.com"},
+	}
+	pruneNotifyState(state, targets)
+	if _, ok := state.LastSessionWarnNotify["https://old.example.com"]; ok {
+		t.Error("stale session_warning entry should have been pruned")
+	}
+}
+
+func TestPruneNotifyState_KeepsActiveSessionWarnEntry(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{},
+		LastSessionWarnNotify: map[string]time.Time{"https://active.example.com": time.Now()},
+	}
+	targets := []dc.NotificationTarget{
+		{URL: "https://active.example.com"},
+	}
+	pruneNotifyState(state, targets)
+	if _, ok := state.LastSessionWarnNotify["https://active.example.com"]; !ok {
+		t.Error("active session_warning entry should have been kept")
+	}
+}
+
+func TestPruneNotifyState_EmptyTargets_ClearsAll(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{"https://a.example.com": time.Now()},
+		LastSessionWarnNotify: map[string]time.Time{"https://b.example.com": time.Now()},
+	}
+	pruneNotifyState(state, nil)
+	if len(state.LastAlertNotify) != 0 {
+		t.Errorf("LastAlertNotify should be empty after prune with no targets, got %d entries", len(state.LastAlertNotify))
+	}
+	if len(state.LastSessionWarnNotify) != 0 {
+		t.Errorf("LastSessionWarnNotify should be empty after prune with no targets, got %d entries", len(state.LastSessionWarnNotify))
+	}
+}
+
+func TestPruneNotifyState_SkipsBlankURLTargets(t *testing.T) {
+	state := &dc.NotifyState{
+		LastAlertNotify:       map[string]time.Time{"https://a.example.com": time.Now()},
+		LastSessionWarnNotify: map[string]time.Time{},
+	}
+	// A target with an empty URL should NOT be treated as active.
+	targets := []dc.NotificationTarget{{URL: ""}}
+	pruneNotifyState(state, targets)
+	if _, ok := state.LastAlertNotify["https://a.example.com"]; ok {
+		t.Error("entry for non-blank URL should be pruned when only blank-URL targets remain")
+	}
+}

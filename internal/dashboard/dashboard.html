@@ -5006,7 +5006,9 @@
                         esc(srv.hostname) +
                         '" data-status="' +
                         s +
-                        '"><div class="srv-h"><span class="srv-host">' +
+                        '"><div class="srv-h"><span class="srv-host" title="' +
+                        esc(srv.hostname) +
+                        '">' +
                         esc(srv.hostname.split(".")[0]) +
                         '</span><span class="badge ' +
                         s +
@@ -5349,7 +5351,9 @@
             async function showHistory(hostname, trigger) {
                 _histTrigger = trigger || null;
                 histOpen = true;
-                document.getElementById("hist-hostname").textContent = hostname.split(".")[0];
+                const histHostEl = document.getElementById("hist-hostname");
+                histHostEl.textContent = hostname.split(".")[0];
+                histHostEl.title = hostname;
                 document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
                 document.getElementById("hist-overlay").classList.add("open");
                 try {
@@ -5627,7 +5631,7 @@
                     const targets = c.notifications || [];
                     if (targets.length === 0) addTargetRow();
                     else targets.forEach((t) => addTargetRow(t));
-                    var th = c.session_warning_threshold || 80;
+                    var th = c.session_warning_threshold != null ? c.session_warning_threshold : 80;
                     var gr = c.grace_period || 60;
                     graceMinutes = gr;
                     document.getElementById("cfg-threshold").value = th;
@@ -5689,7 +5693,8 @@
                             }
                         }, 4000);
                     } else {
-                        st.textContent = "Error: HTTP " + r.status;
+                        const msg = await r.text();
+                        st.textContent = "Error: " + (msg.trim() || "HTTP " + r.status);
                         st.className = "settings-status err";
                     }
                 } catch (e) {

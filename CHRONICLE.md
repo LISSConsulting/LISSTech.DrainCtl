@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Twenty-third roam-mode pass complete.** Three targeted improvements: (1) `serviceHandler.cfg` changed from `*dc.ServiceConfig` to `atomic.Pointer[dc.ServiceConfig]` — the Execute loop (hot-reload write) and the pipe server goroutine (HandleStatus read) accessed the same pointer without synchronisation, which the race detector would catch; (2) `ServerState.Remove()` now calls `delete(s.history, hostname)` to release the in-memory ring buffer for removed hosts instead of leaking it; 1 new test (`TestRemove_ClearsHistoryRing`); (3) `format_test.go` added — 19 new tests covering `ParseFormat`, `ComputeStateDurations` (empty/single/same-mode accumulation/transition reset), `AuditToHistory` (field mapping, `KeyModified` omit/include), `FormatBool`, `or`, `joinFields`.
+> Current state: **Twenty-fourth roam-mode pass complete.** Four targeted improvements: (1) `loadNotifyConfig` JS bug fixed — `c.session_warning_threshold || 80` silently overrode a threshold of 0 (disabled) with 80; fixed to `!= null` guard matching the intent of Roam #16's save-path fix; (2) `saveNotifyConfig` now reads the response body on error so the server's message is shown instead of a bare "Error: HTTP N"; (3) `pruneNotifyState` gained 6 new tests in `check_test.go` covering stale-entry removal, active-entry preservation, both maps (`LastAlertNotify` and `LastSessionWarnNotify`), empty-targets full-clear, and blank-URL target skipping; (4) server cards and history modal title now carry a `title` attribute with the full FQDN so hovering reveals the complete hostname when only the short name is displayed.
 
 ## Completed Work
 
@@ -69,10 +69,14 @@
 | Roam #23 | `serviceHandler.cfg` race fix: `atomic.Pointer[dc.ServiceConfig]` replaces bare pointer field — Execute loop hot-reload write and pipe server goroutine HandleStatus read were unsynchronised | correctness, svc |
 | Roam #23 | `ServerState.Remove()` history cleanup: `delete(s.history, hostname)` added alongside `delete(s.servers, hostname)` — ring buffer was leaked for re-registered-then-removed hosts; 1 new test | correctness, dashboard, testing |
 | Roam #23 | `format_test.go`: 19 new tests — `ParseFormat` (5 valid + 1 invalid), `ComputeStateDurations` (empty/single/same-mode/transition-reset), `AuditToHistory` (field mapping, `KeyModified` omit/include), `FormatBool` (nil/true/false), `or`, `joinFields` | testing |
+| Roam #24 | `loadNotifyConfig` JS bug: `c.session_warning_threshold \|\| 80` silently overrode 0 (disabled) with 80 — fixed to `!= null` null-coalescing guard; Roam #16 fixed the save path but the load path was missed | correctness, dashboard |
+| Roam #24 | `saveNotifyConfig` JS: reads response body on error (`await r.text()`) so the server's message is displayed instead of a bare "Error: HTTP N" | UX, dashboard |
+| Roam #24 | `pruneNotifyState` tests: 6 new tests in `check_test.go` — stale alert/session-warn removal, active-entry preservation, empty-targets full-clear, blank-URL target skipping | testing, svc |
+| Roam #24 | Dashboard server cards and history modal: `title` attribute added to hostname span with full FQDN — hover reveals the complete hostname when only the short label is displayed | UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #23.)*
+*(All tracked items complete — nothing pending after Roam #24.)*
 
 ## Key Learnings
 
