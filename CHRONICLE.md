@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-eighth roam-mode pass complete.** Code organization: `cmd/drainctl/main.go` (929 lines) split into 8 focused command-group files; `main.go` reduced to 53 lines of package setup and root wiring. Bug fix: `runConfigureFlags` now upserts webhook/ntfy targets instead of appending, preventing duplicates when `drainctl configure --webhook-url` is run more than once.
+> Current state: **Forty-ninth roam-mode pass complete.** Three targeted improvements: `drainctl configure` flags path gains `--session-warning-threshold`, `--poll-interval`, `--retention-days` (only interactive wizard had these); `drainctl check` plain output now prints session data (capped: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`); dashboard event log sessInfo for unlimited servers now shows "N active[, M disconnected]" instead of "N active, T total", consistent with the server card.
 
 ## Completed Work
 
@@ -144,10 +144,13 @@
 | Roam #47 | `docs/guide.html` CLI Usage — added `--since`/`--until` RFC 3339 examples to the history section; added `drainctl configure` subsection covering both interactive wizard and flag-driven mode; Service Management — added `drainctl service status` line above `Get-Service DrainCtl` | docs |
 | Roam #48 | `cmd/drainctl/main.go` (929 lines) split into 8 focused command-group files — `check_cmd.go` (103), `history_cmd.go` (111), `audit_cmd.go` (31), `notify_cmd.go` (143), `service_cmd.go` (91), `register_cmd.go` (83), `dashboard_cmd.go` (171), `configure_cmd.go` (214); `main.go` reduced to package setup + root wiring (53 lines) | code quality, code organization |
 | Roam #48 | `runConfigureFlags` bug fix: webhook/ntfy URLs were appended unconditionally, so running `drainctl configure --webhook-url X` twice produced duplicate notification targets; replaced with `upsertNotifyTarget` helper (update first matching type or append new) shared with `setNotifyTarget` | correctness, CLI |
+| Roam #49 | `drainctl configure` flags path: added `--session-warning-threshold` (0–100, 0=disabled), `--poll-interval` (seconds, ≥10), and `--retention-days` (1–365) — the interactive wizard already prompted for all three but MSI installer/scripted invocations could only set grace period | feature, CLI |
+| Roam #49 | `drainctl check` plain output (service-pipe path): session data now printed between grace_period and the final status line — capped server: `sessions=N/M utilization=P%`; uncapped: `sessions=active=N[ disconnected=M]`; matches the information already present in the JSON/CSV paths | feature, CLI |
+| Roam #49 | Dashboard event log `sessInfo` (unlimited servers): changed from `"N active, T total"` to `"N active[, M disconnected]"` — consistent with the server card added in Roam #42; `total_sessions == active + disconnected` so the old form was redundant when no cap is set | correctness, UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #48.)*
+*(All tracked items complete — nothing pending after Roam #49.)*
 
 ## Key Learnings
 
