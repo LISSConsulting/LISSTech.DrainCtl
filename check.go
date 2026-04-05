@@ -7,6 +7,30 @@ import (
 	"time"
 )
 
+// ClassifyState derives the drain status, human-readable message, and exit
+// code from the three fundamental drain inputs.
+//
+//   - drainActive: drain mode is not AllowAll
+//   - stateDur:    how long the current mode has been active (0 if unknown)
+//   - gracePeriod: configured grace period
+//
+// The function is pure and deterministic — it contains no I/O or system calls.
+func ClassifyState(drainActive bool, stateDur, gracePeriod time.Duration) (status, message string, exitCode int) {
+	if drainActive && stateDur > gracePeriod {
+		return "Alert",
+			fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
+				stateDur.Truncate(time.Second), gracePeriod),
+			1
+	}
+	if drainActive {
+		remaining := gracePeriod - stateDur
+		return "Grace",
+			fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second)),
+			0
+	}
+	return "Healthy", "All connections allowed.", 0
+}
+
 // CheckOptions configures a drain mode check.
 type CheckOptions struct {
 	DBPath        string        // audit trail path (empty = skip audit)
@@ -80,15 +104,16 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 
 	// ── Evaluate state ─────────────────────────────────────────────────
 	drainActive := state.Mode != AllowAll
-	graceExceeded := !state.KeyModified.IsZero() && time.Since(state.KeyModified) > opts.GracePeriod
 	connAllowed := !drainActive
 	res.ConnectionsAllowed = &connAllowed
 
-	exitCode := 0
-	if drainActive && graceExceeded {
-		exitCode = 1
+	// Compute state duration from the registry key's last-write timestamp.
+	// If KeyModified is zero (timestamp unavailable), treat stateDur as 0 so
+	// ClassifyState conservatively returns Grace rather than Alert.
+	stateDur := time.Duration(0)
+	if !state.KeyModified.IsZero() {
+		stateDur = time.Since(state.KeyModified)
 	}
-	res.ExitCode = exitCode
 
 	// Detect state transitions
 	if store != nil {
@@ -138,6 +163,14 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 		}
 	}
 
+	// Determine final status using the audit store's duration when available
+	// (more accurate than the registry timestamp), falling back to stateDur.
+	effectiveDur := stateDur
+	if res.StateDurationSeconds != nil {
+		effectiveDur = time.Duration(*res.StateDurationSeconds) * time.Second
+	}
+	res.Status, res.Message, res.ExitCode = ClassifyState(drainActive, effectiveDur, opts.GracePeriod)
+
 	// Record this observation
 	if store != nil {
 		rec := &AuditRecord{
@@ -148,7 +181,7 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 			KeyModified: state.KeyModified,
 			Changed:     res.Transition,
 			ChangedBy:   res.ChangedBy,
-			ExitCode:    exitCode,
+			ExitCode:    res.ExitCode,
 		}
 		if res.Sessions != nil {
 			rec.ActiveSessions = res.Sessions.ActiveSessions
@@ -167,32 +200,22 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 		}
 	}
 
-	// ── Determine final status ─────────────────────────────────────────
-	if drainActive && graceExceeded {
-		age := time.Since(state.KeyModified).Truncate(time.Second)
-		res.Status = "Alert"
-		res.Message = fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.", age, opts.GracePeriod)
+	// ── Log final status ───────────────────────────────────────────────
+	switch res.Status {
+	case "Alert":
 		log(LvlERR, "status=alert", "connections_allowed=false",
-			fmt.Sprintf("drain_age=%s", age),
+			fmt.Sprintf("drain_age=%s", effectiveDur.Truncate(time.Second)),
 			fmt.Sprintf("threshold=%s", opts.GracePeriod),
-			fmt.Sprintf("exit=%d", exitCode),
+			fmt.Sprintf("exit=%d", res.ExitCode),
 		)
-		return &CheckOutput{Result: res, ExitCode: 1}, nil
-	}
-
-	if drainActive && !graceExceeded {
-		remaining := opts.GracePeriod - time.Since(state.KeyModified)
-		res.Status = "Grace"
-		res.Message = fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second))
+	case "Grace":
+		remaining := opts.GracePeriod - effectiveDur
 		log(LvlWRN, "status=grace", "connections_allowed=false",
 			fmt.Sprintf("grace_remaining=%s", remaining.Truncate(time.Second)),
 			"exit=0",
 		)
-		return &CheckOutput{Result: res, ExitCode: 0}, nil
+	default:
+		log(LvlOK, "status=healthy", "connections_allowed=true", "exit=0")
 	}
-
-	res.Status = "Healthy"
-	res.Message = "All connections allowed."
-	log(LvlOK, "status=healthy", "connections_allowed=true", "exit=0")
-	return &CheckOutput{Result: res, ExitCode: 0}, nil
+	return &CheckOutput{Result: res, ExitCode: res.ExitCode}, nil
 }

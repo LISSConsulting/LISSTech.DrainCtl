@@ -14,28 +14,6 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
-// classifyState derives the status string, human-readable message, and exit
-// code from the three fundamental drain inputs.
-//
-//   - drainActive:  drain mode is not AllowAll
-//   - stateDur:     how long the current mode has been active
-//   - gracePeriod:  configured grace period
-func classifyState(drainActive bool, stateDur, gracePeriod time.Duration) (status, message string, exitCode int) {
-	if drainActive && stateDur > gracePeriod {
-		return "Alert",
-			fmt.Sprintf("Drain mode active for %s, exceeding grace period of %s. New connections are blocked.",
-				stateDur.Truncate(time.Second), gracePeriod),
-			1
-	}
-	if drainActive {
-		remaining := gracePeriod - stateDur
-		return "Grace",
-			fmt.Sprintf("Drain mode active, within grace period (%s remaining).", remaining.Truncate(time.Second)),
-			0
-	}
-	return "Healthy", "All connections allowed.", 0
-}
-
 // svcRunCheck performs a single check cycle in service mode.
 func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
 	state, err := dc.ReadDrainMode()
@@ -85,7 +63,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	var status, message string
 	var exitCode int
-	status, message, exitCode = classifyState(drainActive, stateDur, cfg.GracePeriod)
+	status, message, exitCode = dc.ClassifyState(drainActive, stateDur, cfg.GracePeriod)
 
 	// Session tracking.
 	sess := dc.GetSessionSummary()

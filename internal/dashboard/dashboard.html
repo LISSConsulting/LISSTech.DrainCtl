@@ -1255,6 +1255,18 @@
                 color: var(--muted);
                 font-size: 0.82rem;
             }
+            .hist-entry-transition {
+                border-left: 3px solid var(--accent);
+                margin-left: -3px;
+            }
+            .hist-transition-dot {
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                background: var(--accent);
+                flex-shrink: 0;
+                align-self: center;
+            }
 
             /* Scrollbar */
             ::-webkit-scrollbar {
@@ -5452,7 +5464,9 @@
                               hour12: false,
                           });
                     let detail = "";
-                    if (e.drain_mode) detail += "mode=" + esc(mode(e.drain_mode));
+                    if (e.transition && e.transition_from)
+                        detail += mode(e.transition_from) + " \u2192 " + mode(e.drain_mode);
+                    else if (e.drain_mode) detail += "mode=" + esc(mode(e.drain_mode));
                     if (e.state_duration_seconds != null)
                         detail += (detail ? "  " : "") + "dur=" + dur(e.state_duration_seconds);
                     if (e.changed_by) detail += (detail ? "  " : "") + "by=" + esc(e.changed_by);
@@ -5463,8 +5477,9 @@
                             e.sessions.total_sessions +
                             "/" +
                             e.sessions.max_sessions;
-                    h += '<div class="hist-entry">';
+                    h += '<div class="hist-entry' + (e.transition ? " hist-entry-transition" : "") + '">';
                     h += '<div class="hist-ts">' + ts + "</div>";
+                    h += e.transition ? '<div class="hist-transition-dot" aria-hidden="true"></div>' : "";
                     h += '<div class="hist-badge ' + s + '">' + stLabel(s) + "</div>";
                     h += '<div class="hist-detail">' + (detail || "\u2014") + "</div>";
                     h += "</div>";
