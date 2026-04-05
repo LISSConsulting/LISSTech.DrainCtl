@@ -28,7 +28,7 @@ func runSessions(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("enumerate sessions: %w", err)
 	}
-	summary := dc.GetSessionSummary()
+	summary := dc.ComputeSessionSummary(sessions, dc.ReadMaxSessions())
 
 	if format == dc.FormatPlain {
 		log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
