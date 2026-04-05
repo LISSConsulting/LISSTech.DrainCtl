@@ -578,6 +578,66 @@ func TestCheckResultWrite_Plain_NoOp(t *testing.T) {
 	}
 }
 
+func TestCheckResultWrite_CSV_NilPointers(t *testing.T) {
+	// StateSince and StateDurationSeconds are nil — exercises the nil path in
+	// formatTimePtr and formatFloatPtr.
+	r := &CheckResult{
+		Version:        "26.91.0",
+		Timestamp:      time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
+		Host:           "SRV01",
+		DrainModeLabel: "AllowAll",
+		Status:         "Healthy",
+		// StateSince and StateDurationSeconds intentionally nil
+	}
+	var buf bytes.Buffer
+	r.Write(&buf, FormatCSV)
+	out := buf.String()
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("CSV line count = %d, want ≥ 2", len(lines))
+	}
+	// Nil fields should produce empty CSV columns, not panic or "nil".
+	if strings.Contains(out, "<nil>") {
+		t.Errorf("CSV contains literal <nil>: %s", out)
+	}
+	// state_since and state_duration_seconds columns should be empty strings.
+	fields := strings.Split(lines[1], ",")
+	// CSV: timestamp,host,drain_mode,drain_mode_value,state_since(4),state_duration(5),...
+	if len(fields) < 6 {
+		t.Fatalf("CSV data row has too few fields (%d): %s", len(fields), lines[1])
+	}
+	if fields[4] != "" {
+		t.Errorf("state_since column = %q, want empty string for nil", fields[4])
+	}
+	if fields[5] != "" {
+		t.Errorf("state_duration_seconds column = %q, want empty string for nil", fields[5])
+	}
+}
+
+func TestCheckResultWrite_Table_NilDuration(t *testing.T) {
+	// StateDurationSeconds is nil — exercises the nil path in formatAge.
+	r := &CheckResult{
+		Version:        "26.91.0",
+		Timestamp:      time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
+		Host:           "SRV01",
+		DrainModeLabel: "AllowAll",
+		Status:         "Healthy",
+		// StateDurationSeconds intentionally nil
+	}
+	var buf bytes.Buffer
+	r.Write(&buf, FormatTable)
+	out := buf.String()
+
+	if !strings.Contains(out, "SRV01") {
+		t.Errorf("table missing host: %s", out)
+	}
+	// Nil duration should render as "n/a", not panic.
+	if !strings.Contains(out, "n/a") {
+		t.Errorf("table should show n/a for nil duration: %s", out)
+	}
+}
+
 // ── WriteSessions ─────────────────────────────────────────────────────────────
 
 func makeTestSessions() ([]SessionInfo, *SessionSummary) {

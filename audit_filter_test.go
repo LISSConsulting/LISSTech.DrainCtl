@@ -279,4 +279,76 @@ func TestChangesFiltered(t *testing.T) {
 			t.Errorf("got %d records, want 0", len(got))
 		}
 	})
+
+	t.Run("limit applied returns newest n transitions", func(t *testing.T) {
+		store, cleanup := writeTestRecords(t, records)
+		defer cleanup()
+
+		// 2 total transitions (t2, t4); limit=1 → newest: t4
+		got, err := store.ChangesFiltered(1, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d records, want 1", len(got))
+		}
+		if !got[0].Timestamp.Equal(t4) {
+			t.Errorf("got[0] = %v, want %v", got[0].Timestamp, t4)
+		}
+	})
+
+	t.Run("limit with time filter", func(t *testing.T) {
+		// Add extra change records to exercise ring eviction.
+		extra := []AuditRecord{
+			{Timestamp: t1, Host: "h1", DrainMode: 0, Changed: false},
+			{Timestamp: t2, Host: "h1", DrainMode: 1, Changed: true},
+			{Timestamp: t3, Host: "h1", DrainMode: 0, Changed: true},
+			{Timestamp: t4, Host: "h1", DrainMode: 1, Changed: true},
+			{Timestamp: t5, Host: "h1", DrainMode: 0, Changed: true},
+		}
+		store, cleanup := writeTestRecords(t, extra)
+		defer cleanup()
+
+		// 4 transitions (t2–t5 all Changed); limit=2, since=t2 → newest 2: t5, t4
+		since := t2
+		got, err := store.ChangesFiltered(2, &since, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d records, want 2", len(got))
+		}
+		if !got[0].Timestamp.Equal(t5) {
+			t.Errorf("got[0] = %v, want %v", got[0].Timestamp, t5)
+		}
+		if !got[1].Timestamp.Equal(t4) {
+			t.Errorf("got[1] = %v, want %v", got[1].Timestamp, t4)
+		}
+	})
+
+	t.Run("ring buffer evicts oldest when over limit", func(t *testing.T) {
+		// 3 transitions but limit=2 — only the newest 2 should survive.
+		extra := []AuditRecord{
+			{Timestamp: t2, Host: "h1", DrainMode: 1, Changed: true},
+			{Timestamp: t3, Host: "h1", DrainMode: 0, Changed: true},
+			{Timestamp: t4, Host: "h1", DrainMode: 1, Changed: true},
+		}
+		store, cleanup := writeTestRecords(t, extra)
+		defer cleanup()
+
+		got, err := store.ChangesFiltered(2, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d records, want 2", len(got))
+		}
+		// Newest first: t4, t3
+		if !got[0].Timestamp.Equal(t4) {
+			t.Errorf("got[0] = %v, want %v", got[0].Timestamp, t4)
+		}
+		if !got[1].Timestamp.Equal(t3) {
+			t.Errorf("got[1] = %v, want %v", got[1].Timestamp, t3)
+		}
+	})
 }
