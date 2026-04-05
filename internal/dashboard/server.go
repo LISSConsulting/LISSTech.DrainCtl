@@ -351,6 +351,34 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Validate notification targets so invalid entries are rejected with a clear
+	// 400 instead of being silently stripped by Config.Validate() after save.
+	if in.Notifications != nil {
+		for i, t := range *in.Notifications {
+			if t.Type != "webhook" && t.Type != "ntfy" {
+				http.Error(w, fmt.Sprintf("notifications[%d]: unknown type %q (want \"webhook\" or \"ntfy\")", i, t.Type), http.StatusBadRequest)
+				return
+			}
+			if t.URL != "" {
+				lower := strings.ToLower(t.URL)
+				if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+					http.Error(w, fmt.Sprintf("notifications[%d]: URL must use http or https scheme", i), http.StatusBadRequest)
+					return
+				}
+			}
+			for _, tr := range t.Triggers {
+				if !dc.ValidTriggers[tr] {
+					http.Error(w, fmt.Sprintf("notifications[%d]: unknown trigger %q", i, tr), http.StatusBadRequest)
+					return
+				}
+			}
+			if t.RepeatMinutes < 0 || t.RepeatMinutes > dc.MaxRepeatMinutes {
+				http.Error(w, fmt.Sprintf("notifications[%d]: repeat_minutes must be 0–%d", i, dc.MaxRepeatMinutes), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
 	if ds.testPutNotifyConfigFunc != nil {
 		if err := ds.testPutNotifyConfigFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
 			dc.LogMsg(ds.log, dc.LvlERR, "update config failed (test hook)", fmt.Sprintf("error=%q", err))

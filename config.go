@@ -32,6 +32,10 @@ const (
 
 	DefaultSessionWarningThreshold = 80 // percent
 
+	// MaxRepeatMinutes caps notification repeat intervals. Values above this
+	// would overflow time.Duration when multiplied by time.Minute.
+	MaxRepeatMinutes = 10080 // 1 week
+
 	configMutexName = `Global\DrainCtlConfig`
 )
 
@@ -251,6 +255,7 @@ func (c *Config) Validate(log LogFunc) {
 	})
 
 	// Default empty triggers to DefaultTriggers, strip invalid trigger names.
+	// Clamp RepeatMinutes to [0, MaxRepeatMinutes] to prevent time.Duration overflow.
 	for i := range c.Notifications {
 		if len(c.Notifications[i].Triggers) == 0 {
 			c.Notifications[i].Triggers = append([]Trigger{}, DefaultTriggers...)
@@ -264,6 +269,12 @@ func (c *Config) Validate(log LogFunc) {
 				}
 				return false
 			})
+		}
+		if c.Notifications[i].RepeatMinutes < 0 {
+			c.Notifications[i].RepeatMinutes = 0
+		}
+		if c.Notifications[i].RepeatMinutes > MaxRepeatMinutes {
+			c.Notifications[i].RepeatMinutes = MaxRepeatMinutes
 		}
 	}
 }
