@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-third roam-mode pass complete.** Four CLI/correctness fixes: configure warns on unreadable config; check reports source=direct in fallback path; notify status shows effective default triggers; pipe handler returns proper errors on JSON marshal failure.
+> Current state: **Fifty-fourth roam-mode pass complete.** Two correctness/security fixes: `RepeatMinutes` clamped in `Config.Validate()` to prevent `time.Duration` overflow; `handlePutNotifyConfig` now validates notification targets (type, URL scheme, triggers, repeat_minutes) and returns 400 instead of silently dropping invalid entries.
 
 ## Completed Work
 
@@ -161,9 +161,12 @@
 | Roam #53 | `drainctl notify status`: empty `Triggers` list (meaning DefaultTriggers apply) now prints `triggers=[drain_on,drain_off,alert,healthy] (default)` instead of `triggers=[]` — the blank list was misleading since notifications were still firing on the default set | correctness, UX, CLI |
 | Roam #53 | `pipe.go` `handlePipeConn`: `json.Marshal` errors on status and history results now produce a `PipeResponse{OK:false, Error:…}` instead of silently sending `{ok:true,data:null}` — the client's `CheckViaPipe`/`HistoryViaPipe` would have failed with a JSON unmarshal error anyway, but now the error message is actionable | correctness, svc |
 
+| Roam #54 | `Config.Validate`: `RepeatMinutes` clamped to `[0, MaxRepeatMinutes]` (10080 = 1 week) — negative values are normalised to 0 (once-only); values above `MaxRepeatMinutes` would overflow `time.Duration` when multiplied by `time.Minute`; `MaxRepeatMinutes` exported constant added; 3 new tests (`TestValidate_RepeatMinutesClampsNegative`, `_ClampsAboveMax`, `_PreservesValid`) | correctness, config, testing |
+| Roam #54 | `handlePutNotifyConfig`: notification targets are now validated before calling `UpdateNotifySettings` — unknown `type` values, non-http/https URL schemes, unknown trigger names, and out-of-range `repeat_minutes` each return 400 Bad Request with an index-keyed message instead of being silently stripped by `Config.Validate()` after the save (which returned 200 OK with no indication that targets were dropped); 5 new tests (`TestHandlePutNotifyConfig_InvalidTargetType_Returns400`, `_InvalidTargetURLScheme_Returns400`, `_InvalidTargetTrigger_Returns400`, `_OutOfRangeRepeatMinutes_Returns400`, `_ClearNotificationsWithEmptyArray`) | correctness, security, dashboard, testing |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #52.)*
+*(All tracked items complete — nothing pending after Roam #54.)*
 
 ## Key Learnings
 

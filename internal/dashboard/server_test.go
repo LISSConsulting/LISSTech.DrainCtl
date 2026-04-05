@@ -1565,6 +1565,116 @@ func TestHandlePutNotifyConfig_ZeroGracePeriod_Returns400(t *testing.T) {
 	}
 }
 
+func TestHandlePutNotifyConfig_InvalidTargetType_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"notifications":[{"type":"sms","url":"https://example.com"}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for unknown target type", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_InvalidTargetURLScheme_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"notifications":[{"type":"webhook","url":"ftp://bad-scheme.com"}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for ftp:// URL scheme", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_InvalidTargetTrigger_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := `{"notifications":[{"type":"webhook","url":"https://example.com","triggers":["drain_on","bogus_trigger"]}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for unknown trigger", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_OutOfRangeRepeatMinutes_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	hookCalled := false
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+		hookCalled = true
+		return nil
+	}
+
+	body := fmt.Sprintf(`{"notifications":[{"type":"webhook","url":"https://example.com","repeat_minutes":%d}]}`, dc.MaxRepeatMinutes+1)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for repeat_minutes > MaxRepeatMinutes", w.Code)
+	}
+	if hookCalled {
+		t.Error("update hook must not be called for invalid input")
+	}
+}
+
+func TestHandlePutNotifyConfig_ClearNotificationsWithEmptyArray(t *testing.T) {
+	ds := newTestServer(t)
+
+	var capturedNotifs *[]dc.NotificationTarget
+	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+		capturedNotifs = notifications
+		return nil
+	}
+
+	// An explicit empty array must clear all targets (non-nil pointer to empty slice).
+	body := `{"notifications":[]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if capturedNotifs == nil {
+		t.Fatal("capturedNotifs is nil; empty array should produce a non-nil pointer to empty slice")
+	}
+	if len(*capturedNotifs) != 0 {
+		t.Errorf("len(*capturedNotifs) = %d, want 0", len(*capturedNotifs))
+	}
+}
+
 // ── securityMiddleware ────────────────────────────────────────────────────────
 
 func TestSecurityMiddleware_SetsExpectedHeaders(t *testing.T) {

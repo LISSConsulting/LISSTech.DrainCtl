@@ -406,6 +406,43 @@ func TestValidate_PollIntervalPreservesValid(t *testing.T) {
 	}
 }
 
+// ── RepeatMinutes clamping ────────────────────────────────────────────────────
+
+func TestValidate_RepeatMinutesClampsNegative(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: -1},
+	}
+	cfg.Validate(nil)
+	if cfg.Notifications[0].RepeatMinutes != 0 {
+		t.Errorf("RepeatMinutes -1: expected 0 after Validate, got %d", cfg.Notifications[0].RepeatMinutes)
+	}
+}
+
+func TestValidate_RepeatMinutesClampsAboveMax(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: MaxRepeatMinutes + 1},
+	}
+	cfg.Validate(nil)
+	if cfg.Notifications[0].RepeatMinutes != MaxRepeatMinutes {
+		t.Errorf("RepeatMinutes %d: expected %d after Validate, got %d", MaxRepeatMinutes+1, MaxRepeatMinutes, cfg.Notifications[0].RepeatMinutes)
+	}
+}
+
+func TestValidate_RepeatMinutesPreservesValid(t *testing.T) {
+	for _, rm := range []int{0, 1, 60, 1440, MaxRepeatMinutes} {
+		cfg := DefaultConfig()
+		cfg.Notifications = []NotificationTarget{
+			{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: rm},
+		}
+		cfg.Validate(nil)
+		if cfg.Notifications[0].RepeatMinutes != rm {
+			t.Errorf("RepeatMinutes %d: expected unchanged after Validate, got %d", rm, cfg.Notifications[0].RepeatMinutes)
+		}
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {
