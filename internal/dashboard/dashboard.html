@@ -4919,9 +4919,14 @@
                     sb.innerHTML = h;
                 }
 
-                // Area chart — track state proportions over time
-                stateHistory.push({ ok: c.ok, grace: c.grace, alert: c.alert, off: c.off, t: t });
-                if (stateHistory.length > MAX_HIST) stateHistory.shift();
+                // Area chart — track state proportions over time.
+                // Only record snapshots when at least one server is registered;
+                // zero-server entries would cause stateHistory[0].t === 0 and
+                // block chart rendering for up to MAX_HIST × 30 s after servers register.
+                if (t > 0) {
+                    stateHistory.push({ ok: c.ok, grace: c.grace, alert: c.alert, off: c.off, t: t });
+                    if (stateHistory.length > MAX_HIST) stateHistory.shift();
+                }
                 renderChart();
 
                 // Log all server states + detect transitions
@@ -5412,9 +5417,9 @@
                               : e.status === "Alert"
                                 ? "alert"
                                 : "off";
-                    const d = new Date(e.time);
+                    const d = new Date(e.timestamp);
                     const ts = isNaN(d)
-                        ? esc(e.time)
+                        ? esc(e.timestamp)
                         : d.toLocaleString("en-US", {
                               month: "short",
                               day: "numeric",
