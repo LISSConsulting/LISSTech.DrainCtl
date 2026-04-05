@@ -234,7 +234,5 @@ func resetSessionWarnCooldown(state *dc.NotifyState, cfg *dc.ServiceConfig) {
 	if cfg.SessionWarningThreshold <= 0 {
 		return
 	}
-	for k := range state.LastSessionWarnNotify {
-		delete(state.LastSessionWarnNotify, k)
-	}
+	clear(state.LastSessionWarnNotify)
 }

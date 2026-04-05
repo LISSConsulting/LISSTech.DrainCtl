@@ -45,9 +45,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	// notification is not re-fired immediately if sessions are still at high
 	// utilization when drain mode turns off.
 	if trigger == TriggerHealthy || trigger == TriggerDrainOff {
-		for k := range state.LastAlertNotify {
-			delete(state.LastAlertNotify, k)
-		}
+		clear(state.LastAlertNotify)
 	}
 
 	// Build payload.

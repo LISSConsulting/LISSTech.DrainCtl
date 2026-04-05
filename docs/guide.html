@@ -672,7 +672,11 @@ drainctl history
 drainctl history --changes-only
 
 # Last 10 records as JSON
-drainctl history --limit 10 --format json</code></pre>
+drainctl history --limit 10 --format json
+
+# Time-bounded queries (RFC 3339 timestamps)
+drainctl history --since 2025-01-01T00:00:00Z
+drainctl history --since 2025-06-01T00:00:00Z --until 2025-06-30T23:59:59Z</code></pre>
 
             <h3>Exit codes</h3>
             <table>
@@ -731,6 +735,18 @@ drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
                 <code>set-webhook</code> and <code>set-ntfy</code> commands are convenience shortcuts for single-target
                 setups.
             </div>
+
+            <h3>Interactive configuration wizard</h3>
+            <p>
+                Run <code>drainctl configure</code> without flags to step through every setting interactively.
+                The current value is shown in brackets &mdash; press Enter to keep it.
+            </p>
+            <pre><code>drainctl configure</code></pre>
+            <p>
+                When called with flags (e.g., by the MSI installer during silent install), it applies the values
+                directly and writes <code>config.json</code> without prompting:
+            </p>
+            <pre><code>drainctl configure --grace-period 120 --mode dashboard --dashboard-port 49470</code></pre>
 
             <!-- ── PowerShell ─────────────────────────────────────────────────────── -->
             <h2 id="powershell">6. PowerShell Module</h2>
@@ -1354,7 +1370,10 @@ if ($result.exit_code -ne 0) {
 
             <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
-            <pre><code># Check service status
+            <pre><code># Check service status (CLI — shows Running / Stopped)
+drainctl service status
+
+# Check service status (PowerShell — richer output)
 Get-Service DrainCtl
 
 # Stop / Start / Restart
