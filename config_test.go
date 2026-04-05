@@ -45,6 +45,22 @@ func TestClampRetention_LogsWarning(t *testing.T) {
 	}
 }
 
+func TestClampRetention_LogsWarning_AboveMax(t *testing.T) {
+	var warned bool
+	log := func(l Level, fields ...string) {
+		if l == LvlWRN {
+			warned = true
+		}
+	}
+	result := ClampRetention(MaxRetentionDays+1, log)
+	if result != MaxRetentionDays {
+		t.Errorf("ClampRetention(%d) = %d, want %d", MaxRetentionDays+1, result, MaxRetentionDays)
+	}
+	if !warned {
+		t.Error("expected warning log for above-max retention, got none")
+	}
+}
+
 // ── HasTrigger ────────────────────────────────────────────────────────────────
 
 func TestHasTrigger_ExplicitMatch(t *testing.T) {
