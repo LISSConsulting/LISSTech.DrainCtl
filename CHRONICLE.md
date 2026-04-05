@@ -259,9 +259,11 @@ Previous state: Sixty-sixth pass — ntfy notification titles made human-readabl
 
 | Roam #90 | Coverage sweep — 9 new tests across 3 files. (1) `ptr` helper added to `audit_filter_test.go` (compact `AuditRecord` builder for test use). (2) `audit_test.go` (4 new tests) — `GetHistory` was at 0% coverage; `TestGetHistory_ReturnsAllRecords` (basic happy path), `TestGetHistory_ChangesOnly` (ChangesOnly=true returns only Changed records), `TestGetHistory_LimitRespected` (Limit caps results), `TestGetHistory_InvalidPath` (blocking file at directory path → "open audit store" error); `GetHistory` 0% → 100%. (3) `config_test.go` (5 new tests) — `InstallCertificate` was at 0% coverage; `TestInstallCertificate_HappyPath` (files copied to data dir, config.Dashboard.TLSCert/TLSKey set), `TestInstallCertificate_MissingCert` (missing source → "file not found"), `TestInstallCertificate_MissingKey` (missing source → "file not found"), `TestInstallCertificate_WriteCertError` (directory at dstCert → "write cert"), `TestInstallCertificate_WriteKeyError` (directory at dstKey → "write key"); `InstallCertificate` 0% → 86.4%. Root: 63.8% → 66.3%. All tests pass, lint clean. | testing |
 
+| Roam #91 | Coverage sweep — 4 new tests across 2 files. (1) `internal/store/memstore_test.go` (1 new test) — `TestLoad_SeekError` covers the `m.file.Seek(0, 0)` error-return path at the top of `load`; triggered by closing the OS file handle before calling `load()` directly (package-internal test); `load` 84.6% → 92.3%; store 94.8% → 95.5%. (2) `config_test.go` (3 new tests) — remaining uncovered branches in `InstallCertificate`; `TestInstallCertificate_ReadCertError` (directory at srcCert → Stat passes, ReadFile fails → "read cert"), `TestInstallCertificate_ReadKeyError` (directory at srcKey after cert write succeeds → "read key"), `TestInstallCertificate_LoadConfigError` (directory placed at DefaultConfigPath() blocks os.ReadFile with non-IsNotExist error → "load config"); `InstallCertificate` 86.4% → 100%; root 66.3% → 66.6%. All tests pass, lint clean. | testing |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #90.)*
+*(All tracked items complete — nothing pending after Roam #91.)*
 
 ## Key Learnings
 

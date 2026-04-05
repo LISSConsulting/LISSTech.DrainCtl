@@ -1274,3 +1274,99 @@ func TestInstallCertificate_WriteKeyError(t *testing.T) {
 		t.Errorf("error = %q, want 'write key' in message", err.Error())
 	}
 }
+
+// TestInstallCertificate_ReadCertError verifies that InstallCertificate returns
+// a "read cert" error when the source cert path passes Stat but cannot be read
+// — triggered by placing a directory at certPath (os.Stat on a directory
+// succeeds; os.ReadFile on a directory fails).
+func TestInstallCertificate_ReadCertError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	// Place a directory at certPath: Stat succeeds, ReadFile fails.
+	srcCert := filepath.Join(dir, "src.crt")
+	if err := os.MkdirAll(srcCert, 0o755); err != nil {
+		t.Fatalf("MkdirAll srcCert: %v", err)
+	}
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error when cert source is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "read cert") {
+		t.Errorf("error = %q, want 'read cert' in message", err.Error())
+	}
+}
+
+// TestInstallCertificate_ReadKeyError verifies that InstallCertificate returns
+// a "read key" error when the source key path passes Stat but cannot be read
+// — triggered by placing a directory at keyPath after certPath is valid.
+func TestInstallCertificate_ReadKeyError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcCert := filepath.Join(dir, "src.crt")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+	// Place a directory at keyPath: Stat succeeds, ReadFile fails.
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.MkdirAll(srcKey, 0o755); err != nil {
+		t.Fatalf("MkdirAll srcKey: %v", err)
+	}
+
+	// Ensure the data dir exists so WriteFile(dstCert) can proceed first.
+	if err := os.MkdirAll(DefaultDataDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll dataDir: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error when key source is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "read key") {
+		t.Errorf("error = %q, want 'read key' in message", err.Error())
+	}
+}
+
+// TestInstallCertificate_LoadConfigError verifies that InstallCertificate
+// returns a "load config" error when LoadConfig fails after the cert and key
+// files have been written successfully. The config.json path is blocked by
+// placing a directory there so os.ReadFile returns a non-IsNotExist error.
+func TestInstallCertificate_LoadConfigError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+
+	srcCert := filepath.Join(dir, "src.crt")
+	srcKey := filepath.Join(dir, "src.key")
+	if err := os.WriteFile(srcCert, []byte("CERT DATA"), 0o644); err != nil {
+		t.Fatalf("WriteFile cert: %v", err)
+	}
+	if err := os.WriteFile(srcKey, []byte("KEY DATA"), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+
+	// Create the data dir so dstCert/dstKey writes succeed.
+	if err := os.MkdirAll(DefaultDataDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll dataDir: %v", err)
+	}
+
+	// Block config.json by placing a directory at that path so LoadConfig
+	// returns a non-IsNotExist read error.
+	configPath := DefaultConfigPath()
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll configPath: %v", err)
+	}
+
+	err := InstallCertificate(srcCert, srcKey, nil)
+	if err == nil {
+		t.Fatal("expected error when LoadConfig fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "load config") {
+		t.Errorf("error = %q, want 'load config' in message", err.Error())
+	}
+}
