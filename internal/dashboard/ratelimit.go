@@ -56,9 +56,10 @@ func (rl *ipRateLimiter) Allow(ip string) bool {
 	b.lastSeen = now
 
 	// Prune IPs that haven't made a request in 5 minutes.
+	// The current IP's lastSeen was just set to now, so it is never stale here.
 	const pruneAfter = 5 * time.Minute
 	for addr, bkt := range rl.buckets {
-		if addr != ip && now.Sub(bkt.lastSeen) > pruneAfter {
+		if now.Sub(bkt.lastSeen) > pruneAfter {
 			delete(rl.buckets, addr)
 		}
 	}

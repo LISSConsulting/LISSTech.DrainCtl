@@ -47,9 +47,10 @@ type DashboardServer struct {
 	testLoadConfigFunc func() (*dc.Config, error)
 
 	// testPutNotifyConfigFunc, if non-nil, is called by handlePutNotifyConfig
-	// instead of dc.UpdateNotifications / dc.UpdateSessionThreshold / dc.UpdateGracePeriod.
-	// Receives the parsed request values; nil pointers mean the field was absent.
-	testPutNotifyConfigFunc func(notifications []dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
+	// instead of dc.UpdateNotifySettings. Receives the parsed request values;
+	// nil notifications means the field was absent from the request body
+	// (no-op for that field). nil threshold/gracePeriod mean the fields were absent.
+	testPutNotifyConfigFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -312,7 +313,10 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	_ = enc.Encode(out)
 }
 
-// handlePutNotifyConfig accepts JSON and updates notification config via scoped updaters.
+// handlePutNotifyConfig accepts JSON and updates notification config atomically.
+// All provided fields are written in a single config load+save cycle.
+// Absent fields (not present in the JSON body) are left unchanged; to clear
+// notifications send "notifications": [].
 func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
 	if err != nil {
@@ -320,10 +324,12 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Use pointer-to-slice so we can distinguish absent ("don't change") from
+	// explicit empty array ("clear all notifications").
 	var in struct {
-		Notifications           []dc.NotificationTarget `json:"notifications"`
-		SessionWarningThreshold *int                    `json:"session_warning_threshold,omitempty"`
-		GracePeriod             *int                    `json:"grace_period,omitempty"`
+		Notifications           *[]dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold *int                     `json:"session_warning_threshold,omitempty"`
+		GracePeriod             *int                     `json:"grace_period,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -337,26 +343,10 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 			return
 		}
 	} else {
-		if err := dc.UpdateNotifications(in.Notifications, ds.log); err != nil {
-			dc.LogMsg(ds.log, dc.LvlERR, "update notifications failed", fmt.Sprintf("error=%q", err))
-			http.Error(w, "failed to update notifications", http.StatusInternalServerError)
+		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, ds.log); err != nil {
+			dc.LogMsg(ds.log, dc.LvlERR, "update notify settings failed", fmt.Sprintf("error=%q", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-
-		if in.SessionWarningThreshold != nil {
-			if err := dc.UpdateSessionThreshold(*in.SessionWarningThreshold, ds.log); err != nil {
-				dc.LogMsg(ds.log, dc.LvlERR, "update session threshold failed", fmt.Sprintf("error=%q", err))
-				http.Error(w, "failed to update session threshold", http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if in.GracePeriod != nil {
-			if err := dc.UpdateGracePeriod(*in.GracePeriod, ds.log); err != nil {
-				dc.LogMsg(ds.log, dc.LvlERR, "update grace period failed", fmt.Sprintf("error=%q", err))
-				http.Error(w, "failed to update grace period", http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 

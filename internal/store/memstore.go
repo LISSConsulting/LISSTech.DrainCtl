@@ -267,7 +267,10 @@ func (m *MemAuditStore) Prune(retention time.Duration) (int64, error) {
 
 	w := bufio.NewWriter(m.file)
 	for _, r := range kept {
-		data, _ := json.Marshal(r)
+		data, err := json.Marshal(r)
+		if err != nil {
+			continue
+		}
 		_, _ = fmt.Fprintf(w, "%s\n", data)
 	}
 	if err := w.Flush(); err != nil {

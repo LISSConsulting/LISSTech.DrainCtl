@@ -1259,7 +1259,7 @@ func TestHandleGetNotifyConfig_MultipleTargets(t *testing.T) {
 
 func TestHandlePutNotifyConfig_Success_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return nil
 	}
 
@@ -1288,7 +1288,7 @@ func TestHandlePutNotifyConfig_Success_Returns200(t *testing.T) {
 
 func TestHandlePutNotifyConfig_InvalidJSON_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return nil
 	}
 
@@ -1303,7 +1303,7 @@ func TestHandlePutNotifyConfig_InvalidJSON_Returns400(t *testing.T) {
 
 func TestHandlePutNotifyConfig_UpdateError_Returns500(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return fmt.Errorf("disk full")
 	}
 
@@ -1320,18 +1320,16 @@ func TestHandlePutNotifyConfig_UpdateError_Returns500(t *testing.T) {
 func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T) {
 	ds := newTestServer(t)
 
-	var capturedTargets []dc.NotificationTarget
+	var capturedNotifs *[]dc.NotificationTarget
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutNotifyConfigFunc = func(notifications []dc.NotificationTarget, threshold *int, grace *int) error {
-		capturedTargets = notifications
+	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, threshold *int, grace *int) error {
+		capturedNotifs = notifications
 		capturedThreshold = threshold
 		capturedGrace = grace
 		return nil
 	}
 
-	th := 90
-	gp := 30
 	payload := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
@@ -1340,8 +1338,8 @@ func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T)
 		Notifications: []dc.NotificationTarget{
 			{Type: "ntfy", URL: "https://ntfy.sh/alerts", Triggers: dc.DefaultTriggers},
 		},
-		SessionWarningThreshold: th,
-		GracePeriod:             gp,
+		SessionWarningThreshold: 90,
+		GracePeriod:             30,
 	}
 	body, _ := json.Marshal(payload)
 
@@ -1352,8 +1350,8 @@ func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if len(capturedTargets) != 1 || capturedTargets[0].URL != "https://ntfy.sh/alerts" {
-		t.Errorf("capturedTargets = %v, want 1 entry with URL https://ntfy.sh/alerts", capturedTargets)
+	if capturedNotifs == nil || len(*capturedNotifs) != 1 || (*capturedNotifs)[0].URL != "https://ntfy.sh/alerts" {
+		t.Errorf("capturedNotifs = %v, want 1 entry with URL https://ntfy.sh/alerts", capturedNotifs)
 	}
 	if capturedThreshold == nil || *capturedThreshold != 90 {
 		t.Errorf("capturedThreshold = %v, want 90", capturedThreshold)
@@ -1368,7 +1366,7 @@ func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing
 
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutNotifyConfigFunc = func(_ []dc.NotificationTarget, threshold *int, grace *int) error {
+	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, threshold *int, grace *int) error {
 		capturedThreshold = threshold
 		capturedGrace = grace
 		return nil
@@ -1394,9 +1392,9 @@ func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing
 func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
 	ds := newTestServer(t)
 
-	var capturedTargets []dc.NotificationTarget
-	ds.testPutNotifyConfigFunc = func(notifications []dc.NotificationTarget, _ *int, _ *int) error {
-		capturedTargets = notifications
+	var capturedNotifs *[]dc.NotificationTarget
+	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+		capturedNotifs = notifications
 		return nil
 	}
 
@@ -1417,11 +1415,38 @@ func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if len(capturedTargets) != 1 {
-		t.Fatalf("len(capturedTargets) = %d, want 1", len(capturedTargets))
+	if capturedNotifs == nil || len(*capturedNotifs) != 1 {
+		t.Fatalf("len(capturedNotifs) = %v, want 1", capturedNotifs)
 	}
-	if capturedTargets[0].Secret != "my-hmac-secret" {
-		t.Errorf("Secret = %q, want my-hmac-secret", capturedTargets[0].Secret)
+	if (*capturedNotifs)[0].Secret != "my-hmac-secret" {
+		t.Errorf("Secret = %q, want my-hmac-secret", (*capturedNotifs)[0].Secret)
+	}
+}
+
+func TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil(t *testing.T) {
+	ds := newTestServer(t)
+
+	var capturedNotifs *[]dc.NotificationTarget
+	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+		capturedNotifs = notifications
+		return nil
+	}
+
+	// Body contains only threshold — no "notifications" key at all.
+	th := 75
+	body, _ := json.Marshal(struct {
+		SessionWarningThreshold int `json:"session_warning_threshold"`
+	}{SessionWarningThreshold: th})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
+	ds.handlePutNotifyConfig(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedNotifs != nil {
+		t.Errorf("capturedNotifs = %v, want nil (absent field should not clear notifications)", capturedNotifs)
 	}
 }
 
