@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Twenty-fourth roam-mode pass complete.** Four targeted improvements: (1) `loadNotifyConfig` JS bug fixed — `c.session_warning_threshold || 80` silently overrode a threshold of 0 (disabled) with 80; fixed to `!= null` guard matching the intent of Roam #16's save-path fix; (2) `saveNotifyConfig` now reads the response body on error so the server's message is shown instead of a bare "Error: HTTP N"; (3) `pruneNotifyState` gained 6 new tests in `check_test.go` covering stale-entry removal, active-entry preservation, both maps (`LastAlertNotify` and `LastSessionWarnNotify`), empty-targets full-clear, and blank-URL target skipping; (4) server cards and history modal title now carry a `title` attribute with the full FQDN so hovering reveals the complete hostname when only the short name is displayed.
+> Current state: **Twenty-fifth roam-mode pass complete.** Three correctness/quality fixes: (1) `handlePutNotifyConfig` now uses a single atomic `UpdateNotifySettings` call instead of three separate LoadConfig+save cycles, and uses `*[]NotificationTarget` so an absent `notifications` field is a no-op instead of silently clearing all targets; (2) `MemAuditStore.Prune` now skips records that fail `json.Marshal` (was writing empty lines) — consistent with `flushLocked`; (3) `ipRateLimiter.Allow` pruning loop drops the redundant `addr != ip` guard since the current IP's `lastSeen` is always `now` (never stale).
 
 ## Completed Work
 
@@ -73,10 +73,13 @@
 | Roam #24 | `saveNotifyConfig` JS: reads response body on error (`await r.text()`) so the server's message is displayed instead of a bare "Error: HTTP N" | UX, dashboard |
 | Roam #24 | `pruneNotifyState` tests: 6 new tests in `check_test.go` — stale alert/session-warn removal, active-entry preservation, empty-targets full-clear, blank-URL target skipping | testing, svc |
 | Roam #24 | Dashboard server cards and history modal: `title` attribute added to hostname span with full FQDN — hover reveals the complete hostname when only the short label is displayed | UX, dashboard |
+| Roam #25 | `handlePutNotifyConfig`: replaced three separate LoadConfig+save cycles with single `UpdateNotifySettings()` call; changed `in.Notifications` from `[]NotificationTarget` to `*[]NotificationTarget` so an absent field is a no-op (was silently clearing all targets on partial updates); 1 new test `TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil`; updated 5 existing test hook signatures | correctness, dashboard, testing |
+| Roam #25 | `MemAuditStore.Prune`: `json.Marshal` error now skips the record instead of writing an empty line — matches `flushLocked` behaviour | correctness, svc |
+| Roam #25 | `ipRateLimiter.Allow`: removed redundant `addr != ip` guard in prune loop; current IP's `lastSeen` is always `now` after refill so it is never pruned regardless | code quality, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #24.)*
+*(All tracked items complete — nothing pending after Roam #25.)*
 
 ## Key Learnings
 
