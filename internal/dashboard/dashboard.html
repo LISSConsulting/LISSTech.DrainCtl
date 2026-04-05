@@ -5247,6 +5247,7 @@
                 document.getElementById("btn-gear").setAttribute("aria-expanded", isOpen);
                 if (isOpen) {
                     overlay.querySelector(".settings-close").focus();
+                    loadNotifyConfig();
                 } else {
                     document.getElementById("btn-gear").focus();
                 }
@@ -5524,6 +5525,8 @@
                 return targets;
             }
             async function loadNotifyConfig() {
+                document.getElementById("target-list").innerHTML =
+                    '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
                 try {
                     const r = await fetch("/api/v1/notify-config");
                     if (!r.ok) return;
@@ -5572,6 +5575,8 @@
                     return;
                 }
                 graceEl.style.borderColor = "";
+                const saveBtn = document.querySelector(".btn-save");
+                if (saveBtn) saveBtn.disabled = true;
                 try {
                     const body = JSON.stringify({
                         notifications,
@@ -5586,6 +5591,12 @@
                     if (r.ok) {
                         st.textContent = "Saved successfully.";
                         st.className = "settings-status ok";
+                        setTimeout(() => {
+                            if (st.className === "settings-status ok") {
+                                st.textContent = "";
+                                st.className = "settings-status";
+                            }
+                        }, 4000);
                     } else {
                         st.textContent = "Error: HTTP " + r.status;
                         st.className = "settings-status err";
@@ -5593,6 +5604,8 @@
                 } catch (e) {
                     st.textContent = "Error: " + e.message;
                     st.className = "settings-status err";
+                } finally {
+                    if (saveBtn) saveBtn.disabled = false;
                 }
             }
             async function sendTestNotification() {
