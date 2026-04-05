@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Thirtieth roam-mode pass complete.** Three improvements: (1) webhook/ntfy notification payload now includes `sessions` field (active, total, max, utilization_pct) when session data is available — enables webhook consumers to see session state on all triggers, and makes `session_warning` payloads actually useful; (2) ntfy `session_warning` body now reads "Session utilization at N% (X/Y sessions)." instead of the generic status message that doesn't mention sessions; (3) dashboard `render()` now prunes stale `prev` entries for servers that have been removed — prevents removed-then-re-added servers from showing a spurious transition event from stale pre-removal state; 3 new tests.
+> Current state: **Thirty-first roam-mode pass complete.** Two dashboard bug fixes: (1) `renderHistoryModal` was reading `e.time` but `CheckResult` serializes as `"timestamp"` — all history modal timestamps were silently blank; (2) `stateHistory` was accumulating `t=0` entries on polls with no registered servers; `stateHistory[0].t === 0` caused `renderChart` to show "Collecting data..." for up to 30 minutes after servers registered on a fresh install.
 
 ## Completed Work
 
@@ -89,10 +89,12 @@
 | Roam #30 | `SendNotification` webhook payload now includes `"sessions"` field (`active_sessions`, `disconnected_sessions`, `total_sessions`, `max_sessions`, `utilization_pct`) when `result.Sessions != nil` — previously all notification triggers, including `session_warning`, sent no session data to webhook consumers | feature, notify |
 | Roam #30 | ntfy `session_warning` body overridden to "Session utilization at N% (X/Y sessions)." — previously sent `result.Message` which for a Healthy server reads "All connections allowed." and contains no session information; tags changed to `busts_in_silhouette` | UX, notify |
 | Roam #30 | Dashboard `render()` prunes stale `prev` map entries after each refresh — servers removed from the dashboard left behind entries that could surface as false "transition" events if the server was later re-added; 3 new tests (`TestSendNotification_WebhookPayloadIncludesSessions`, `_OmitsSessionsWhenNil`, `_NtfySessionWarningMessage`) | correctness, dashboard, testing |
+| Roam #31 | Dashboard `renderHistoryModal` bug fix: `e.time` → `e.timestamp` — `CheckResult` serializes its timestamp as `"timestamp"` in JSON, so `e.time` was always `undefined`; all history modal entries showed a blank timestamp | correctness, dashboard |
+| Roam #31 | Dashboard `stateHistory` bug fix: `push` is now conditional on `t > 0` — polls while no servers are registered produced `{ t: 0 }` entries; `renderChart` exits early when `stateHistory[0].t === 0`, so the chart would not appear for up to 30 minutes (MAX_HIST × 30 s) after the first servers registered on a fresh install | correctness, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #30.)*
+*(All tracked items complete — nothing pending after Roam #31.)*
 
 ## Key Learnings
 
