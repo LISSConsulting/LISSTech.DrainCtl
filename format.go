@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -268,7 +269,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			if r.ExitCode > 0 {
 				lvl = LvlERR
 			}
-			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, lvl, joinFields(fields))
+			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, lvl, strings.Join(fields, " "))
 		}
 	}
 }
@@ -331,8 +332,12 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.StateDurationSeconds != nil {
 				dur = (time.Duration(*hr.StateDurationSeconds) * time.Second).String()
 			}
+			ts := hr.Timestamp
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				ts = t.Local().Format("2006-01-02 15:04:05")
+			}
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n",
-				hr.Timestamp, hr.DrainMode, dur, ch, by, hr.ExitCode,
+				ts, hr.DrainMode, dur, ch, by, hr.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -354,7 +359,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.ExitCode > 0 {
 				lvl = LvlERR
 			}
-			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", hr.Timestamp, lvl, joinFields(fields))
+			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", hr.Timestamp, lvl, strings.Join(fields, " "))
 		}
 	}
 }
@@ -421,10 +426,9 @@ func WriteSessions(w io.Writer, sessions []SessionInfo, summary *SessionSummary,
 				fmt.Sprintf("state=%s", s.State),
 			}
 			if s.UserName != "" {
-				fields = append([]string{fmt.Sprintf("user=%s", s.UserName)}, fields[1:]...)
-				fields[1] = fmt.Sprintf("session_id=%d", s.SessionID)
+				fields = append([]string{fmt.Sprintf("user=%s", s.UserName)}, fields...)
 			}
-			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, joinFields(fields))
+			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, strings.Join(fields, " "))
 		}
 		if summary != nil {
 			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, formatSessionSummaryLine(summary))
@@ -491,15 +495,4 @@ func or(a, b string) string {
 		return a
 	}
 	return b
-}
-
-func joinFields(fields []string) string {
-	result := ""
-	for i, f := range fields {
-		if i > 0 {
-			result += " "
-		}
-		result += f
-	}
-	return result
 }

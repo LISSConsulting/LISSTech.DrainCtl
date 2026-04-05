@@ -222,26 +222,6 @@ func TestOr_FallsBackToSecond(t *testing.T) {
 	}
 }
 
-// ── joinFields ────────────────────────────────────────────────────────────────
-
-func TestJoinFields_Empty(t *testing.T) {
-	if got := joinFields(nil); got != "" {
-		t.Errorf("joinFields(nil) = %q, want %q", got, "")
-	}
-}
-
-func TestJoinFields_Single(t *testing.T) {
-	if got := joinFields([]string{"a"}); got != "a" {
-		t.Errorf("joinFields([\"a\"]) = %q, want %q", got, "a")
-	}
-}
-
-func TestJoinFields_Multiple(t *testing.T) {
-	if got := joinFields([]string{"a", "b", "c"}); got != "a b c" {
-		t.Errorf("joinFields([\"a\",\"b\",\"c\"]) = %q, want %q", got, "a b c")
-	}
-}
-
 // ── WriteHistory ──────────────────────────────────────────────────────────────
 
 func makeAuditRecords() []AuditRecord {
@@ -449,6 +429,13 @@ func TestWriteHistoryRecords_Table(t *testing.T) {
 	}
 	if !strings.Contains(out, "operator") {
 		t.Errorf("table missing changed_by: %s", out)
+	}
+	// Timestamp must be reformatted from RFC3339 to local datetime (no "T" separator).
+	if strings.Contains(out, "2026-04-01T10:01:00") {
+		t.Errorf("table timestamp should be reformatted (no RFC3339 T separator): %s", out)
+	}
+	if !strings.Contains(out, "2026-04-01") {
+		t.Errorf("table missing date portion of reformatted timestamp: %s", out)
 	}
 }
 
@@ -705,6 +692,12 @@ func TestWriteSessions_Plain_LogLines(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "alice") {
 		t.Errorf("first plain line missing alice: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "session_id=1") {
+		t.Errorf("first plain line missing session_id: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "station=RDP-Tcp#0") {
+		t.Errorf("first plain line missing station: %s", lines[0])
 	}
 	if !strings.Contains(lines[2], "sessions") {
 		t.Errorf("summary line missing 'sessions': %s", lines[2])
