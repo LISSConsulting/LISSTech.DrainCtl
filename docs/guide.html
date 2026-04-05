@@ -742,18 +742,36 @@ drainctl configure show</code></pre>
             <pre><code># View notification status
 drainctl notify status
 
-# Set a webhook target
+# Set a webhook target (URL only — other settings preserved)
 drainctl notify set-webhook https://hooks.example.com/drainctl
 
+# Set webhook with HMAC signing secret and custom trigger filter
+drainctl notify set-webhook https://hooks.example.com/drainctl \
+  --secret MY_SIGNING_SECRET \
+  --triggers drain_on,alert,healthy \
+  --repeat-minutes 60
+
+# Update only the HMAC secret without changing the URL or triggers
+drainctl notify set-webhook https://hooks.example.com/drainctl --secret NEW_SECRET
+
 # Set an ntfy target
-drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts</code></pre>
+drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts
+
+# ntfy with session-warning notifications and 30-minute repeat throttle
+drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts \
+  --triggers drain_on,alert,healthy,session_warning \
+  --repeat-minutes 30
+
+# Send a test notification to all configured targets
+drainctl notify test</code></pre>
 
             <div class="callout">
-                <strong>&#x1F4A1; Multi-target management.</strong>
-                To add, remove, or configure individual notification targets with granular triggers and repeat
-                intervals, edit <code>config.json</code> directly or use the dashboard UI. The CLI
-                <code>set-webhook</code> and <code>set-ntfy</code> commands are convenience shortcuts for single-target
-                setups.
+                <strong>&#x1F4A1; Flag behaviour.</strong>
+                When <code>set-webhook</code> or <code>set-ntfy</code> is called without optional flags, only the URL
+                is updated; the existing secret, triggers, and repeat interval are preserved. Pass a flag explicitly
+                to overwrite only that field. Valid trigger names:
+                <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>,
+                <code>healthy</code>, <code>session_warning</code>.
             </div>
 
             <h3>Interactive configuration wizard</h3>
@@ -903,8 +921,18 @@ Get-RDSHDrainHistory -ChangesOnly |
             <pre><code># Set a webhook target (Slack, Teams, PagerDuty, custom endpoint, etc.)
 drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx
 
+# Set webhook with HMAC signing and only alert/healthy triggers
+drainctl notify set-webhook https://hooks.slack.com/services/T.../B.../xxx \
+  --secret MY_SIGNING_SECRET \
+  --triggers drain_on,alert,healthy
+
 # Set an ntfy target (push notifications on your phone!)
 drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts
+
+# ntfy with session-warning alerts, repeat at most every 30 minutes
+drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts \
+  --triggers drain_on,alert,healthy,session_warning \
+  --repeat-minutes 30
 
 # View notification status
 drainctl notify status
@@ -913,10 +941,17 @@ drainctl notify status
 drainctl notify test</code></pre>
 
             <p>
-                To manage multiple targets with per-target triggers and repeat intervals, edit
-                <code>config.json</code> directly or use the <a href="#dashboard">dashboard UI</a>'s notification
-                settings drawer. See the <a href="#configure">Configuration</a> section for the full
-                <code>config.json</code> structure.
+                Optional flags on <code>set-webhook</code> and <code>set-ntfy</code>:
+            </p>
+            <ul>
+                <li><code>--secret TEXT</code> &mdash; HMAC-SHA256 signing secret sent as <code>X-DrainCtl-Signature</code> (webhook only)</li>
+                <li><code>--triggers LIST</code> &mdash; comma-separated events that fire this target; omit to keep existing value; valid names: <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code></li>
+                <li><code>--repeat-minutes N</code> &mdash; minimum minutes between repeated <code>alert</code> / <code>session_warning</code> notifications; <code>0</code> means once per state change (default)</li>
+            </ul>
+            <p>
+                When a flag is omitted the existing value is preserved, so you can update a single field without
+                touching the rest. To manage multiple targets with per-target settings, use the
+                <a href="#dashboard">dashboard UI</a> or edit <code>config.json</code> directly.
             </p>
 
             <h3>PowerShell way</h3>
