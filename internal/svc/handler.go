@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -81,9 +82,11 @@ type drainService struct {
 
 // serviceHandler is the pipe handler bridge between the service state
 // and the named pipe server.
+// cfg is accessed from two goroutines (Execute loop + pipe server) and
+// must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
 	store *store.MemAuditStore
-	cfg   *dc.ServiceConfig
+	cfg   atomic.Pointer[dc.ServiceConfig]
 }
 
 func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult {
@@ -98,7 +101,7 @@ func (h *serviceHandler) HandleStatus(gracePeriod time.Duration) *dc.CheckResult
 		}
 	}
 
-	gp := h.cfg.GracePeriod
+	gp := h.cfg.Load().GracePeriod
 	if gracePeriod > 0 {
 		gp = gracePeriod
 	}
@@ -217,7 +220,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 
 	// Start pipe server.
-	handler := &serviceHandler{store: st, cfg: &cfg}
+	handler := &serviceHandler{store: st}
+	handler.cfg.Store(&cfg)
 	go pipe.ServePipe(ctx, handler, s.log)
 
 	// Start dashboard if enabled.
@@ -354,7 +358,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
-			handler.cfg = &cfg
+			handler.cfg.Store(&cfg)
 			newDashCfg := newFullCfg.ToDashboardConfig()
 
 			// Handle dashboard URL or TLS fingerprint changes.

@@ -138,6 +138,22 @@ func TestRemove_OnlyRemovesTargetServer(t *testing.T) {
 	}
 }
 
+func TestRemove_ClearsHistoryRing(t *testing.T) {
+	s := NewServerState(t.TempDir(), nil)
+	s.Register("SRV01")
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	if h := s.HostHistory("SRV01", 0); len(h) == 0 {
+		t.Fatal("expected history before Remove")
+	}
+
+	s.Remove("SRV01")
+
+	if h := s.HostHistory("SRV01", 0); len(h) != 0 {
+		t.Errorf("history ring not cleared after Remove: got %d entries", len(h))
+	}
+}
+
 // ── IsRegistered ──────────────────────────────────────────────────────────────
 
 func TestIsRegistered_TrueForRegistered(t *testing.T) {
