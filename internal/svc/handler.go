@@ -130,7 +130,7 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 		stateDur = time.Duration(*res.StateDurationSeconds) * time.Second
 	}
 
-	res.Status, res.Message, res.ExitCode = classifyState(drainActive, stateDur, gp)
+	res.Status, res.Message, res.ExitCode = dc.ClassifyState(drainActive, stateDur, gp)
 
 	// Session tracking.
 	if sess := dc.GetSessionSummary(); sess != nil {

@@ -10,56 +10,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 )
 
-// ── classifyState ─────────────────────────────────────────────────────────────
-
-func TestClassifyState_Healthy(t *testing.T) {
-	status, msg, code := classifyState(false, 0, 30*time.Minute)
-	if status != "Healthy" {
-		t.Errorf("status = %q, want Healthy", status)
-	}
-	if code != 0 {
-		t.Errorf("exitCode = %d, want 0", code)
-	}
-	if msg == "" {
-		t.Error("message should be non-empty")
-	}
-}
-
-func TestClassifyState_GraceWithinPeriod(t *testing.T) {
-	status, _, code := classifyState(true, 10*time.Minute, 30*time.Minute)
-	if status != "Grace" {
-		t.Errorf("status = %q, want Grace", status)
-	}
-	if code != 0 {
-		t.Errorf("exitCode = %d, want 0", code)
-	}
-}
-
-func TestClassifyState_AlertExceedsPeriod(t *testing.T) {
-	status, _, code := classifyState(true, 60*time.Minute, 30*time.Minute)
-	if status != "Alert" {
-		t.Errorf("status = %q, want Alert", status)
-	}
-	if code != 1 {
-		t.Errorf("exitCode = %d, want 1", code)
-	}
-}
-
-func TestClassifyState_GraceAtBoundary(t *testing.T) {
-	// stateDur == gracePeriod: not strictly greater, so Grace.
-	status, _, _ := classifyState(true, 30*time.Minute, 30*time.Minute)
-	if status != "Grace" {
-		t.Errorf("status = %q, want Grace at boundary", status)
-	}
-}
-
-func TestClassifyState_AlertJustOverBoundary(t *testing.T) {
-	status, _, _ := classifyState(true, 30*time.Minute+time.Second, 30*time.Minute)
-	if status != "Alert" {
-		t.Errorf("status = %q, want Alert just past boundary", status)
-	}
-}
-
 // ── applyRemoteConfig ─────────────────────────────────────────────────────────
 
 func TestApplyRemoteConfig_SetsTargets(t *testing.T) {
