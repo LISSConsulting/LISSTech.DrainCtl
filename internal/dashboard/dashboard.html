@@ -5083,6 +5083,27 @@
             }
 
             let chartInstance = null;
+            let chartWidth = 0;
+            let chartColorKey = "";
+
+            function buildChartData() {
+                const now = Date.now() / 1000;
+                const xs = stateHistory.map((_, i) => now - (stateHistory.length - 1 - i) * 30);
+                const layers = ["ok", "grace", "alert", "off"];
+                const data = [xs];
+                layers.forEach((l, li) => {
+                    data.push(
+                        stateHistory.map((d) => {
+                            const total = d.t || 1;
+                            let cum = 0;
+                            for (let j = 0; j <= li; j++) cum += d[layers[j]] || 0;
+                            return (cum / total) * 100;
+                        }),
+                    );
+                });
+                return data;
+            }
+
             function renderChart() {
                 const el = document.getElementById("chart-el");
                 if (!stateHistory.length || !stateHistory[0].t || stateHistory.length < 3) {
@@ -5103,34 +5124,35 @@
                     alert: cs.getPropertyValue("--red").trim(),
                     off: cs.getPropertyValue("--subtle").trim(),
                 };
-                const now = Date.now() / 1000;
-                const xs = stateHistory.map((_, i) => now - (stateHistory.length - 1 - i) * 30);
-                const layers = ["ok", "grace", "alert", "off"];
-                const data = [xs];
-                layers.forEach((l, li) => {
-                    data.push(
-                        stateHistory.map((d) => {
-                            const total = d.t || 1;
-                            let cum = 0;
-                            for (let j = 0; j <= li; j++) cum += d[layers[j]] || 0;
-                            return (cum / total) * 100;
-                        }),
-                    );
-                });
+                const colorKey = colors.ok + colors.grace + colors.alert + colors.off;
+                const data = buildChartData();
+
+                // Reuse the existing chart on data-only updates (same size + theme) to avoid
+                // the destroy/recreate flicker every 30 s. Recreate only when the container
+                // width or CSS colour scheme changes (resize or dark/light toggle).
+                if (chartInstance && el.clientWidth === chartWidth && colorKey === chartColorKey) {
+                    chartInstance.setData(data);
+                    return;
+                }
+
                 if (chartInstance) {
                     chartInstance.destroy();
                     chartInstance = null;
                 }
                 el.innerHTML = "";
+                chartWidth = el.clientWidth;
+                chartColorKey = colorKey;
+
                 const opts = {
-                    width: el.clientWidth,
+                    width: chartWidth,
                     height: 200,
                     cursor: { show: false },
                     legend: { show: false },
                     select: { show: false },
                     axes: [
                         {
-                            // X-axis: relative time
+                            // X-axis: relative time — recomputes "now" on every axis draw so
+                            // labels stay accurate after setData() calls.
                             show: true,
                             size: 30,
                             gap: 6,
@@ -5140,9 +5162,10 @@
                             grid: { show: false },
                             ticks: { show: false },
                             values: function (u, splits) {
+                                var liveNow = Date.now() / 1000;
                                 var last = "";
                                 return splits.map(function (v) {
-                                    var ago = Math.round((now - v) / 60);
+                                    var ago = Math.round((liveNow - v) / 60);
                                     var lbl = ago <= 0 ? "now" : ago + "m ago";
                                     if (lbl === last) return "";
                                     last = lbl;
