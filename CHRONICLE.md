@@ -80,10 +80,13 @@
 | Roam #26 | `handlePutNotifyConfig`: validates `session_warning_threshold` (0–100) and `grace_period` (1–1440) before calling `UpdateNotifySettings` — out-of-range values now return 400 Bad Request instead of 500 Internal Server Error; 4 new tests | correctness, dashboard, testing |
 | Roam #27 | Wall-clock config re-fetch timer: `backoffTicks(int) int` → `backoffDuration(int) time.Duration` (5 min base, doubles per failure, 160 min cap); `pollsSinceConfigFetch` counter → `lastConfigFetch time.Time` — re-fetch interval now independent of `PollInterval` runtime changes; `backoff_test.go` updated; log message changed from `next_retry_polls=N` to `next_retry_in=Xm` | correctness, svc |
 | Roam #27 | uPlot chart `setData()` optimisation: `buildChartData()` extracted; `renderChart()` compares container width + CSS colour fingerprint against last-creation values — data-only 30 s updates call `chartInstance.setData()` instead of destroy+recreate (no per-poll flicker); stale `now` closure in x-axis formatter fixed to recompute `Date.now()/1000` on each axis draw | perf, UX, dashboard |
+| Roam #28 | `AuditStore.Prune`: `data, _ := json.Marshal(r)` → `data, err := json.Marshal(r); if err != nil { continue }` — silent write of empty line on marshal error is now a skip, matching `MemAuditStore.Prune` behaviour; the corrupt empty line would have been silently skipped on re-read but the record would be lost without indication | correctness, audit |
+| Roam #28 | `sendWebhook` / `sendNtfy`: add `_, _ = io.Copy(io.Discard, resp.Body)` before return — drains the response body so the HTTP transport reuses the keep-alive connection; without the drain, each outgoing notification opened a new TCP connection | perf, notify |
+| Roam #28 | `sendNtfy`: 4 new direct tests (`TestSendNtfy_Success`, `TestSendNtfy_NonSuccessStatus`, `TestSendNtfy_SetsHeaders`, `TestSendNotification_CallsNtfy`) — `sendNtfy` previously had zero direct test coverage despite being the second notification backend | testing, notify |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #27.)*
+*(All tracked items complete — nothing pending after Roam #28.)*
 
 ## Key Learnings
 
@@ -149,3 +152,5 @@
 
 - **`Retry-After` header on token-bucket 429**: `Allow()` returning `(bool, time.Duration)` is cleaner than a separate `WaitTime()` method because it keeps the deny decision and the associated delay co-located. The wait is `ceil((1 - tokens) / rate)` seconds — always ≥ 1 s since `tokens < 1` and rate > 0. `rateLimitMiddleware` converts the duration to a whole-second string and sets `Retry-After`; the `int(wait.Seconds())` cast truncates, but `math.Ceil` already rounded up so the result is exact.
 - **400 vs 500 for input validation errors**: `UpdateNotifySettings` can fail for two distinct reasons — a local I/O error (config file unreadable → 500 is correct) or an out-of-range value supplied by the caller (→ 400). The handler is the HTTP boundary; it must validate HTTP input and map validation errors to 4xx before delegating to the domain function. Duplicating the range check in the handler is correct: the domain function enforces invariants, the handler enforces the HTTP contract.
+- **HTTP response body must be drained for connection reuse**: Go's `http.Transport` does not reuse a keep-alive connection unless the response body is read to completion before `Close()`. `defer resp.Body.Close()` alone is not sufficient — add `_, _ = io.Copy(io.Discard, resp.Body)` before returning to drain any unread bytes. This applies to every outbound HTTP call that cares about connection pool efficiency (notifications, config fetches, health probes).
+- **`AuditStore.Prune` vs `MemAuditStore.Prune` consistency**: Both rewrite kept records to a file; both should handle `json.Marshal` errors identically (skip the record). `AuditRecord` contains only primitive-typed fields so Marshal never actually fails, but silently writing an empty line on error is wrong — `scanRecords` would skip it on re-read, silently dropping the record. The correct pattern matches `MemAuditStore`: `if err != nil { continue }`.
