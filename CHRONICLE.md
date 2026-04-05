@@ -1,7 +1,7 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixty-first roam-mode pass complete.** `drainctl sessions` command added — lists current RDS sessions via `WTSEnumerateSessionsW` with table (default), JSON, CSV, and plain output formats; `WriteSessions` + `formatSessionSummaryLine` added to `format.go`; 13 new tests in `format_test.go`.
+> Current state: **Sixty-second roam-mode pass complete.** `ComputeSessionSummary` extracted from `GetSessionSummary` — eliminates double WTS enumeration in `sessions_cmd.go` and enables unit testing; 7 new tests in `sessions_test.go` covering `wtsStateName` and `ComputeSessionSummary`; dashboard favicon MIME type corrected from `image/png` to `image/x-icon`.
 
-Previous state: Fifty-ninth pass — 14 new tests in `format_test.go` covering `WriteHistory`, `WriteHistoryRecords`, and `CheckResult.Write` output format paths that previously had zero test coverage.
+Previous state: Sixty-first pass — `drainctl sessions` command added — lists current RDS sessions via `WTSEnumerateSessionsW` with table (default), JSON, CSV, and plain output formats; `WriteSessions` + `formatSessionSummaryLine` added to `format.go`; 13 new tests in `format_test.go`.
 
 ## Completed Work
 
@@ -183,10 +183,11 @@ Previous state: Fifty-ninth pass — 14 new tests in `format_test.go` covering `
 | Roam #60 | `docs/guide.html` webhook payload example: updated from 9 fields (pre-Roam #52) to full current schema — added `grace_period_seconds`, `connections_allowed`, `version`, and `sessions` object; added explanatory note that `previous_mode` is transition-only, `sessions` is monitoring-only, and `connections_allowed` is the recommended field to check for automation gating instead of parsing `status` | docs |
 
 | Roam #61 | `drainctl sessions` — new subcommand lists current RDS sessions via `WTSEnumerateSessionsW`; shows session ID, username, station, and state; default format is table; supports JSON, CSV, and plain formats; `WriteSessions(w, sessions, summary, format)` + `formatSessionSummaryLine` added to `format.go` following the `WriteHistory` pattern; 13 new tests in `format_test.go` (JSON valid/empty, CSV header+data, table columns+values+summary, plain log lines, nil-summary omission, summary line capped/uncapped) | feature, CLI, testing |
+| Roam #62 | `ComputeSessionSummary(sessions, maxSessions)` extracted from `GetSessionSummary` — eliminates double WTS API call in `sessions_cmd.go` (previously `EnumerateSessions` was called twice: once directly, once inside `GetSessionSummary`); pure function enables unit testing without syscall mocks; `GetSessionSummary` now delegates to it; 7 new tests in `sessions_test.go` covering `wtsStateName` (all 10 named states + unknown fallback) and `ComputeSessionSummary` (empty list, active+disconnected counts, non-counted states ignored, utilization capped at 100%, no max); dashboard favicon MIME type corrected from `image/png` to `image/x-icon` | correctness, testing, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #61.)*
+*(All tracked items complete — nothing pending after Roam #62.)*
 
 ## Key Learnings
 
