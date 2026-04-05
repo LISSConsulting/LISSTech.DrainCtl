@@ -800,6 +800,75 @@ func TestSendNotification_NtfySessionWarningMessage(t *testing.T) {
 	}
 }
 
+// TestNtfyTitle verifies that each trigger produces a human-readable title and
+// that the host name is always included.
+func TestNtfyTitle(t *testing.T) {
+	cases := []struct {
+		trigger Trigger
+		host    string
+		want    string
+	}{
+		{TriggerDrainOn, "SRV01", "DrainCtl: Drain Mode Active on SRV01"},
+		{TriggerDrainOff, "SRV01", "DrainCtl: Connections Restored on SRV01"},
+		{TriggerGraceEntered, "SRV01", "DrainCtl: Grace Period Active on SRV01"},
+		{TriggerAlert, "SRV01", "DrainCtl: Alert: Drain Exceeded Grace Period on SRV01"},
+		{TriggerHealthy, "SRV01", "DrainCtl: All Connections Allowed on SRV01"},
+		{TriggerSessionWarning, "SRV01", "DrainCtl: Session Utilization Warning on SRV01"},
+		// Unknown trigger falls back to the raw name.
+		{Trigger("custom_event"), "SRV01", "DrainCtl: custom_event on SRV01"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.trigger), func(t *testing.T) {
+			got := ntfyTitle(tc.trigger, tc.host)
+			if got != tc.want {
+				t.Errorf("ntfyTitle(%q, %q) = %q, want %q", tc.trigger, tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSendNotification_NtfyTitleIsReadable verifies that the Title header sent
+// to an ntfy endpoint contains a human-readable label rather than a raw
+// trigger name like "drain_on".
+func TestSendNotification_NtfyTitleIsReadable(t *testing.T) {
+	cases := []struct {
+		trigger     Trigger
+		status      string
+		wantInTitle string
+	}{
+		{TriggerDrainOn, "Grace", "Drain Mode Active"},
+		{TriggerDrainOff, "Healthy", "Connections Restored"},
+		{TriggerGraceEntered, "Grace", "Grace Period Active"},
+		{TriggerAlert, "Alert", "Alert: Drain Exceeded Grace Period"},
+		{TriggerHealthy, "Healthy", "All Connections Allowed"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.trigger), func(t *testing.T) {
+			var capturedTitle string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedTitle = r.Header.Get("Title")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			targets := []NotificationTarget{
+				{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{tc.trigger}},
+			}
+			result := newTestResult("SRV01", tc.status)
+			SendNotification(targets, &NotifyState{}, result, tc.trigger, "", nil)
+
+			if !strings.Contains(capturedTitle, tc.wantInTitle) {
+				t.Errorf("Title = %q, want it to contain %q", capturedTitle, tc.wantInTitle)
+			}
+			// Ensure the raw trigger name is NOT the label part.
+			rawName := string(tc.trigger)
+			if strings.Contains(capturedTitle, rawName) {
+				t.Errorf("Title = %q, should not contain raw trigger name %q", capturedTitle, rawName)
+			}
+		})
+	}
+}
+
 // TestSendTestNotification_WebhookPayloadSchemaComplete verifies that the test
 // notification payload contains the same top-level fields as a real notification
 // so webhook consumers can validate against a consistent schema.

@@ -117,7 +117,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			}
 
 		case "ntfy":
-			title := fmt.Sprintf("DrainCtl: %s on %s", trigger, result.Host)
+			title := ntfyTitle(trigger, result.Host)
 			priority := "default"
 			tags := "white_check_mark"
 			switch result.Status {
@@ -249,6 +249,30 @@ func webhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+// ntfyTitle returns a human-readable notification title for the given trigger
+// and host. Using raw trigger names (e.g. "drain_on") in the title produces
+// technical-looking push notifications that are hard to read at a glance.
+func ntfyTitle(trigger Trigger, host string) string {
+	var label string
+	switch trigger {
+	case TriggerDrainOn:
+		label = "Drain Mode Active"
+	case TriggerDrainOff:
+		label = "Connections Restored"
+	case TriggerGraceEntered:
+		label = "Grace Period Active"
+	case TriggerAlert:
+		label = "Alert: Drain Exceeded Grace Period"
+	case TriggerHealthy:
+		label = "All Connections Allowed"
+	case TriggerSessionWarning:
+		label = "Session Utilization Warning"
+	default:
+		label = string(trigger)
+	}
+	return fmt.Sprintf("DrainCtl: %s on %s", label, host)
 }
 
 // sendNtfy posts a message to an ntfy.sh-compatible endpoint.
