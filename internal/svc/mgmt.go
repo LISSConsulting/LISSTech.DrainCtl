@@ -52,11 +52,13 @@ func installServiceImpl(exePath string, log dc.LogFunc) error {
 	defer func() { _ = s.Close() }()
 
 	// Set recovery: restart after 5 seconds on first and second failure.
-	_ = s.SetRecoveryActions([]mgr.RecoveryAction{
+	if err := s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * 1e9}, // 5 seconds in 100ns units
 		{Type: mgr.ServiceRestart, Delay: 5 * 1e9},
 		{Type: mgr.NoAction, Delay: 0},
-	}, 86400) // reset failure count after 24 hours
+	}, 86400); err != nil { // reset failure count after 24 hours
+		log(dc.LvlWRN, fmt.Sprintf("set_recovery_actions_failed=%q (service will not auto-restart on crash)", err))
+	}
 
 	// Write default parameters.
 	if err := dc.WriteDefaultParameters(log); err != nil {
