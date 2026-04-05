@@ -4822,7 +4822,9 @@
                 _histHostname = null,
                 activeFilter = "all",
                 _histTrigger = null,
-                _histAbortCtrl = null;
+                _histAbortCtrl = null,
+                _cfgAbortCtrl = null,
+                _saveStatusTimer = null;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -5019,7 +5021,7 @@
                 if (!servers || !servers.length) {
                     g.innerHTML =
                         '<div class="empty card" style="padding:48px 32px;grid-column:1/-1"><h2 style="margin-bottom:8px">No servers registered yet</h2><p style="margin-bottom:20px;max-width:400px;margin-left:auto;margin-right:auto">Register your RDSH servers to start monitoring drain mode, sessions, and alerts.</p><div style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:16px 20px;display:inline-block;text-align:left"><code style="font-family:JetBrains Mono,monospace;font-size:.82rem;line-height:2"><span style="color:var(--muted)"># On each RDSH server, run:</span><br>drainctl register https://' +
-                        location.host +
+                        esc(location.host) +
                         "</code></div></div>";
                     return;
                 }
@@ -5395,6 +5397,7 @@
                     overlay.querySelector(".settings-close").focus();
                     loadNotifyConfig();
                 } else {
+                    if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); _cfgAbortCtrl = null; }
                     document.getElementById("btn-gear").focus();
                 }
             }
@@ -5709,11 +5712,16 @@
                 return targets;
             }
             async function loadNotifyConfig() {
+                // Cancel any in-flight request so a stale response cannot
+                // overwrite the UI when settings is closed and reopened quickly.
+                if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); }
+                _cfgAbortCtrl = new AbortController();
+                const signal = _cfgAbortCtrl.signal;
                 const targetList = document.getElementById("target-list");
                 targetList.innerHTML =
                     '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
                 try {
-                    const r = await fetch("/api/v1/notify-config");
+                    const r = await fetch("/api/v1/notify-config", { signal });
                     if (!r.ok) {
                         targetList.innerHTML =
                             '<div style="color:var(--red);padding:8px 0">Failed to load configuration (' + r.status + '). Try closing and reopening settings.</div>';
@@ -5733,6 +5741,7 @@
                     syncPills("grace-pills", gr, "mins");
                     syncPills("threshold-pills", th, "val");
                 } catch (e) {
+                    if (e.name === "AbortError") return;
                     console.error("loadNotifyConfig:", e);
                     targetList.innerHTML =
                         '<div style="color:var(--red);padding:8px 0">Failed to load configuration. Try closing and reopening settings.</div>';
@@ -5782,7 +5791,8 @@
                     if (r.ok) {
                         st.textContent = "Saved successfully.";
                         st.className = "settings-status ok";
-                        setTimeout(() => {
+                        clearTimeout(_saveStatusTimer);
+                        _saveStatusTimer = setTimeout(() => {
                             if (st.className === "settings-status ok") {
                                 st.textContent = "";
                                 st.className = "settings-status";
@@ -5899,11 +5909,14 @@
                         rmBtn.setAttribute("aria-label", "Confirm removal of " + h);
                         rmBtn.textContent = "Sure?";
                         // Auto-cancel after 5 s if no second click.
+                        // Re-query the button inside the callback: the grid may have
+                        // re-rendered during the 5 s window, replacing the old DOM node.
                         _rmTimers[h] = setTimeout(function () {
-                            if (rmBtn.dataset.confirm === "1") {
-                                rmBtn.dataset.confirm = "";
-                                rmBtn.setAttribute("aria-label", "Remove " + h);
-                                rmBtn.textContent = "Remove";
+                            var btn = document.querySelector('.btn-rm[data-host="' + esc(h) + '"]');
+                            if (btn && btn.dataset.confirm === "1") {
+                                btn.dataset.confirm = "";
+                                btn.setAttribute("aria-label", "Remove " + h);
+                                btn.textContent = "Remove";
                             }
                             delete _rmTimers[h];
                         }, 5000);
