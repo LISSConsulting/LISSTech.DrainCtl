@@ -4821,7 +4821,8 @@
                 histTransitions = false,
                 _histHostname = null,
                 activeFilter = "all",
-                _histTrigger = null;
+                _histTrigger = null,
+                _histAbortCtrl = null;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -5400,19 +5401,26 @@
             function closeHistory() {
                 histOpen = false;
                 _histHostname = null;
+                if (_histAbortCtrl) { _histAbortCtrl.abort(); _histAbortCtrl = null; }
                 document.getElementById("hist-overlay").classList.remove("open");
                 if (_histTrigger) { _histTrigger.focus(); _histTrigger = null; }
             }
             async function loadHistory(hostname) {
+                // Cancel any in-flight request so a stale response cannot
+                // overwrite the results of a newer one (e.g. rapid toggle).
+                if (_histAbortCtrl) { _histAbortCtrl.abort(); }
+                _histAbortCtrl = new AbortController();
+                const signal = _histAbortCtrl.signal;
                 document.getElementById("hist-body").innerHTML = '<div class="hist-empty">Loading\u2026</div>';
                 var url = "/api/v1/history/" + encodeURIComponent(hostname) + "?limit=20";
                 if (histTransitions) url += "&changes_only=1";
                 try {
-                    const r = await fetch(url);
+                    const r = await fetch(url, { signal });
                     if (!r.ok) throw new Error("HTTP " + r.status);
                     const entries = await r.json();
                     renderHistoryModal(entries || []);
                 } catch (e) {
+                    if (e.name === "AbortError") return;
                     document.getElementById("hist-body").innerHTML =
                         '<div class="hist-empty">Error: ' + esc(e.message) + "</div>";
                 }
@@ -5540,7 +5548,7 @@
                     '" placeholder="' +
                     (isNtfy ? "my-drainctl-alerts" : "https://hooks.example.com/...") +
                     '">' +
-                    '<button class="btn-rm-target" title="Remove target">&times;</button>' +
+                    '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
                     "</div>" +
                     '<div class="webhook-secret-wrap" style="display:' + (isNtfy ? "none" : "flex") + ';align-items:center;gap:10px;margin-bottom:14px">' +
                     '<div class="target-section-label" style="margin-bottom:0;white-space:nowrap">HMAC Secret</div>' +
@@ -5883,6 +5891,10 @@
                         rmConfirmed(h);
                     } else {
                         // First click — enter confirm state.
+                        // Clear any previous timer for this host (e.g. from a
+                        // prior click before the grid re-rendered) so we never
+                        // accumulate orphaned timers.
+                        clearTimeout(_rmTimers[h]);
                         rmBtn.dataset.confirm = "1";
                         rmBtn.setAttribute("aria-label", "Confirm removal of " + h);
                         rmBtn.textContent = "Sure?";

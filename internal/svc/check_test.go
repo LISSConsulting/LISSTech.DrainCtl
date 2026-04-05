@@ -170,3 +170,44 @@ func TestPruneNotifyState_SkipsBlankURLTargets(t *testing.T) {
 		t.Error("entry for non-blank URL should be pruned when only blank-URL targets remain")
 	}
 }
+
+// ── resetSessionWarnCooldown ──────────────────────────────────────────────────
+
+func TestResetSessionWarnCooldown_ClearsWhenBelowThreshold(t *testing.T) {
+	state := &dc.NotifyState{
+		LastSessionWarnNotify: map[string]time.Time{
+			"https://a.example.com": time.Now(),
+			"https://b.example.com": time.Now(),
+		},
+	}
+	cfg := &dc.ServiceConfig{SessionWarningThreshold: 80}
+	resetSessionWarnCooldown(state, cfg)
+	if len(state.LastSessionWarnNotify) != 0 {
+		t.Errorf("LastSessionWarnNotify should be empty after reset, got %d entries", len(state.LastSessionWarnNotify))
+	}
+}
+
+func TestResetSessionWarnCooldown_NoopWhenThresholdDisabled(t *testing.T) {
+	state := &dc.NotifyState{
+		LastSessionWarnNotify: map[string]time.Time{
+			"https://a.example.com": time.Now(),
+		},
+	}
+	cfg := &dc.ServiceConfig{SessionWarningThreshold: 0}
+	resetSessionWarnCooldown(state, cfg)
+	if len(state.LastSessionWarnNotify) != 1 {
+		t.Error("LastSessionWarnNotify should not be modified when threshold is disabled (0)")
+	}
+}
+
+func TestResetSessionWarnCooldown_AlreadyEmpty(t *testing.T) {
+	state := &dc.NotifyState{
+		LastSessionWarnNotify: map[string]time.Time{},
+	}
+	cfg := &dc.ServiceConfig{SessionWarningThreshold: 80}
+	// Should not panic on empty map.
+	resetSessionWarnCooldown(state, cfg)
+	if len(state.LastSessionWarnNotify) != 0 {
+		t.Error("empty map should remain empty after reset")
+	}
+}
