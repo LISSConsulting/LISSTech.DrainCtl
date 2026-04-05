@@ -26,6 +26,7 @@ and saves config.json without prompting.`,
 
 			fileCfg, err := dc.LoadConfig(log)
 			if err != nil {
+				log(dc.LvlWRN, fmt.Sprintf("config unreadable (%s); starting from defaults", err))
 				fileCfg = dc.DefaultConfig()
 			}
 

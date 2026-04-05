@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-second roam-mode pass complete.** Webhook payload enriched with three new fields: `grace_period_seconds` (the configured alerting threshold — lets consumers compute Grace time remaining), `connections_allowed` (boolean — direct flag rather than requiring status string parsing), `version` (reporting agent version — useful for debugging mixed-version deployments); 2 new tests.
+> Current state: **Fifty-third roam-mode pass complete.** Four CLI/correctness fixes: configure warns on unreadable config; check reports source=direct in fallback path; notify status shows effective default triggers; pipe handler returns proper errors on JSON marshal failure.
 
 ## Completed Work
 
@@ -155,6 +155,11 @@
 | Roam #51 | Dashboard `renderHistoryModal` XSS consistency: transition branch now wraps `mode()` with `esc()` (`esc(mode(e.transition_from)) + " → " + esc(mode(e.drain_mode))`) — the non-transition branch already used `esc(mode(...))` but the transition branch injected the `mode()` result directly into `innerHTML`; drain-mode values are currently alphanumeric constants but defence-in-depth requires escaping all server-sourced strings | security, dashboard |
 
 | Roam #52 | `SendNotification` webhook payload: added `grace_period_seconds` (configured alerting threshold in seconds), `connections_allowed` (boolean — true only when drain mode is off), and `version` (reporting agent version) — webhook consumers previously had to parse `status` to determine if connections were blocked and had no way to know the alerting threshold or compute Grace time remaining; 2 new tests (`TestSendNotification_WebhookPayloadContextFields`, `TestSendNotification_ConnectionsAllowedTrueWhenHealthy`) | feature, notify, testing |
+
+| Roam #53 | `drainctl configure`: `dc.LoadConfig` failure now warns the user (`config unreadable (…); starting from defaults`) instead of silently falling back — operators running the wizard on a machine with a corrupted config.json would previously see defaults with no indication that their config was lost | correctness, UX, CLI |
+| Roam #53 | `drainctl check` direct path: `source=direct` logged before the registry read — mirrors the `source=service` line emitted via the pipe path so both paths are identifiable in plain output | UX, CLI |
+| Roam #53 | `drainctl notify status`: empty `Triggers` list (meaning DefaultTriggers apply) now prints `triggers=[drain_on,drain_off,alert,healthy] (default)` instead of `triggers=[]` — the blank list was misleading since notifications were still firing on the default set | correctness, UX, CLI |
+| Roam #53 | `pipe.go` `handlePipeConn`: `json.Marshal` errors on status and history results now produce a `PipeResponse{OK:false, Error:…}` instead of silently sending `{ok:true,data:null}` — the client's `CheckViaPipe`/`HistoryViaPipe` would have failed with a JSON unmarshal error anyway, but now the error message is actionable | correctness, svc |
 
 ## Remaining Work
 

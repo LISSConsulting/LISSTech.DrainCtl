@@ -31,12 +31,18 @@ func notifyCmd() *cobra.Command {
 				return nil
 			}
 			for i, t := range fileCfg.Notifications {
-				triggers := make([]string, len(t.Triggers))
-				for j, tr := range t.Triggers {
+				effectiveTriggers := t.Triggers
+				triggerNote := ""
+				if len(effectiveTriggers) == 0 {
+					effectiveTriggers = dc.DefaultTriggers
+					triggerNote = " (default)"
+				}
+				triggers := make([]string, len(effectiveTriggers))
+				for j, tr := range effectiveTriggers {
 					triggers[j] = string(tr)
 				}
-				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s] repeat_minutes=%d",
-					i, t.Type, t.URL, strings.Join(triggers, ","), t.RepeatMinutes))
+				log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d",
+					i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes))
 			}
 			if fileCfg.HasTargets() {
 				log(dc.LvlOK, "notifications=enabled")

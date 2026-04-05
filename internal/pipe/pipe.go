@@ -95,11 +95,12 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 	switch req.Cmd {
 	case "status":
 		result := handler.HandleStatus()
-		if result != nil {
-			raw, _ := json.Marshal(result)
-			resp = PipeResponse{OK: true, Data: raw}
-		} else {
+		if result == nil {
 			resp = PipeResponse{OK: false, Error: "no status available"}
+		} else if raw, err := json.Marshal(result); err != nil {
+			resp = PipeResponse{OK: false, Error: "marshal result: " + err.Error()}
+		} else {
+			resp = PipeResponse{OK: true, Data: raw}
 		}
 
 	case "history":
@@ -113,8 +114,11 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 		for i, r := range records {
 			out[i] = dc.AuditToHistory(r, &durations[i])
 		}
-		raw, _ := json.Marshal(out)
-		resp = PipeResponse{OK: true, Data: raw}
+		if raw, err := json.Marshal(out); err != nil {
+			resp = PipeResponse{OK: false, Error: "marshal history: " + err.Error()}
+		} else {
+			resp = PipeResponse{OK: true, Data: raw}
+		}
 
 	default:
 		resp = PipeResponse{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Cmd)}

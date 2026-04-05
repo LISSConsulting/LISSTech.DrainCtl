@@ -95,6 +95,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	} else {
 		log = dc.DiscardLogger()
 	}
+	log(dc.LvlINF, "source=direct")
 
 	out, err := dc.Check(dc.CheckOptions{
 		DBPath:        cfg.DB,
