@@ -1,5 +1,7 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Fifty-eighth roam-mode pass complete.** Two improvements: (1) dashboard `.empty h2` CSS bug fixed — `Fraunces` font family was referenced but not loaded in the Google Fonts link (removed in a prior roam); changed to `DM Serif Display` so "Connecting…", "Access Denied", and "No servers registered yet" headings render with the designed typeface; (2) 17 new tests in `config_test.go` covering previously untested paths: `Validate` SessionWarningThreshold clamping (< 0 and > 100), `HasTargets` (empty, with URL, empty URL, mixed), `ToServiceConfig` unit conversions (GracePeriod minutes→Duration, PollInterval seconds→Duration, field copies), `ToDashboardConfig` nil/true/false AutoPin and field copies.
+> Current state: **Fifty-ninth roam-mode pass complete.** 14 new tests in `format_test.go` covering `WriteHistory`, `WriteHistoryRecords`, and `CheckResult.Write` output format paths that previously had zero test coverage — see Roam #59 entry below.
+
+Previous state: Fifty-eighth pass — Two improvements: (1) dashboard `.empty h2` CSS bug fixed — `Fraunces` font family was referenced but not loaded in the Google Fonts link (removed in a prior roam); changed to `DM Serif Display` so "Connecting…", "Access Denied", and "No servers registered yet" headings render with the designed typeface; (2) 17 new tests in `config_test.go` covering previously untested paths: `Validate` SessionWarningThreshold clamping (< 0 and > 100), `HasTargets` (empty, with URL, empty URL, mixed), `ToServiceConfig` unit conversions (GracePeriod minutes→Duration, PollInterval seconds→Duration, field copies), `ToDashboardConfig` nil/true/false AutoPin and field copies.
 
 ## Completed Work
 
@@ -176,10 +178,11 @@
 | Roam #57 | `handleUI` tests: 3 new tests in `server_test.go` (`TestHandleUI_ReturnsHTML`, `TestHandleUI_NoCacheHeader`, `TestHandleUI_BodyContainsDashboard`) — the SPA entry-point handler previously had zero test coverage | testing, dashboard |
 | Roam #58 | Dashboard `.empty h2` CSS bug: `Fraunces` was removed from the Google Fonts link in Roam #55 but the CSS reference was not updated — "Connecting…", "Access Denied", and "No servers registered yet" headings fell back to the browser's generic serif; changed to `DM Serif Display` to match the dashboard design | correctness, dashboard |
 | Roam #58 | 17 new tests in `config_test.go` — `Validate` SessionWarningThreshold clamping (negative → 0, > 100 → 100, valid 0–100 preserved); `HasTargets` (empty, with URL, empty URL, mixed); `ToServiceConfig` unit conversions (GracePeriod int-minutes → Duration, PollInterval int-seconds → Duration, field copies); `ToDashboardConfig` AutoPin nil/&true/&false semantics and field copies | testing |
+| Roam #59 | 14 new tests in `format_test.go` covering three previously untested output-format functions: `WriteHistory` (JSON valid-JSON array + field checks, CSV header+data, Table columns+values, Plain log-format lines with ERR level for non-zero exit, Empty/no-panic across all formats); `WriteHistoryRecords` (same 5 coverage points for the pipe-path pre-computed variant, plus Plain_ErrorLevel confirming ERR vs INF level selection); `CheckResult.Write` (JSON round-trip via `json.Unmarshal`, CSV header+status/host/changed_by, Table HOST/STATUS column headers + values, Plain_NoOp confirming `FormatPlain` intentionally writes nothing) | testing |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #57.)*
+*(All tracked items complete — nothing pending after Roam #59.)*
 
 ## Key Learnings
 
