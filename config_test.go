@@ -245,6 +245,60 @@ func TestValidate_PreservesValidTriggers(t *testing.T) {
 	}
 }
 
+// ── Validate — dashboard port range ──────────────────────────────────────────
+
+func TestValidate_DashboardPortClamped(t *testing.T) {
+	for _, port := range []int{0, -1, 65536, 99999} {
+		cfg := DefaultConfig()
+		cfg.Dashboard.Port = port
+		cfg.Validate(nil)
+		if cfg.Dashboard.Port != DefaultDashboardPort {
+			t.Errorf("port %d: expected default %d after Validate, got %d", port, DefaultDashboardPort, cfg.Dashboard.Port)
+		}
+	}
+}
+
+func TestValidate_DashboardPortPreservesValid(t *testing.T) {
+	for _, port := range []int{1, 80, 443, 8080, DefaultDashboardPort, 65535} {
+		cfg := DefaultConfig()
+		cfg.Dashboard.Port = port
+		cfg.Validate(nil)
+		if cfg.Dashboard.Port != port {
+			t.Errorf("port %d: expected port unchanged after Validate, got %d", port, cfg.Dashboard.Port)
+		}
+	}
+}
+
+// ── Validate — dashboard group whitespace ─────────────────────────────────────
+
+func TestValidate_DashboardGroupTrimsWhitespace(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"  Domain Admins  ", "Domain Admins"},
+		{"\tRDS Admins\t", "RDS Admins"},
+		{"  \t  ", DefaultDashboardGroup}, // all-whitespace falls back to default
+	}
+	for _, tc := range cases {
+		cfg := DefaultConfig()
+		cfg.Dashboard.Group = tc.input
+		cfg.Validate(nil)
+		if cfg.Dashboard.Group != tc.want {
+			t.Errorf("group %q: expected %q after Validate, got %q", tc.input, tc.want, cfg.Dashboard.Group)
+		}
+	}
+}
+
+func TestValidate_DashboardGroupPreservesNormal(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Dashboard.Group = "RDS Admins"
+	cfg.Validate(nil)
+	if cfg.Dashboard.Group != "RDS Admins" {
+		t.Errorf("expected group unchanged, got %q", cfg.Dashboard.Group)
+	}
+}
+
 // ── DefaultConfig ─────────────────────────────────────────────────────────────
 
 func TestDefaultConfig_Defaults(t *testing.T) {

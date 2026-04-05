@@ -206,9 +206,10 @@ func (c *Config) Validate(log LogFunc) {
 	if c.AuditPath == "" {
 		c.AuditPath = DefaultAuditPath()
 	}
-	if c.Dashboard.Port == 0 {
+	if c.Dashboard.Port < 1 || c.Dashboard.Port > 65535 {
 		c.Dashboard.Port = DefaultDashboardPort
 	}
+	c.Dashboard.Group = strings.TrimSpace(c.Dashboard.Group)
 	if c.Dashboard.Group == "" {
 		c.Dashboard.Group = DefaultDashboardGroup
 	}
