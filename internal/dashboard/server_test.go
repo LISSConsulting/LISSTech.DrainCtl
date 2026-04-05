@@ -1870,3 +1870,45 @@ func TestHSTSMiddleware_SetsSTSHeader(t *testing.T) {
 		t.Errorf("Strict-Transport-Security = %q, want max-age= directive", sts)
 	}
 }
+
+// ── handleUI ──────────────────────────────────────────────────────────────────
+
+func TestHandleUI_ReturnsHTML(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	ds.handleUI(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+	if w.Body.Len() == 0 {
+		t.Error("expected non-empty response body")
+	}
+}
+
+func TestHandleUI_NoCacheHeader(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	ds.handleUI(w, r)
+
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
+}
+
+func TestHandleUI_BodyContainsDashboard(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	ds.handleUI(w, r)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "DrainCtl") {
+		t.Error("response body does not contain expected dashboard content")
+	}
+}
