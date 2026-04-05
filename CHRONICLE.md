@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Sixtieth roam-mode pass complete.** Two fixes: (1) `SendTestNotification` webhook payload aligned with production schema — `grace_period_seconds`, `connections_allowed`, and `version` fields added; (2) `docs/guide.html` webhook payload example updated to current full schema including new fields and `sessions` object — see Roam #60 entry below.
+> Current state: **Sixty-first roam-mode pass complete.** `drainctl sessions` command added — lists current RDS sessions via `WTSEnumerateSessionsW` with table (default), JSON, CSV, and plain output formats; `WriteSessions` + `formatSessionSummaryLine` added to `format.go`; 13 new tests in `format_test.go`.
 
 Previous state: Fifty-ninth pass — 14 new tests in `format_test.go` covering `WriteHistory`, `WriteHistoryRecords`, and `CheckResult.Write` output format paths that previously had zero test coverage.
 
@@ -182,9 +182,11 @@ Previous state: Fifty-ninth pass — 14 new tests in `format_test.go` covering `
 | Roam #60 | `SendTestNotification` webhook payload: added `grace_period_seconds` (0), `connections_allowed` (true), and `version` (`Version` constant) — test payload was structurally different from the production payload (Roam #52 added these three fields to `SendNotification` but not to `SendTestNotification`); webhook consumers that validate schema against real notifications would receive a different field set for tests; 1 new test `TestSendTestNotification_WebhookPayloadSchemaComplete` (verifies all 11 required top-level fields are present, plus `event="test"`, `connections_allowed=true`, `grace_period_seconds=0`, and non-empty `version`) | correctness, notify, testing |
 | Roam #60 | `docs/guide.html` webhook payload example: updated from 9 fields (pre-Roam #52) to full current schema — added `grace_period_seconds`, `connections_allowed`, `version`, and `sessions` object; added explanatory note that `previous_mode` is transition-only, `sessions` is monitoring-only, and `connections_allowed` is the recommended field to check for automation gating instead of parsing `status` | docs |
 
+| Roam #61 | `drainctl sessions` — new subcommand lists current RDS sessions via `WTSEnumerateSessionsW`; shows session ID, username, station, and state; default format is table; supports JSON, CSV, and plain formats; `WriteSessions(w, sessions, summary, format)` + `formatSessionSummaryLine` added to `format.go` following the `WriteHistory` pattern; 13 new tests in `format_test.go` (JSON valid/empty, CSV header+data, table columns+values+summary, plain log lines, nil-summary omission, summary line capped/uncapped) | feature, CLI, testing |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #60.)*
+*(All tracked items complete — nothing pending after Roam #61.)*
 
 ## Key Learnings
 
