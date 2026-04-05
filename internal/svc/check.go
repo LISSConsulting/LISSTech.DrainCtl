@@ -166,10 +166,10 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		}
 
 		// Session utilization warning.
-		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 {
-			if sess.UtilizationPct >= cfg.SessionWarningThreshold {
-				triggers = append(triggers, dc.TriggerSessionWarning)
-			}
+		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 && sess.UtilizationPct >= cfg.SessionWarningThreshold {
+			triggers = append(triggers, dc.TriggerSessionWarning)
+		} else {
+			resetSessionWarnCooldown(notifyState, cfg)
 		}
 
 		for _, trigger := range triggers {
@@ -223,5 +223,18 @@ func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConf
 			gp = 1440
 		}
 		cfg.GracePeriod = time.Duration(gp) * time.Minute
+	}
+}
+
+// resetSessionWarnCooldown clears per-target session-warning cooldown entries
+// when session monitoring is enabled but utilization is currently at or below
+// the threshold. This ensures the warning fires again the next time utilization
+// rises above the threshold, rather than remaining suppressed indefinitely.
+func resetSessionWarnCooldown(state *dc.NotifyState, cfg *dc.ServiceConfig) {
+	if cfg.SessionWarningThreshold <= 0 {
+		return
+	}
+	for k := range state.LastSessionWarnNotify {
+		delete(state.LastSessionWarnNotify, k)
 	}
 }
