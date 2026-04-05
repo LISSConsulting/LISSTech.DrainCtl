@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-fourth roam-mode pass complete.** Two code-quality items from the deferred backlog: (B5) landing page `docs/index.html` — all targeted inline styles replaced with named CSS classes (`.section--shaded`, `.section--bordered`, `.install-cards`, `.wrap--wide`, `.install-cta`, `.btn--block`, `.btn-psgallery`, `.features-grid--2col`); fragile `[style*="grid"] !important` media query replaced with the new `.install-cards` class selector; (B9) `internal/dashboard/mock.js` relocated to `testdata/mock.js`; `mock_dev.go` / `mock_prod.go` compile-time pair added — devmode builds embed the fixture and serve it at `GET /mock.js` so `?mock` mode works via the dev server.
+> Current state: **Forty-seventh roam-mode pass complete.** Code quality + docs: `clear()` built-in replaces manual `for/delete` loops in `notify.go` (`LastAlertNotify` reset on healthy/drain-off) and `internal/svc/check.go` (`resetSessionWarnCooldown`); `docs/guide.html` now documents `--since`/`--until` RFC 3339 time-bounded history queries, the `drainctl configure` interactive wizard (and flag-driven mode used by the MSI), and `drainctl service status` alongside the existing `Get-Service DrainCtl` snippet.
 
 ## Completed Work
 
@@ -140,10 +140,12 @@
 | Roam #46 | Dashboard settings modal inline → CSS: `style="display:grid;grid-template-columns:1fr 1fr;..."` replaced with `.settings-cfg-grid`; mobile media query updated from fragile `[style*="grid-template-columns"] !important` to plain `.settings-cfg-grid { grid-template-columns:1fr }` — same pattern eliminated for install cards in Roam #44; `.settings-group--flush`, `.settings-num-label`, `.repeat-pill--dashed`, `.repeat-pill-extra` added for remaining modal overrides; `.settings-num` CSS width corrected to 80px and all three inline `style="width:80px"` removed (static and dynamically generated); `margin-top:12px` moved into `.btn-add-target` CSS | code quality, dashboard |
 | Roam #46 | Landing page inline → CSS: `.hero-ps` and `.ps-oneliner` + `.ps-oneliner code` CSS added for the hero PowerShell one-liner widget (removed three block inline-style attrs); `.section-title--italic` modifier replaces `style="font-style:italic"`; `.comic-body--row`, `.comic-icon--lg`, `.comic-text` for the wide comic panel flex layout; `.dashboard-ss` + `.dashboard-ss img` for the screenshot wrapper; `.section-cta` for the Dashboard Guide CTA row — zero inline styles remaining (except SVG `vertical-align:middle`) | code quality, docs |
 | Roam #46 | Fixed two malformed `</` closing tags (missing `a`) in install-card anchor buttons — pre-existing bug that caused `prettier` to error out on every `just fmt-web` run since the Roam #44 pass; also corrected `justfile` `fmt-web` glob from `internal/dashboard/*.js` to `internal/dashboard/testdata/*.js` after mock.js was relocated in Roam #44 | correctness, code quality, docs |
+| Roam #47 | `notify.go`: `for k := range state.LastAlertNotify { delete(...) }` → `clear(state.LastAlertNotify)` — idiomatic Go 1.21+ map reset (two maps are now separate, no filter needed); `internal/svc/check.go` `resetSessionWarnCooldown`: same `for/delete` → `clear(state.LastSessionWarnNotify)` | code quality |
+| Roam #47 | `docs/guide.html` CLI Usage — added `--since`/`--until` RFC 3339 examples to the history section; added `drainctl configure` subsection covering both interactive wizard and flag-driven mode; Service Management — added `drainctl service status` line above `Get-Service DrainCtl` | docs |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #46.)*
+*(All tracked items complete — nothing pending after Roam #47.)*
 
 ## Key Learnings
 
