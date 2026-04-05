@@ -17,7 +17,16 @@ func notifyCmd() *cobra.Command {
 		Short: "Manage notification settings",
 	}
 
-	cmd.AddCommand(&cobra.Command{
+	cmd.AddCommand(notifyStatusCmd())
+	cmd.AddCommand(notifySetWebhookCmd())
+	cmd.AddCommand(notifySetNtfyCmd())
+	cmd.AddCommand(notifyTestCmd())
+
+	return cmd
+}
+
+func notifyStatusCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "status",
 		Short: "Show current notification configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -29,12 +38,22 @@ func notifyCmd() *cobra.Command {
 			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
 			return nil
 		},
-	})
+	}
+}
 
-	cmd.AddCommand(&cobra.Command{
+func notifySetWebhookCmd() *cobra.Command {
+	c := &cobra.Command{
 		Use:   "set-webhook [url]",
 		Short: "Set webhook URL (empty to disable)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Set the webhook notification URL.
+
+When called without optional flags, only the URL is updated and all other
+settings (secret, triggers, repeat interval) are preserved.
+
+Use --secret to configure HMAC-SHA256 request signing.
+Use --triggers to filter which events fire this webhook.
+Use --repeat-minutes to control how often repeated events notify (0=once).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			fileCfg, err := dc.LoadConfig(log)
@@ -45,14 +64,49 @@ func notifyCmd() *cobra.Command {
 			if len(args) > 0 {
 				url = args[0]
 			}
-			return setNotifyTarget(fileCfg, "webhook", url, log)
-		},
-	})
 
-	cmd.AddCommand(&cobra.Command{
+			var ov notifyOverrides
+			if cmd.Flags().Changed("secret") {
+				s, _ := cmd.Flags().GetString("secret")
+				ov.Secret = &s
+			}
+			if cmd.Flags().Changed("triggers") {
+				raw, _ := cmd.Flags().GetString("triggers")
+				triggers, err := parseTriggers(raw)
+				if err != nil {
+					return err
+				}
+				ov.Triggers = &triggers
+			}
+			if cmd.Flags().Changed("repeat-minutes") {
+				m, _ := cmd.Flags().GetInt("repeat-minutes")
+				if m < 0 || m > dc.MaxRepeatMinutes {
+					return fmt.Errorf("repeat-minutes must be 0–%d", dc.MaxRepeatMinutes)
+				}
+				ov.RepeatMinutes = &m
+			}
+
+			return setNotifyTarget(fileCfg, "webhook", url, ov, log)
+		},
+	}
+	c.Flags().String("secret", "", "HMAC-SHA256 signing secret (empty to clear)")
+	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this webhook (valid: %s)", triggerList()))
+	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
+	return c
+}
+
+func notifySetNtfyCmd() *cobra.Command {
+	c := &cobra.Command{
 		Use:   "set-ntfy [url]",
 		Short: "Set ntfy URL (empty to disable)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Set the ntfy.sh notification URL.
+
+When called without optional flags, only the URL is updated and all other
+settings (triggers, repeat interval) are preserved.
+
+Use --triggers to filter which events fire this notification.
+Use --repeat-minutes to control how often repeated events notify (0=once).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			fileCfg, err := dc.LoadConfig(log)
@@ -63,11 +117,34 @@ func notifyCmd() *cobra.Command {
 			if len(args) > 0 {
 				url = args[0]
 			}
-			return setNotifyTarget(fileCfg, "ntfy", url, log)
-		},
-	})
 
-	cmd.AddCommand(&cobra.Command{
+			var ov notifyOverrides
+			if cmd.Flags().Changed("triggers") {
+				raw, _ := cmd.Flags().GetString("triggers")
+				triggers, err := parseTriggers(raw)
+				if err != nil {
+					return err
+				}
+				ov.Triggers = &triggers
+			}
+			if cmd.Flags().Changed("repeat-minutes") {
+				m, _ := cmd.Flags().GetInt("repeat-minutes")
+				if m < 0 || m > dc.MaxRepeatMinutes {
+					return fmt.Errorf("repeat-minutes must be 0–%d", dc.MaxRepeatMinutes)
+				}
+				ov.RepeatMinutes = &m
+			}
+
+			return setNotifyTarget(fileCfg, "ntfy", url, ov, log)
+		},
+	}
+	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
+	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
+	return c
+}
+
+func notifyTestCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "test",
 		Short: "Send a test notification to all configured backends",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,15 +155,22 @@ func notifyCmd() *cobra.Command {
 			}
 			return dc.SendTestNotification(fileCfg.Notifications, log)
 		},
-	})
+	}
+}
 
-	return cmd
+// notifyOverrides holds optional per-field overrides for a notification target.
+// A nil pointer means "preserve the existing value".
+type notifyOverrides struct {
+	Secret        *string
+	Triggers      *[]dc.Trigger
+	RepeatMinutes *int
 }
 
 // setNotifyTarget sets or clears the first notification target of typ.
 // If url is empty, all targets of typ are removed. Otherwise the first
-// existing target of typ is updated, or a new one appended.
-func setNotifyTarget(fileCfg *dc.Config, typ, url string, log dc.LogFunc) error {
+// existing target of typ is updated (URL + any non-nil overrides), or a new
+// one is appended when none exists.
+func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides, log dc.LogFunc) error {
 	if url == "" {
 		filtered := fileCfg.Notifications[:0]
 		for _, t := range fileCfg.Notifications {
@@ -103,11 +187,66 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, log dc.LogFunc) error 
 	}
 
 	fileCfg.Notifications = upsertNotifyTarget(fileCfg.Notifications, typ, url)
+
+	// Apply per-field overrides to the target we just upserted/updated.
+	for i := range fileCfg.Notifications {
+		if fileCfg.Notifications[i].Type == typ {
+			if ov.Secret != nil {
+				fileCfg.Notifications[i].Secret = *ov.Secret
+			}
+			if ov.Triggers != nil {
+				fileCfg.Notifications[i].Triggers = *ov.Triggers
+			}
+			if ov.RepeatMinutes != nil {
+				fileCfg.Notifications[i].RepeatMinutes = *ov.RepeatMinutes
+			}
+			break
+		}
+	}
+
 	if err := dc.SaveConfig(fileCfg, log); err != nil {
 		return err
 	}
 	log(dc.LvlOK, fmt.Sprintf("%s_url=%q", typ, url))
 	return nil
+}
+
+// parseTriggers splits a comma-separated trigger list and validates each name.
+func parseTriggers(raw string) ([]dc.Trigger, error) {
+	parts := strings.Split(raw, ",")
+	triggers := make([]dc.Trigger, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		tr := dc.Trigger(p)
+		if !dc.ValidTriggers[tr] {
+			return nil, fmt.Errorf("unknown trigger %q (valid: %s)", p, triggerList())
+		}
+		triggers = append(triggers, tr)
+	}
+	if len(triggers) == 0 {
+		return nil, fmt.Errorf("triggers list is empty")
+	}
+	return triggers, nil
+}
+
+// triggerList returns a human-readable comma-separated list of all valid trigger names.
+func triggerList() string {
+	names := make([]string, 0, len(dc.ValidTriggers))
+	for tr := range dc.ValidTriggers {
+		names = append(names, string(tr))
+	}
+	// Sort for deterministic output.
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	return strings.Join(sorted, ", ")
 }
 
 // printNotifyTargets logs each notification target and the overall enabled/disabled
