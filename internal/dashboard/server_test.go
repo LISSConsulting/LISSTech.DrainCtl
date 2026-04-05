@@ -127,6 +127,92 @@ func TestHandleHealth_StatusCounts(t *testing.T) {
 	}
 }
 
+func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	// Back-date LastSeen past the stale threshold.
+	ds.state.mu.Lock()
+	ds.state.servers["SRV01"].LastSeen = time.Now().Add(-15 * time.Minute)
+	ds.state.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Healthy int `json:"healthy"`
+		Offline int `json:"offline"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Healthy != 0 {
+		t.Errorf("healthy = %d, want 0 (stale server must not count as healthy)", resp.Healthy)
+	}
+	if resp.Offline != 1 {
+		t.Errorf("offline = %d, want 1 (last_seen > staleThreshold)", resp.Offline)
+	}
+}
+
+func TestHandleHealth_FreshServerNotOffline(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	// Update sets LastSeen = time.Now() — well within the stale threshold.
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Healthy int `json:"healthy"`
+		Offline int `json:"offline"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Healthy != 1 {
+		t.Errorf("healthy = %d, want 1 (fresh server)", resp.Healthy)
+	}
+	if resp.Offline != 0 {
+		t.Errorf("offline = %d, want 0 (last_seen < staleThreshold)", resp.Offline)
+	}
+}
+
+func TestHandleHealth_StaleAlertAndGraceCountedAsOffline(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Register("SRV02")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
+
+	ds.state.mu.Lock()
+	ds.state.servers["SRV01"].LastSeen = time.Now().Add(-20 * time.Minute)
+	ds.state.servers["SRV02"].LastSeen = time.Now().Add(-11 * time.Minute)
+	ds.state.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+	var resp struct {
+		Alerting int `json:"alerting"`
+		Grace    int `json:"grace"`
+		Offline  int `json:"offline"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Alerting != 0 {
+		t.Errorf("alerting = %d, want 0 (stale alert counted as offline)", resp.Alerting)
+	}
+	if resp.Grace != 0 {
+		t.Errorf("grace = %d, want 0 (stale grace counted as offline)", resp.Grace)
+	}
+	if resp.Offline != 2 {
+		t.Errorf("offline = %d, want 2", resp.Offline)
+	}
+}
+
 // ── handleRegister ────────────────────────────────────────────────────────────
 
 func TestHandleRegister_ValidHostname(t *testing.T) {

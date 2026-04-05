@@ -405,25 +405,40 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(dashboardHTML)
 }
 
+// staleThreshold is the maximum time since a server's last report before it is
+// considered offline. Matches the STALE constant (600 000 ms) in the dashboard UI.
+const staleThreshold = 10 * time.Minute
+
 // handleHealth serves GET /api/v1/health without authentication.
 // Returns version, registered server count, and per-status counts.
 // Useful for load-balancer health checks and external monitoring.
+//
+// A server is counted as "offline" when its last report is older than
+// staleThreshold, regardless of the last-reported status. This matches the
+// dashboard UI's staleness check so the API and UI always agree.
 func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	servers := ds.state.All()
+	now := time.Now()
 
-	healthy, grace, alerting, unknown := 0, 0, 0, 0
+	healthy, grace, alerting, unknown, offline := 0, 0, 0, 0, 0
 	for _, s := range servers {
 		if s.LastResult == nil {
 			unknown++
 			continue
 		}
+		if !s.LastSeen.IsZero() && now.Sub(s.LastSeen) > staleThreshold {
+			offline++
+			continue
+		}
 		switch s.LastResult.Status {
+		case "Healthy":
+			healthy++
 		case "Alert":
 			alerting++
 		case "Grace":
 			grace++
 		default:
-			healthy++
+			unknown++
 		}
 	}
 
@@ -434,6 +449,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Healthy  int    `json:"healthy"`
 		Grace    int    `json:"grace"`
 		Alerting int    `json:"alerting"`
+		Offline  int    `json:"offline"`
 		Unknown  int    `json:"unknown"`
 	}{
 		OK:       true,
@@ -442,6 +458,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Healthy:  healthy,
 		Grace:    grace,
 		Alerting: alerting,
+		Offline:  offline,
 		Unknown:  unknown,
 	}
 

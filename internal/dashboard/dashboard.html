@@ -5215,6 +5215,7 @@
             function filterGrid() {
                 const searchEl = document.getElementById("srv-search");
                 const q = searchEl ? searchEl.value.toLowerCase() : "";
+                if (searchEl) localStorage.setItem("drainctl-search", searchEl.value);
                 let visible = 0;
                 document.querySelectorAll("#grid .srv").forEach(function (card) {
                     const host = (card.dataset.host || "").toLowerCase();
@@ -5761,6 +5762,7 @@
             // Status filter pill wiring
             function activateFilterPill(pill) {
                 activeFilter = pill.dataset.status;
+                localStorage.setItem("drainctl-filter", activeFilter);
                 document.querySelectorAll("#status-filter .filter-pill").forEach(function (p) {
                     p.classList.remove("active");
                     p.setAttribute("aria-pressed", "false");
@@ -5774,6 +5776,27 @@
                 pill.addEventListener("keydown", function (e) {
                     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activateFilterPill(pill); }
                 });
+            });
+
+            // Restore filter state from previous session.
+            (function () {
+                var savedFilter = localStorage.getItem("drainctl-filter");
+                var savedSearch = localStorage.getItem("drainctl-search");
+                if (savedFilter && savedFilter !== "all") {
+                    var pill = document.querySelector('#status-filter .filter-pill[data-status="' + savedFilter + '"]');
+                    if (pill) activateFilterPill(pill);
+                }
+                if (savedSearch) {
+                    var el = document.getElementById("srv-search");
+                    if (el) { el.value = savedSearch; filterGrid(); }
+                }
+            })();
+
+            // Track OS colour-scheme changes and update the chart when no manual
+            // override is set, so the chart colours match the active theme.
+            matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+                updateThemeBtn();
+                if (!document.documentElement.dataset.theme && chartInstance && stateHistory.length) renderChart();
             });
 
             updateThemeBtn();
