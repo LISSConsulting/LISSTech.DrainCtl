@@ -970,3 +970,120 @@ func TestSendTestNotification_WebhookPayloadSchemaComplete(t *testing.T) {
 		t.Errorf("grace_period_seconds = %v, want 0", got)
 	}
 }
+
+// TestSendNotification_PreviousModeInPayload verifies that the webhook payload
+// includes a "previous_mode" field when the CheckResult carries a transition
+// (result.Transition = true, result.TransitionFrom non-empty).
+func TestSendNotification_PreviousModeInPayload(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
+	}
+	connAllowed := false
+	result := &CheckResult{
+		Host:               "SRV-PROD",
+		Status:             "Grace",
+		DrainModeLabel:     "DrainAllSessions",
+		Message:            "Drain mode active.",
+		ConnectionsAllowed: &connAllowed,
+		Transition:         true,
+		TransitionFrom:     "AllowAll",
+		Timestamp:          time.Now(),
+	}
+
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "DOMAIN\\admin", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if got, ok := payload["previous_mode"]; !ok {
+		t.Error("payload missing 'previous_mode' field when Transition=true")
+	} else if got != "AllowAll" {
+		t.Errorf("previous_mode = %v, want AllowAll", got)
+	}
+}
+
+// TestSendNotification_NoPreviousModeWhenNotTransition verifies that
+// "previous_mode" is absent from the payload when result.Transition is false.
+func TestSendNotification_NoPreviousModeWhenNotTransition(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 65536)
+		n, _ := r.Body.Read(buf)
+		body = buf[:n]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerAlert}},
+	}
+	connAllowed := false
+	result := &CheckResult{
+		Host:               "SRV-PROD",
+		Status:             "Alert",
+		DrainModeLabel:     "DrainAllSessions",
+		Message:            "Drain mode active.",
+		ConnectionsAllowed: &connAllowed,
+		Transition:         false, // not a transition
+		Timestamp:          time.Now(),
+	}
+
+	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "", nil)
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if _, ok := payload["previous_mode"]; ok {
+		t.Error("payload must not include 'previous_mode' when Transition=false")
+	}
+}
+
+// TestSendWebhook_InvalidURL_ReturnsError verifies that sendWebhook returns an
+// error when the target URL is not a valid HTTP URL.
+func TestSendWebhook_InvalidURL_ReturnsError(t *testing.T) {
+	err := sendWebhook("\x00invalid-url", "", map[string]any{"event": "test"})
+	if err == nil {
+		t.Error("expected error for invalid URL, got nil")
+	}
+}
+
+// TestSendNtfy_InvalidURL_ReturnsError verifies that sendNtfy returns an error
+// when the target URL is not valid.
+func TestSendNtfy_InvalidURL_ReturnsError(t *testing.T) {
+	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default", "test_tube")
+	if err == nil {
+		t.Error("expected error for invalid URL, got nil")
+	}
+}
+
+// TestSendTestNotification_NtfyError_ReturnsError verifies that
+// SendTestNotification returns an error when the ntfy server responds with
+// a non-2xx status.
+func TestSendTestNotification_NtfyError_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "ntfy", URL: srv.URL},
+	}
+	err := SendTestNotification(targets, nil)
+	if err == nil {
+		t.Error("expected error when ntfy returns 503, got nil")
+	}
+	if !strings.Contains(err.Error(), srv.URL) {
+		t.Errorf("error message missing target URL (%s): %s", srv.URL, err)
+	}
+}

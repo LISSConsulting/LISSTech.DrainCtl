@@ -525,6 +525,19 @@ func TestPrune_AllRecordsPruned(t *testing.T) {
 
 // ── scanRecords — malformed line handling ─────────────────────────────────────
 
+// TestAuditStore_Close verifies that Close returns nil and can be called
+// on any open store (it is a no-op satisfying the interface contract).
+func TestAuditStore_Close(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenAuditStore(dir + `\audit.jsonl`)
+	if err != nil {
+		t.Fatalf("OpenAuditStore: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Errorf("Close() = %v, want nil", err)
+	}
+}
+
 func TestScanRecords_SkipsMalformedLines(t *testing.T) {
 	f, err := os.CreateTemp("", "audit_test_malformed_*.jsonl")
 	if err != nil {
