@@ -1,5 +1,5 @@
 > [Project]: spec-driven AI coding loop.
-> Current state: **Forty-second roam-mode pass complete.** Three fixes: (1) HTTP response-body drain added to JSON decode failure paths in `internal/dashboard/client.go` (`Register`, `FetchNotifyConfig`, `FetchServers`) — the non-2xx error paths were already drained since Roam #41, but a 2xx response whose body is only partially consumed by `json.Decoder` also prevents TCP connection reuse; (2) dashboard favicon `<link>` type corrected from `image/x-icon` to `image/png` — the file is embedded as `favicon.png` and served with `Content-Type: image/png`, so the type attribute must match; (3) unlimited-session server cards now show disconnected sessions alongside active ones ("N active, M disconnected") when `max_sessions == 0`, giving admins the full load picture instead of only the active count.
+> Current state: **Forty-third roam-mode pass complete.** Three dashboard UX improvements: (1) dynamic page title — `document.title` is updated in `render()` to show "N alert · DrainCtl" or "N grace · DrainCtl" when servers are in Alert or Grace, and "DrainCtl Dashboard" when all are healthy, so the browser tab conveys status at a glance without focus; (2) per-server grace period for Grace Left — the Grace Left row now reads `r.grace_period_seconds` from each server's last CheckResult (already sent in every report) instead of the globally-fetched `graceMinutes`, with a fallback to `graceMinutes * 60` for older agent versions that do not send the field; (3) status pill on auth failure — a 401/403 response from `/api/v1/servers` now sets the status pill to "Auth Error" in amber instead of leaving it at the previous stale value.
 
 ## Completed Work
 
@@ -131,10 +131,13 @@
 | Roam #42 | `internal/dashboard/client.go` body drain on JSON decode failure: `Register`, `FetchNotifyConfig`, and `FetchServers` decode-error paths now drain the body via `io.Copy(io.Discard, ...)` before returning — Roam #41 drained non-2xx error paths but a 2xx response whose body is only partially consumed by `json.Decoder` also prevents TCP keep-alive reuse without an explicit drain | correctness, performance |
 | Roam #42 | Dashboard favicon `<link>` type corrected from `image/x-icon` to `image/png` — the embedded file is `favicon.png` served with `Content-Type: image/png`; the type attribute must match the actual MIME type | correctness, dashboard |
 | Roam #42 | Dashboard server cards: unlimited-session display (`max_sessions == 0`) now shows "N active, M disconnected" when `disconnected_sessions > 0`, instead of only "N active" — disconnected sessions still consume resources and the full session picture is what admins need when assessing capacity on servers without a configured maximum | UX, dashboard |
+| Roam #43 | Dashboard dynamic page title: `render()` updates `document.title` to "N alert · DrainCtl" when any servers are in Alert, "N grace · DrainCtl" when any are in Grace (but none Alert), or "DrainCtl Dashboard" when all healthy — the browser tab now conveys status at a glance without the window needing focus | UX, dashboard |
+| Roam #43 | Dashboard Grace Left per-server grace period: server cards in Grace state now read `r.grace_period_seconds` from each server's last CheckResult (present in every report since the initial implementation) rather than the globally-fetched `graceMinutes`; falls back to `graceMinutes * 60` for older agent versions; Grace Left now displays immediately on first data load rather than waiting for the notify-config fetch | correctness, UX, dashboard |
+| Roam #43 | Dashboard status pill on auth failure: a 401 or 403 response from `/api/v1/servers` now sets the status pill to "Auth Error" (amber) instead of leaving it at its previous stale "Live" value — operators can distinguish an authentication failure from a connectivity loss | correctness, UX, dashboard |
 
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #42.)*
+*(All tracked items complete — nothing pending after Roam #43.)*
 
 ## Key Learnings
 
