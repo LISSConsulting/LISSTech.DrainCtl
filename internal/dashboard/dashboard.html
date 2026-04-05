@@ -1532,7 +1532,7 @@
                 <div class="settings-group">
                     <div class="settings-label">Notification Targets</div>
                     <div class="target-list" id="target-list"></div>
-                    <button class="btn-add-target" onclick="addTargetRow()" style="margin-top: 12px">
+                    <button class="btn-add-target" onclick="addTargetRow(); _cfgDirty = true;" style="margin-top: 12px">
                         + Add Target
                     </button>
                 </div>
@@ -4824,7 +4824,8 @@
                 _histTrigger = null,
                 _histAbortCtrl = null,
                 _cfgAbortCtrl = null,
-                _saveStatusTimer = null;
+                _saveStatusTimer = null,
+                _cfgDirty = false;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -5416,12 +5417,19 @@
             }
             function toggleSettings() {
                 const overlay = document.getElementById("settings-overlay");
+                const wasOpen = overlay.classList.contains("open");
+                if (wasOpen && _cfgDirty) {
+                    if (!confirm("You have unsaved changes. Close without saving?")) {
+                        return;
+                    }
+                }
                 const isOpen = overlay.classList.toggle("open");
                 document.getElementById("btn-gear").setAttribute("aria-expanded", isOpen);
                 if (isOpen) {
                     overlay.querySelector(".settings-close").focus();
                     loadNotifyConfig();
                 } else {
+                    _cfgDirty = false;
                     if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); _cfgAbortCtrl = null; }
                     document.getElementById("btn-gear").focus();
                 }
@@ -5635,6 +5643,7 @@
                 var rmBtn = row.querySelector(".btn-rm-target");
                 rmBtn.addEventListener("click", function () {
                     row.remove();
+                    _cfgDirty = true;
                 });
 
                 var sel = row.querySelector(".target-type");
@@ -5657,6 +5666,7 @@
                             urlInput.value = "";
                         }
                     }
+                    _cfgDirty = true;
                 });
 
                 // Trigger pill toggles
@@ -5666,6 +5676,7 @@
                         pill.classList.toggle("active");
                         var cb = pill.querySelector("input");
                         cb.checked = pill.classList.contains("active");
+                        _cfgDirty = true;
                     });
                 });
 
@@ -5679,6 +5690,7 @@
                             p.classList.remove("active");
                         });
                         pill.classList.add("active");
+                        _cfgDirty = true;
                     });
                 });
                 repeatInput.addEventListener("input", function () {
@@ -5686,7 +5698,13 @@
                     row.querySelectorAll(".repeat-pill").forEach(function (p) {
                         p.classList.toggle("active", parseInt(p.dataset.mins) === v);
                     });
+                    _cfgDirty = true;
                 });
+                urlInput.addEventListener("input", function () { _cfgDirty = true; });
+                var secretInput = row.querySelector('[data-field="secret"]');
+                if (secretInput) {
+                    secretInput.addEventListener("input", function () { _cfgDirty = true; });
+                }
 
                 document.getElementById("target-list").appendChild(row);
                 return row;
@@ -5739,6 +5757,7 @@
             async function loadNotifyConfig() {
                 // Cancel any in-flight request so a stale response cannot
                 // overwrite the UI when settings is closed and reopened quickly.
+                _cfgDirty = false;
                 if (_cfgAbortCtrl) { _cfgAbortCtrl.abort(); }
                 _cfgAbortCtrl = new AbortController();
                 const signal = _cfgAbortCtrl.signal;
@@ -5765,6 +5784,7 @@
                     document.getElementById("cfg-grace").value = gr;
                     syncPills("grace-pills", gr, "mins");
                     syncPills("threshold-pills", th, "val");
+                    _cfgDirty = false; // clear any dirty state set during DOM population
                 } catch (e) {
                     if (e.name === "AbortError") return;
                     console.error("loadNotifyConfig:", e);
@@ -5814,6 +5834,7 @@
                         body,
                     });
                     if (r.ok) {
+                        _cfgDirty = false;
                         st.textContent = "Saved successfully.";
                         st.className = "settings-status ok";
                         clearTimeout(_saveStatusTimer);
@@ -5881,10 +5902,12 @@
                     pill.addEventListener("click", function () {
                         input.value = pill.dataset.mins;
                         syncPills("grace-pills", parseInt(pill.dataset.mins), "mins");
+                        _cfgDirty = true;
                     });
                 });
                 input.addEventListener("input", function () {
                     syncPills("grace-pills", parseInt(input.value) || 0, "mins");
+                    _cfgDirty = true;
                 });
             })();
 
@@ -5900,14 +5923,17 @@
                     pill.addEventListener("click", function () {
                         input.value = pill.dataset.val;
                         syncThreshold(parseInt(pill.dataset.val));
+                        _cfgDirty = true;
                     });
                 });
                 offPill.addEventListener("click", function () {
                     input.value = 0;
                     syncThreshold(0);
+                    _cfgDirty = true;
                 });
                 input.addEventListener("input", function () {
                     syncThreshold(parseInt(input.value) || 0);
+                    _cfgDirty = true;
                 });
             })();
 
