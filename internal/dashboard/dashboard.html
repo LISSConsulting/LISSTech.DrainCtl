@@ -363,6 +363,15 @@
                 border-radius: 2px;
                 border: 1px solid var(--border);
             }
+            .chart-placeholder {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 200px;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.8rem;
+                color: var(--muted);
+            }
             .dot.ok {
                 background: var(--green);
             }
@@ -458,6 +467,9 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+            }
+            .srv-v--amber {
+                color: var(--amber);
             }
             .srv-act {
                 margin-top: 8px;
@@ -717,6 +729,13 @@
                 font-size: 0.75rem;
                 color: var(--subtle);
             }
+            .footer-brand {
+                font-family: "JetBrains Mono", monospace;
+                font-weight: 700;
+                font-size: 0.72rem;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+            }
             .status-pill {
                 display: inline-flex;
                 align-items: center;
@@ -953,6 +972,12 @@
             .settings-status.err {
                 color: var(--red);
             }
+            .settings-actions {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                flex-wrap: wrap;
+            }
 
             /* Target rows */
             .target-list {
@@ -1025,6 +1050,30 @@
                 letter-spacing: 0.08em;
                 color: var(--muted);
                 margin-bottom: 8px;
+            }
+            .target-section-label--nowrap {
+                margin-bottom: 0;
+                white-space: nowrap;
+            }
+            .ntfy-prefix {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.82rem;
+                color: var(--muted);
+                padding: 8px 0 8px 12px;
+                white-space: nowrap;
+            }
+            .webhook-secret-wrap {
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 14px;
+            }
+            .webhook-secret-wrap .settings-input {
+                flex: 1;
+            }
+            .hmac-header-label {
+                font-size: 0.72rem;
+                color: var(--muted);
+                white-space: nowrap;
             }
             .target-triggers {
                 display: flex;
@@ -1205,6 +1254,15 @@
                 align-items: center;
                 justify-content: space-between;
                 flex-shrink: 0;
+            }
+            .hist-head-actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .hist-head .filter-pill {
+                font-size: 0.68rem;
+                padding: 4px 10px;
             }
             .hist-title {
                 font-family: "DM Serif Display", serif;
@@ -1449,7 +1507,7 @@
                     <div class="ctr-v" id="ca">—</div>
                     <div class="ctr-l">Alert</div>
                 </div>
-                <div class="ctr card total" style="border-left-color: var(--accent)">
+                <div class="ctr card total">
                     <div class="ctr-v" id="cs">—</div>
                     <div class="ctr-l">Sessions</div>
                 </div>
@@ -1582,7 +1640,7 @@
 
                 <div class="settings-divider"></div>
 
-                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+                <div class="settings-actions">
                     <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
                     <button class="btn-test" id="btn-test" onclick="sendTestNotification()">Send Test</button>
                     <div class="settings-status" id="cfg-status"></div>
@@ -1604,14 +1662,13 @@
                         <div class="hist-title" id="hist-title-label">Server History</div>
                         <div class="hist-hostname" id="hist-hostname"></div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 10px">
+                    <div class="hist-head-actions">
                         <button
                             class="filter-pill"
                             id="hist-transitions-btn"
                             role="button"
                             tabindex="0"
                             aria-pressed="false"
-                            style="font-size: 0.68rem; padding: 4px 10px"
                             onclick="toggleHistTransitions()"
                         >
                             Transitions only
@@ -1626,17 +1683,7 @@
         </div>
 
         <footer class="footer">
-            <p
-                style="
-                    font-family: &quot;JetBrains Mono&quot;, monospace;
-                    font-weight: 700;
-                    font-size: 0.72rem;
-                    letter-spacing: 0.06em;
-                    text-transform: uppercase;
-                "
-            >
-                DrainCtl — LISS Technologies
-            </p>
+            <p class="footer-brand">DrainCtl — LISS Technologies</p>
             <span class="status-pill" id="status-pill">Live</span>
             <p id="footer-updated">Auto-refresh 30s</p>
         </footer>
@@ -5144,7 +5191,7 @@
                             const remainSec = Math.max(0, gpSec - r.state_duration_seconds);
                             const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
                             html +=
-                                '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v" style="color:var(--amber)">' +
+                                '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v srv-v--amber">' +
                                 remainLabel +
                                 "</span></div>";
                         }
@@ -5243,7 +5290,7 @@
                         chartInstance = null;
                     }
                     el.innerHTML =
-                        '<div style="display:flex;align-items:center;justify-content:center;height:200px;font-family:JetBrains Mono,monospace;font-size:.8rem;color:var(--muted)">Collecting data' +
+                        '<div class="chart-placeholder">Collecting data' +
                         (stateHistory.length ? "... " + stateHistory.length + "/3" : "") +
                         "</div>";
                     return;
@@ -5664,7 +5711,7 @@
                     '>Webhook</option><option value="ntfy"' +
                     (isNtfy ? " selected" : "") +
                     ">Ntfy.sh</option></select>" +
-                    '<span class="ntfy-prefix" style="font-family:JetBrains Mono,monospace;font-size:.82rem;color:var(--muted);padding:8px 0 8px 12px;white-space:nowrap;display:' +
+                    '<span class="ntfy-prefix" style="display:' +
                     (isNtfy ? "inline" : "none") +
                     '">ntfy.sh /</span>' +
                     '<input class="settings-input target-url" data-field="url" type="text" value="' +
@@ -5676,12 +5723,12 @@
                     "</div>" +
                     '<div class="webhook-secret-wrap" style="display:' +
                     (isNtfy ? "none" : "flex") +
-                    ';align-items:center;gap:10px;margin-bottom:14px">' +
-                    '<div class="target-section-label" style="margin-bottom:0;white-space:nowrap">HMAC Secret</div>' +
+                    '">' +
+                    '<div class="target-section-label target-section-label--nowrap">HMAC Secret</div>' +
                     '<input class="settings-input" data-field="secret" type="password" value="' +
                     secretVal.replace(/"/g, "&quot;") +
-                    '" placeholder="Optional signing secret" autocomplete="new-password" style="flex:1">' +
-                    '<span style="font-size:.72rem;color:var(--muted);white-space:nowrap">X-DrainCtl-Signature</span>' +
+                    '" placeholder="Optional signing secret" autocomplete="new-password">' +
+                    '<span class="hmac-header-label">X-DrainCtl-Signature</span>' +
                     "</div>" +
                     '<div class="target-section-label">Triggers</div>' +
                     '<p class="target-desc">Which events send a notification to this target.</p>' +
@@ -5727,7 +5774,7 @@
                     '<input class="settings-num" data-field="repeat" type="number" min="0" value="' +
                     rv +
                     '">' +
-                    '<span style="font-size:.75rem;color:var(--muted)">minutes (custom value)</span></div>';
+                    '<span class="settings-num-label">minutes (custom value)</span></div>';
 
                 // Wire up events
                 var rmBtn = row.querySelector(".btn-rm-target");
