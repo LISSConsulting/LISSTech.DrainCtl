@@ -179,6 +179,7 @@ func writeRestrictedFile(path string, data []byte) error {
 		{"icacls", path, "/inheritance:r"},
 		{"icacls", path, "/grant", "SYSTEM:(F)"},
 		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators by SID (locale-independent)
+		{"icacls", path, "/grant", "*S-1-5-6:(R)"},      // SERVICE group (virtual service accounts) — read only
 	}
 	for _, args := range cmds {
 		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
