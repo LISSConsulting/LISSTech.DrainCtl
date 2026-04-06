@@ -152,6 +152,7 @@ func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certifica
 	}
 	keyData := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	if err := writeRestrictedFile(keyPath, keyData); err != nil {
+		_ = os.Remove(certPath)
 		return tls.Certificate{}, fmt.Errorf("write key file: %w", err)
 	}
 

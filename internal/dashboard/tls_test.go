@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -280,5 +281,71 @@ func TestLoadOrGenerateTLS_ReusesExistingCert(t *testing.T) {
 	leaf2, _ := x509.ParseCertificate(cfg2.Certificates[0].Certificate[0])
 	if certFingerprint(leaf1) != certFingerprint(leaf2) {
 		t.Error("second call returned a different cert — expected reuse")
+	}
+}
+
+// TestCertFingerprint_ValidCert verifies that CertFingerprint returns the
+// correct SHA-256 fingerprint for a cert written as a PEM file.
+// Generates the cert in-memory — does not require elevation.
+func TestCertFingerprint_ValidCert(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "drainctl-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+
+	// Write the cert PEM to a temp dir (no key file needed for CertFingerprint).
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "dashboard-tls.crt")
+	pemData := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	if err := os.WriteFile(certPath, pemData, 0o644); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+
+	fp, err := CertFingerprint(dir)
+	if err != nil {
+		t.Fatalf("CertFingerprint: %v", err)
+	}
+
+	sum := sha256.Sum256(certDER)
+	want := hex.EncodeToString(sum[:])
+	if fp != want {
+		t.Errorf("CertFingerprint = %q, want %q", fp, want)
+	}
+}
+
+// TestGenerateSelfSigned_KeyWriteError verifies that generateSelfSigned returns
+// a descriptive error when the key file path is blocked by a directory.
+// The cert is written successfully; the key write fails without requiring elevation.
+func TestGenerateSelfSigned_KeyWriteError(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "test.crt")
+	// Block the key path with a directory — os.WriteFile will fail.
+	keyPath := filepath.Join(dir, "blocked-key")
+	if err := os.MkdirAll(keyPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	_, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	if err == nil {
+		t.Fatal("expected error when key path is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "write key file") {
+		t.Errorf("error = %q, want 'write key file' in message", err.Error())
+	}
+	// Cert file should have been removed on key write failure.
+	if _, statErr := os.Stat(certPath); statErr == nil {
+		t.Error("cert file should be absent after key write failure (no partial cert on disk)")
 	}
 }

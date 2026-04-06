@@ -1394,3 +1394,54 @@ func TestInstallCertificate_LoadConfigError(t *testing.T) {
 		t.Errorf("error = %q, want 'load config' in message", err.Error())
 	}
 }
+
+// TestLoadConfig_FreshInstall_WriteError verifies that LoadConfig returns an
+// error containing "write default config" when no config.json exists and
+// saveConfigToFile fails (data directory cannot be created).
+func TestLoadConfig_FreshInstall_WriteError(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("ProgramData", base)
+
+	// Block MkdirAll by placing a regular file where "LISS Technologies"
+	// would be — mirrors TestSaveConfig_CreateDataDirError but exercises
+	// the "write default config" wrapper in LoadConfig.
+	blocker := filepath.Join(base, "LISS Technologies")
+	if err := os.WriteFile(blocker, []byte("blocked"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := LoadConfig(nil)
+	if err == nil {
+		t.Fatal("expected error when saveConfigToFile fails during fresh install, got nil")
+	}
+	if !strings.Contains(err.Error(), "write default config") {
+		t.Errorf("error = %q, want 'write default config' in message", err.Error())
+	}
+}
+
+// TestSaveConfig_WriteTempError verifies that SaveConfig returns an error
+// containing "write temp config" when the .tmp path is blocked by a directory.
+func TestSaveConfig_WriteTempError(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("ProgramData", base)
+
+	// Create the data directory so MkdirAll succeeds.
+	dataDir := DefaultDataDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll dataDir: %v", err)
+	}
+
+	// Block config.json.tmp with a directory — os.WriteFile will fail.
+	tmpPath := DefaultConfigPath() + ".tmp"
+	if err := os.MkdirAll(tmpPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll tmpPath: %v", err)
+	}
+
+	err := SaveConfig(DefaultConfig(), nil)
+	if err == nil {
+		t.Fatal("expected error when tmpPath is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "write temp config") {
+		t.Errorf("error = %q, want 'write temp config' in message", err.Error())
+	}
+}
