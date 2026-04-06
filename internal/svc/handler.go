@@ -290,9 +290,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 
 		// Fetch notification config from dashboard (replaces local targets).
-		// Independent of registration — global config, not host-specific.
-		if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
-			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", err))
+		var remote *dashboard.RemoteNotifyConfig
+		var fetchErr error
+		if dashState != nil {
+			remote, fetchErr = dashboard.GetNotifyConfig(s.log)
+		} else {
+			remote, fetchErr = dashboard.FetchNotifyConfig(dashCfg.URL, s.log)
+		}
+		if fetchErr != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "dashboard: failed to fetch notify config, using local targets", fmt.Sprintf("error=%q", fetchErr))
 		} else {
 			dashConfigFailures = 0
 			useRemoteConfig = true
@@ -311,7 +317,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -341,7 +347,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(dc.LvlINF, "trigger=registry_change")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
@@ -365,19 +371,26 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashConfigFailures) {
 				lastConfigFetch = time.Now()
 				s.log(dc.LvlDBG, "msg=\"dashboard config fetch\"", fmt.Sprintf("url=%s", dashCfg.URL))
-				if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
+				var cfgRemote *dashboard.RemoteNotifyConfig
+				var cfgErr error
+				if dashState != nil {
+					cfgRemote, cfgErr = dashboard.GetNotifyConfig(s.log)
+				} else {
+					cfgRemote, cfgErr = dashboard.FetchNotifyConfig(dashCfg.URL, s.log)
+				}
+				if cfgErr != nil {
 					dashConfigFailures++
 					nextIn := backoffDuration(dashConfigFailures)
 					dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
-						fmt.Sprintf("error=%q next_retry_in=%s", err, nextIn.Round(time.Minute)))
+						fmt.Sprintf("error=%q next_retry_in=%s", cfgErr, nextIn.Round(time.Minute)))
 				} else {
 					dashConfigFailures = 0
 					useRemoteConfig = true
-					applyRemoteConfig(remote, &cfg, &notifyTargets)
+					applyRemoteConfig(cfgRemote, &cfg, &notifyTargets)
 					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
 				}
 			}
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
 
 		case <-configCh:
 			newFullCfg, err := dc.LoadConfig(s.log)
