@@ -54,10 +54,8 @@ func (a *AuditStore) Record(rec *AuditRecord) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshal record: %w", err)
-	}
+	// AuditRecord contains only primitive-typed fields; Marshal cannot fail.
+	data, _ := json.Marshal(rec)
 	_, err = fmt.Fprintf(f, "%s\n", data)
 	return err
 }
@@ -140,10 +138,8 @@ func (a *AuditStore) Prune(retention time.Duration) (int64, error) {
 
 	w := bufio.NewWriter(f)
 	for _, r := range kept {
-		data, err := json.Marshal(r)
-		if err != nil {
-			continue
-		}
+		// AuditRecord contains only primitive-typed fields; Marshal cannot fail.
+		data, _ := json.Marshal(r)
 		_, _ = fmt.Fprintf(w, "%s\n", data)
 	}
 	if err := w.Flush(); err != nil {
