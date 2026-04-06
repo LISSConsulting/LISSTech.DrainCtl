@@ -10,6 +10,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
 )
 
@@ -101,7 +102,11 @@ func dashboardCmd() *cobra.Command {
 			}
 
 			log(dc.LvlOK, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
-			log(dc.LvlINF, "Restart the DrainCtl service to activate: Restart-Service DrainCtl")
+
+			// Restart the service so the dashboard listener starts.
+			if err := svc.RestartService(log); err != nil {
+				log(dc.LvlWRN, fmt.Sprintf("msg=%q error=%q", "service restart failed, restart manually", err))
+			}
 			return nil
 		},
 	}
@@ -123,7 +128,11 @@ func dashboardCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 			log(dc.LvlOK, "dashboard=disabled")
-			log(dc.LvlINF, "Restart the DrainCtl service to apply: Restart-Service DrainCtl")
+
+			// Restart the service to stop the dashboard listener.
+			if err := svc.RestartService(log); err != nil {
+				log(dc.LvlWRN, fmt.Sprintf("msg=%q error=%q", "service restart failed, restart manually", err))
+			}
 			return nil
 		},
 	})
