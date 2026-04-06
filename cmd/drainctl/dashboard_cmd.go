@@ -10,6 +10,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
 )
@@ -39,25 +40,22 @@ func dashboardCmd() *cobra.Command {
 		Use:   "list-servers",
 		Short: "List registered servers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
+			raw, err := pipe.ServersViaPipe()
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return fmt.Errorf("list servers: %w", err)
 			}
-			if !fileCfg.Dashboard.Enabled {
-				return fmt.Errorf("dashboard not enabled on this server")
-			}
-			url := fmt.Sprintf("https://localhost:%d/api/v1/servers", fileCfg.Dashboard.Port)
-			resp, err := dashboard.FetchServers(url)
-			if err != nil {
-				return fmt.Errorf("fetch servers: %w", err)
-			}
-			if len(resp) == 0 {
+			if len(raw) == 0 || string(raw) == "[]" {
 				fmt.Println("No registered servers.")
 				return nil
 			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(resp)
+			var parsed json.RawMessage
+			if err := json.Unmarshal(raw, &parsed); err == nil {
+				pretty, _ := json.MarshalIndent(parsed, "", "  ")
+				fmt.Println(string(pretty))
+			} else {
+				fmt.Println(string(raw))
+			}
+			return nil
 		},
 	})
 
@@ -66,15 +64,7 @@ func dashboardCmd() *cobra.Command {
 		Short: "Remove a server from the dashboard",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-			if !fileCfg.Dashboard.Enabled {
-				return fmt.Errorf("dashboard not enabled on this server")
-			}
-			url := fmt.Sprintf("https://localhost:%d/api/v1/servers/%s", fileCfg.Dashboard.Port, args[0])
-			if err := dashboard.RemoveServer(url); err != nil {
+			if err := pipe.RemoveServerViaPipe(args[0]); err != nil {
 				return fmt.Errorf("remove server: %w", err)
 			}
 			fmt.Printf("Server %s removed.\n", args[0])

@@ -17,9 +17,10 @@ const PipeName = `\\.\pipe\drainctl`
 
 // PipeRequest is the JSON request sent by clients.
 type PipeRequest struct {
-	Cmd         string `json:"cmd"`                    // "status" or "history"
+	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server"
 	Limit       int    `json:"limit,omitempty"`        // for history
 	ChangesOnly bool   `json:"changes_only,omitempty"` // for history
+	Hostname    string `json:"hostname,omitempty"`     // for remove-server
 }
 
 // PipeResponse is the JSON response returned by the service.
@@ -33,6 +34,8 @@ type PipeResponse struct {
 type PipeHandler interface {
 	HandleStatus() *dc.CheckResult
 	HandleHistory(limit int, changesOnly bool) []dc.AuditRecord
+	HandleServers() json.RawMessage           // nil if dashboard not enabled
+	HandleRemoveServer(hostname string) error // ErrNotFound or nil
 }
 
 // ServePipe runs the named pipe server using a simple goroutine-per-connection
@@ -118,6 +121,23 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 		raw, _ := json.Marshal(out)
 		resp = PipeResponse{OK: true, Data: raw}
 
+	case "servers":
+		raw := handler.HandleServers()
+		if raw == nil {
+			resp = PipeResponse{OK: false, Error: "dashboard not enabled"}
+		} else {
+			resp = PipeResponse{OK: true, Data: raw}
+		}
+
+	case "remove-server":
+		if req.Hostname == "" {
+			resp = PipeResponse{OK: false, Error: "hostname required"}
+		} else if err := handler.HandleRemoveServer(req.Hostname); err != nil {
+			resp = PipeResponse{OK: false, Error: err.Error()}
+		} else {
+			resp = PipeResponse{OK: true}
+		}
+
 	default:
 		resp = PipeResponse{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Cmd)}
 	}
@@ -152,6 +172,21 @@ func HistoryViaPipe(limit int, changesOnly bool) ([]dc.HistoryRecord, error) {
 		return nil, fmt.Errorf("unmarshal history: %w", err)
 	}
 	return records, nil
+}
+
+// ServersViaPipe lists registered dashboard servers via the named pipe.
+func ServersViaPipe() (json.RawMessage, error) {
+	resp, err := pipeRPC(PipeRequest{Cmd: "servers"})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
+// RemoveServerViaPipe removes a server from the dashboard via the named pipe.
+func RemoveServerViaPipe(hostname string) error {
+	_, err := pipeRPC(PipeRequest{Cmd: "remove-server", Hostname: hostname})
+	return err
 }
 
 // pipeRPC connects to the service pipe, sends a request, and reads the response.
