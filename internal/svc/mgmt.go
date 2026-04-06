@@ -25,13 +25,9 @@ func UninstallService(log dc.LogFunc) error {
 }
 
 func installServiceImpl(exePath string, log dc.LogFunc) error {
-	// Register event log source.
-	err := eventlog.InstallAsEventCreate(dc.ServiceName,
-		eventlog.Info|eventlog.Warning|eventlog.Error)
-	if err != nil {
-		// Ignore "already exists" — not a real error.
-		log(dc.LvlINF, fmt.Sprintf("eventlog_source=%s (may already exist)", dc.ServiceName))
-	}
+	// Remove legacy Application event log source if it exists.
+	// The MSI registers the source under the custom "DrainCtl" log.
+	_ = eventlog.Remove(dc.ServiceName)
 
 	m, err := mgr.Connect()
 	if err != nil {
