@@ -184,6 +184,14 @@ func StopService(log dc.LogFunc) error {
 	return fmt.Errorf("timed out waiting for service to stop")
 }
 
+// RestartService stops the service (if running) and starts it again.
+func RestartService(log dc.LogFunc) error {
+	if err := StopService(log); err != nil {
+		return err
+	}
+	return StartService(log)
+}
+
 // ServiceStatus returns the current SCM state of the service as a human-readable string.
 func ServiceStatus() (string, error) {
 	m, err := mgr.Connect()
