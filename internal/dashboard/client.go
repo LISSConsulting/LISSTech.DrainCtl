@@ -139,15 +139,38 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 	log(dc.LvlINF, "dashboard=reported", fmt.Sprintf("host=%s status=%s", result.Host, result.Status))
 }
 
-// negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
-// It makes an initial request, and if a 401 is returned, acquires an SSPI client
-// token and retries with the Authorization header.
-// If the target host is this machine, the URL is rewritten to 127.0.0.1 to avoid
-// Windows NTLM loopback issues and hit the server's loopback auth bypass.
+// negotiateRequest performs an HTTP request with authentication.
+// If the target host is this machine, uses the process-scoped internal token
+// (same-process dashboard). Otherwise uses SSPI Negotiate (Kerberos/NTLM).
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
-	rawURL = rewriteLoopback(rawURL)
+	if isLocalTarget(rawURL) {
+		return internalRequest(method, rewriteLoopback(rawURL), body)
+	}
+	return sspiRequest(method, rawURL, body)
+}
 
-	// First attempt — expect 401.
+// internalRequest sends a request with the process-scoped internal token.
+// Used when the service talks to its own dashboard.
+func internalRequest(method, rawURL string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
+	req.Header.Set(internalHeader, InternalToken())
+
+	resp, err := dashClientPtr.Load().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	return resp, nil
+}
+
+// sspiRequest performs an HTTP request with SSPI Negotiate authentication.
+// Makes an initial request, and if 401 is returned, acquires an SSPI client
+// token and retries with the Authorization header.
+func sspiRequest(method, rawURL string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -165,7 +188,6 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
-	// Acquire SSPI client credentials and generate a Negotiate token.
 	cred, err := negotiate.AcquireCurrentUserCredentials()
 	if err != nil {
 		return nil, fmt.Errorf("sspi acquire credentials: %w", err)
@@ -179,7 +201,6 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	}
 	defer func() { _ = secCtx.Release() }()
 
-	// Retry with Negotiate token.
 	req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create retry request: %w", err)
@@ -189,6 +210,19 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
 
 	return dashClientPtr.Load().Do(req)
+}
+
+// isLocalTarget returns true if the URL's hostname matches the local machine.
+func isLocalTarget(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), local)
 }
 
 // targetSPN derives the HTTP service SPN from a URL, e.g. "HTTP/server.domain.com".
