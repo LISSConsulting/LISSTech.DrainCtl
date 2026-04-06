@@ -49,32 +49,33 @@
             </ComboBox>
         </UI>
 
-        <!-- Custom actions use ExeCommand with the installed drainctl.exe.
-             HideTarget suppresses command-line logging; the console window is
-             hidden by running via conhost with /headless (Win10 1809+). -->
+        <!-- Custom actions via WixQuietExec — no console window. -->
+        <SetProperty Id="ConfigureAction" Before="ConfigureAction" Sequence="execute"
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --quiet --mode=[INSTALL_MODE] --webhook-url=&quot;[WEBHOOK_URL]&quot; --ntfy-url=&quot;[NTFY_URL]&quot; --dashboard-url=&quot;[DASHBOARD_URL]&quot; --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --grace-period=[GRACE_PERIOD]" />
         <CustomAction Id="ConfigureAction"
-            Directory="BinFolder"
-            ExeCommand="[BinFolder]drainctl.exe configure --quiet --mode=[INSTALL_MODE] --webhook-url=&quot;[WEBHOOK_URL]&quot; --ntfy-url=&quot;[NTFY_URL]&quot; --dashboard-url=&quot;[DASHBOARD_URL]&quot; --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --grace-period=[GRACE_PERIOD]"
+            DllEntry="WixQuietExec"
             Execute="commit"
             Impersonate="no"
             Return="check"
-            HideTarget="yes" />
+            BinaryRef="Wix4UtilCA_X64" />
 
+        <SetProperty Id="AddEventLogReaders" Before="AddEventLogReaders" Sequence="execute"
+            Value="&quot;[BinFolder]drainctl.exe&quot; service grant-eventlog" />
         <CustomAction Id="AddEventLogReaders"
-            Directory="BinFolder"
-            ExeCommand="[BinFolder]drainctl.exe service grant-eventlog"
+            DllEntry="WixQuietExec"
             Execute="commit"
             Impersonate="no"
             Return="ignore"
-            HideTarget="yes" />
+            BinaryRef="Wix4UtilCA_X64" />
 
+        <SetProperty Id="RestartService" Before="RestartService" Sequence="execute"
+            Value="&quot;[BinFolder]drainctl.exe&quot; service restart" />
         <CustomAction Id="RestartService"
-            Directory="BinFolder"
-            ExeCommand="[BinFolder]drainctl.exe service restart"
+            DllEntry="WixQuietExec"
             Execute="commit"
             Impersonate="no"
             Return="ignore"
-            HideTarget="yes" />
+            BinaryRef="Wix4UtilCA_X64" />
 
         <InstallExecuteSequence>
             <Custom Action="ConfigureAction"
