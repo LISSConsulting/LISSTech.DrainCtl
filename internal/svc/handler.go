@@ -446,6 +446,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 
+			// Preserve SRV-discovered URL if the config file doesn't set one.
+			if newDashCfg.URL == "" && dashCfg.URL != "" {
+				newDashCfg.URL = dashCfg.URL
+			}
 			dashCfg = newDashCfg
 			s.log(dc.LvlINF, "config=reloaded")
 			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
