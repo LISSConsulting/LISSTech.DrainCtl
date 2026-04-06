@@ -17,7 +17,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
-	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 )
@@ -452,10 +451,6 @@ func registerWithDashboard(dashCfg *dc.DashboardConfig, log dc.LogFunc) bool {
 // RunService starts the Windows service. Called by the CLI's hidden
 // "service run" subcommand.
 func RunService() error {
-	// Remove legacy Application event log source so events route to the
-	// custom "DrainCtl" log registered by the MSI installer.
-	removeLegacyEventLogSource()
-
 	elog, err := eventlog.Open(dc.ServiceName)
 	if err != nil {
 		return fmt.Errorf("open event log: %w", err)
@@ -473,20 +468,4 @@ func RunService() error {
 
 	log := MultiLogger(EventLogLogger(elog), FileLogger(fw))
 	return svc.Run(dc.ServiceName, &drainService{log: log, elog: elog})
-}
-
-// removeLegacyEventLogSource deletes the old Application\DrainCtl registry key
-// so events route to the custom DrainCtl log instead. Silently ignored if the
-// key doesn't exist or can't be deleted.
-func removeLegacyEventLogSource() {
-	k, err := registry.OpenKey(
-		registry.LOCAL_MACHINE,
-		`SYSTEM\CurrentControlSet\Services\EventLog\Application`,
-		registry.ALL_ACCESS,
-	)
-	if err != nil {
-		return
-	}
-	defer func() { _ = k.Close() }()
-	_ = registry.DeleteKey(k, dc.ServiceName)
 }
