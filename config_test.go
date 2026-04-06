@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // ── ClampRetention ────────────────────────────────────────────────────────────
@@ -1443,5 +1445,50 @@ func TestSaveConfig_WriteTempError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "write temp config") {
 		t.Errorf("error = %q, want 'write temp config' in message", err.Error())
+	}
+}
+
+// TestSaveConfig_RenameError verifies that SaveConfig returns an error
+// containing "rename config" when both windows.MoveFileEx and os.Rename fail.
+// This is forced by holding config.json open without FILE_SHARE_DELETE so that
+// MoveFileEx cannot replace it and the os.Rename fallback also fails.
+func TestSaveConfig_RenameError(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("ProgramData", base)
+
+	// Bootstrap a valid config.json so the destination file already exists.
+	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+		t.Fatalf("SaveConfig (setup): %v", err)
+	}
+
+	// Hold config.json open without FILE_SHARE_DELETE — prevents both
+	// windows.MoveFileEx (MOVEFILE_REPLACE_EXISTING) and os.Rename from
+	// replacing it, because Windows cannot delete a file whose delete access
+	// is not shared.
+	configPath := DefaultConfigPath()
+	pathPtr, err := windows.UTF16PtrFromString(configPath)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathPtr,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ, // intentionally omit FILE_SHARE_DELETE
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile exclusive: %v", err)
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+
+	err = SaveConfig(DefaultConfig(), nil)
+	if err == nil {
+		t.Fatal("expected error from SaveConfig when rename fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "rename config") {
+		t.Errorf("error = %q, want 'rename config' in message", err.Error())
 	}
 }

@@ -354,9 +354,12 @@ func saveConfigToFile(cfg *Config, log LogFunc) error {
 	}
 
 	// Acquire cross-process mutex.
+	// windows.CreateMutex returns ERROR_ALREADY_EXISTS (as an error) when the
+	// named mutex already exists in the kernel object namespace — the handle is
+	// still valid in that case, so treat it as a success.
 	mutexName, _ := windows.UTF16PtrFromString(configMutexName)
 	mutex, err := windows.CreateMutex(nil, false, mutexName)
-	if err != nil {
+	if err != nil && err != windows.ERROR_ALREADY_EXISTS {
 		return fmt.Errorf("create config mutex: %w", err)
 	}
 	defer func() { _ = windows.CloseHandle(mutex) }()
