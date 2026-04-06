@@ -32,11 +32,12 @@ func installServiceImpl(exePath string, log dc.LogFunc) error {
 	defer func() { _ = m.Disconnect() }()
 
 	s, err := m.CreateService(dc.ServiceName, exePath, mgr.Config{
-		DisplayName:  dc.ServiceDisplayName,
-		Description:  dc.ServiceDescription,
-		StartType:    mgr.StartAutomatic,
-		ErrorControl: mgr.ErrorNormal,
-		ServiceType:  windows.SERVICE_WIN32_OWN_PROCESS,
+		DisplayName:      dc.ServiceDisplayName,
+		Description:      dc.ServiceDescription,
+		StartType:        mgr.StartAutomatic,
+		ErrorControl:     mgr.ErrorNormal,
+		ServiceType:      windows.SERVICE_WIN32_OWN_PROCESS,
+		ServiceStartName: "NT SERVICE\\" + dc.ServiceName,
 	}, "service", "run") // args passed to binary: drainctl.exe service run
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)

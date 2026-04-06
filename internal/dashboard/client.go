@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -139,38 +138,10 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 	log(dc.LvlINF, "dashboard=reported", fmt.Sprintf("host=%s status=%s", result.Host, result.Status))
 }
 
-// negotiateRequest performs an HTTP request with authentication.
-// If the target host is this machine, uses the process-scoped internal token
-// (same-process dashboard). Otherwise uses SSPI Negotiate (Kerberos/NTLM).
-func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
-	if isLocalTarget(rawURL) {
-		return internalRequest(method, rewriteLoopback(rawURL), body)
-	}
-	return sspiRequest(method, rawURL, body)
-}
-
-// internalRequest sends a request with the process-scoped internal token.
-// Used when the service talks to its own dashboard.
-func internalRequest(method, rawURL string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
-	req.Header.Set(internalHeader, InternalToken())
-
-	resp, err := dashClientPtr.Load().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	return resp, nil
-}
-
-// sspiRequest performs an HTTP request with SSPI Negotiate authentication.
-// Makes an initial request, and if 401 is returned, acquires an SSPI client
+// negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
+// Makes an initial request, and if a 401 is returned, acquires an SSPI client
 // token and retries with the Authorization header.
-func sspiRequest(method, rawURL string, body []byte) (*http.Response, error) {
+func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -212,49 +183,11 @@ func sspiRequest(method, rawURL string, body []byte) (*http.Response, error) {
 	return dashClientPtr.Load().Do(req)
 }
 
-// isLocalTarget returns true if the URL's hostname matches the local machine.
-func isLocalTarget(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	local, err := os.Hostname()
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(u.Hostname(), local)
-}
-
 // targetSPN derives the HTTP service SPN from a URL, e.g. "HTTP/server.domain.com".
 func targetSPN(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return ""
-	}
-	host := u.Hostname()
-	return "HTTP/" + host
-}
-
-// rewriteLoopback rewrites a URL to use 127.0.0.1 if the target hostname
-// matches the local machine. This ensures self-connections hit the loopback
-// bypass and avoids Windows NTLM loopback authentication issues.
-func rewriteLoopback(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	local, err := os.Hostname()
-	if err != nil {
-		return rawURL
-	}
-	if !strings.EqualFold(u.Hostname(), local) {
-		return rawURL
-	}
-	port := u.Port()
-	if port != "" {
-		u.Host = "127.0.0.1:" + port
-	} else {
-		u.Host = "127.0.0.1"
 	}
 	return u.String()
 }
