@@ -24,6 +24,37 @@ import (
 // (hyphen not at start/end), separated by dots.
 var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
 
+// isAuthorizedForHost checks whether the authenticated identity is allowed to
+// register or report for the given hostname.
+//   - Machine accounts ("DOMAIN\HOST$") can only act for their own hostname.
+//   - Members of the dashboard admin group can act for any host.
+//   - All other identities are rejected.
+func isAuthorizedForHost(auth *AuthInfo, hostname, adminGroup string) bool {
+	if auth == nil {
+		return false
+	}
+	// Machine account: "DOMAIN\HOST$" → extract hostname, compare.
+	user := auth.Username
+	if strings.HasSuffix(user, "$") {
+		machineHost := user[:len(user)-1] // strip trailing $
+		if idx := strings.LastIndex(machineHost, `\`); idx >= 0 {
+			machineHost = machineHost[idx+1:]
+		}
+		return strings.EqualFold(machineHost, hostname)
+	}
+	// Non-machine account: must be a member of the admin group.
+	for _, g := range auth.Groups {
+		if strings.EqualFold(g, adminGroup) {
+			return true
+		}
+		parts := strings.SplitN(g, `\`, 2)
+		if len(parts) == 2 && strings.EqualFold(parts[1], adminGroup) {
+			return true
+		}
+	}
+	return false
+}
+
 //go:embed dashboard.html
 var dashboardHTML []byte
 
@@ -197,13 +228,22 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ds.state.Register(req.Hostname)
-
+	// Verify the authenticated identity matches the claimed hostname.
+	// Machine accounts are "DOMAIN\HOST$" — the hostname must match.
+	// Domain admins (non-machine accounts) can register any host.
 	auth := GetAuthInfo(r)
 	user := ""
 	if auth != nil {
 		user = auth.Username
+		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) {
+			dc.LogMsg(ds.log, dc.LvlWRN, "dashboard: register rejected: identity mismatch",
+				fmt.Sprintf("user=%s claimed_host=%s", user, req.Hostname))
+			http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
+			return
+		}
 	}
+
+	ds.state.Register(req.Hostname)
 	ds.log(dc.LvlINF, "dashboard=register",
 		fmt.Sprintf("host=%s user=%s", req.Hostname, user))
 
@@ -239,6 +279,14 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 
 	if !ds.state.IsRegistered(result.Host) {
 		http.Error(w, "host not registered", http.StatusForbidden)
+		return
+	}
+
+	auth := GetAuthInfo(r)
+	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) {
+		dc.LogMsg(ds.log, dc.LvlWRN, "dashboard: report rejected: identity mismatch",
+			fmt.Sprintf("user=%s claimed_host=%s", auth.Username, result.Host))
+		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
 	}
 
@@ -324,12 +372,21 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
+	// Strip secrets — this endpoint is accessible to any authenticated
+	// domain identity, not just admins. Agents need triggers and URLs
+	// but not HMAC signing secrets (the dashboard sends notifications,
+	// not the agents).
+	stripped := make([]dc.NotificationTarget, len(notifications))
+	copy(stripped, notifications)
+	for i := range stripped {
+		stripped[i].Secret = ""
+	}
 	out := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
 	}{
-		Notifications:           notifications,
+		Notifications:           stripped,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 	}
