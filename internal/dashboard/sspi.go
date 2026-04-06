@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/negotiate"
 	"golang.org/x/sys/windows"
 )
@@ -34,9 +37,36 @@ func GetAuthInfo(r *http.Request) *AuthInfo {
 	return nil
 }
 
+// pendingCtx holds an in-progress NTLM multi-leg server context.
+type pendingCtx struct {
+	cred    *sspi.Credentials
+	sc      *negotiate.ServerContext
+	created time.Time
+}
+
 // NegotiateMiddleware wraps an http.Handler with SSPI Negotiate (Kerberos/NTLM)
-// authentication. Unauthenticated requests receive a 401 with a Negotiate challenge.
+// authentication. Supports multi-leg NTLM by keying pending contexts on the
+// TCP connection's remote address (preserved across HTTP/1.1 keep-alive).
 func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
+	var pending sync.Map // remoteAddr → *pendingCtx
+
+	// Reap stale contexts every 30 seconds.
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			now := time.Now()
+			pending.Range(func(key, value any) bool {
+				pc := value.(*pendingCtx)
+				if now.Sub(pc.created) > 60*time.Second {
+					_ = pc.sc.Release()
+					_ = pc.cred.Release()
+					pending.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Negotiate ") {
@@ -53,25 +83,49 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 			return
 		}
 
-		cred, err := negotiate.AcquireServerCredentials("")
-		if err != nil {
-			dc.LogMsg(log, dc.LvlERR, "sspi: acquire credentials failed", fmt.Sprintf("error=%q", err))
-			http.Error(w, "server auth error", http.StatusInternalServerError)
-			return
-		}
-		defer func() { _ = cred.Release() }()
+		connKey := r.RemoteAddr
 
-		sc, authDone, responseToken, err := negotiate.NewServerContext(cred, token)
-		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "sspi: negotiate failed", fmt.Sprintf("error=%q", err))
-			w.Header().Set("WWW-Authenticate", "Negotiate")
-			http.Error(w, "authentication failed", http.StatusUnauthorized)
-			return
+		// Check for an existing multi-leg context from a previous 401 exchange.
+		var sc *negotiate.ServerContext
+		var cred *sspi.Credentials
+		var authDone bool
+		var responseToken []byte
+
+		if v, ok := pending.LoadAndDelete(connKey); ok {
+			// Second leg: continue the existing context.
+			pc := v.(*pendingCtx)
+			cred = pc.cred
+			sc = pc.sc
+			authDone, responseToken, err = sc.Update(token)
+			if err != nil {
+				_ = sc.Release()
+				_ = cred.Release()
+				dc.LogMsg(log, dc.LvlWRN, "sspi: negotiate leg2 failed", fmt.Sprintf("error=%q", err))
+				w.Header().Set("WWW-Authenticate", "Negotiate")
+				http.Error(w, "authentication failed", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			// First leg: create new context.
+			cred, err = negotiate.AcquireServerCredentials("")
+			if err != nil {
+				dc.LogMsg(log, dc.LvlERR, "sspi: acquire credentials failed", fmt.Sprintf("error=%q", err))
+				http.Error(w, "server auth error", http.StatusInternalServerError)
+				return
+			}
+			sc, authDone, responseToken, err = negotiate.NewServerContext(cred, token)
+			if err != nil {
+				_ = cred.Release()
+				dc.LogMsg(log, dc.LvlWRN, "sspi: negotiate failed", fmt.Sprintf("error=%q", err))
+				w.Header().Set("WWW-Authenticate", "Negotiate")
+				http.Error(w, "authentication failed", http.StatusUnauthorized)
+				return
+			}
 		}
-		defer func() { _ = sc.Release() }()
 
 		if !authDone {
-			// Multi-leg negotiation: send challenge back.
+			// Multi-leg: store context for the next request on this connection.
+			pending.Store(connKey, &pendingCtx{cred: cred, sc: sc, created: time.Now()})
 			if len(responseToken) > 0 {
 				w.Header().Set("WWW-Authenticate",
 					"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
@@ -79,6 +133,12 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+
+		// Auth complete — clean up.
+		defer func() {
+			_ = sc.Release()
+			_ = cred.Release()
+		}()
 
 		username, err := sc.GetUsername()
 		if err != nil {
@@ -88,15 +148,11 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 		}
 		dc.LogMsg(log, dc.LvlDBG, "sspi: negotiate complete", fmt.Sprintf("user=%s", username))
 
-		// Set response token if present.
 		if len(responseToken) > 0 {
 			w.Header().Set("WWW-Authenticate",
 				"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
 		}
 
-		// Extract group memberships while sc is alive by impersonating on
-		// this OS thread. LockOSThread ensures the impersonation token stays
-		// on the thread that calls CheckTokenMembership.
 		groups := extractGroups(sc, log, username)
 
 		info := &AuthInfo{Username: username, Groups: groups}
@@ -122,7 +178,7 @@ func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string)
 	err := windows.OpenThreadToken(
 		windows.CurrentThread(),
 		windows.TOKEN_QUERY,
-		false, // open as client, not self
+		false,
 		&token,
 	)
 	if err != nil {
@@ -156,9 +212,6 @@ func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string)
 
 // RequireGroup wraps an http.Handler and rejects requests where the
 // authenticated user is not a member of the specified Windows group.
-// The caller must wrap with NegotiateMiddleware first.
-// Group membership is checked against AuthInfo.Groups (populated by
-// NegotiateMiddleware), not via thread impersonation.
 func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := GetAuthInfo(r)
@@ -167,15 +220,12 @@ func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler 
 			return
 		}
 
-		// Check group membership from the pre-extracted groups list.
-		// Match on "DOMAIN\Group" or just "Group" (case-insensitive).
 		found := false
 		for _, g := range auth.Groups {
 			if strings.EqualFold(g, group) {
 				found = true
 				break
 			}
-			// Also match the bare group name (without domain prefix).
 			parts := strings.SplitN(g, `\`, 2)
 			if len(parts) == 2 && strings.EqualFold(parts[1], group) {
 				found = true
