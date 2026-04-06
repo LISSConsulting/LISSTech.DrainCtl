@@ -4,6 +4,7 @@ package svc
 
 import (
 	"fmt"
+	"os/exec"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -187,6 +188,23 @@ func RestartService(log dc.LogFunc) error {
 		return err
 	}
 	return StartService(log)
+}
+
+// GrantEventLogAccess adds the virtual service account to the Event Log Readers
+// local group so the service can subscribe to Security log events.
+func GrantEventLogAccess(log dc.LogFunc) error {
+	account := `NT SERVICE\` + dc.ServiceName
+	out, err := exec.Command("net", "localgroup", "Event Log Readers", account, "/add").CombinedOutput()
+	if err != nil {
+		// Error 1378 = "already a member" — not a real failure.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			log(dc.LvlINF, fmt.Sprintf("eventlog_readers=%s (already a member)", account))
+			return nil
+		}
+		return fmt.Errorf("net localgroup: %w (%s)", err, string(out))
+	}
+	log(dc.LvlOK, fmt.Sprintf("eventlog_readers=%s added", account))
+	return nil
 }
 
 // ServiceStatus returns the current SCM state of the service as a human-readable string.

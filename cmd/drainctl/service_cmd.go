@@ -87,5 +87,14 @@ func serviceCmd() *cobra.Command {
 		},
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:    "grant-eventlog",
+		Short:  "Add the service account to Event Log Readers group",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return svc.GrantEventLogAccess(dc.DefaultLogger(os.Stdout, false))
+		},
+	})
+
 	return cmd
 }

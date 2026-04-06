@@ -39,6 +39,13 @@ func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan s
 
 	ch := make(chan struct{}, 1)
 
+	// Track config.json mtime to filter out writes to other files in the directory.
+	configPath := path
+	var lastMtime time.Time
+	if mt, err := statFile(configPath); err == nil {
+		lastMtime = mt
+	}
+
 	go func() {
 		defer func() {
 			_ = windows.FindCloseChangeNotification(handle)
@@ -67,10 +74,13 @@ func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan s
 
 			switch idx {
 			case windows.WAIT_OBJECT_0:
-				// Directory write detected — notify consumer.
-				select {
-				case ch <- struct{}{}:
-				default:
+				// Directory write detected — only notify if config.json actually changed.
+				if mt, err := statFile(configPath); err == nil && mt.After(lastMtime) {
+					lastMtime = mt
+					select {
+					case ch <- struct{}{}:
+					default:
+					}
 				}
 				// Re-arm the notification.
 				if err := windows.FindNextChangeNotification(handle); err != nil {

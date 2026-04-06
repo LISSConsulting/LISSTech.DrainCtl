@@ -56,9 +56,23 @@
             Execute="commit"
             Impersonate="no"
             Return="check" />
+
+        <!-- Add service account to Event Log Readers for Security log access.
+             Uses drainctl.exe as the host process since WiX CustomAction with
+             FileRef needs a known binary. The /c net command runs via cmd.exe. -->
+        <CustomAction Id="AddEventLogReaders"
+            FileRef="drainctl.exe"
+            ExeCommand="service grant-eventlog"
+            Execute="commit"
+            Impersonate="no"
+            Return="ignore" />
+
         <InstallExecuteSequence>
             <Custom Action="ConfigureAction"
                 After="InstallFiles"
+                Condition="NOT REMOVE" />
+            <Custom Action="AddEventLogReaders"
+                After="ConfigureAction"
                 Condition="NOT REMOVE" />
         </InstallExecuteSequence>
 
