@@ -25,10 +25,6 @@ func UninstallService(log dc.LogFunc) error {
 }
 
 func installServiceImpl(exePath string, log dc.LogFunc) error {
-	// Remove legacy Application event log source if it exists.
-	// The MSI registers the source under the custom "DrainCtl" log.
-	_ = eventlog.Remove(dc.ServiceName)
-
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
