@@ -1,5 +1,6 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-  xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+  xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
     <Package Name="LISSTech DrainCtl"
         Manufacturer="LISS Consulting, Corp."
         Version="$(var.ProductVersion)"
@@ -186,6 +187,22 @@
         </Component>
     </Fragment>
 
+    <!-- ── Firewall rule (dashboard mode only) ────────────────────────────── -->
+    <Fragment>
+        <Component Id="FirewallRule" Directory="BinFolder"
+            Guid="a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6"
+            Condition="INSTALL_MODE = &quot;dashboard&quot;">
+            <fw:FirewallException Id="DashboardTcpIn"
+                Name="Remote Desktop Drain Monitor (TCP-In)"
+                Scope="any"
+                Protocol="tcp"
+                Port="[DASHBOARD_PORT]"
+                Profile="domain"
+                Description="Allows inbound TCP connections to the LISSTech DrainCtl dashboard."
+                Grouping="Remote Desktop Drain Monitor" />
+        </Component>
+    </Fragment>
+
     <!-- ── Component Group ─────────────────────────────────────────────────── -->
     <Fragment>
         <ComponentGroup Id="AllComponents">
@@ -195,6 +212,7 @@
             <ComponentRef Id="DefaultConfig" />
             <ComponentRef Id="DataDirectory" />
             <ComponentRef Id="PSModule" />
+            <ComponentRef Id="FirewallRule" />
         </ComponentGroup>
     </Fragment>
 </Wix>
