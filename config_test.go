@@ -761,6 +761,30 @@ func TestSaveConfig_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSaveConfig_CreateDataDirError verifies that SaveConfig returns an error
+// containing "create data dir" when os.MkdirAll cannot create the data directory.
+// This is forced by placing a regular file at the first subdirectory component
+// of the data path, so MkdirAll fails when trying to descend through it.
+func TestSaveConfig_CreateDataDirError(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("ProgramData", base)
+
+	// DefaultDataDir() = base + `\LISS Technologies\LISSTech DrainCtl`
+	// Block MkdirAll by placing a file where "LISS Technologies" would be.
+	blocker := filepath.Join(base, "LISS Technologies")
+	if err := os.WriteFile(blocker, []byte("blocked"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := SaveConfig(DefaultConfig(), nil)
+	if err == nil {
+		t.Fatal("expected error from SaveConfig when data dir cannot be created, got nil")
+	}
+	if !strings.Contains(err.Error(), "create data dir") {
+		t.Errorf("error = %q, want 'create data dir' in message", err.Error())
+	}
+}
+
 // TestSaveConfig_ValidatesBeforeSave verifies that SaveConfig clamps
 // out-of-range values via Validate before writing.
 func TestSaveConfig_ValidatesBeforeSave(t *testing.T) {

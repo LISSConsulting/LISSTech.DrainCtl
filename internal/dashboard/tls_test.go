@@ -3,11 +3,19 @@
 package dashboard
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 
@@ -32,6 +40,48 @@ func requireElevatedOrSkip(t *testing.T) {
 	t.Helper()
 	if !isElevated() {
 		t.Skip("requires elevated administrator privileges (writeRestrictedFile restricts key to SYSTEM+Admins)")
+	}
+}
+
+// ── certFingerprint ───────────────────────────────────────────────────────────
+
+// TestCertFingerprintInternal_MatchesSHA256 verifies that the private
+// certFingerprint helper returns the SHA-256 fingerprint of the certificate's
+// raw DER bytes encoded as a lowercase hex string.
+// The certificate is created entirely in memory — no disk I/O, no elevation.
+func TestCertFingerprintInternal_MatchesSHA256(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
+
+	got := certFingerprint(cert)
+
+	sum := sha256.Sum256(certDER)
+	want := hex.EncodeToString(sum[:])
+
+	if got != want {
+		t.Errorf("certFingerprint = %q, want %q", got, want)
+	}
+	if len(got) != 64 {
+		t.Errorf("fingerprint length = %d, want 64 hex chars", len(got))
 	}
 }
 
