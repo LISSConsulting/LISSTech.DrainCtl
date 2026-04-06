@@ -67,12 +67,23 @@
             Impersonate="no"
             Return="ignore" />
 
+        <!-- Restart service after configure so it picks up dashboard mode, TLS, etc. -->
+        <CustomAction Id="RestartService"
+            FileRef="drainctl.exe"
+            ExeCommand="service restart"
+            Execute="commit"
+            Impersonate="no"
+            Return="ignore" />
+
         <InstallExecuteSequence>
             <Custom Action="ConfigureAction"
                 After="InstallFiles"
                 Condition="NOT REMOVE" />
             <Custom Action="AddEventLogReaders"
                 After="ConfigureAction"
+                Condition="NOT REMOVE" />
+            <Custom Action="RestartService"
+                After="AddEventLogReaders"
                 Condition="NOT REMOVE" />
         </InstallExecuteSequence>
 
