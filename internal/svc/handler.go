@@ -352,6 +352,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// spam every poll.
 			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashConfigFailures) {
 				lastConfigFetch = time.Now()
+				s.log(dc.LvlDBG, "msg=\"dashboard config fetch\"", fmt.Sprintf("url=%s", dashCfg.URL))
 				if remote, err := dashboard.FetchNotifyConfig(dashCfg.URL, s.log); err != nil {
 					dashConfigFailures++
 					nextIn := backoffDuration(dashConfigFailures)
@@ -414,6 +415,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 // auto-pin if enabled. Returns true on success. Safe to call multiple times;
 // the dashboard treats re-registration as a no-op for already-known hosts.
 func registerWithDashboard(dashCfg *dc.DashboardConfig, log dc.LogFunc) bool {
+	log(dc.LvlDBG, "msg=\"dashboard registration attempt\"", fmt.Sprintf("url=%s", dashCfg.URL))
 	regResult, err := dashboard.Register(dashCfg.URL, log)
 	if err != nil {
 		dc.LogMsg(log, dc.LvlWRN, "dashboard: registration failed, will retry on next poll", fmt.Sprintf("error=%q", err))

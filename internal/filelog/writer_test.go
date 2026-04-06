@@ -17,7 +17,7 @@ func TestWriteAndRotate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	line := strings.Repeat("A", 50) + "\n"
 	for i := 0; i < 4; i++ {
 		if _, err := w.Write([]byte(line)); err != nil {
@@ -39,7 +39,7 @@ func TestRotationKeepsNFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	line := strings.Repeat("B", 99) + "\n"
 	for i := 0; i < 6; i++ {
 		if _, err := w.Write([]byte(line)); err != nil {
