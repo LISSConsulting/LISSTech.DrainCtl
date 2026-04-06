@@ -4,6 +4,7 @@ package svc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -112,8 +113,9 @@ type drainService struct {
 // cfg is accessed from two goroutines (Execute loop + pipe server) and
 // must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
-	store *store.MemAuditStore
-	cfg   atomic.Pointer[dc.ServiceConfig]
+	store     *store.MemAuditStore
+	cfg       atomic.Pointer[dc.ServiceConfig]
+	dashState *dashboard.ServerState // nil if dashboard not enabled
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -178,6 +180,25 @@ func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRe
 		return h.store.Changes(limit)
 	}
 	return h.store.History(limit)
+}
+
+func (h *serviceHandler) HandleServers() json.RawMessage {
+	if h.dashState == nil {
+		return nil
+	}
+	all := h.dashState.All()
+	raw, _ := json.Marshal(all)
+	return raw
+}
+
+func (h *serviceHandler) HandleRemoveServer(hostname string) error {
+	if h.dashState == nil {
+		return fmt.Errorf("dashboard not enabled")
+	}
+	if !h.dashState.Remove(hostname) {
+		return fmt.Errorf("host not found: %s", hostname)
+	}
+	return nil
 }
 
 // Execute is the Windows service main loop.
@@ -256,6 +277,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start", fmt.Sprintf("error=%q", err))
 		} else {
 			dashState = st
+			handler.dashState = st
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d", dashCfg.Port))
 		}
 	}
@@ -435,6 +457,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start on config reload", fmt.Sprintf("error=%q", err))
 				} else {
 					dashState = st
+					handler.dashState = st
 					s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d (late start)", newDashCfg.Port))
 					if isLocalDashboard(newDashCfg.URL) {
 						if h, _ := os.Hostname(); h != "" {

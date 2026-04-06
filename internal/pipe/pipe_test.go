@@ -4,6 +4,7 @@ package pipe
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net"
 	"strings"
@@ -25,6 +26,14 @@ func (m *mockHandler) HandleStatus() *dc.CheckResult {
 
 func (m *mockHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRecord {
 	return m.historyResult
+}
+
+func (m *mockHandler) HandleServers() json.RawMessage {
+	return nil
+}
+
+func (m *mockHandler) HandleRemoveServer(_ string) error {
+	return fmt.Errorf("not implemented")
 }
 
 // pipeCall writes req to handlePipeConn via an in-memory net.Pipe and returns
@@ -261,4 +270,10 @@ func (c *captureHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRe
 		return c.onHistory(limit, changesOnly)
 	}
 	return nil
+}
+
+func (c *captureHandler) HandleServers() json.RawMessage { return nil }
+
+func (c *captureHandler) HandleRemoveServer(_ string) error {
+	return fmt.Errorf("not implemented")
 }
