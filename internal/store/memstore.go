@@ -219,10 +219,8 @@ func (m *MemAuditStore) flushLocked() error {
 	w := bufio.NewWriter(m.file)
 	start := len(m.records) - m.dirty
 	for i := start; i < len(m.records); i++ {
-		data, err := json.Marshal(m.records[i])
-		if err != nil {
-			continue
-		}
+		// AuditRecord contains only primitive-typed fields; Marshal cannot fail.
+		data, _ := json.Marshal(m.records[i])
 		_, _ = fmt.Fprintf(w, "%s\n", data)
 	}
 	if err := w.Flush(); err != nil {
@@ -267,10 +265,8 @@ func (m *MemAuditStore) Prune(retention time.Duration) (int64, error) {
 
 	w := bufio.NewWriter(m.file)
 	for _, r := range kept {
-		data, err := json.Marshal(r)
-		if err != nil {
-			continue
-		}
+		// AuditRecord contains only primitive-typed fields; Marshal cannot fail.
+		data, _ := json.Marshal(r)
 		_, _ = fmt.Fprintf(w, "%s\n", data)
 	}
 	if err := w.Flush(); err != nil {
