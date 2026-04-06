@@ -653,3 +653,113 @@ func TestPrune_EmptyStoreReturnsZero(t *testing.T) {
 		t.Errorf("want 0 pruned, got %d", pruned)
 	}
 }
+
+// ── load — malformed JSON skip ────────────────────────────────────────────────
+
+// TestLoad_MalformedJSONSkipped verifies that load silently skips lines that
+// cannot be parsed as AuditRecord JSON, continuing to load valid records that
+// follow the corrupted line.
+func TestLoad_MalformedJSONSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	now := time.Now().Truncate(time.Millisecond)
+	r1 := dc.AuditRecord{Timestamp: now, Host: "h1", DrainLabel: "AllowAll"}
+	r2 := dc.AuditRecord{Timestamp: now.Add(time.Second), Host: "h1", DrainLabel: "AllowAll"}
+	data1, _ := json.Marshal(r1)
+	data2, _ := json.Marshal(r2)
+
+	// Embed a malformed JSON line between two valid JSONL records.
+	content := string(data1) + "\n" + "{not valid json!!}" + "\n" + string(data2) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	if err != nil {
+		t.Fatalf("OpenMemAuditStore: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	got := st.History(0)
+	if len(got) != 2 {
+		t.Errorf("want 2 records (malformed line skipped), got %d", len(got))
+	}
+}
+
+// ── flushLocked — flush write error ──────────────────────────────────────────
+
+// TestFlushLocked_FlushError verifies that flushLocked returns a "flush: ..."
+// error when the underlying file write fails. This is exercised by replacing
+// the store's file handle with a read-only handle: Seek(0,2) still succeeds
+// (seeking does not require write access), but bufio.Writer.Flush fails when
+// it attempts to write the buffered bytes to the read-only handle.
+func TestFlushLocked_FlushError(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup()
+
+	// Mark the store dirty so flushLocked proceeds past the dirty==0 guard.
+	st.Append(rec(dc.AllowAll, time.Now(), false))
+
+	path := st.file.Name()
+
+	// Close the read-write handle (releases the exclusive write lock).
+	if err := st.file.Close(); err != nil {
+		t.Fatalf("close original: %v", err)
+	}
+
+	// Reopen the same file in read-only mode and inject it as the store's handle.
+	// Seek(0,2) will succeed; any Write through bufio.Flush will fail.
+	readOnly, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open read-only: %v", err)
+	}
+	st.file = readOnly
+
+	flushErr := st.Flush()
+	if flushErr == nil {
+		t.Fatal("expected error from Flush on read-only file, got nil")
+	}
+	if !strings.Contains(flushErr.Error(), "flush") {
+		t.Errorf("error = %q, want 'flush' in message", flushErr.Error())
+	}
+}
+
+// ── Prune — truncate error ────────────────────────────────────────────────────
+
+// TestPrune_TruncateError verifies that Prune returns a "truncate: ..." error
+// when file.Truncate(0) fails. The same read-only handle trick used in
+// TestFlushLocked_FlushError is applied: after close and reopen as read-only,
+// Seek(0,0) succeeds but Truncate fails (SetEndOfFile requires write access).
+func TestPrune_TruncateError(t *testing.T) {
+	st, cleanup := newTestStore(t)
+	defer cleanup()
+
+	// Add a record old enough to be pruned so Prune reaches the rewrite stage.
+	st.Append(rec(dc.AllowAll, time.Now().Add(-48*time.Hour), false))
+
+	path := st.file.Name()
+
+	// Flush so the record is on disk, then close the read-write handle.
+	if err := st.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if err := st.file.Close(); err != nil {
+		t.Fatalf("close original: %v", err)
+	}
+
+	// Reopen read-only: Seek(0,0) succeeds, Truncate(0) fails.
+	readOnly, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open read-only: %v", err)
+	}
+	st.file = readOnly
+
+	_, pruneErr := st.Prune(12 * time.Hour)
+	if pruneErr == nil {
+		t.Fatal("expected error from Prune with read-only file, got nil")
+	}
+	if !strings.Contains(pruneErr.Error(), "truncate") {
+		t.Errorf("error = %q, want 'truncate' in message", pruneErr.Error())
+	}
+}
