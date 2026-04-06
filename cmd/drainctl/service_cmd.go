@@ -96,5 +96,14 @@ func serviceCmd() *cobra.Command {
 		},
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:    "restart",
+		Short:  "Restart the DrainCtl service",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return svc.RestartService(dc.DefaultLogger(os.Stdout, false))
+		},
+	})
+
 	return cmd
 }
