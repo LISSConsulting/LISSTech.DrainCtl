@@ -13,6 +13,7 @@ import (
 type Level string
 
 const (
+	LvlDBG Level = "DBG"
 	LvlINF Level = "INF"
 	LvlWRN Level = "WRN"
 	LvlERR Level = "ERR"
