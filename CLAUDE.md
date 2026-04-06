@@ -29,3 +29,4 @@ Config: JSON file with atomic writes (named mutex + MoveFileEx). Scoped updaters
 Notifications: multi-target (N webhook + M ntfy), granular triggers, per-target repeat intervals.
 Sessions: `WTSEnumerateSessionsW` via wtsapi32.dll, utilization alerts at configurable threshold.
 Dashboard chart: uPlot (inline ~50KB). Session gauges per server card.
+Logging: dual-sink — Windows Event Log (custom "DrainCtl" log, INF+) + file log (`%ProgramData%\...\drainctl.log`, 10 MB rotate, 7 kept, all levels incl DBG).
