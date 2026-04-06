@@ -16,6 +16,7 @@ import (
 
 // svcRunCheck performs a single check cycle in service mode.
 func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+	checkStart := time.Now()
 	state, err := dc.ReadDrainMode()
 	if err != nil {
 		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
@@ -190,8 +191,16 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
+		log(dc.LvlDBG, "msg=\"dashboard heartbeat sending\"", fmt.Sprintf("url=%s", dashCfg.URL))
 		dashboard.ReportState(dashCfg.URL, result, log)
 	}
+
+	log(dc.LvlDBG,
+		"msg=\"poll tick\"",
+		fmt.Sprintf("mode=%s", state.Mode),
+		fmt.Sprintf("status=%s", status),
+		fmt.Sprintf("elapsed=%s", time.Since(checkStart).Truncate(time.Microsecond)),
+	)
 }
 
 // pruneNotifyState removes per-URL entries from state that no longer correspond

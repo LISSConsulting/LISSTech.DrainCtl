@@ -86,6 +86,7 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 			http.Error(w, "auth error", http.StatusUnauthorized)
 			return
 		}
+		dc.LogMsg(log, dc.LvlDBG, "sspi: negotiate complete", fmt.Sprintf("user=%s", username))
 
 		// Set response token if present.
 		if len(responseToken) > 0 {
