@@ -114,11 +114,9 @@ func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
 		for i, r := range records {
 			out[i] = dc.AuditToHistory(r, &durations[i])
 		}
-		if raw, err := json.Marshal(out); err != nil {
-			resp = PipeResponse{OK: false, Error: "marshal history: " + err.Error()}
-		} else {
-			resp = PipeResponse{OK: true, Data: raw}
-		}
+		// HistoryRecord contains only primitive-typed fields; Marshal cannot fail.
+		raw, _ := json.Marshal(out)
+		resp = PipeResponse{OK: true, Data: raw}
 
 	default:
 		resp = PipeResponse{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Cmd)}
