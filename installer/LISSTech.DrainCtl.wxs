@@ -146,9 +146,9 @@
         <Component Id="DataDirectory" Directory="DATADIRECTORY"
             Guid="0c2afad8-e85a-4a79-b484-d3e51ebd6fea">
             <CreateFolder>
-                <Permission User="NT SERVICE\DrainCtl" GenericAll="yes" />
                 <Permission User="SYSTEM" GenericAll="yes" />
                 <Permission User="Administrators" GenericAll="yes" />
+                <Permission User="SERVICE" GenericAll="yes" />
                 <Permission User="Users" GenericRead="yes" GenericExecute="yes" />
             </CreateFolder>
         </Component>
