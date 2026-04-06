@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -378,7 +379,7 @@ func saveConfigToFile(cfg *Config, log LogFunc) error {
 	data = append(data, '\n')
 
 	// Write to temp file.
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("write temp config: %w", err)
 	}
 
@@ -392,7 +393,25 @@ func saveConfigToFile(cfg *Config, log LogFunc) error {
 		}
 	}
 
+	// Restrict ACL after rename — config.json may contain notification secrets.
+	restrictConfigACL(path)
+
 	return nil
+}
+
+// restrictConfigACL sets the ACL on a config file to SYSTEM + Administrators +
+// SERVICE (for the virtual service account). Best-effort — errors are ignored
+// since the file is still functional with inherited ACLs.
+func restrictConfigACL(path string) {
+	cmds := [][]string{
+		{"icacls", path, "/inheritance:r"},
+		{"icacls", path, "/grant", "SYSTEM:(F)"},
+		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators
+		{"icacls", path, "/grant", "*S-1-5-6:(M)"},      // SERVICE — modify (read+write)
+	}
+	for _, args := range cmds {
+		_ = exec.Command(args[0], args[1:]...).Run()
+	}
 }
 
 // ── Scoped updaters (dashboard API) ─────────────────────────────────────
