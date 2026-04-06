@@ -47,23 +47,38 @@ type pendingCtx struct {
 // NegotiateMiddleware wraps an http.Handler with SSPI Negotiate (Kerberos/NTLM)
 // authentication. Supports multi-leg NTLM by keying pending contexts on the
 // TCP connection's remote address (preserved across HTTP/1.1 keep-alive).
-func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
+// The ctx parameter controls the lifetime of the background reaper goroutine.
+func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc) http.Handler {
 	var pending sync.Map // remoteAddr → *pendingCtx
 
-	// Reap stale contexts every 30 seconds.
+	// Reap stale contexts; exits when ctx is cancelled.
 	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 		for {
-			time.Sleep(30 * time.Second)
-			now := time.Now()
-			pending.Range(func(key, value any) bool {
-				pc := value.(*pendingCtx)
-				if now.Sub(pc.created) > 60*time.Second {
+			select {
+			case <-ctx.Done():
+				// Release all pending contexts on shutdown.
+				pending.Range(func(key, value any) bool {
+					pc := value.(*pendingCtx)
 					_ = pc.sc.Release()
 					_ = pc.cred.Release()
 					pending.Delete(key)
-				}
-				return true
-			})
+					return true
+				})
+				return
+			case <-ticker.C:
+				now := time.Now()
+				pending.Range(func(key, value any) bool {
+					pc := value.(*pendingCtx)
+					if now.Sub(pc.created) > 60*time.Second {
+						_ = pc.sc.Release()
+						_ = pc.cred.Release()
+						pending.Delete(key)
+					}
+					return true
+				})
+			}
 		}
 	}()
 

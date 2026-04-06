@@ -80,8 +80,8 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	// wrapAuth/wrapGroup are determined at compile time via build tags.
 	// Production builds (default) use SSPI Negotiate middleware.
 	// Dev builds (-tags devmode) bypass auth entirely.
-	wa := func(h http.Handler) http.Handler { return wrapAuth(h, cfg.Group, log) }
-	wg := func(h http.Handler) http.Handler { return wrapGroup(h, cfg.Group, log) }
+	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group, log) }
+	wg := func(h http.Handler) http.Handler { return wrapGroup(ctx, h, cfg.Group, log) }
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 

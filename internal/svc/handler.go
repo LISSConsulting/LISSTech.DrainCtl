@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -247,11 +249,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	go pipe.ServePipe(ctx, handler, s.log)
 
 	// Start dashboard if enabled.
+	var dashState *dashboard.ServerState
 	if dashCfg.Enabled {
-		_, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), s.log)
+		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), s.log)
 		if err != nil {
 			dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start", fmt.Sprintf("error=%q", err))
 		} else {
+			dashState = st
 			s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d", dashCfg.Port))
 		}
 	}
@@ -264,18 +268,26 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 
 	// Auto-register with dashboard if URL is configured (or discovered).
-	// When the dashboard URL is set, notification config is pulled from
-	// the dashboard and replaces local targets. On fetch failure the
-	// service keeps using the last successfully fetched targets (or falls
-	// back to local config.json targets if no fetch ever succeeded).
 	var useRemoteConfig bool
-	var lastConfigFetch time.Time // zero → fetch on first poll
-	dashConfigFailures := 0       // consecutive dashboard config-fetch failures
-	dashRegistered := false       // true once Register succeeds; retried on each poll until it does
+	var lastConfigFetch time.Time
+	dashConfigFailures := 0
+	dashRegistered := false
 
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
-		dashRegistered = registerWithDashboard(&dashCfg, s.log)
+
+		// If the dashboard runs in this process, register directly (no HTTP/SSPI).
+		if dashState != nil && isLocalDashboard(dashCfg.URL) {
+			hostname, _ := os.Hostname()
+			if hostname != "" {
+				dashState.Register(hostname)
+				dashRegistered = true
+				s.log(dc.LvlINF, "dashboard=self-registered", fmt.Sprintf("host=%s", hostname))
+			}
+		}
+		if !dashRegistered {
+			dashRegistered = registerWithDashboard(&dashCfg, s.log)
+		}
 
 		// Fetch notification config from dashboard (replaces local targets).
 		// Independent of registration — global config, not host-specific.
@@ -402,12 +414,20 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 
 			// Start dashboard on hot-reload if it was just enabled.
+			// Also self-register the local host if dashboard URL points here.
 			if newDashCfg.Enabled && !dashCfg.Enabled {
-				_, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), s.log)
-				if err != nil {
+				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), s.log); err != nil {
 					dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start on config reload", fmt.Sprintf("error=%q", err))
 				} else {
+					dashState = st
 					s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d (late start)", newDashCfg.Port))
+					if isLocalDashboard(newDashCfg.URL) {
+						if h, _ := os.Hostname(); h != "" {
+							dashState.Register(h)
+							dashRegistered = true
+							s.log(dc.LvlINF, "dashboard=self-registered", fmt.Sprintf("host=%s", h))
+						}
+					}
 				}
 			}
 
@@ -468,4 +488,17 @@ func RunService() error {
 
 	log := MultiLogger(EventLogLogger(elog), FileLogger(fw))
 	return svc.Run(dc.ServiceName, &drainService{log: log, elog: elog})
+}
+
+// isLocalDashboard returns true if the dashboard URL points to this machine.
+func isLocalDashboard(dashURL string) bool {
+	u, err := url.Parse(dashURL)
+	if err != nil {
+		return false
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), local)
 }
