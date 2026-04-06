@@ -325,6 +325,39 @@ func TestCertFingerprint_ValidCert(t *testing.T) {
 	}
 }
 
+// TestWriteRestrictedFile_HappyPath verifies that writeRestrictedFile writes the
+// file and applies the three icacls ACL commands without returning an error.
+// No elevation is required — the test creates a file in t.TempDir() which is
+// owned by the current user, so icacls can set permissions on it.
+// The file is NOT read back after the call because the restricted ACL (SYSTEM +
+// Administrators only) leaves the non-elevated test process without read access.
+func TestWriteRestrictedFile_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "restricted.key")
+	data := []byte("dummy key data")
+
+	if err := writeRestrictedFile(path, data); err != nil {
+		t.Fatalf("writeRestrictedFile: %v", err)
+	}
+}
+
+// TestWriteRestrictedFile_WriteError verifies that writeRestrictedFile returns
+// an error immediately when os.WriteFile fails — the icacls commands are never
+// reached. Blocking the path with a directory triggers "is a directory" from
+// os.WriteFile on both Windows and Unix.
+func TestWriteRestrictedFile_WriteError(t *testing.T) {
+	dir := t.TempDir()
+	// Place a directory where the file should be created.
+	blockedPath := filepath.Join(dir, "blocked")
+	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	if err := writeRestrictedFile(blockedPath, []byte("data")); err == nil {
+		t.Fatal("expected error when path is a directory, got nil")
+	}
+}
+
 // TestGenerateSelfSigned_KeyWriteError verifies that generateSelfSigned returns
 // a descriptive error when the key file path is blocked by a directory.
 // The cert is written successfully; the key write fails without requiring elevation.
