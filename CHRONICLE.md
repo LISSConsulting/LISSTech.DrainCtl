@@ -261,9 +261,11 @@ Previous state: Sixty-sixth pass — ntfy notification titles made human-readabl
 
 | Roam #91 | Coverage sweep — 4 new tests across 2 files. (1) `internal/store/memstore_test.go` (1 new test) — `TestLoad_SeekError` covers the `m.file.Seek(0, 0)` error-return path at the top of `load`; triggered by closing the OS file handle before calling `load()` directly (package-internal test); `load` 84.6% → 92.3%; store 94.8% → 95.5%. (2) `config_test.go` (3 new tests) — remaining uncovered branches in `InstallCertificate`; `TestInstallCertificate_ReadCertError` (directory at srcCert → Stat passes, ReadFile fails → "read cert"), `TestInstallCertificate_ReadKeyError` (directory at srcKey after cert write succeeds → "read key"), `TestInstallCertificate_LoadConfigError` (directory placed at DefaultConfigPath() blocks os.ReadFile with non-IsNotExist error → "load config"); `InstallCertificate` 86.4% → 100%; root 66.3% → 66.6%. All tests pass, lint clean. | testing |
 
+| Roam #92 | Coverage sweep — 3 new tests across 3 files targeting uncovered error paths. (1) `audit_test.go` — `TestPrune_CreateTempFileError`: places a directory at `store.path+".tmp"` before calling `Prune` with stale records; `os.Create(tmp)` fails with ERROR_ACCESS_DENIED → "create temp file" error path covered; `Prune` create-temp-file branch now exercised. (2) `internal/dashboard/tls_test.go` — `TestCertFingerprintInternal_MatchesSHA256`: generates an in-memory ECDSA key+cert (no disk I/O, no elevation required), calls the private `certFingerprint` helper directly, and validates the returned hex string matches `sha256.Sum256(certDER)`; `certFingerprint` 0% → 100% (was unreachable without elevation since all callers are elevation-gated). (3) `config_test.go` — `TestSaveConfig_CreateDataDirError`: redirects `ProgramData` to a temp dir, places a regular file at `tempDir/LISS Technologies` to block `os.MkdirAll`, calls `SaveConfig` → "create data dir" error; `saveConfigToFile` 77.8% → 81.5%. Dashboard 52.6% → 52.8%; root 66.6% → 66.7%. All tests pass, lint clean. | testing |
+
 ## Remaining Work
 
-*(All tracked items complete — nothing pending after Roam #91.)*
+*(All tracked items complete — nothing pending after Roam #92.)*
 
 ## Key Learnings
 

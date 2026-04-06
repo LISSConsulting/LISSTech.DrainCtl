@@ -941,6 +941,35 @@ func TestGetHistory_InvalidPath(t *testing.T) {
 	}
 }
 
+// TestPrune_CreateTempFileError verifies that Prune returns an error containing
+// "create temp file" when os.Create fails for the .tmp rewrite path.
+// This is forced by placing a directory at store.path+".tmp" before calling Prune,
+// which causes os.Create to fail with ERROR_ACCESS_DENIED on Windows.
+func TestPrune_CreateTempFileError(t *testing.T) {
+	now := time.Now().UTC()
+	records := []AuditRecord{
+		{Timestamp: now.Add(-48 * time.Hour), Host: "srv1"}, // old — pruned
+		{Timestamp: now, Host: "srv1"},                      // recent — kept
+	}
+	store, cleanup := writeTestRecords(t, records)
+	defer cleanup()
+
+	// Block the temp file path by creating a directory there.
+	tmpPath := store.path + ".tmp"
+	if err := os.Mkdir(tmpPath, 0o755); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", tmpPath, err)
+	}
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	_, err := store.Prune(24 * time.Hour)
+	if err == nil {
+		t.Fatal("expected error from Prune when .tmp path is a directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "create temp file") {
+		t.Errorf("error = %q, want 'create temp file' in message", err.Error())
+	}
+}
+
 // TestPrune_RenameError verifies that Prune returns an error containing
 // "rename temp file" when os.Rename fails. This is forced by holding an
 // exclusive (no-share-delete) Windows handle on the destination file so that
