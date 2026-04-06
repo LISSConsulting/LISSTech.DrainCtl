@@ -5,12 +5,14 @@ package svc
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/filelog"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -73,6 +75,26 @@ func EventLogLogger(elog *eventlog.Log) dc.LogFunc {
 			_ = elog.Warning(EvtGenericWarning, msg)
 		default:
 			_ = elog.Info(EvtGenericInfo, msg)
+		}
+	}
+}
+
+// FileLogger returns a LogFunc that writes timestamped structured lines to w.
+// All levels including LvlDBG are written.
+func FileLogger(w io.Writer) dc.LogFunc {
+	return func(l dc.Level, fields ...string) {
+		ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		_, _ = fmt.Fprintf(w, "%s %s %s\n", ts, l, strings.Join(fields, " "))
+	}
+}
+
+// MultiLogger fans out log calls to both an event log sink (INF+ only)
+// and a file log sink (all levels including DBG).
+func MultiLogger(eventLog, fileLog dc.LogFunc) dc.LogFunc {
+	return func(l dc.Level, fields ...string) {
+		fileLog(l, fields...)
+		if l != dc.LvlDBG {
+			eventLog(l, fields...)
 		}
 	}
 }
@@ -423,6 +445,15 @@ func RunService() error {
 	}
 	defer func() { _ = elog.Close() }()
 
-	log := EventLogLogger(elog)
+	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 10<<20, 7) // 10 MB, 7 old files
+	if err != nil {
+		// File log failure is non-fatal — fall back to event log only.
+		log := EventLogLogger(elog)
+		log(dc.LvlWRN, fmt.Sprintf("msg=%q error=%q", "file log unavailable, using event log only", err))
+		return svc.Run(dc.ServiceName, &drainService{log: log, elog: elog})
+	}
+	defer func() { _ = fw.Close() }()
+
+	log := MultiLogger(EventLogLogger(elog), FileLogger(fw))
 	return svc.Run(dc.ServiceName, &drainService{log: log, elog: elog})
 }
