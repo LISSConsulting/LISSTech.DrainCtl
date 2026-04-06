@@ -293,8 +293,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		var remote *dashboard.RemoteNotifyConfig
 		var fetchErr error
 		if dashState != nil {
+			s.log(dc.LvlDBG, "msg=\"dashboard config fetch (local)\"")
 			remote, fetchErr = dashboard.GetNotifyConfig(s.log)
 		} else {
+			s.log(dc.LvlDBG, "msg=\"dashboard config fetch (remote)\"", fmt.Sprintf("url=%s", dashCfg.URL))
 			remote, fetchErr = dashboard.FetchNotifyConfig(dashCfg.URL, s.log)
 		}
 		if fetchErr != nil {
