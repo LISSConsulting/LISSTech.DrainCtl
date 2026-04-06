@@ -372,21 +372,12 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
-	// Strip secrets — this endpoint is accessible to any authenticated
-	// domain identity, not just admins. Agents need triggers and URLs
-	// but not HMAC signing secrets (the dashboard sends notifications,
-	// not the agents).
-	stripped := make([]dc.NotificationTarget, len(notifications))
-	copy(stripped, notifications)
-	for i := range stripped {
-		stripped[i].Secret = ""
-	}
 	out := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
 	}{
-		Notifications:           stripped,
+		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 	}
