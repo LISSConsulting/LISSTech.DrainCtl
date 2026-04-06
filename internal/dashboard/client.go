@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -141,7 +142,11 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
 // It makes an initial request, and if a 401 is returned, acquires an SSPI client
 // token and retries with the Authorization header.
+// If the target host is this machine, the URL is rewritten to 127.0.0.1 to avoid
+// Windows NTLM loopback issues and hit the server's loopback auth bypass.
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
+	rawURL = rewriteLoopback(rawURL)
+
 	// First attempt — expect 401.
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
@@ -194,6 +199,30 @@ func targetSPN(rawURL string) string {
 	}
 	host := u.Hostname()
 	return "HTTP/" + host
+}
+
+// rewriteLoopback rewrites a URL to use 127.0.0.1 if the target hostname
+// matches the local machine. This ensures self-connections hit the loopback
+// bypass and avoids Windows NTLM loopback authentication issues.
+func rewriteLoopback(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return rawURL
+	}
+	if !strings.EqualFold(u.Hostname(), local) {
+		return rawURL
+	}
+	port := u.Port()
+	if port != "" {
+		u.Host = "127.0.0.1:" + port
+	} else {
+		u.Host = "127.0.0.1"
+	}
+	return u.String()
 }
 
 // hostName returns the local machine hostname.
