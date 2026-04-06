@@ -1557,7 +1557,7 @@ drainctl service uninstall</code></pre>
                     <strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant
                     CLI/PS responses
                 </li>
-                <li><strong>Writes</strong> to the Windows Event Log (Application/DrainCtl) on state changes</li>
+                <li><strong>Writes</strong> to the Windows Event Log (Applications and Services Logs &gt; DrainCtl) on state changes</li>
                 <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
                 <li>
                     <strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization
@@ -1567,7 +1567,7 @@ drainctl service uninstall</code></pre>
             </ul>
 
             <h3>Event Log</h3>
-            <p>Check <code>Application</code> log, source <code>DrainCtl</code>:</p>
+            <p>Open Event Viewer &rarr; Applications and Services Logs &rarr; <code>DrainCtl</code>:</p>
             <table>
                 <thead>
                     <tr>
@@ -1620,7 +1620,7 @@ drainctl service uninstall</code></pre>
             </p>
 
             <h3>Service won't start</h3>
-            <p>Check the Application Event Log for DrainCtl errors (Event ID 3002). Common causes:</p>
+            <p>Check the DrainCtl event log for DrainCtl errors (Event ID 3002). Common causes:</p>
             <ul>
                 <li>Another instance holds the audit file lock &mdash; restart the machine or find the process</li>
                 <li>Permissions on the ProgramData directory</li>
@@ -1637,7 +1637,7 @@ drainctl service uninstall</code></pre>
                 <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
                 <li><code>drainctl notify test</code> &mdash; sends a test message</li>
                 <li>
-                    Check the Application Event Log for "webhook notification failed" or "ntfy notification failed"
+                    Check the DrainCtl event log for "webhook notification failed" or "ntfy notification failed"
                     warnings
                 </li>
                 <li>Verify network connectivity from the RDSH server to the webhook/ntfy endpoint</li>
@@ -1654,7 +1654,7 @@ drainctl service uninstall</code></pre>
                 <li>
                     Can the server reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code>
                 </li>
-                <li>Check the Application Event Log on the reporting server for DrainCtl errors</li>
+                <li>Check the DrainCtl event log on the reporting server for DrainCtl errors</li>
             </ul>
 
             <h3>Dashboard returns 401 or "Access Denied"</h3>
