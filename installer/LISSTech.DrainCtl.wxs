@@ -114,7 +114,7 @@
                 KeyPath="yes" />
         </Component>
 
-        <!-- Event Log message file + source registration -->
+        <!-- Event Log message file + source registration (custom "DrainCtl" log) -->
         <Component Id="EventLogSource" Directory="BinFolder"
             Guid="6d88631f-f074-4125-9399-28a349a45bea">
             <File Id="drainctl_msg.dll"
@@ -122,11 +122,15 @@
                 Name="drainctl-msg.dll"
                 KeyPath="yes" />
             <RegistryKey Root="HKLM"
-                Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\DrainCtl">
+                Key="SYSTEM\CurrentControlSet\Services\EventLog\DrainCtl\DrainCtl">
                 <RegistryValue Name="EventMessageFile" Type="string"
                     Value="[BinFolder]drainctl-msg.dll" />
                 <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
             </RegistryKey>
+            <!-- Remove legacy Application log source on upgrade -->
+            <RemoveRegistryKey Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\DrainCtl"
+                Action="removeOnInstall" />
         </Component>
     </Fragment>
 
