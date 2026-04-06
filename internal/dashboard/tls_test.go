@@ -358,6 +358,27 @@ func TestWriteRestrictedFile_WriteError(t *testing.T) {
 	}
 }
 
+// TestWriteRestrictedFile_IcaclsCommandError verifies that writeRestrictedFile
+// returns an error (containing "icacls") when the icacls executable cannot be
+// found. The file is written successfully first (os.WriteFile uses Win32 APIs
+// directly, not PATH), then the first icacls invocation fails because PATH is
+// redirected to an empty directory.
+func TestWriteRestrictedFile_IcaclsCommandError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.key")
+
+	// Redirect PATH to an empty temp directory — icacls is not present there.
+	t.Setenv("PATH", t.TempDir())
+
+	err := writeRestrictedFile(path, []byte("test key data"))
+	if err == nil {
+		t.Fatal("expected error when icacls cannot be found, got nil")
+	}
+	if !strings.Contains(err.Error(), "icacls") {
+		t.Errorf("error = %q, want 'icacls' in message", err.Error())
+	}
+}
+
 // TestGenerateSelfSigned_KeyWriteError verifies that generateSelfSigned returns
 // a descriptive error when the key file path is blocked by a directory.
 // The cert is written successfully; the key write fails without requiring elevation.
