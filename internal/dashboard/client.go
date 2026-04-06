@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -142,6 +143,7 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 // Makes an initial request, and if a 401 is returned, acquires an SSPI client
 // token and retries with the Authorization header.
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
+	rawURL = rewriteLoopback(rawURL)
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -188,6 +190,30 @@ func targetSPN(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return ""
+	}
+	return "HTTP/" + u.Hostname()
+}
+
+// rewriteLoopback rewrites a URL to use 127.0.0.1 if the target hostname
+// matches the local machine. This avoids IPv6 link-local resolution and
+// enables NTLM loopback authentication via the same-machine SSPI path.
+func rewriteLoopback(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return rawURL
+	}
+	if !strings.EqualFold(u.Hostname(), local) {
+		return rawURL
+	}
+	port := u.Port()
+	if port != "" {
+		u.Host = "127.0.0.1:" + port
+	} else {
+		u.Host = "127.0.0.1"
 	}
 	return u.String()
 }

@@ -140,20 +140,19 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 			_ = cred.Release()
 		}()
 
-		username, err := sc.GetUsername()
-		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "sspi: get username failed", fmt.Sprintf("error=%q", err))
-			http.Error(w, "auth error", http.StatusUnauthorized)
-			return
-		}
-		dc.LogMsg(log, dc.LvlDBG, "sspi: negotiate complete", fmt.Sprintf("user=%s", username))
-
 		if len(responseToken) > 0 {
 			w.Header().Set("WWW-Authenticate",
 				"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
 		}
 
-		groups := extractGroups(sc, log, username)
+		// Extract username and groups by impersonating. GetUsername() doesn't
+		// work for NTLM contexts, so we always use the impersonation path.
+		username, groups := extractIdentity(sc, log)
+		if username == "" {
+			http.Error(w, "auth error", http.StatusUnauthorized)
+			return
+		}
+		dc.LogMsg(log, dc.LvlDBG, "sspi: negotiate complete", fmt.Sprintf("user=%s", username))
 
 		info := &AuthInfo{Username: username, Groups: groups}
 		ctx := context.WithValue(r.Context(), authInfoKey, info)
@@ -161,16 +160,16 @@ func NegotiateMiddleware(next http.Handler, log dc.LogFunc) http.Handler {
 	})
 }
 
-// extractGroups impersonates the SSPI client on the current OS thread,
-// reads the token's group SIDs, reverts, and returns group names.
-func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string) []string {
+// extractIdentity impersonates the SSPI client on the current OS thread,
+// reads the username and group memberships from the thread token, then reverts.
+// Works for both Kerberos and NTLM contexts.
+func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	if err := sc.ImpersonateUser(); err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: impersonate failed",
-			fmt.Sprintf("user=%s error=%q", username, err))
-		return nil
+		dc.LogMsg(log, dc.LvlWRN, "sspi: impersonate failed", fmt.Sprintf("error=%q", err))
+		return "", nil
 	}
 	defer func() { _ = sc.RevertToSelf() }()
 
@@ -182,17 +181,32 @@ func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string)
 		&token,
 	)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: open thread token failed",
-			fmt.Sprintf("user=%s error=%q", username, err))
-		return nil
+		dc.LogMsg(log, dc.LvlWRN, "sspi: open thread token failed", fmt.Sprintf("error=%q", err))
+		return "", nil
 	}
 	defer func() { _ = token.Close() }()
 
+	// Get username from the token's user SID.
+	tokenUser, err := token.GetTokenUser()
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "sspi: get token user failed", fmt.Sprintf("error=%q", err))
+		return "", nil
+	}
+	userName, domainName, _, err := tokenUser.User.Sid.LookupAccount("")
+	if err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "sspi: lookup account failed", fmt.Sprintf("error=%q", err))
+		return "", nil
+	}
+	username := userName
+	if domainName != "" {
+		username = domainName + `\` + userName
+	}
+
+	// Get groups from the token.
 	tokenGroups, err := token.GetTokenGroups()
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: get token groups failed",
-			fmt.Sprintf("user=%s error=%q", username, err))
-		return nil
+		dc.LogMsg(log, dc.LvlWRN, "sspi: get token groups failed", fmt.Sprintf("user=%s error=%q", username, err))
+		return username, nil
 	}
 
 	var groups []string
@@ -207,7 +221,7 @@ func extractGroups(sc *negotiate.ServerContext, log dc.LogFunc, username string)
 			groups = append(groups, name)
 		}
 	}
-	return groups
+	return username, groups
 }
 
 // RequireGroup wraps an http.Handler and rejects requests where the
