@@ -401,6 +401,16 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				pruneNotifyState(notifyState, notifyTargets)
 			}
 
+			// Start dashboard on hot-reload if it was just enabled.
+			if newDashCfg.Enabled && !dashCfg.Enabled {
+				_, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), s.log)
+				if err != nil {
+					dc.LogMsg(s.log, dc.LvlWRN, "dashboard failed to start on config reload", fmt.Sprintf("error=%q", err))
+				} else {
+					s.log(dc.LvlINF, fmt.Sprintf("dashboard=started port=%d (late start)", newDashCfg.Port))
+				}
+			}
+
 			dashCfg = newDashCfg
 			s.log(dc.LvlINF, "config=reloaded")
 			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
