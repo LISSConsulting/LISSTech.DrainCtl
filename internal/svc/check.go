@@ -15,7 +15,8 @@ import (
 )
 
 // svcRunCheck performs a single check cycle in service mode.
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+// dashState is non-nil when the dashboard runs in this process (local reporting).
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
 	checkStart := time.Now()
 	state, err := dc.ReadDrainMode()
 	if err != nil {
@@ -191,8 +192,13 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
-		log(dc.LvlDBG, "msg=\"dashboard heartbeat sending\"", fmt.Sprintf("url=%s", dashCfg.URL))
-		dashboard.ReportState(dashCfg.URL, result, log)
+		if dashState != nil {
+			dashState.ReportLocal(result.Host, result)
+			log(dc.LvlDBG, "msg=\"dashboard heartbeat (local)\"", fmt.Sprintf("host=%s", result.Host))
+		} else {
+			log(dc.LvlDBG, "msg=\"dashboard heartbeat sending\"", fmt.Sprintf("url=%s", dashCfg.URL))
+			dashboard.ReportState(dashCfg.URL, result, log)
+		}
 	}
 
 	log(dc.LvlDBG,

@@ -152,6 +152,34 @@ func (s *ServerState) All() []ServerInfo {
 	return out
 }
 
+// ReportLocal processes a check result for the local host without HTTP.
+// Returns false if the host is not registered.
+func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult) bool {
+	if !s.IsRegistered(hostname) {
+		return false
+	}
+	s.Update(hostname, result)
+	return true
+}
+
+// GetNotifyConfig reads notification configuration from config.json.
+// This is the in-process equivalent of GET /api/v1/notify-config.
+func GetNotifyConfig(log dc.LogFunc) (*RemoteNotifyConfig, error) {
+	cfg, err := dc.LoadConfig(log)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	notifications := cfg.Notifications
+	if notifications == nil {
+		notifications = []dc.NotificationTarget{}
+	}
+	return &RemoteNotifyConfig{
+		Notifications:           notifications,
+		SessionWarningThreshold: cfg.SessionWarningThreshold,
+		GracePeriod:             cfg.GracePeriod,
+	}, nil
+}
+
 func (s *ServerState) load() {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
