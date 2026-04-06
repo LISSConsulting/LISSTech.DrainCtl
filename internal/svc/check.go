@@ -57,8 +57,11 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	// Determine exit code and status.
 	drainActive := state.Mode != dc.AllowAll
 	stateDur := time.Duration(0)
+	var stateSince *time.Time
 	if since := st.StateSince(state.Mode); since != nil {
 		stateDur = time.Since(*since).Truncate(time.Second)
+		s := since.Local()
+		stateSince = &s
 	}
 
 	var status, message string
@@ -134,6 +137,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		DrainModeLabel:       state.Mode.String(),
 		DrainModeValue:       uint32(state.Mode),
 		GracePeriodSeconds:   int(cfg.GracePeriod.Seconds()),
+		StateSince:           stateSince,
 		StateDurationSeconds: &dur,
 		Status:               status,
 		ConnectionsAllowed:   &connAllowed,
