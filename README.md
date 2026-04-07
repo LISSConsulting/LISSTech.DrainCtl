@@ -49,7 +49,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | ⚡ **Named pipe IPC** | CLI and PowerShell query the service instantly via `\\.\pipe\drainctl` |
 | 📊 **N-central ready** | Exit codes + structured stdout for AMP threshold monitoring |
 | 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` |
-| 🔔 **Multi-target notifications** | N webhook + M ntfy.sh targets, each with individual triggers and repeat intervals |
+| 🔔 **Multi-target notifications** | N webhook + M ntfy.sh + email (SMTP) targets, each with individual triggers and repeat intervals |
 | 🎯 **Granular triggers** | Per-event notification control: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, and more |
 | 📈 **Session tracking** | WTS session enumeration — active, disconnected, and total counts with utilization percentage |
 | ⚠️ **Session utilization alerts** | Configurable threshold fires `session_warning` when utilization is too high |
@@ -312,7 +312,7 @@ Events are written to `Application` log under source `DrainCtl`:
 
 ## 🔔 Notifications
 
-DrainCtl supports **multi-target notifications** — configure any number of webhook and ntfy.sh targets, each with its own trigger filter and repeat interval.
+DrainCtl supports **multi-target notifications** — configure any number of webhook, ntfy.sh, and email (SMTP) targets, each with its own trigger filter and repeat interval.
 
 ### Setup
 
@@ -320,6 +320,7 @@ DrainCtl supports **multi-target notifications** — configure any number of web
 # Add notification targets
 drainctl notify add webhook https://hooks.slack.com/services/T.../B.../xxx --triggers drain_on,drain_off,alert,healthy --repeat 30
 drainctl notify add ntfy https://ntfy.sh/my-drainctl-alerts --triggers alert,session_warning --repeat 0
+drainctl notify add email smtp://smtp.example.com:587 --to ops@example.com --from drainctl@example.com --secret smtp-password --triggers drain_on,drain_off,alert
 
 # List configured targets
 drainctl notify list
@@ -438,6 +439,14 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
       "url": "https://ntfy.sh/my-alerts",
       "triggers": ["alert", "session_warning"],
       "repeat_minutes": 0
+    },
+    {
+      "type": "email",
+      "url": "smtp://smtp.example.com:587",
+      "to": ["ops@example.com", "oncall@example.com"],
+      "from": "drainctl@example.com",
+      "secret": "smtp-password",
+      "triggers": ["drain_on", "drain_off", "alert"]
     }
   ]
 }

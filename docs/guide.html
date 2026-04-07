@@ -912,8 +912,9 @@ Get-RDSHDrainHistory -ChangesOnly |
             <p>
                 Get pushed when something happens. DrainCtl supports
                 <strong>multiple notification targets</strong> &mdash; any combination of
-                <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints) and
-                <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics. Each target has its own triggers and
+                <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints),
+                <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics, and
+                <strong>email via SMTP</strong>. Each target has its own triggers and
                 repeat interval.
             </p>
 
@@ -1055,6 +1056,22 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                 ntfy messages arrive with priority <strong>high</strong> for alerts (red notification on your phone) and
                 <strong>default</strong> for transitions.
             </p>
+
+            <h3>Email (SMTP)</h3>
+            <p>
+                Email notifications via SMTP. Use <code>smtp://</code> for STARTTLS (port 587) or
+                <code>smtps://</code> for implicit TLS (port 465). Works with any SMTP relay &mdash;
+                Gmail, Mailgun, SendGrid, O365. The <code>secret</code> field is the SMTP password.
+                The <code>from</code> and <code>to</code> fields are required.
+            </p>
+            <pre><code>{
+  "type": "email",
+  "url": "smtp://smtp.example.com:587",
+  "to": ["ops@example.com", "oncall@example.com"],
+  "from": "drainctl@example.com",
+  "secret": "smtp-password",
+  "triggers": ["drain_on", "drain_off", "alert"]
+}</code></pre>
 
             <!-- ── Session Tracking ───────────────────────────────────────────────── -->
             <h2 id="sessions">8. Session Tracking</h2>
