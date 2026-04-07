@@ -13,6 +13,8 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - `just lint` — must pass with zero issues.
 - If lint fails: fix the issues, re-run lint, repeat until clean.
 - `go build ./...` — must compile.
+- `just gotest` — all Go tests must pass.
+- `just vulncheck` — no known vulnerabilities.
 
 ### 3. Version bump
 - `just bump` — bumps CalVer across all version-bearing files + recompiles .syso.

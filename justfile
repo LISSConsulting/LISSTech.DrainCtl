@@ -225,7 +225,7 @@ all: msi
 # Build and sign everything: binaries → sign → MSI → sign MSI
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: psmodule sign-binaries msi sign-msi
+release: gotest psmodule sign-binaries msi sign-msi
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
@@ -314,6 +314,27 @@ lint:
     & golangci-lint run ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   ✅ All clean" -ForegroundColor Green
+
+# Run Go tests
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+gotest:
+    Write-Host "`n🧪 Running Go tests" -ForegroundColor Cyan
+    & go test ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "   ✅ All tests pass" -ForegroundColor Green
+
+# Check for known vulnerabilities in dependencies
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+vulncheck:
+    Write-Host "`n🛡️ Vulnerability scan" -ForegroundColor Cyan
+    & govulncheck ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "   ✅ No vulnerabilities" -ForegroundColor Green
+
+# Run all quality checks: lint + test + vulncheck
+check: lint gotest vulncheck
 
 # Format all Go source files
 fmt:
