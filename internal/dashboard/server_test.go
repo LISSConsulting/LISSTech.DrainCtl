@@ -24,6 +24,7 @@ func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
 	return &DashboardServer{
 		state: NewServerState(t.TempDir(), nil),
+		cfg:   dc.DashboardConfig{Group: "Domain Admins"},
 		log:   dc.DiscardLogger(),
 	}
 }
