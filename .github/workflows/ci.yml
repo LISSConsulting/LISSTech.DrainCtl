@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [trunk, development]
   pull_request:
     branches: [trunk]
 
@@ -10,48 +8,35 @@ permissions:
   contents: read
 
 jobs:
-  lint-and-build:
+  check:
+    name: Lint + Test + Vulncheck
     runs-on: windows-latest
     steps:
-      - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version-file: go.mod
 
       - name: Install tools
         run: |
-          choco install mingw just -y
-          dotnet tool install -g wix
+          go install golang.org/x/vuln/cmd/govulncheck@latest
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: gofmt check
         shell: pwsh
+        run: |
+          $unformatted = & gofmt -l . cmd/drainctl/ cmd/cshared/ 2>&1
+          if ($unformatted) { Write-Error "gofmt: $unformatted"; exit 1 }
 
-      - name: Lint
-        run: just lint
-        shell: pwsh
+      - name: golangci-lint
+        run: golangci-lint run ./...
 
-      - name: Build
-        run: just all
-        shell: pwsh
+      - name: Go test
+        run: go test ./...
 
-      - name: Verify version
-        run: .\dist\LISSTech.DrainCtl\bin\drainctl.exe --version
-        shell: pwsh
-
-  sbom:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: anchore/sbom-action@v0
-        with:
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: sbom
-          path: sbom.spdx.json
+      - name: Vulnerability scan
+        run: govulncheck ./...
