@@ -31,11 +31,25 @@ func newDashClient(fingerprint string) *http.Client {
 	}
 
 	if fingerprint != "" {
-		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		verifyFP := func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
 				return fmt.Errorf("dashboard: no TLS certificate presented")
 			}
 			h := sha256.Sum256(rawCerts[0])
+			got := hex.EncodeToString(h[:])
+			if got != fingerprint {
+				return fmt.Errorf("dashboard: certificate fingerprint mismatch (got %s, want %s)", got, fingerprint)
+			}
+			return nil
+		}
+		tlsCfg.VerifyPeerCertificate = verifyFP
+		// Also set VerifyConnection to prevent resumed sessions from bypassing
+		// the fingerprint check (G123).
+		tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return fmt.Errorf("dashboard: no TLS certificate in connection state")
+			}
+			h := sha256.Sum256(cs.PeerCertificates[0].Raw)
 			got := hex.EncodeToString(h[:])
 			if got != fingerprint {
 				return fmt.Errorf("dashboard: certificate fingerprint mismatch (got %s, want %s)", got, fingerprint)

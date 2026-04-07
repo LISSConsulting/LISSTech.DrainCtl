@@ -1,4 +1,8 @@
-# ── Go formatting ─────────────────────────────────────────────────────
+# ── Pre-commit: fast checks that auto-fix ────────────────────────────
+# Order matters: formatters first, then checks. If a formatter changes
+# a file the commit is aborted so the dev can re-stage.
+
+# 1. Go formatting (auto-fix + re-stage)
 [[repos]]
 repo = "local"
 
@@ -6,45 +10,11 @@ repo = "local"
 id = "gofmt"
 name = "gofmt"
 language = "system"
-entry = "gofmt -l"
+entry = "gofmt -w"
 files = "\\.go$"
 pass_filenames = true
 
-# ── Go vet ────────────────────────────────────────────────────────────
-[[repos]]
-repo = "local"
-
-[[repos.hooks]]
-id = "go-vet"
-name = "go-vet"
-language = "system"
-entry = "go vet ./..."
-pass_filenames = false
-stages = ["pre-push"]
-
-# ── golangci-lint ─────────────────────────────────────────────────────
-[[repos]]
-repo = "local"
-
-[[repos.hooks]]
-id = "golangci-lint"
-name = "golangci-lint"
-language = "system"
-entry = "golangci-lint run ./..."
-pass_filenames = false
-stages = ["pre-push"]
-
-# ── Secrets ───────────────────────────────────────────────────────────
-[[repos]]
-repo = "https://github.com/gitleaks/gitleaks"
-rev = "v8.30.0"
-
-[[repos.hooks]]
-id = "gitleaks"
-name = "gitleaks"
-stages = ["pre-push"]
-
-# ── Whitespace ────────────────────────────────────────────────────────
+# 2. Whitespace fixers
 [[repos]]
 repo = "https://github.com/pre-commit/pre-commit-hooks"
 rev = "v6.0.0"
@@ -61,5 +31,54 @@ exclude = "^(dist/|assets/.*\\.dll)"
 id = "mixed-line-ending"
 exclude = "^(dist/|assets/.*\\.dll)"
 
+# 3. JSON syntax check
 [[repos.hooks]]
 id = "check-json"
+
+# ── Pre-push: heavier checks ─────────────────────────────────────────
+
+# 4. Go vet
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "go-vet"
+name = "go vet"
+language = "system"
+entry = "go vet ./..."
+pass_filenames = false
+stages = ["pre-push"]
+
+# 5. golangci-lint
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "golangci-lint"
+name = "golangci-lint"
+language = "system"
+entry = "golangci-lint run ./..."
+pass_filenames = false
+stages = ["pre-push"]
+
+# 6. Go tests
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "go-test"
+name = "go test"
+language = "system"
+entry = "go test ./..."
+pass_filenames = false
+stages = ["pre-push"]
+
+# 7. Secrets scan
+[[repos]]
+repo = "https://github.com/gitleaks/gitleaks"
+rev = "v8.30.0"
+
+[[repos.hooks]]
+id = "gitleaks"
+name = "gitleaks"
+stages = ["pre-push"]

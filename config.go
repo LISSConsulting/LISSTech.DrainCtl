@@ -437,6 +437,12 @@ func saveConfigToFile(cfg *Config, log LogFunc) error {
 // SERVICE (for the virtual service account). Best-effort — errors are ignored
 // since the file is still functional with inherited ACLs.
 func restrictConfigACL(path string) {
+	// Only restrict ACLs when running as SYSTEM or an elevated admin.
+	// In non-elevated contexts (tests, dev), icacls /inheritance:r would
+	// lock out the current user.
+	if !isElevated() {
+		return
+	}
 	cmds := [][]string{
 		{"icacls", path, "/inheritance:r"},
 		{"icacls", path, "/grant", "SYSTEM:(F)"},
@@ -446,6 +452,29 @@ func restrictConfigACL(path string) {
 	for _, args := range cmds {
 		_ = exec.Command(args[0], args[1:]...).Run()
 	}
+}
+
+// isElevated returns true if the current process token is a member of the
+// built-in Administrators group.
+func isElevated() bool {
+	var sid *windows.SID
+	err := windows.AllocateAndInitializeSid(
+		&windows.SECURITY_NT_AUTHORITY,
+		2,
+		windows.SECURITY_BUILTIN_DOMAIN_RID,
+		windows.DOMAIN_ALIAS_RID_ADMINS,
+		0, 0, 0, 0, 0, 0,
+		&sid,
+	)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = windows.FreeSid(sid) }()
+	member, err := windows.Token(0).IsMember(sid)
+	if err != nil {
+		return false
+	}
+	return member
 }
 
 // ── Scoped updaters (dashboard API) ─────────────────────────────────────

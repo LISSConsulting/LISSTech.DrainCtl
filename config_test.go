@@ -351,19 +351,19 @@ func TestValidate_StripsUnknownType(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://example.com/hook"},
-		{Type: "email", URL: "https://example.com/email"}, // unknown
-		{Type: "", URL: "https://example.com/empty"},      // unknown (empty)
+		{Type: "email", URL: "smtp://mail.example.com:587", From: "a@b.com", To: []string{"c@d.com"}},
+		{Type: "", URL: "https://example.com/empty"}, // unknown (empty)
 		{Type: "ntfy", URL: "https://ntfy.sh/topic"},
 		{Type: "slack", URL: "https://hooks.slack.com/foo"}, // unknown
 	}
 
 	cfg.Validate(nil)
 
-	if len(cfg.Notifications) != 2 {
-		t.Errorf("expected 2 valid notifications after Validate, got %d", len(cfg.Notifications))
+	if len(cfg.Notifications) != 3 {
+		t.Errorf("expected 3 valid notifications after Validate, got %d", len(cfg.Notifications))
 	}
 	for _, n := range cfg.Notifications {
-		if n.Type != "webhook" && n.Type != "ntfy" {
+		if n.Type != "webhook" && n.Type != "ntfy" && n.Type != "email" {
 			t.Errorf("Validate kept notification with unknown type %q", n.Type)
 		}
 	}

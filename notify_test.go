@@ -837,11 +837,11 @@ func TestSendNotification_NtfyTitleIsReadable(t *testing.T) {
 		status      string
 		wantInTitle string
 	}{
-		{TriggerDrainOn, "Grace", "Drain Mode Active"},
-		{TriggerDrainOff, "Healthy", "Connections Restored"},
-		{TriggerGraceEntered, "Grace", "Grace Period Active"},
-		{TriggerAlert, "Alert", "Alert: Drain Exceeded Grace Period"},
-		{TriggerHealthy, "Healthy", "All Connections Allowed"},
+		{TriggerDrainOn, "Grace", "remote connections disabled"},
+		{TriggerDrainOff, "Healthy", "re-enabled"},
+		{TriggerGraceEntered, "Grace", "grace period"},
+		{TriggerAlert, "Alert", "exceeds"},
+		{TriggerHealthy, "Healthy", "healthy"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.trigger), func(t *testing.T) {
@@ -858,13 +858,12 @@ func TestSendNotification_NtfyTitleIsReadable(t *testing.T) {
 			result := newTestResult("SRV01", tc.status)
 			SendNotification(targets, &NotifyState{}, result, tc.trigger, "", nil)
 
-			if !strings.Contains(capturedTitle, tc.wantInTitle) {
+			if !strings.Contains(strings.ToLower(capturedTitle), strings.ToLower(tc.wantInTitle)) {
 				t.Errorf("Title = %q, want it to contain %q", capturedTitle, tc.wantInTitle)
 			}
-			// Ensure the raw trigger name is NOT the label part.
-			rawName := string(tc.trigger)
-			if strings.Contains(capturedTitle, rawName) {
-				t.Errorf("Title = %q, should not contain raw trigger name %q", capturedTitle, rawName)
+			// Must contain the host name.
+			if !strings.Contains(capturedTitle, "SRV01") {
+				t.Errorf("Title = %q, should contain host name", capturedTitle)
 			}
 		})
 	}

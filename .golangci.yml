@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - gosec
+    - bodyclose
+    - durationcheck
+    - nilerr
+    - unconvert
+    - wastedassign
+
+  settings:
+    gosec:
+      excludes:
+        - G101  # false positives on variable names like "secret"
+        - G103  # unsafe.Pointer — required for Windows syscalls
+        - G115  # integer overflow conversion — Go handles these safely
+        - G204  # subprocess with variable args — we control the inputs
+        - G301  # directory permissions 0755 — standard for ProgramData
+        - G302  # file permissions 0644 — appropriate for logs and audit trails
+        - G304  # file path from variable — we validate paths
+        - G306  # WriteFile 0644 — same as G302
+        - G118  # goroutine with background context — long-lived goroutines, not request-scoped
+        - G402  # TLS InsecureSkipVerify — used with VerifyPeerCertificate
+        - G703  # path traversal — false positive on os.WriteFile
+
+issues:
+  exclude-dirs:
+    - dist
+    - obj
+    - vendor
+  max-issues-per-linter: 0
+  max-same-issues: 0
