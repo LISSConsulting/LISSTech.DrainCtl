@@ -220,7 +220,7 @@ drainctl notify test        Send a test notification to all targets
 
 | Command | Description |
 |---------|-------------|
-| `drainctl notify add <type> <url> [--triggers ...] [--repeat N]` | Add a webhook or ntfy target with optional trigger filter and repeat interval |
+| `drainctl notify add <type> <url> [--triggers ...] [--repeat N]` | Add a webhook, ntfy, or email target with optional trigger filter and repeat interval |
 | `drainctl notify remove <url>` | Remove a notification target by URL |
 | `drainctl notify list` | List all configured notification targets and their settings |
 | `drainctl notify test` | Send a test notification to all configured targets |
@@ -373,6 +373,14 @@ Notification targets are defined in `config.json`:
       "url": "https://ntfy.sh/my-alerts",
       "triggers": ["alert", "session_warning"],
       "repeat_minutes": 0
+    },
+    {
+      "type": "email",
+      "url": "smtp://smtp.example.com:587",
+      "to": ["ops@example.com"],
+      "from": "drainctl@example.com",
+      "secret": "smtp-password",
+      "triggers": ["drain_on", "drain_off", "alert"]
     }
   ]
 }
@@ -471,8 +479,11 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | yes | `"webhook"` or `"ntfy"` |
-| `url` | string | yes | Endpoint URL |
+| `type` | string | yes | `"webhook"`, `"ntfy"`, or `"email"` |
+| `url` | string | yes | Endpoint URL (`https://` for webhook/ntfy, `smtp://` or `smtps://` for email) |
+| `to` | string[] | email only | Recipient addresses |
+| `from` | string | email only | Sender address |
+| `secret` | string | no | HMAC-SHA256 signing secret (webhook) or SMTP password (email) |
 | `triggers` | string[] | no | Event types to notify on (omit for all) |
 | `repeat_minutes` | int | no | Re-alert interval while condition persists (0 = notify once) |
 

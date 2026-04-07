@@ -531,6 +531,20 @@ Get-RDSHDrainMode | Format-List</code></pre>
       "url": "https://hooks.example.com/drainctl",
       "triggers": ["drain_on", "drain_off", "alert", "healthy"],
       "repeat_minutes": 30
+    },
+    {
+      "type": "ntfy",
+      "url": "https://ntfy.sh/my-rdsh-alerts",
+      "triggers": ["alert", "session_warning"],
+      "repeat_minutes": 0
+    },
+    {
+      "type": "email",
+      "url": "smtp://smtp.example.com:587",
+      "to": ["ops@example.com"],
+      "from": "drainctl@example.com",
+      "secret": "smtp-password",
+      "triggers": ["drain_on", "drain_off", "alert"]
     }
   ],
   "dashboard": {
@@ -935,6 +949,12 @@ drainctl notify set-ntfy https://ntfy.sh/my-rdsh-alerts \
   --triggers drain_on,alert,healthy,session_warning \
   --repeat-minutes 30
 
+# Add an email target (any SMTP relay — Gmail, Mailgun, O365, SendGrid)
+drainctl notify add email smtp://smtp.example.com:587 \
+  --to ops@example.com --from drainctl@example.com \
+  --secret smtp-password \
+  --triggers drain_on,drain_off,alert
+
 # View notification status
 drainctl notify status
 
@@ -972,6 +992,11 @@ Add-RDSHDrainNotificationTarget -Type webhook -URL 'https://hooks.example.com/dr
 
 # Add ntfy for all events
 Add-RDSHDrainNotificationTarget -Type ntfy -URL 'https://ntfy.sh/drainctl'
+
+# Add email target
+Add-RDSHDrainNotificationTarget -Type email -URL 'smtp://smtp.example.com:587' `
+  -To 'ops@example.com' -From 'drainctl@example.com' -Secret 'smtp-password' `
+  -Triggers drain_on,alert
 
 # Remove a target
 Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code></pre>
@@ -1015,6 +1040,15 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                     </tr>
                 </tbody>
             </table>
+
+            <p>
+                All three target types share the same natural-language subjects, e.g.
+                <em>"RDS01 &mdash; New remote connections disabled by DOMAIN\admin"</em>,
+                <em>"RDS01 &mdash; Remote connections disabled for 2h 15m (exceeds 1h grace period)"</em>, or
+                <em>"RDS01 &mdash; Session utilization at 85% (17/20 sessions)"</em>.
+                For webhooks the subject appears in the <code>message</code> field; for ntfy it's the notification title;
+                for email it's the Subject header and the HTML body heading.
+            </p>
 
             <p>
                 Each target also has a <code>repeat_minutes</code> setting &mdash; set it to re-send alerts periodically
@@ -1575,7 +1609,7 @@ drainctl service uninstall</code></pre>
                     CLI/PS responses
                 </li>
                 <li><strong>Writes</strong> to the Windows Event Log (Applications and Services Logs &gt; DrainCtl) on state changes</li>
-                <li><strong>Sends</strong> webhook/ntfy notifications when configured</li>
+                <li><strong>Sends</strong> webhook/ntfy/email notifications when configured</li>
                 <li>
                     <strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization
                     alerts
@@ -1654,10 +1688,11 @@ drainctl service uninstall</code></pre>
                 <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
                 <li><code>drainctl notify test</code> &mdash; sends a test message</li>
                 <li>
-                    Check the DrainCtl event log for "webhook notification failed" or "ntfy notification failed"
-                    warnings
+                    Check the DrainCtl event log for "webhook notification failed", "ntfy notification failed",
+                    or "email notification failed" warnings
                 </li>
-                <li>Verify network connectivity from the RDSH server to the webhook/ntfy endpoint</li>
+                <li>Verify network connectivity from the RDSH server to the webhook/ntfy/SMTP endpoint</li>
+                <li>For email: confirm the SMTP password is correct, the <code>from</code> address is authorized to send, and the relay allows connections from the server's IP</li>
             </ol>
 
             <h3>Dashboard shows "Offline" for a registered server</h3>
