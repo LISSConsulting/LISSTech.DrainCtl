@@ -76,7 +76,7 @@ stages = ["pre-push"]
 # 7. Secrets scan
 [[repos]]
 repo = "https://github.com/gitleaks/gitleaks"
-rev = "v8.30.0"
+rev = "v8.30.1"
 
 [[repos.hooks]]
 id = "gitleaks"
