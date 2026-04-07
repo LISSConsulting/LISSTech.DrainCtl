@@ -271,7 +271,14 @@ publish:
 
     # Create release with MSI
     $assets = @($msiPath)
-    & gh release create $tag @assets --title "LISSTech DrainCtl $version" --generate-notes
+    $prevTag = & git describe --tags --abbrev=0 "$tag^" 2>$null
+    if ($prevTag) {
+        $notes = & git log "$prevTag..$tag" --pretty=format:"- %s" --no-merges
+        $body = "## What's Changed`n`n$($notes -join "`n")`n`n**Full Changelog**: https://github.com/LISSConsulting/LISSTech.DrainCtl/compare/$prevTag...$tag"
+    } else {
+        $body = "Initial release"
+    }
+    & gh release create $tag @assets --title "LISSTech DrainCtl $version" --notes $body
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Release created with $($assets.Count) asset(s)" -ForegroundColor Green
     Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
