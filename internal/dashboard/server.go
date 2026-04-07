@@ -425,14 +425,16 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	// 400 instead of being silently stripped by Config.Validate() after save.
 	if in.Notifications != nil {
 		for i, t := range *in.Notifications {
-			if t.Type != "webhook" && t.Type != "ntfy" {
-				http.Error(w, fmt.Sprintf("notifications[%d]: unknown type %q (want \"webhook\" or \"ntfy\")", i, t.Type), http.StatusBadRequest)
+			if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
+				http.Error(w, fmt.Sprintf("notifications[%d]: unknown type %q (want \"webhook\", \"ntfy\", or \"email\")", i, t.Type), http.StatusBadRequest)
 				return
 			}
 			if t.URL != "" {
 				lower := strings.ToLower(t.URL)
-				if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-					http.Error(w, fmt.Sprintf("notifications[%d]: URL must use http or https scheme", i), http.StatusBadRequest)
+				validScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
+					strings.HasPrefix(lower, "smtp://") || strings.HasPrefix(lower, "smtps://")
+				if !validScheme {
+					http.Error(w, fmt.Sprintf("notifications[%d]: URL must use http, https, smtp, or smtps scheme", i), http.StatusBadRequest)
 					return
 				}
 			}
