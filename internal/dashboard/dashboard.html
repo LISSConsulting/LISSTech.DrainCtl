@@ -5709,7 +5709,7 @@
                 if (isNtfy && displayUrl.match(/^https?:\/\/ntfy\.sh\//)) {
                     displayUrl = displayUrl.replace(/^https?:\/\/ntfy\.sh\//, "");
                 }
-                var secretVal = !isNtfy && !isEmail && t.secret ? t.secret : "";
+                var secretVal = !isNtfy && t.secret ? t.secret : "";
                 row.innerHTML =
                     '<div class="target-row-head">' +
                     '<select class="target-type" data-field="type"><option value="webhook"' +
@@ -5730,13 +5730,13 @@
                     '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
                     "</div>" +
                     '<div class="webhook-secret-wrap" style="display:' +
-                    (isNtfy || isEmail ? "none" : "flex") +
+                    (isNtfy ? "none" : "flex") +
                     '">' +
-                    '<div class="target-section-label target-section-label--nowrap">HMAC Secret</div>' +
+                    '<div class="target-section-label target-section-label--nowrap">' + (isEmail ? "SMTP Password" : "HMAC Secret") + '</div>' +
                     '<input class="settings-input" data-field="secret" type="password" value="' +
                     secretVal.replace(/"/g, "&quot;") +
-                    '" placeholder="Optional signing secret" autocomplete="new-password">' +
-                    '<span class="hmac-header-label">X-DrainCtl-Signature</span>' +
+                    '" placeholder="' + (isEmail ? "SMTP password" : "Optional signing secret") + '" autocomplete="new-password">' +
+                    '<span class="hmac-header-label" style="display:' + (isEmail ? "none" : "") + '">X-DrainCtl-Signature</span>' +
                     "</div>" +
                     '<div class="email-fields" style="display:' + (isEmail ? "flex" : "none") + ';gap:8px;margin-top:6px">' +
                     '<input class="settings-input" data-field="from" type="text" value="' + (t.from || "").replace(/"/g, "&quot;") + '" placeholder="from@example.com" style="flex:1">' +
@@ -5804,7 +5804,13 @@
                     var isN = sel.value === "ntfy";
                     var isE = sel.value === "email";
                     ntfyPrefix.style.display = isN ? "inline" : "none";
-                    secretWrap.style.display = isN || isE ? "none" : "flex";
+                    secretWrap.style.display = isN ? "none" : "flex";
+                    var secretLabel = secretWrap.querySelector(".target-section-label");
+                    if (secretLabel) secretLabel.textContent = isE ? "SMTP Password" : "HMAC Secret";
+                    var secretPlaceholder = secretWrap.querySelector('[data-field="secret"]');
+                    if (secretPlaceholder) secretPlaceholder.placeholder = isE ? "SMTP password" : "Optional signing secret";
+                    var hmacLabel = secretWrap.querySelector(".hmac-header-label");
+                    if (hmacLabel) hmacLabel.style.display = isE ? "none" : "";
                     if (emailFields) emailFields.style.display = isE ? "flex" : "none";
                     urlInput.placeholder = isN ? "my-drainctl-alerts" : isE ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...";
                     if (isN) {
@@ -5900,7 +5906,7 @@
                     urlInput.style.borderColor = "";
                     const repeat = parseInt(row.querySelector('[data-field="repeat"]').value) || 0;
                     const secretInput = row.querySelector('[data-field="secret"]');
-                    const secret = type === "webhook" && secretInput ? secretInput.value : "";
+                    const secret = (type === "webhook" || type === "email") && secretInput ? secretInput.value : "";
                     const triggers = [];
                     row.querySelectorAll("input[data-trigger]").forEach((cb) => {
                         if (cb.checked) triggers.push(cb.dataset.trigger);
