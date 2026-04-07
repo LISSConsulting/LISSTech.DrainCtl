@@ -5,7 +5,34 @@ package drainctl
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestEmailTemplateRenders(t *testing.T) {
+	dur := 300.0
+	result := &CheckResult{
+		Host:                 "RDS01",
+		Status:               "Alert",
+		DrainModeLabel:       "Drain Active",
+		GracePeriodSeconds:   3600,
+		StateDurationSeconds: &dur,
+		Timestamp:            time.Now(),
+		Message:              "Drain mode active for 5m.",
+	}
+	subject := "RDS01 \u2014 test subject"
+	html, err := renderEmailHTML(result, subject, TriggerAlert, `DOMAIN\admin`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html == "" {
+		t.Fatal("empty HTML")
+	}
+	for _, want := range []string{"RDS01", "Alert", "Drain Active", "#a3475b", "LISS Technologies"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+}
 
 func TestNotificationSubject(t *testing.T) {
 	dur := 8100.0 // 2h 15m
