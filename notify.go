@@ -141,6 +141,13 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			} else {
 				log(LvlINF, "notify=ntfy", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
 			}
+
+		case "email":
+			if err := sendEmail(target, result, trigger, changedBy, log); err != nil {
+				LogMsg(log, LvlWRN, "email notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+			} else {
+				log(LvlINF, "notify=email", fmt.Sprintf("event=%s to=%v", trigger, target.To))
+			}
 		}
 	}
 }
@@ -205,6 +212,22 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 				errs = append(errs, fmt.Errorf("ntfy %s: %w", target.URL, err))
 			} else {
 				log(LvlOK, "notify=ntfy", fmt.Sprintf("test=sent url=%s", target.URL))
+			}
+
+		case "email":
+			testResult := &CheckResult{
+				Host:           host,
+				Status:         "Test",
+				DrainModeLabel: "N/A",
+				Timestamp:      time.Now(),
+				Message:        "This is a test notification from DrainCtl.",
+				Version:        Version,
+			}
+			if err := sendEmail(target, testResult, "test", "", log); err != nil {
+				LogMsg(log, LvlERR, "email test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				errs = append(errs, fmt.Errorf("email %s: %w", target.URL, err))
+			} else {
+				log(LvlOK, "notify=email", fmt.Sprintf("test=sent to=%v", target.To))
 			}
 		}
 	}
