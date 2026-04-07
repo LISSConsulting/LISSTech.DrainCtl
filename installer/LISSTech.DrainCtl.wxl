@@ -3,6 +3,10 @@
     <String Id="DowngradeError"
         Value="A newer version of [ProductName] is already installed." />
 
+    <!-- Welcome dialog -->
+    <String Id="WelcomeDlgDescription"
+        Value="The Setup Wizard will install [ProductName] v[ProductVersion] on your computer. Click Next to continue or Cancel to exit the Setup Wizard." />
+
     <!-- InstallModeDlg -->
     <String Id="InstallModeDlg_Title" Value="[ProductName] Setup" />
     <String Id="InstallModeDlgTitle"

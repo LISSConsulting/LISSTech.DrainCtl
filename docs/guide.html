@@ -1254,8 +1254,8 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
 
 # Verify
 Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
-                <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);b.textContent='✓ Copied!';setTimeout(function(){b.innerHTML='&#128203; Copy'},1500)})(this)"
-                    style="margin-top: 10px; padding: 6px 18px; font-size: 0.82rem; font-weight: 600; border: none; border-radius: 6px; background: #a3475b; color: #fff; cursor: pointer; letter-spacing: 0.02em; transition: background 0.15s">
+                <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);b.style.transform='translate(3px,3px)';b.style.boxShadow='none';b.textContent='✓ Copied!';setTimeout(function(){b.innerHTML='&#128203; Copy';b.style.transform='';b.style.boxShadow=''},1500)})(this)"
+                    style="margin-top: 12px; padding: 8px 22px; font-size: 0.85rem; font-weight: 700; border: var(--bw) solid var(--border); border-radius: var(--r); background: #a3475b; color: #fff; cursor: pointer; letter-spacing: 0.04em; box-shadow: 3px 3px 0 var(--border); transition: transform 0.1s, box-shadow 0.1s; text-transform: uppercase">
                     &#128203; Copy
                 </button>
             </div>
