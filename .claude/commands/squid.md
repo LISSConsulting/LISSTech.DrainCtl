@@ -2,8 +2,13 @@ Push development and merge to trunk via PR.
 
 ## Steps
 
-1. `git push origin development`
-2. Create a PR from `development` to `trunk`:
+1. Rebase development on trunk (required after prior rebase merges):
+   ```
+   git fetch origin && git rebase origin/trunk
+   ```
+   If rebase conflicts: stop and tell the user.
+2. `git push origin development --force-with-lease`
+3. Create a PR from `development` to `trunk`:
    ```
    gh pr create --base trunk --head development --title "<version or summary>" --body "$(git log origin/trunk..origin/development --pretty=format:'- %s' --no-merges)"
    ```
@@ -13,5 +18,5 @@ Push development and merge to trunk via PR.
    ```
    gh pr merge <PR> --rebase --delete-branch=false
    ```
-5. Pull trunk locally: `git fetch origin && git checkout development`
+5. Sync development to trunk: `git fetch origin && git rebase origin/trunk`
 6. If CI fails or merge is blocked: stop and tell the user.
