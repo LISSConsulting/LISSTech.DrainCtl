@@ -42,24 +42,24 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 
 | Feature | Description |
 |---------|-------------|
-| 🔔 **Real-time detection** | `RegNotifyChangeKeyValue` — instant notification when drain mode changes |
-| 📋 **Audit trail** | 90-day JSONL history of every state observation and transition |
-| 👤 **Change attribution** | `EvtSubscribe` on Event ID 4657 — knows *who* changed drain mode |
-| 🖥️ **Windows Service** | Runs as `DrainCtl`, auto-start, polls as safety net |
-| ⚡ **Named pipe IPC** | CLI and PowerShell query the service instantly via `\\.\pipe\drainctl` |
-| 📊 **N-central ready** | Exit codes + structured stdout for AMP threshold monitoring |
-| 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` |
-| 🔔 **Multi-target notifications** | N webhook + M ntfy.sh + email (SMTP) targets, each with individual triggers and repeat intervals |
-| 🎯 **Granular triggers** | Per-event notification control: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, and more |
-| 📈 **Session tracking** | WTS session enumeration — active, disconnected, and total counts with utilization percentage |
-| ⚠️ **Session utilization alerts** | Configurable threshold fires `session_warning` when utilization is too high |
+| 🔔 **Real-time detection** | `RegNotifyChangeKeyValue` fires the instant drain mode flips -- zero polling delay |
+| 📋 **90-day audit trail** | Every state observation and transition, persisted as JSONL with automatic rotation |
+| 🕵️ **Change attribution** | `EvtSubscribe` on Event ID 4657 -- knows exactly *who* ran `chglogon /drain` |
+| 🖥️ **Windows Service** | Runs as `DrainCtl` with auto-start; poll ticker as safety net in case events are lost |
+| ⚡ **Named pipe IPC** | CLI and PowerShell get answers in <1 ms via `\\.\pipe\drainctl` -- no file I/O |
+| 📊 **N-central ready** | Exit codes + structured stdout slot directly into AMP threshold monitoring |
+| 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` -- pipeline-friendly |
+| 📡 **Multi-target notifications** | N webhooks + M ntfy.sh + email (SMTP) -- each target gets its own triggers and repeat cadence |
+| 🎯 **Granular triggers** | Subscribe per-event: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, and more |
+| 📈 **Live session tracking** | `WTSEnumerateSessionsW` counts active, disconnected, and total sessions with utilization % |
+| 🚨 **Utilization alerts** | Configurable threshold fires `session_warning` before your RDSH boxes hit capacity |
 
 ---
 
 ## 🏗️ Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#2d1a1a', 'lineColor': '#7a5a5a', 'primaryColor': '#f5e0e4', 'primaryTextColor': '#2d1a1a', 'secondaryColor': '#e8f0eb', 'tertiaryColor': '#fce8df'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#a3475b', 'primaryTextColor': '#fff', 'primaryBorderColor': '#8a3a4d', 'secondaryColor': '#f5ebe8', 'tertiaryColor': '#fdf8f6', 'lineColor': '#a3475b', 'fontFamily': 'monospace', 'fontSize': '13px'}}}%%
 graph TB
     subgraph SVC["DrainCtl Windows Service"]
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
@@ -73,6 +73,7 @@ graph TB
         CHECK --> NOTIFY["Multi-Target Dispatch"]
         NOTIFY --> WH["Webhook 1..N"]
         NOTIFY --> NTFY["ntfy 1..M"]
+        NOTIFY --> EMAIL["Email (SMTP)"]
         STORE --> PIPE["Named Pipe"]
     end
 
@@ -87,7 +88,7 @@ graph TB
 ### How Detection Works
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'monospace', 'fontSize': '13px', 'primaryBorderColor': '#2d1a1a', 'lineColor': '#7a5a5a'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#a3475b', 'primaryTextColor': '#fff', 'primaryBorderColor': '#8a3a4d', 'secondaryColor': '#f5ebe8', 'tertiaryColor': '#fdf8f6', 'lineColor': '#a3475b', 'fontFamily': 'monospace', 'fontSize': '13px', 'actorBkg': '#a3475b', 'actorTextColor': '#fff', 'actorBorder': '#8a3a4d', 'signalColor': '#2d1a1a', 'noteBkgColor': '#f5ebe8', 'noteBorderColor': '#a3475b'}}}%%
 sequenceDiagram
     participant Admin
     participant Registry
