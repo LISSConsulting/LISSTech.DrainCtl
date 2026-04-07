@@ -68,6 +68,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		"connections_allowed":    connAllowed,
 		"version":                result.Version,
 		"timestamp":              result.Timestamp.Format(time.RFC3339),
+		"subject":                NotificationSubject(result, trigger, changedBy),
 	}
 	if result.Transition && result.TransitionFrom != "" {
 		payload["previous_mode"] = result.TransitionFrom
@@ -117,7 +118,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			}
 
 		case "ntfy":
-			title := ntfyTitle(trigger, result.Host)
+			title := NotificationSubject(result, trigger, changedBy)
 			priority := "default"
 			tags := "white_check_mark"
 			switch result.Status {
@@ -273,6 +274,72 @@ func ntfyTitle(trigger Trigger, host string) string {
 		label = string(trigger)
 	}
 	return fmt.Sprintf("DrainCtl: %s on %s", label, host)
+}
+
+// NotificationSubject returns a natural-language subject line for the given
+// trigger, suitable for email subjects, ntfy titles, and webhook payloads.
+func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string) string {
+	host := result.Host
+	if host == "" {
+		host = "Unknown"
+	}
+
+	dur := ""
+	if result.StateDurationSeconds != nil {
+		dur = formatDuration(time.Duration(*result.StateDurationSeconds * float64(time.Second)))
+	}
+
+	grace := formatDuration(time.Duration(result.GracePeriodSeconds) * time.Second)
+
+	by := ""
+	if changedBy != "" {
+		by = " by " + changedBy
+	}
+
+	switch trigger {
+	case TriggerDrainOn:
+		return fmt.Sprintf("%s \u2014 New remote connections disabled%s", host, by)
+	case TriggerDrainOff:
+		return fmt.Sprintf("%s \u2014 Remote connections re-enabled%s", host, by)
+	case TriggerAlert:
+		return fmt.Sprintf("%s \u2014 Remote connections disabled for %s (exceeds %s grace period)", host, dur, grace)
+	case TriggerGraceEntered:
+		remaining := ""
+		if result.StateDurationSeconds != nil {
+			rem := time.Duration(result.GracePeriodSeconds)*time.Second - time.Duration(*result.StateDurationSeconds*float64(time.Second))
+			if rem > 0 {
+				remaining = formatDuration(rem) + " remaining in "
+			}
+		}
+		return fmt.Sprintf("%s \u2014 Remote connections disabled, %sgrace period", host, remaining)
+	case TriggerHealthy:
+		return fmt.Sprintf("%s \u2014 Remote connections enabled, server healthy", host)
+	case TriggerSessionWarning:
+		if result.Sessions != nil {
+			return fmt.Sprintf("%s \u2014 Session utilization at %d%% (%d/%d sessions)",
+				host, result.Sessions.UtilizationPct, result.Sessions.TotalSessions, result.Sessions.MaxSessions)
+		}
+		return fmt.Sprintf("%s \u2014 Session utilization warning", host)
+	default:
+		return fmt.Sprintf("%s \u2014 %s", host, trigger)
+	}
+}
+
+// formatDuration returns a human-readable duration like "2h 15m" or "45m".
+func formatDuration(d time.Duration) string {
+	d = d.Truncate(time.Minute)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 && m > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	if h > 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return "0m"
 }
 
 // sendNtfy posts a message to an ntfy.sh-compatible endpoint.
