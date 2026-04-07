@@ -68,11 +68,13 @@ var ValidTriggers = map[Trigger]bool{
 
 // NotificationTarget describes a single notification endpoint.
 type NotificationTarget struct {
-	Type          string    `json:"type"` // "webhook" or "ntfy"
+	Type          string    `json:"type"` // "webhook", "ntfy", or "email"
 	URL           string    `json:"url"`
 	Triggers      []Trigger `json:"triggers"`                 // empty = DefaultTriggers
 	RepeatMinutes int       `json:"repeat_minutes,omitempty"` // 0 = once only
-	Secret        string    `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks
+	Secret        string    `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks; SMTP password for email
+	To            []string  `json:"to,omitempty"`             // email recipients
+	From          string    `json:"from,omitempty"`           // email sender
 }
 
 // HasTrigger returns true if the target subscribes to the given trigger.
@@ -229,7 +231,7 @@ func (c *Config) Validate(log LogFunc) {
 	// Strip notification targets with unknown types (must be "webhook" or "ntfy").
 	// A target with an unrecognised type would silently never fire — reject it early.
 	c.Notifications = slices.DeleteFunc(c.Notifications, func(t NotificationTarget) bool {
-		if t.Type != "webhook" && t.Type != "ntfy" {
+		if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
 			if log != nil {
 				LogMsg(log, LvlWRN, "notification target has unknown type, ignored",
 					fmt.Sprintf("type=%q url=%s", t.Type, t.URL))
@@ -245,7 +247,9 @@ func (c *Config) Validate(log LogFunc) {
 			return false // empty URL is handled elsewhere
 		}
 		lower := strings.ToLower(t.URL)
-		if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		validScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
+			strings.HasPrefix(lower, "smtp://") || strings.HasPrefix(lower, "smtps://")
+		if !validScheme {
 			if log != nil {
 				LogMsg(log, LvlWRN, "notification target has invalid URL scheme, ignored",
 					fmt.Sprintf("url=%s", t.URL))
@@ -276,6 +280,36 @@ func (c *Config) Validate(log LogFunc) {
 		}
 		if c.Notifications[i].RepeatMinutes > MaxRepeatMinutes {
 			c.Notifications[i].RepeatMinutes = MaxRepeatMinutes
+		}
+	}
+
+	// Validate email targets: require smtp(s):// URL, from, and at least one to.
+	for i := range c.Notifications {
+		t := &c.Notifications[i]
+		if t.Type != "email" {
+			continue
+		}
+		lower := strings.ToLower(t.URL)
+		if !strings.HasPrefix(lower, "smtp://") && !strings.HasPrefix(lower, "smtps://") {
+			if log != nil {
+				LogMsg(log, LvlWRN, "email target requires smtp:// or smtps:// URL, ignored",
+					fmt.Sprintf("url=%s", t.URL))
+			}
+			t.URL = ""
+		}
+		if t.From == "" {
+			if log != nil {
+				LogMsg(log, LvlWRN, "email target missing 'from' address, ignored",
+					fmt.Sprintf("url=%s", t.URL))
+			}
+			t.URL = ""
+		}
+		if len(t.To) == 0 {
+			if log != nil {
+				LogMsg(log, LvlWRN, "email target missing 'to' addresses, ignored",
+					fmt.Sprintf("url=%s", t.URL))
+			}
+			t.URL = ""
 		}
 	}
 }
