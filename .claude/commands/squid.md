@@ -9,9 +9,9 @@ Push development and merge to trunk via PR.
    ```
    Use the most recent commit message or version as the PR title.
 3. Wait for CI checks to pass: `gh pr checks <PR> --watch`
-4. Merge with `--merge` (fast-forward, linear history enforced by branch protection):
+4. Merge with `--rebase` (preserves original commits, linear history):
    ```
-   gh pr merge <PR> --merge --delete-branch=false
+   gh pr merge <PR> --rebase --delete-branch=false
    ```
 5. Pull trunk locally: `git fetch origin && git checkout development`
 6. If CI fails or merge is blocked: stop and tell the user.
