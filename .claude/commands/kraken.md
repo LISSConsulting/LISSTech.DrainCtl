@@ -28,9 +28,13 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - Commit with message: `v{VERSION}: {brief description of what changed since last release}`
 - `git push origin development`
 
-### 6. Fast-forward trunk
-- `git checkout trunk && git merge --ff-only origin/development && git push origin trunk && git checkout development`
-- If FF fails: ask the user — trunk has diverged.
+### 6. Merge to trunk via PR
+- `git push origin development`
+- Create PR: `gh pr create --base trunk --head development --title "v{VERSION}" --body "$(git log origin/trunk..origin/development --pretty=format:'- %s' --no-merges)"`
+- Wait for CI: `gh pr checks <PR_NUMBER> --watch`
+- If CI fails: diagnose, fix, push again, wait for CI.
+- Merge: `gh pr merge <PR_NUMBER> --merge --delete-branch=false`
+- `git fetch origin`
 
 ### 7. Publish
 - `just publish` — tags, creates GH release with MSI, publishes to PSGallery.
