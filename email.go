@@ -4,9 +4,14 @@ package drainctl
 
 import (
 	"bytes"
+	"crypto/tls"
 	_ "embed"
 	"fmt"
 	"html/template"
+	"net"
+	"net/smtp"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -69,4 +74,118 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		return "", fmt.Errorf("render email template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// sendEmail sends an HTML notification email via SMTP.
+func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, changedBy string, log LogFunc) error {
+	subject := NotificationSubject(result, trigger, changedBy)
+
+	html, err := renderEmailHTML(result, subject, trigger, changedBy)
+	if err != nil {
+		return err
+	}
+
+	u, err := url.Parse(target.URL)
+	if err != nil {
+		return fmt.Errorf("parse SMTP URL: %w", err)
+	}
+
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "smtps" {
+			port = "465"
+		} else {
+			port = "587"
+		}
+	}
+	addr := net.JoinHostPort(host, port)
+
+	// Build MIME message.
+	var msg bytes.Buffer
+	msg.WriteString("From: " + target.From + "\r\n")
+	msg.WriteString("To: " + strings.Join(target.To, ", ") + "\r\n")
+	msg.WriteString("Subject: " + subject + "\r\n")
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	msg.WriteString("X-Mailer: DrainCtl/" + Version + "\r\n")
+	msg.WriteString("\r\n")
+	msg.WriteString(html)
+
+	if u.Scheme == "smtps" {
+		return sendSMTPS(addr, host, target, msg.Bytes())
+	}
+	return sendSMTPStartTLS(addr, host, target, msg.Bytes())
+}
+
+func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) error {
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	if err := c.Hello("drainctl"); err != nil {
+		return fmt.Errorf("smtp hello: %w", err)
+	}
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
+
+	if target.Secret != "" {
+		auth := smtp.PlainAuth("", target.From, target.Secret, host)
+		if err := c.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+
+	return smtpSend(c, target.From, target.To, msg)
+}
+
+func sendSMTPS(addr, host string, target NotificationTarget, msg []byte) error {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host})
+	if err != nil {
+		return fmt.Errorf("smtps dial: %w", err)
+	}
+
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtp client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	if target.Secret != "" {
+		auth := smtp.PlainAuth("", target.From, target.Secret, host)
+		if err := c.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+
+	return smtpSend(c, target.From, target.To, msg)
+}
+
+func smtpSend(c *smtp.Client, from string, to []string, msg []byte) error {
+	if err := c.Mail(from); err != nil {
+		return fmt.Errorf("smtp mail from: %w", err)
+	}
+	for _, rcpt := range to {
+		if err := c.Rcpt(rcpt); err != nil {
+			return fmt.Errorf("smtp rcpt to %s: %w", rcpt, err)
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data: %w", err)
+	}
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("smtp write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp close data: %w", err)
+	}
+	return c.Quit()
 }

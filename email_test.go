@@ -3,6 +3,10 @@
 package drainctl
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +35,81 @@ func TestEmailTemplateRenders(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("HTML missing %q", want)
 		}
+	}
+}
+
+func TestSendEmailSMTP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	addr := ln.Addr().String()
+
+	var received bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = fmt.Fprintf(conn, "220 test SMTP\r\n")
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "EHLO") || strings.HasPrefix(line, "HELO") {
+				_, _ = fmt.Fprintf(conn, "250-hello\r\n250 OK\r\n")
+			} else if strings.HasPrefix(line, "MAIL FROM") {
+				_, _ = fmt.Fprintf(conn, "250 OK\r\n")
+			} else if strings.HasPrefix(line, "RCPT TO") {
+				_, _ = fmt.Fprintf(conn, "250 OK\r\n")
+			} else if line == "DATA" {
+				_, _ = fmt.Fprintf(conn, "354 Go ahead\r\n")
+				for scanner.Scan() {
+					dl := scanner.Text()
+					if dl == "." {
+						break
+					}
+					received.WriteString(dl + "\n")
+				}
+				_, _ = fmt.Fprintf(conn, "250 OK\r\n")
+			} else if strings.HasPrefix(line, "QUIT") {
+				_, _ = fmt.Fprintf(conn, "221 Bye\r\n")
+				return
+			} else {
+				_, _ = fmt.Fprintf(conn, "250 OK\r\n")
+			}
+		}
+	}()
+
+	target := NotificationTarget{
+		Type: "email",
+		URL:  "smtp://" + addr,
+		To:   []string{"test@example.com"},
+		From: "drainctl@example.com",
+	}
+	result := &CheckResult{
+		Host:           "SRV01",
+		Status:         "Alert",
+		DrainModeLabel: "Drain",
+		Timestamp:      time.Now(),
+		Message:        "Test alert.",
+	}
+
+	err = sendEmail(target, result, TriggerAlert, "", DiscardLogger())
+	if err != nil {
+		t.Fatalf("sendEmail: %v", err)
+	}
+
+	<-done
+	body := received.String()
+	if !strings.Contains(body, "SRV01") {
+		t.Error("email body missing host")
+	}
+	if !strings.Contains(body, "text/html") {
+		t.Error("email missing Content-Type html")
 	}
 }
 
