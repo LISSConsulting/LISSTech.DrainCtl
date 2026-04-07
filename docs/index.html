@@ -569,7 +569,7 @@
                 font-size: 0.82rem;
                 line-height: 1.8;
                 overflow-x: auto;
-                white-space: pre-line;
+                white-space: pre;
             }
             .usage-panel.active {
                 display: block;
@@ -1233,86 +1233,75 @@
                     <button class="usage-tab" onclick="showTab(3)">History</button>
                 </div>
 
-                <div class="usage-panel active" id="tab0">
-                    <span class="c"># Check drain mode status (instant via service pipe)</span>
-                    <span class="b">PS&gt;</span> drainctl check <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> source=service <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> host=MDS-LDC1-RDS5 <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
-                    <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
-                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
-                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy
-                    connections_allowed=true exit=0
+                <div class="usage-panel active" id="tab0"><span class="c"># Check drain mode status (instant via service pipe)</span>
+<span class="b">PS&gt;</span> drainctl check
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> source=service
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> host=MDS-LDC1-RDS5
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy connections_allowed=true exit=0
 
-                    <span class="c"># When drain mode is active beyond grace period:</span>
-                    <span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r"
-                        >Alert</span
-                    >
-                    connections_allowed=<span class="r">false</span> exit=1
-                    <span class="c"># Exit code 1 triggers your RMM monitoring threshold</span>
-                </div>
+<span class="c"># When drain mode is active beyond grace period:</span>
+<span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r">Alert</span> connections_allowed=<span class="r">false</span> exit=1
+<span class="c"># Exit code 1 triggers your RMM monitoring threshold</span></div>
 
-                <div class="usage-panel" id="tab1">
-                    <span class="c"># Rich status object</span> <span class="b">PS&gt;</span> Get-RDSHDrainMode
+                <div class="usage-panel" id="tab1"><span class="c"># Rich status object</span>
+<span class="b">PS&gt;</span> Get-RDSHDrainMode
 
-                    <span class="w">Timestamp :</span> <span class="d">4/2/2026 8:08:56 PM</span>
-                    <span class="w">Host :</span> <span class="d">MDS-LDC1-RDS5</span>
-                    <span class="w">DrainMode :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
-                    <span class="w">StateSince :</span> <span class="d">4/2/2026 6:30:00 PM</span>
-                    <span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
-                    <span class="w">Status :</span> <span class="g">Healthy</span>
-                    <span class="w">ConnectionsAllowed :</span> <span class="g">True</span>
-                    <span class="w">Message :</span> <span class="d">All connections allowed.</span>
-                    <span class="w">ExitCode :</span> <span class="d">0</span>
+<span class="w">Timestamp            :</span> <span class="d">4/2/2026 8:08:56 PM</span>
+<span class="w">Host                 :</span> <span class="d">MDS-LDC1-RDS5</span>
+<span class="w">DrainMode            :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
+<span class="w">StateSince           :</span> <span class="d">4/2/2026 6:30:00 PM</span>
+<span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
+<span class="w">Status               :</span> <span class="g">Healthy</span>
+<span class="w">ConnectionsAllowed   :</span> <span class="g">True</span>
+<span class="w">Message              :</span> <span class="d">All connections allowed.</span>
+<span class="w">ExitCode             :</span> <span class="d">0</span>
 
-                    <span class="c"># Boolean check for scripts and alerts</span>
-                    <span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) {
-                    <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
-                    <span class="g">OK</span>
+<span class="c"># Boolean check for scripts and alerts</span>
+<span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) { <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
+<span class="g">OK</span>
 
-                    <span class="c"># One-liner for monitoring scripts</span>
-                    <span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status <span class="g">Healthy</span>
-                </div>
+<span class="c"># One-liner for monitoring scripts</span>
+<span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status
+<span class="g">Healthy</span></div>
 
-                <div class="usage-panel" id="tab2">
-                    <span class="c"># Machine-readable output for automation</span>
-                    <span class="b">PS&gt;</span> drainctl check --format json
-                    <span class="w">{</span>
-                    <span class="b">"version"</span>: <span class="d">"26.97.1"</span>,
-                    <span class="b">"timestamp"</span>: <span class="d">"2026-04-02T20:08:56-04:00"</span>,
-                    <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
-                    <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
-                    <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
-                    <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
-                    <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
-                    <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
-                    <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
-                    <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
-                    <span class="b">"sessions"</span>: { <span class="b">"active_sessions"</span>:
-                    <span class="d">12</span>, <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
-                    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
-                    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
-                    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
-                    },
-                    <span class="b">"transition"</span>: <span class="d">false</span>, <span class="b">"message"</span>:
-                    <span class="d">"All connections allowed."</span>, <span class="b">"exit_code"</span>:
-                    <span class="d">0</span> <span class="w">}</span>
-                </div>
+                <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
+<span class="b">PS&gt;</span> drainctl check --format json
+<span class="w">{</span>
+  <span class="b">"version"</span>: <span class="d">"26.97.1"</span>,
+  <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
+  <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
+  <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
+  <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
+  <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
+  <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
+  <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
+  <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
+  <span class="b">"sessions"</span>: {
+    <span class="b">"active_sessions"</span>: <span class="d">12</span>,
+    <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
+    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
+    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
+    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
+  },
+  <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
+  <span class="b">"exit_code"</span>: <span class="d">0</span>
+<span class="w">}</span></div>
 
-                <div class="usage-panel" id="tab3">
-                    <span class="c"># View recent state transitions with attribution</span>
-                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
+                <div class="usage-panel" id="tab3"><span class="c"># View recent state transitions with attribution</span>
+<span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
 
-                    <span class="w">Timestamp DrainMode Changed ChangedBy Exit</span>
-                    <span class="d">--------- --------- ------- --------- ----</span>
-                    <span class="y">4/2/2026 10:14:04 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\lissadmin 0</span>
-                    <span class="g">4/2/2026 10:13:32 PM ALLOW_ALL_CONNECTIONS YES MDS\lissadmin 0</span>
-                    <span class="y">4/2/2026 10:10:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\lissadmin 0</span>
-                    <span class="g">4/2/2026 8:30:00 PM ALLOW_ALL_CONNECTIONS YES MDS\svcaccount 0</span>
-                    <span class="y">4/2/2026 6:15:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW... YES MDS\jdoe 0</span>
+<span class="w">Timestamp              DrainMode                         Changed  ChangedBy       Exit</span>
+<span class="d">---------              ---------                         -------  ---------       ----</span>
+<span class="y">4/2/2026 10:14:04 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\lissadmin   0</span>
+<span class="g">4/2/2026 10:13:32 PM   ALLOW_ALL_CONNECTIONS             YES      MDS\lissadmin   0</span>
+<span class="y">4/2/2026 10:10:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\lissadmin   0</span>
+<span class="g">4/2/2026  8:30:00 PM   ALLOW_ALL_CONNECTIONS             YES      MDS\svcaccount  0</span>
+<span class="y">4/2/2026  6:15:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\jdoe        0</span>
 
-                    <span class="c"># Filter in pipeline</span>
+<span class="c"># Filter in pipeline</span>
                     <span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp,
                     ChangedBy
                 </div>
