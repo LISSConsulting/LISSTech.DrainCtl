@@ -1466,25 +1466,27 @@
             <div class="nav-in">
                 <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div><span class="nav-ver" id="nav-ver" style="font-size:0.7rem;opacity:0.5;margin-left:8px"></span>
                 <div class="nav-right" id="ns"></div>
-                <button
-                    class="btn-gear"
-                    id="btn-gear"
-                    onclick="toggleSettings()"
-                    title="Notification Settings"
-                    aria-label="Open configuration settings"
-                    aria-haspopup="dialog"
-                >
-                    CONFIG
-                </button>
-                <button
-                    class="btn-gear btn-theme"
-                    id="btn-theme"
-                    onclick="toggleTheme()"
-                    title="Toggle light/dark mode"
-                    aria-label="Switch to dark mode"
-                >
-                    ☽
-                </button>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <button
+                        class="btn-gear"
+                        id="btn-gear"
+                        onclick="toggleSettings()"
+                        title="Notification Settings"
+                        aria-label="Open configuration settings"
+                        aria-haspopup="dialog"
+                    >
+                        CONFIG
+                    </button>
+                    <button
+                        class="btn-gear btn-theme"
+                        id="btn-theme"
+                        onclick="toggleTheme()"
+                        title="Toggle light/dark mode"
+                        aria-label="Switch to dark mode"
+                    >
+                        ☽
+                    </button>
+                </div>
             </div>
         </nav>
 
