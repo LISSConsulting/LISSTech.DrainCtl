@@ -33,7 +33,7 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - Create PR: `gh pr create --base trunk --head development --title "v{VERSION}" --body "$(git log origin/trunk..origin/development --pretty=format:'- %s' --no-merges)"`
 - Wait for CI: `gh pr checks <PR_NUMBER> --watch`
 - If CI fails: diagnose, fix, push again, wait for CI.
-- Merge: `gh pr merge <PR_NUMBER> --merge --delete-branch=false`
+- Merge: `gh pr merge <PR_NUMBER> --rebase --delete-branch=false`
 - `git fetch origin`
 
 ### 7. Publish
