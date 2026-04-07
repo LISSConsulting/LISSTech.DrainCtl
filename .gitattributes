@@ -1,0 +1,4 @@
+# Force LF line endings for Go source files to ensure consistent gofmt
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
