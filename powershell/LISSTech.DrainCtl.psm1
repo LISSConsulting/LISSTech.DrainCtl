@@ -339,6 +339,10 @@ function Get-RDSHDrainHistory {
             StateDurationSeconds = Get-SafeProperty $r 'state_duration_seconds'
             Changed              = $r.changed
             ChangedBy            = Get-SafeProperty $r 'changed_by'
+            ActiveSessions       = Get-SafeProperty $r 'active_sessions' 0
+            DisconnectedSessions = Get-SafeProperty $r 'disconnected_sessions' 0
+            TotalSessions        = Get-SafeProperty $r 'total_sessions' 0
+            MaxSessions          = Get-SafeProperty $r 'max_sessions' 0
             ExitCode             = $r.exit_code
         }
     }
