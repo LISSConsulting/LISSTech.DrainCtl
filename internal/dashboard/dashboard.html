@@ -1464,17 +1464,8 @@
     <body>
         <nav class="nav">
             <div class="nav-in">
-                <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div>
+                <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div><span class="nav-ver" id="nav-ver" style="font-size:0.7rem;opacity:0.5;margin-left:8px"></span>
                 <div class="nav-right" id="ns"></div>
-                <button
-                    class="btn-gear btn-theme"
-                    id="btn-theme"
-                    onclick="toggleTheme()"
-                    title="Toggle light/dark mode"
-                    aria-label="Switch to dark mode"
-                >
-                    ☽
-                </button>
                 <button
                     class="btn-gear"
                     id="btn-gear"
@@ -1484,6 +1475,15 @@
                     aria-haspopup="dialog"
                 >
                     CONFIG
+                </button>
+                <button
+                    class="btn-gear btn-theme"
+                    id="btn-theme"
+                    onclick="toggleTheme()"
+                    title="Toggle light/dark mode"
+                    aria-label="Switch to dark mode"
+                >
+                    ☽
                 </button>
             </div>
         </nav>
@@ -5004,6 +5004,11 @@
                 if (c.alert) p.push('<span class="a">' + c.alert + " alert</span>");
                 if (c.off) p.push(c.off + " offline");
                 ns.innerHTML = p.join(" · ");
+                const navVer = document.getElementById("nav-ver");
+                if (navVer) {
+                    const ver = servers && servers[0] && servers[0].last_result && servers[0].last_result.version;
+                    navVer.textContent = ver ? "v" + ver : "";
+                }
 
                 // State bar
                 const sb = document.getElementById("sbar");
@@ -5699,30 +5704,33 @@
                 var rv = t.repeat_minutes || 0;
                 // For ntfy, extract topic from URL
                 var isNtfy = t.type === "ntfy";
+                var isEmail = t.type === "email";
                 var displayUrl = t.url || "";
                 if (isNtfy && displayUrl.match(/^https?:\/\/ntfy\.sh\//)) {
                     displayUrl = displayUrl.replace(/^https?:\/\/ntfy\.sh\//, "");
                 }
-                var secretVal = !isNtfy && t.secret ? t.secret : "";
+                var secretVal = !isNtfy && !isEmail && t.secret ? t.secret : "";
                 row.innerHTML =
                     '<div class="target-row-head">' +
                     '<select class="target-type" data-field="type"><option value="webhook"' +
                     (t.type === "webhook" ? " selected" : "") +
                     '>Webhook</option><option value="ntfy"' +
                     (isNtfy ? " selected" : "") +
-                    ">Ntfy.sh</option></select>" +
+                    '>Ntfy.sh</option><option value="email"' +
+                    (isEmail ? " selected" : "") +
+                    ">Email (SMTP)</option></select>" +
                     '<span class="ntfy-prefix" style="display:' +
                     (isNtfy ? "inline" : "none") +
                     '">ntfy.sh /</span>' +
                     '<input class="settings-input target-url" data-field="url" type="text" value="' +
                     displayUrl.replace(/"/g, "&quot;") +
                     '" placeholder="' +
-                    (isNtfy ? "my-drainctl-alerts" : "https://hooks.example.com/...") +
+                    (isNtfy ? "my-drainctl-alerts" : isEmail ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...") +
                     '">' +
                     '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
                     "</div>" +
                     '<div class="webhook-secret-wrap" style="display:' +
-                    (isNtfy ? "none" : "flex") +
+                    (isNtfy || isEmail ? "none" : "flex") +
                     '">' +
                     '<div class="target-section-label target-section-label--nowrap">HMAC Secret</div>' +
                     '<input class="settings-input" data-field="secret" type="password" value="' +
@@ -5730,6 +5738,10 @@
                     '" placeholder="Optional signing secret" autocomplete="new-password">' +
                     '<span class="hmac-header-label">X-DrainCtl-Signature</span>' +
                     "</div>" +
+                    '<div class="email-fields" style="display:' + (isEmail ? "flex" : "none") + ';gap:8px;margin-top:6px">' +
+                    '<input class="settings-input" data-field="from" type="text" value="' + (t.from || "").replace(/"/g, "&quot;") + '" placeholder="from@example.com" style="flex:1">' +
+                    '<input class="settings-input" data-field="to" type="text" value="' + ((t.to || []).join(", ")).replace(/"/g, "&quot;") + '" placeholder="to@example.com, ops@example.com" style="flex:2">' +
+                    '</div>' +
                     '<div class="target-section-label">Triggers</div>' +
                     '<p class="target-desc">Which events send a notification to this target.</p>' +
                     '<div class="target-triggers">' +
@@ -5787,17 +5799,20 @@
                 var urlInput = row.querySelector(".target-url");
                 var ntfyPrefix = row.querySelector(".ntfy-prefix");
                 var secretWrap = row.querySelector(".webhook-secret-wrap");
+                var emailFields = row.querySelector(".email-fields");
                 sel.addEventListener("change", function () {
                     var isN = sel.value === "ntfy";
+                    var isE = sel.value === "email";
                     ntfyPrefix.style.display = isN ? "inline" : "none";
-                    secretWrap.style.display = isN ? "none" : "flex";
-                    urlInput.placeholder = isN ? "my-drainctl-alerts" : "https://hooks.example.com/...";
+                    secretWrap.style.display = isN || isE ? "none" : "flex";
+                    if (emailFields) emailFields.style.display = isE ? "flex" : "none";
+                    urlInput.placeholder = isN ? "my-drainctl-alerts" : isE ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...";
                     if (isN) {
                         // Switching to ntfy: strip https://ntfy.sh/ prefix if present
                         if (urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
                             urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
                         }
-                    } else {
+                    } else if (!isE) {
                         // Switching to webhook: clear field if it looks like a topic name, not a URL
                         if (!urlInput.value.match(/^https?:\/\//)) {
                             urlInput.value = "";
@@ -5892,6 +5907,10 @@
                     });
                     const target = { type, url, triggers, repeat_minutes: repeat };
                     if (secret) target.secret = secret;
+                    const fromField = row.querySelector('[data-field="from"]');
+                    const toField = row.querySelector('[data-field="to"]');
+                    if (fromField) target.from = fromField.value.trim();
+                    if (toField) target.to = toField.value.split(",").map((s) => s.trim()).filter(Boolean);
                     targets.push(target);
                 });
                 if (!valid) return null;
