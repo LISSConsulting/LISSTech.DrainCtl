@@ -240,8 +240,8 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 
 	case FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tEXIT")
-		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t----")
+		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tSESSIONS\tEXIT")
+		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t--------\t----")
 		for i, r := range records {
 			ch := ""
 			if r.Changed {
@@ -252,9 +252,15 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 				by = "-"
 			}
 			dur := (time.Duration(durations[i]) * time.Second).String()
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n",
+			sess := "-"
+			if r.MaxSessions > 0 {
+				sess = fmt.Sprintf("%d/%d", r.TotalSessions, r.MaxSessions)
+			} else if r.TotalSessions > 0 {
+				sess = fmt.Sprintf("%d", r.TotalSessions)
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
 				r.Timestamp.Local().Format("2006-01-02 15:04:05"),
-				r.DrainLabel, dur, ch, by, r.ExitCode,
+				r.DrainLabel, dur, ch, by, sess, r.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -270,6 +276,13 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			}
 			if r.ChangedBy != "" {
 				fields = append(fields, fmt.Sprintf("changed_by=%s", r.ChangedBy))
+			}
+			if r.TotalSessions > 0 || r.MaxSessions > 0 {
+				fields = append(fields,
+					fmt.Sprintf("sessions=%d/%d", r.TotalSessions, r.MaxSessions),
+					fmt.Sprintf("active=%d", r.ActiveSessions),
+					fmt.Sprintf("disconnected=%d", r.DisconnectedSessions),
+				)
 			}
 			fields = append(fields, fmt.Sprintf("exit=%d", r.ExitCode))
 
