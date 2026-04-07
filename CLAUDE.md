@@ -7,7 +7,7 @@ just release    # signed (needs CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env)
 just lint       # go vet + gofmt + golangci-lint
 just resource   # recompile .syso after icon/version changes
 ```
-Requires: Go 1.25+, MinGW, WiX 5, .NET SDK 8+.
+Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 
 ## Key Rules
 - Every `.go` file needs `//go:build windows`
