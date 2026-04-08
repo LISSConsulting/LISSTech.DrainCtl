@@ -5204,13 +5204,15 @@
                         var sessVals = [], cpuVals = [], memVals = [];
                         var dqVals = [], idVals = [], tcpVals = [];
                         rev.forEach(function(e) {
-                            sessVals.push(e.max_sessions > 0 ? (e.total_sessions / e.max_sessions * 100) : 0);
-                            cpuVals.push(e.cpu_pct || 0);
-                            var memUsed = (e.mem_total_mb && e.mem_avail_mb) ? ((e.mem_total_mb - e.mem_avail_mb) / e.mem_total_mb * 100) : 0;
+                            var s = e.sessions || {};
+                            var p = e.performance || {};
+                            sessVals.push(s.max_sessions > 0 ? (s.total_sessions / s.max_sessions * 100) : 0);
+                            cpuVals.push(p.cpu_pct || 0);
+                            var memUsed = (p.mem_total_mb && p.mem_avail_mb) ? ((p.mem_total_mb - p.mem_avail_mb) / p.mem_total_mb * 100) : 0;
                             memVals.push(memUsed);
-                            dqVals.push(e.disk_queue || 0);
-                            idVals.push(e.input_delay_max_ms || 0);
-                            tcpVals.push(e.tcp_retrans_sec || 0);
+                            dqVals.push(p.disk_queue || 0);
+                            idVals.push(p.input_delay_max_ms || 0);
+                            tcpVals.push(p.tcp_retrans_sec || 0);
                         });
                         var canvases = detailRow.querySelectorAll('canvas[data-spark]');
                         var sets = [sessVals, cpuVals, memVals, dqVals, idVals, tcpVals];
