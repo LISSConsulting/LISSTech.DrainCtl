@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
   xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
   xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
-    <Package Name="LISSTech DrainCtl"
+    <Package Name="LISSTech DrainCtl v$(var.ProductVersion)"
         Manufacturer="LISS Consulting, Corp."
         Version="$(var.ProductVersion)"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
