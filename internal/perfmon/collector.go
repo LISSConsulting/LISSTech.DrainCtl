@@ -93,10 +93,16 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	}
 
 	// Host-level counters (required).
+	// Use PdhAddCounterW as primary (works reliably on Win11/Server 2022+)
+	// with PdhAddEnglishCounterW as fallback for non-English locales.
 	must := func(path string, dest *syscall.Handle) error {
-		h, err := pdhAddEnglishCounter(query, path)
+		h, err := pdhAddCounter(query, path)
 		if err != nil {
-			return fmt.Errorf("required counter %s: %w", path, err)
+			// Localized name may differ on non-English systems; try English API.
+			h, err = pdhAddEnglishCounter(query, path)
+			if err != nil {
+				return fmt.Errorf("required counter %s: %w", path, err)
+			}
 		}
 		*dest = h
 		return nil
@@ -120,28 +126,38 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	}
 
 	// TCP retransmits — optional (counter set may not exist on some configs).
-	if h, err := pdhAddEnglishCounter(query, counterTCPRetrans); err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "TCP retransmit counter unavailable, skipping", fmt.Sprintf("error=%q", err))
+	if h, err := pdhAddCounter(query, counterTCPRetrans); err != nil {
+		if h2, err2 := pdhAddEnglishCounter(query, counterTCPRetrans); err2 != nil {
+			dc.LogMsg(log, dc.LvlWRN, "TCP retransmit counter unavailable, skipping", fmt.Sprintf("error=%q", err))
+		} else {
+			c.retransH = h2
+		}
 	} else {
 		c.retransH = h
 	}
 
-	// Per-session counters.
+	// Per-session counters — use PdhAddCounterW primary, English fallback.
+	addOpt := func(path string) (syscall.Handle, error) {
+		if h, err := pdhAddCounter(query, path); err == nil {
+			return h, nil
+		}
+		return pdhAddEnglishCounter(query, path)
+	}
 	if cfg.CollectPerSession {
-		if h, err := pdhAddEnglishCounter(query, counterInputDelay); err != nil {
+		if h, err := addOpt(counterInputDelay); err != nil {
 			dc.LogMsg(log, dc.LvlWRN, "User Input Delay counter unavailable — requires Server 2019+ or registry key HKLM\\System\\CurrentControlSet\\Control\\Terminal Server\\EnableLagCounter=1", fmt.Sprintf("error=%q", err))
 		} else {
 			c.inputDelayH = h
 			c.inputDelayAvail = true
 		}
 
-		if h, err := pdhAddEnglishCounter(query, counterSessCPU); err != nil {
+		if h, err := addOpt(counterSessCPU); err != nil {
 			dc.LogMsg(log, dc.LvlWRN, "Terminal Services Session CPU counter unavailable", fmt.Sprintf("error=%q", err))
 		} else {
 			c.sessCPUH = h
 		}
 
-		if h, err := pdhAddEnglishCounter(query, counterSessMem); err != nil {
+		if h, err := addOpt(counterSessMem); err != nil {
 			dc.LogMsg(log, dc.LvlWRN, "Terminal Services Session memory counter unavailable", fmt.Sprintf("error=%q", err))
 		} else {
 			c.sessMemH = h
@@ -152,7 +168,7 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	if cfg.CollectRemoteFX {
 		c.rfxAvailable = true
 		optRFX := func(path string, dest *syscall.Handle) {
-			h, err := pdhAddEnglishCounter(query, path)
+			h, err := addOpt(path)
 			if err != nil {
 				dc.LogMsg(log, dc.LvlWRN, "RemoteFX counter unavailable", fmt.Sprintf("counter=%q error=%q", path, err))
 				c.rfxAvailable = false
