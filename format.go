@@ -78,6 +78,11 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 			"grace_period_seconds", "status", "connections_allowed",
 			"transition", "transition_from", "changed_by", "message", "exit_code",
 			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
+			"cpu_pct", "mem_avail_mb", "mem_total_mb", "pages_sec", "disk_queue",
+			"tcp_retrans_sec", "input_delay_p50_ms", "input_delay_p95_ms", "input_delay_max_ms",
+			"session_cpu_p95_pct", "session_mem_p95_bytes",
+			"rfx_available", "rfx_fps_out", "rfx_encode_ms", "rfx_quality_pct",
+			"rfx_rtt_ms", "rfx_loss_pct", "rfx_skip_server_sec", "rfx_skip_net_sec",
 		})
 		activeSess, disconnSess, totalSess, maxSess := "", "", "", ""
 		if r.Sessions != nil {
@@ -86,7 +91,24 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 			totalSess = fmt.Sprintf("%d", r.Sessions.TotalSessions)
 			maxSess = fmt.Sprintf("%d", r.Sessions.MaxSessions)
 		}
-		_ = cw.Write([]string{
+		perfCSV := make([]string, 14)
+		if p := r.Performance; p != nil {
+			perfCSV[0] = fmt.Sprintf("%.1f", p.CPUPct)
+			perfCSV[1] = fmt.Sprintf("%.0f", p.MemAvailMB)
+			perfCSV[2] = fmt.Sprintf("%.0f", p.MemTotalMB)
+			perfCSV[3] = fmt.Sprintf("%.1f", p.PagesSec)
+			perfCSV[4] = fmt.Sprintf("%.2f", p.DiskQueue)
+			perfCSV[5] = fmt.Sprintf("%.1f", p.TCPRetrans)
+			perfCSV[6] = fmt.Sprintf("%.1f", p.InputDelayP50)
+			perfCSV[7] = fmt.Sprintf("%.1f", p.InputDelayP95)
+			perfCSV[8] = fmt.Sprintf("%.1f", p.InputDelayMax)
+			perfCSV[9] = fmt.Sprintf("%.1f", p.SessionCPUP95)
+			perfCSV[10] = fmt.Sprintf("%.0f", p.SessionMemP95)
+			perfCSV[11] = fmt.Sprintf("%t", p.RFXAvailable)
+			perfCSV[12] = fmt.Sprintf("%.1f", p.RFXFPSOut)
+			perfCSV[13] = fmt.Sprintf("%.1f", p.RFXEncodeMS)
+		}
+		row := []string{
 			r.Timestamp.Format(time.RFC3339),
 			r.Host,
 			r.DrainModeLabel,
@@ -102,20 +124,45 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 			r.Message,
 			fmt.Sprintf("%d", r.ExitCode),
 			activeSess, disconnSess, totalSess, maxSess,
-		})
+		}
+		row = append(row, perfCSV...)
+		if p := r.Performance; p != nil {
+			row = append(row,
+				fmt.Sprintf("%.1f", p.RFXQuality),
+				fmt.Sprintf("%.1f", p.RFXRTT),
+				fmt.Sprintf("%.1f", p.RFXLoss),
+				fmt.Sprintf("%.1f", p.RFXSkipServer),
+				fmt.Sprintf("%.1f", p.RFXSkipNet),
+			)
+		} else {
+			row = append(row, "", "", "", "", "")
+		}
+		_ = cw.Write(row)
 		cw.Flush()
 
 	case FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "HOST\tDRAIN MODE\tSTATUS\tCONNECTIONS\tSTATE DURATION\tCHANGED BY\tEXIT")
-		_, _ = fmt.Fprintln(tw, "----\t----------\t------\t-----------\t--------------\t----------\t----")
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+		_, _ = fmt.Fprintln(tw, "HOST\tDRAIN MODE\tSTATUS\tCONNECTIONS\tSTATE DURATION\tCHANGED BY\tCPU%\tMEM FREE\tINPUT DLY\tDISK Q\tEXIT")
+		_, _ = fmt.Fprintln(tw, "----\t----------\t------\t-----------\t--------------\t----------\t----\t--------\t---------\t------\t----")
+		cpuCol, memCol, delayCol, diskCol := "-", "-", "-", "-"
+		if p := r.Performance; p != nil {
+			cpuCol = fmt.Sprintf("%.0f%%", p.CPUPct)
+			if p.MemTotalMB > 0 {
+				memCol = fmt.Sprintf("%.0f%%", (p.MemAvailMB/p.MemTotalMB)*100)
+			}
+			if p.InputDelayMax > 0 {
+				delayCol = fmt.Sprintf("%.0fms", p.InputDelayMax)
+			}
+			diskCol = fmt.Sprintf("%.1f", p.DiskQueue)
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
 			r.Host,
 			r.DrainModeLabel,
 			r.Status,
 			formatBoolPtr(r.ConnectionsAllowed),
 			formatAge(r.StateDurationSeconds),
 			or(r.ChangedBy, "-"),
+			cpuCol, memCol, delayCol, diskCol,
 			r.ExitCode,
 		)
 		_ = tw.Flush()
@@ -131,19 +178,21 @@ func (r *CheckResult) Write(w io.Writer, format OutputFormat) {
 
 // HistoryRecord is the JSON/CSV-serializable form of an audit record.
 type HistoryRecord struct {
-	Timestamp            string `json:"timestamp"`
-	Host                 string `json:"host"`
-	DrainMode            string `json:"drain_mode"`
-	DrainValue           uint32 `json:"drain_mode_value"`
-	KeyModified          string `json:"key_modified,omitempty"`
-	StateDurationSeconds *int   `json:"state_duration_seconds"`
-	Changed              bool   `json:"changed"`
-	ChangedBy            string `json:"changed_by,omitempty"`
-	ActiveSessions       int    `json:"active_sessions,omitempty"`
-	DisconnectedSessions int    `json:"disconnected_sessions,omitempty"`
-	TotalSessions        int    `json:"total_sessions,omitempty"`
-	MaxSessions          int    `json:"max_sessions,omitempty"`
-	ExitCode             int    `json:"exit_code"`
+	Timestamp            string   `json:"timestamp"`
+	Host                 string   `json:"host"`
+	DrainMode            string   `json:"drain_mode"`
+	DrainValue           uint32   `json:"drain_mode_value"`
+	KeyModified          string   `json:"key_modified,omitempty"`
+	StateDurationSeconds *int     `json:"state_duration_seconds"`
+	Changed              bool     `json:"changed"`
+	ChangedBy            string   `json:"changed_by,omitempty"`
+	ActiveSessions       int      `json:"active_sessions,omitempty"`
+	DisconnectedSessions int      `json:"disconnected_sessions,omitempty"`
+	TotalSessions        int      `json:"total_sessions,omitempty"`
+	MaxSessions          int      `json:"max_sessions,omitempty"`
+	CPUPct               *float64 `json:"cpu_pct,omitempty"`
+	InputDelayMax        *float64 `json:"input_delay_max_ms,omitempty"`
+	ExitCode             int      `json:"exit_code"`
 }
 
 // ComputeStateDurations annotates records (newest-first) with state duration.
@@ -189,6 +238,14 @@ func AuditToHistory(rec AuditRecord, stateDur *int) HistoryRecord {
 		MaxSessions:          rec.MaxSessions,
 		ExitCode:             rec.ExitCode,
 	}
+	if rec.CPUPct != 0 {
+		v := rec.CPUPct
+		hr.CPUPct = &v
+	}
+	if rec.InputDelayMax != 0 {
+		v := rec.InputDelayMax
+		hr.InputDelayMax = &v
+	}
 	if !rec.KeyModified.IsZero() {
 		hr.KeyModified = rec.KeyModified.Local().Format(time.RFC3339)
 	}
@@ -216,6 +273,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			"key_modified", "state_duration_seconds",
 			"changed", "changed_by",
 			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
+			"cpu_pct", "input_delay_max_ms",
 			"exit_code",
 		})
 		for i, r := range records {
@@ -223,6 +281,13 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			ch := ""
 			if hr.Changed {
 				ch = "true"
+			}
+			cpuStr, delayStr := "", ""
+			if hr.CPUPct != nil {
+				cpuStr = fmt.Sprintf("%.1f", *hr.CPUPct)
+			}
+			if hr.InputDelayMax != nil {
+				delayStr = fmt.Sprintf("%.1f", *hr.InputDelayMax)
 			}
 			_ = cw.Write([]string{
 				hr.Timestamp, hr.Host, hr.DrainMode,
@@ -234,6 +299,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 				fmt.Sprintf("%d", hr.DisconnectedSessions),
 				fmt.Sprintf("%d", hr.TotalSessions),
 				fmt.Sprintf("%d", hr.MaxSessions),
+				cpuStr, delayStr,
 				fmt.Sprintf("%d", hr.ExitCode),
 			})
 		}
@@ -241,8 +307,8 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 
 	case FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tSESSIONS\tEXIT")
-		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t--------\t----")
+		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tSESSIONS\tCPU%\tINPUT DLY\tEXIT")
+		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t--------\t----\t---------\t----")
 		for i, r := range records {
 			ch := ""
 			if r.Changed {
@@ -259,9 +325,16 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			} else if r.TotalSessions > 0 {
 				sess = fmt.Sprintf("%d", r.TotalSessions)
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			cpuStr, delayStr := "-", "-"
+			if r.CPUPct != 0 {
+				cpuStr = fmt.Sprintf("%.0f%%", r.CPUPct)
+			}
+			if r.InputDelayMax != 0 {
+				delayStr = fmt.Sprintf("%.0fms", r.InputDelayMax)
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
 				r.Timestamp.Local().Format("2006-01-02 15:04:05"),
-				r.DrainLabel, dur, ch, by, sess, r.ExitCode,
+				r.DrainLabel, dur, ch, by, sess, cpuStr, delayStr, r.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -313,6 +386,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			"key_modified", "state_duration_seconds",
 			"changed", "changed_by",
 			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
+			"cpu_pct", "input_delay_max_ms",
 			"exit_code",
 		})
 		for _, hr := range records {
@@ -324,6 +398,13 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.StateDurationSeconds != nil {
 				dur = fmt.Sprintf("%d", *hr.StateDurationSeconds)
 			}
+			cpuStr, delayStr := "", ""
+			if hr.CPUPct != nil {
+				cpuStr = fmt.Sprintf("%.1f", *hr.CPUPct)
+			}
+			if hr.InputDelayMax != nil {
+				delayStr = fmt.Sprintf("%.1f", *hr.InputDelayMax)
+			}
 			_ = cw.Write([]string{
 				hr.Timestamp, hr.Host, hr.DrainMode,
 				fmt.Sprintf("%d", hr.DrainValue),
@@ -333,6 +414,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 				fmt.Sprintf("%d", hr.DisconnectedSessions),
 				fmt.Sprintf("%d", hr.TotalSessions),
 				fmt.Sprintf("%d", hr.MaxSessions),
+				cpuStr, delayStr,
 				fmt.Sprintf("%d", hr.ExitCode),
 			})
 		}
@@ -340,8 +422,8 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 
 	case FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tEXIT")
-		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t----")
+		_, _ = fmt.Fprintln(tw, "TIMESTAMP\tDRAIN MODE\tSTATE DURATION\tCHANGED\tCHANGED BY\tSESSIONS\tCPU%\tINPUT DLY\tEXIT")
+		_, _ = fmt.Fprintln(tw, "---------\t----------\t--------------\t-------\t----------\t--------\t----\t---------\t----")
 		for _, hr := range records {
 			ch := ""
 			if hr.Changed {
@@ -359,8 +441,21 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if t, err := time.Parse(time.RFC3339, ts); err == nil {
 				ts = t.Local().Format("2006-01-02 15:04:05")
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n",
-				ts, hr.DrainMode, dur, ch, by, hr.ExitCode,
+			sess := "-"
+			if hr.MaxSessions > 0 {
+				sess = fmt.Sprintf("%d/%d", hr.TotalSessions, hr.MaxSessions)
+			} else if hr.TotalSessions > 0 {
+				sess = fmt.Sprintf("%d", hr.TotalSessions)
+			}
+			cpuStr, delayStr := "-", "-"
+			if hr.CPUPct != nil {
+				cpuStr = fmt.Sprintf("%.0f%%", *hr.CPUPct)
+			}
+			if hr.InputDelayMax != nil {
+				delayStr = fmt.Sprintf("%.0fms", *hr.InputDelayMax)
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+				ts, hr.DrainMode, dur, ch, by, sess, cpuStr, delayStr, hr.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -376,6 +471,12 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			}
 			if hr.ChangedBy != "" {
 				fields = append(fields, fmt.Sprintf("changed_by=%s", hr.ChangedBy))
+			}
+			if hr.CPUPct != nil {
+				fields = append(fields, fmt.Sprintf("cpu=%.0f%%", *hr.CPUPct))
+			}
+			if hr.InputDelayMax != nil {
+				fields = append(fields, fmt.Sprintf("input_delay=%.0fms", *hr.InputDelayMax))
 			}
 			fields = append(fields, fmt.Sprintf("exit=%d", hr.ExitCode))
 			lvl := LvlINF
