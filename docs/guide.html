@@ -277,6 +277,34 @@
                 margin-bottom: 4px;
             }
 
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 13px 26px;
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.95rem;
+                font-weight: 700;
+                text-decoration: none;
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                transition: transform 0.1s, box-shadow 0.1s;
+                cursor: pointer;
+            }
+            .btn:hover {
+                transform: translate(-2px, -2px);
+                box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+            }
+            .btn:active {
+                transform: translate(2px, 2px);
+                box-shadow: 1px 1px 0 var(--shadow);
+            }
+            .btn-fill {
+                background: var(--accent);
+                color: #fff;
+            }
+
             .footer {
                 border-top: var(--bw) solid var(--border);
                 padding: 40px 0;
@@ -1297,8 +1325,7 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
 
 # Verify
 Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
-                <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);b.style.transform='translate(var(--so),var(--so))';b.style.boxShadow='none';b.textContent='✓ Copied!';setTimeout(function(){b.innerHTML='&#128203; Copy';b.style.transform='';b.style.boxShadow=''},1500)})(this)"
-                    style="margin-top: 12px; padding: 10px 20px; font-family: 'Work Sans', sans-serif; font-size: 0.82rem; font-weight: 700; border: var(--bw) solid var(--border); border-radius: var(--r); background: var(--accent); color: #fff; cursor: pointer; box-shadow: var(--so) var(--so) 0 var(--shadow); transition: transform 0.1s, box-shadow 0.1s">
+                <button class="btn btn-fill" style="margin-top:12px" onclick="(function(b){navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);b.textContent='\u2713 Copied!';setTimeout(function(){b.innerHTML='&#128203; Copy'},1500)})(this)">
                     &#128203; Copy
                 </button>
             </div>
