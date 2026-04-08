@@ -52,6 +52,8 @@ var (
 
 	procPdhOpenQueryW               = modPdh.NewProc("PdhOpenQueryW")
 	procPdhAddEnglishCounterW       = modPdh.NewProc("PdhAddEnglishCounterW")
+	procPdhAddCounterW              = modPdh.NewProc("PdhAddCounterW")
+	procPdhRemoveCounter            = modPdh.NewProc("PdhRemoveCounter")
 	procPdhCollectQueryData         = modPdh.NewProc("PdhCollectQueryData")
 	procPdhGetFormattedCounterValue = modPdh.NewProc("PdhGetFormattedCounterValue")
 	procPdhGetFormattedCounterArray = modPdh.NewProc("PdhGetFormattedCounterArrayW")
@@ -85,6 +87,30 @@ func pdhAddEnglishCounter(query syscall.Handle, counterPath string) (syscall.Han
 		return 0, fmt.Errorf("PdhAddEnglishCounterW(%s) failed: 0x%08X", counterPath, ret)
 	}
 	return counter, nil
+}
+
+// pdhAddCounter adds a counter using the localized name (same as typeperf uses).
+func pdhAddCounter(query syscall.Handle, counterPath string) (syscall.Handle, error) {
+	path, err := windows.UTF16PtrFromString(counterPath)
+	if err != nil {
+		return 0, fmt.Errorf("invalid counter path %q: %w", counterPath, err)
+	}
+	var counter syscall.Handle
+	ret, _, _ := procPdhAddCounterW.Call(
+		uintptr(query),
+		uintptr(unsafe.Pointer(path)),
+		0,
+		uintptr(unsafe.Pointer(&counter)),
+	)
+	if ret != 0 {
+		return 0, fmt.Errorf("PdhAddCounterW(%s) failed: 0x%08X", counterPath, ret)
+	}
+	return counter, nil
+}
+
+// pdhRemoveCounter removes a counter from its query.
+func pdhRemoveCounter(counter syscall.Handle) {
+	procPdhRemoveCounter.Call(uintptr(counter))
 }
 
 // pdhCollectQueryData collects current data for all counters in the query.
