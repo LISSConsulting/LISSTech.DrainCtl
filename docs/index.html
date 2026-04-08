@@ -8,7 +8,7 @@
         <title>DrainCtl — RDSH Drain Mode Monitor</title>
         <meta
             name="description"
-            content="Real-time Remote Desktop drain mode monitoring for Windows Server. Instant detection, 90-day audit trail, change attribution."
+            content="Real-time Remote Desktop drain mode and performance monitoring for Windows Server. Instant detection, performance thresholds, 90-day audit trail, change attribution."
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -385,7 +385,7 @@
             /* ── Features ─────────────────────────────────────────── */
             .features-hero {
                 display: grid;
-                grid-template-columns: 1fr 1fr 1fr;
+                grid-template-columns: 1fr 1fr 1fr 1fr;
                 gap: 18px;
                 margin-bottom: 18px;
             }
@@ -871,8 +871,7 @@
                 <img src="logo.png" alt="" width="72" height="72" style="display:block;margin:0 auto 12px" />
                 <h1>It knows who drained<br />the server. <em>Do you?</em></h1>
                 <p class="hero-sub">
-                    DrainCtl monitors RDSH drain mode in real time. The moment someone blocks new connections, you know
-                    &mdash; who did it, when, and how long it's been active.
+                    DrainCtl monitors RDSH drain mode and host performance in real time. The moment someone blocks new connections &mdash; or CPU hits 85%, or input delay crosses 100ms &mdash; you know. Who changed it. What's degraded. How long it's been happening.
                 </p>
                 <div class="hero-buttons">
                     <a
@@ -924,7 +923,7 @@
                     <div class="stat-label">Audit retention</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">6</div>
+                    <div class="stat-value">12</div>
                     <div class="stat-label">Trigger types</div>
                 </div>
                 <div class="stat">
@@ -944,8 +943,7 @@
                 <div class="section-label">Capabilities</div>
                 <div class="section-title">Everything you need to monitor drain mode.</div>
                 <div class="section-desc">
-                    One binary. One service. Real-time visibility across your entire RDSH farm &mdash; with a dashboard
-                    to prove it.
+                    One binary. One service. Real-time drain mode and performance visibility across your entire RDSH farm &mdash; with a dashboard to prove it.
                 </div>
                 <div class="features-hero">
                     <div class="feature-h card">
@@ -970,6 +968,13 @@
                         <p>
                             See active and disconnected sessions on every server. Set a capacity threshold and get
                             alerted before your farm runs out of slots.
+                        </p>
+                    </div>
+                    <div class="feature-h card">
+                        <span class="icon">&#128200;</span>
+                        <h3>Performance Monitoring</h3>
+                        <p>
+                            CPU, memory, disk I/O, input delay, and RemoteFX — collected every poll cycle through the Windows PDH API. Threshold alerts fire before users notice.
                         </p>
                     </div>
                 </div>
@@ -1023,6 +1028,13 @@
                         <p>
                             Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from
                             download to execution.
+                        </p>
+                    </div>
+                    <div class="feature card">
+                        <div class="icon">&#9888;</div>
+                        <h3>12 Alert Triggers</h3>
+                        <p>
+                            Drain mode, session capacity, CPU, memory, and input delay — each with its own threshold. CPU and memory require two consecutive breaches to fire, eliminating flap noise.
                         </p>
                     </div>
                 </div>

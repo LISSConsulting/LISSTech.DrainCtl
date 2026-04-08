@@ -339,6 +339,7 @@
                     <li><a href="#notifications">Notifications</a></li>
                     <li><a href="#sessions">Session Tracking</a></li>
                     <li><a href="#dashboard">Multi-Server Dashboard</a></li>
+                    <li><a href="#performance">Performance Monitoring</a></li>
                     <li><a href="#rmm">RMM Integration</a></li>
                     <li><a href="#service">Service Management</a></li>
                     <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -552,7 +553,18 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "port": 49470,
     "group": "Domain Admins"
   },
-  "session_warning_threshold": 80
+  "session_warning_threshold": 80,
+  "performance": {
+    "enabled": true,
+    "cpu_warn_pct": 70,
+    "cpu_crit_pct": 85,
+    "mem_warn_pct": 20,
+    "mem_crit_pct": 10,
+    "input_delay_warn_ms": 50,
+    "input_delay_crit_ms": 100,
+    "collect_remotefx": false,
+    "collect_per_session": true
+  }
 }</code></pre>
 
             <table>
@@ -605,6 +617,13 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td>80</td>
                         <td>
                             Session utilization percentage that triggers a <code>session_warning</code> notification.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>performance</code></td>
+                        <td><em>see above</em></td>
+                        <td>
+                            Performance monitoring settings. Set <code>enabled: true</code> to collect CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle. Thresholds default to industry baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to <code>-1</code> to disable it.
                         </td>
                     </tr>
                 </tbody>
@@ -785,7 +804,7 @@ drainctl notify test</code></pre>
                 is updated; the existing secret, triggers, and repeat interval are preserved. Pass a flag explicitly
                 to overwrite only that field. Valid trigger names:
                 <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>,
-                <code>healthy</code>, <code>session_warning</code>.
+                <code>healthy</code>, <code>session_warning</code>, <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>, <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>.
             </div>
 
             <h3>Interactive configuration wizard</h3>
@@ -966,7 +985,7 @@ drainctl notify test</code></pre>
             </p>
             <ul>
                 <li><code>--secret TEXT</code> &mdash; HMAC-SHA256 signing secret sent as <code>X-DrainCtl-Signature</code> (webhook only)</li>
-                <li><code>--triggers LIST</code> &mdash; comma-separated events that fire this target; omit to keep existing value; valid names: <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code></li>
+                <li><code>--triggers LIST</code> &mdash; comma-separated events that fire this target; omit to keep existing value; valid names: <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>, <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>, <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code></li>
                 <li><code>--repeat-minutes N</code> &mdash; minimum minutes between repeated <code>alert</code> / <code>session_warning</code> notifications; <code>0</code> means once per state change (default)</li>
             </ul>
             <p>
@@ -1037,6 +1056,30 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                     <tr>
                         <td><code>session_warning</code></td>
                         <td>Session utilization threshold exceeded (default 80%)</td>
+                    </tr>
+                    <tr>
+                        <td><code>cpu_warning</code></td>
+                        <td>CPU usage at or above warning threshold (default 70%)</td>
+                    </tr>
+                    <tr>
+                        <td><code>cpu_critical</code></td>
+                        <td>CPU usage at or above critical threshold (default 85%)</td>
+                    </tr>
+                    <tr>
+                        <td><code>memory_warning</code></td>
+                        <td>Available memory at or below warning threshold (default 20% free)</td>
+                    </tr>
+                    <tr>
+                        <td><code>memory_critical</code></td>
+                        <td>Available memory at or below critical threshold (default 10% free)</td>
+                    </tr>
+                    <tr>
+                        <td><code>input_delay_warning</code></td>
+                        <td>Input delay P95 at or above warning threshold (default 50ms)</td>
+                    </tr>
+                    <tr>
+                        <td><code>input_delay_critical</code></td>
+                        <td>Input delay P95 at or above critical threshold (default 100ms)</td>
                     </tr>
                 </tbody>
             </table>
@@ -1532,8 +1575,52 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 that port for the agent servers and admin workstations.
             </div>
 
+            <!-- ── Performance Monitoring ──────────────────────────────────────── -->
+            <h2 id="performance">10. Performance Monitoring</h2>
+            <p>
+                DrainCtl collects host-level and per-session performance metrics through the Windows PDH API. Enable it with one config key:
+            </p>
+            <pre><code>"performance": { "enabled": true }</code></pre>
+            <p>
+                With defaults, DrainCtl collects CPU, available memory, pages/sec, disk queue length, TCP retransmits, and per-session input delay every poll cycle. Metrics appear in the dashboard, audit trail, webhook payloads, and CLI JSON output.
+            </p>
+
+            <h3>Thresholds &amp; Triggers</h3>
+            <table>
+                <thead>
+                    <tr><th>Trigger</th><th>Default</th><th>Fires when</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>cpu_warning</code></td><td>70%</td><td>CPU &ge; threshold for 2 consecutive polls</td></tr>
+                    <tr><td><code>cpu_critical</code></td><td>85%</td><td>CPU &ge; threshold for 2 consecutive polls</td></tr>
+                    <tr><td><code>memory_warning</code></td><td>20% free</td><td>Available memory &le; threshold for 2 consecutive polls</td></tr>
+                    <tr><td><code>memory_critical</code></td><td>10% free</td><td>Available memory &le; threshold for 2 consecutive polls</td></tr>
+                    <tr><td><code>input_delay_warning</code></td><td>50ms</td><td>Input delay P95 &ge; threshold (single poll)</td></tr>
+                    <tr><td><code>input_delay_critical</code></td><td>100ms</td><td>Input delay P95 &ge; threshold (single poll)</td></tr>
+                </tbody>
+            </table>
+            <p>
+                CPU and memory triggers require two consecutive breaches to fire — this eliminates flap noise from transient spikes. Input delay fires immediately because sustained delay is felt by users at once.
+            </p>
+            <p>
+                Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.
+            </p>
+
+            <h3>RemoteFX Counters</h3>
+            <p>
+                Set <code>"collect_remotefx": true</code> to collect RemoteFX Graphics and Network counters: output FPS, encoding time, frame quality, RTT, packet loss, and skip rates. These counters are only available when the RemoteFX role is installed; absence is not an error.
+            </p>
+
+            <h3>Dashboard Display</h3>
+            <p>
+                Each server card gains a collapsible Performance section showing CPU and memory gauges, input delay values, disk queue, and RemoteFX metrics (when available). Values are color-coded: green for healthy, amber at warning, red at critical.
+            </p>
+            <p>
+                The state history chart gains toggle-able CPU% and Input Delay overlay lines via checkboxes in the legend.
+            </p>
+
             <!-- ── RMM Integration ────────────────────────────────────────────────── -->
-            <h2 id="rmm">10. RMM Integration</h2>
+            <h2 id="rmm">11. RMM Integration</h2>
 
             <p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
 
@@ -1569,7 +1656,7 @@ if ($result.exit_code -ne 0) {
 }</code></pre>
 
             <!-- ── Service Management ─────────────────────────────────────────────── -->
-            <h2 id="service">11. Service Management</h2>
+            <h2 id="service">12. Service Management</h2>
 
             <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
@@ -1662,7 +1749,7 @@ drainctl service uninstall</code></pre>
             </table>
 
             <!-- ── Troubleshooting ────────────────────────────────────────────────── -->
-            <h2 id="troubleshooting">12. Troubleshooting</h2>
+            <h2 id="troubleshooting">13. Troubleshooting</h2>
 
             <h3>"changed_by" is empty</h3>
             <p>
