@@ -296,7 +296,7 @@
 
             /* ── Hero ─────────────────────────────────────────────── */
             .hero {
-                padding: 100px 0 80px;
+                padding: 80px 0 64px;
                 text-align: center;
                 position: relative;
                 overflow: hidden;
@@ -412,7 +412,7 @@
 
             .features-grid {
                 display: grid;
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(4, 1fr);
                 gap: 18px;
             }
             .feature {
@@ -462,10 +462,15 @@
             }
             @media (max-width: 768px) {
                 .features-hero {
-                    grid-template-columns: 1fr;
+                    grid-template-columns: 1fr 1fr;
                 }
                 .features-grid {
                     grid-template-columns: 1fr 1fr;
+                }
+            }
+            @media (max-width: 640px) {
+                .features-hero {
+                    grid-template-columns: 1fr;
                 }
             }
             @media (max-width: 480px) {
@@ -990,11 +995,9 @@
                     </div>
                     <div class="feature card">
                         <div class="icon">&#128276;</div>
-                        <h3>Smart Alerts &amp; Centralized Config</h3>
+                        <h3>Smart Alerts</h3>
                         <p>
-                            Configure notification targets, grace periods, and alert thresholds once in the dashboard
-                            &mdash; every agent inherits them. Unlimited webhook, ntfy.sh, and email (SMTP) targets
-                            with per-target triggers and repeat intervals.
+                            12 trigger types &mdash; drain mode, session capacity, CPU, memory, input delay &mdash; each with its own threshold. Unlimited webhook, ntfy.sh, and email (SMTP) targets with per-target repeat intervals. Two consecutive breaches required for CPU/memory to eliminate flap noise.
                         </p>
                     </div>
                     <div class="feature card">
@@ -1006,35 +1009,10 @@
                         </p>
                     </div>
                     <div class="feature card">
-                        <div class="icon">&#128187;</div>
-                        <h3>PowerShell + CLI</h3>
-                        <p>
-                            12 native cmdlets on
-                            <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>. Exit
-                            codes + JSON for any RMM. Works on PS 5.1 and 7+.
-                        </p>
-                    </div>
-                    <div class="feature card">
-                        <div class="icon">&#128196;</div>
-                        <h3>Zero-Touch Discovery</h3>
-                        <p>
-                            One DNS SRV record and every agent finds the dashboard automatically. Install the MSI, walk
-                            away &mdash; agents register themselves.
-                        </p>
-                    </div>
-                    <div class="feature card">
                         <div class="icon">&#128274;</div>
-                        <h3>EV Code-Signed</h3>
+                        <h3>Enterprise Ready</h3>
                         <p>
-                            Every binary, DLL, MSI, and PowerShell script signed with an EV certificate. Trusted from
-                            download to execution.
-                        </p>
-                    </div>
-                    <div class="feature card">
-                        <div class="icon">&#9888;</div>
-                        <h3>12 Alert Triggers</h3>
-                        <p>
-                            Drain mode, session capacity, CPU, memory, and input delay — each with its own threshold. CPU and memory require two consecutive breaches to fire, eliminating flap noise.
+                            DNS SRV discovery &mdash; install and walk away. EV code-signed binaries, DLLs, and MSIs. Kerberos SSO. Virtual service account (NT SERVICE\DrainCtl). 12 native PowerShell cmdlets + CLI with JSON output for any RMM.
                         </p>
                     </div>
                 </div>
@@ -1045,41 +1023,36 @@
         <section class="section section--shaded" id="how">
             <div class="wrap">
                 <div class="section-label">Architecture</div>
-                <div class="section-title">Three signals. One answer.</div>
+                <div class="section-title">Five layers. One service.</div>
                 <div class="section-desc">
-                    The service triangulates registry notifications, event log subscriptions, and safety-net polling to
-                    deliver a definitive, attributed state.
+                    The service triangulates registry notifications, event log subscriptions, performance counters, and safety-net polling &mdash; then routes results to the dashboard, notifications, and dual-sink logging.
                 </div>
                 <div class="flow-steps">
                     <div class="flow-step card">
-                        <h3>Registry Notification</h3>
+                        <h3>Registry + Event Log</h3>
                         <p>
-                            Windows fires <code>RegNotifyChangeKeyValue</code> the instant
-                            <code>TSServerDrainMode</code> is written. Zero delay.
+                            <code>RegNotifyChangeKeyValue</code> fires the instant drain mode changes. <code>EvtSubscribe</code> on Security Event 4657 delivers who did it.
                         </p>
                         <span class="tag">~0ms</span>
                     </div>
                     <div class="flow-step card">
-                        <h3>Event Log Subscription</h3>
+                        <h3>Performance Counters</h3>
                         <p>
-                            <code>EvtSubscribe</code> on Security Event 4657 pushes the username, domain, and process
-                            that made the change.
+                            PDH API collects CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle. Threshold alerts fire on two consecutive breaches.
                         </p>
-                        <span class="tag">~200ms</span>
+                        <span class="tag">PDH + RemoteFX</span>
                     </div>
                     <div class="flow-step card">
-                        <h3>State Evaluation</h3>
+                        <h3>Notifications</h3>
                         <p>
-                            The service reads the registry, detects transitions, correlates attribution, evaluates the
-                            grace period, and appends to the audit store.
+                            Webhook, ntfy.sh, and email (SMTP with HTML templates and natural-language subjects). Per-target triggers and repeat intervals.
                         </p>
-                        <span class="tag">in-memory</span>
+                        <span class="tag">N&times;M targets</span>
                     </div>
                     <div class="flow-step card">
-                        <h3>Instant Query</h3>
+                        <h3>Dashboard + Logging</h3>
                         <p>
-                            CLI and PowerShell connect via named pipe. No file I/O, no registry reads. The answer is
-                            already computed.
+                            In-process HTTPS dashboard with Kerberos SSO. Dual-sink logging to Windows Event Log and file. Runs as NT SERVICE\DrainCtl.
                         </p>
                         <span class="tag">\\.\pipe\drainctl</span>
                     </div>
@@ -1121,11 +1094,20 @@
                     <div class="comic-panel">
                         <div class="comic-caption">At the notification desk&hellip;</div>
                         <div class="comic-body">
-                            <div class="comic-icon">&#128276;</div>
-                            <h3>Target Editor</h3>
+                            <div class="comic-icon">&#128231;</div>
+                            <h3>Email + Webhook + ntfy</h3>
                             <p>
-                                Add and remove webhook, ntfy, and email targets right in the dashboard. Per-target
-                                triggers and repeat intervals.
+                                SMTP email with HTML templates and natural-language subjects. Webhook and ntfy.sh too. Manage all targets from the dashboard with per-target triggers.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="comic-panel">
+                        <div class="comic-caption">The counters are watching&hellip;</div>
+                        <div class="comic-body">
+                            <div class="comic-icon">&#128200;</div>
+                            <h3>Performance Monitoring</h3>
+                            <p>
+                                CPU, memory, input delay, disk I/O, and RemoteFX &mdash; collected via PDH every poll cycle. Threshold alerts fire before users complain.
                             </p>
                         </div>
                     </div>
@@ -1137,17 +1119,6 @@
                             <p>
                                 <code>Add-</code>, <code>Get-</code>, <code>Remove-RDSHDrainNotificationTarget</code>.
                                 Full multi-target control from PowerShell.
-                            </p>
-                        </div>
-                    </div>
-                    <div class="comic-panel">
-                        <div class="comic-caption">A familiar face, modernized&hellip;</div>
-                        <div class="comic-body">
-                            <div class="comic-icon">&#128640;</div>
-                            <h3>Go 1.25</h3>
-                            <p>
-                                Range-over-int, <code>slices</code>, <code>clear()</code>. Event-based config watcher.
-                                Faster, leaner, modern.
                             </p>
                         </div>
                     </div>
