@@ -935,6 +935,7 @@
                         >Download MSI</a
                     >
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
+                    <button class="btn btn-ghost" onclick="shareOrCopy()" id="share-btn" style="cursor:pointer">&#x1F517; Share</button>
                 </div>
                 <div class="hero-ps">
                     <div class="ps-oneliner">
@@ -997,7 +998,10 @@
             <div class="wrap">
                 <div class="section-label">Capabilities</div>
                 <div class="section-title">Complete visibility for your RDS farm.</div>
-                <div class="section-desc">Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything. One dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.</div>
+                <div class="section-desc">
+                    Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything.
+                    One dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.
+                </div>
                 <div class="hero-features">
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#9889;</div>
@@ -1408,9 +1412,8 @@
                 <div class="footer-links">
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a>
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE"
-                        >Apache 2.0 License</a
-                    >
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0 License</a>
+                    <a href="#" onclick="shareOrCopy();return false">&#x1F517; Share</a>
                 </div>
                 <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
                 <p style="font-size:0.6rem;opacity:0.35;margin-top:4px"><a href="https://www.flaticon.com/free-icons/pipe" title="pipe icons" style="color:inherit">Pipe icons created by Smashicons - Flaticon</a></p>
@@ -1418,6 +1421,21 @@
         </footer>
 
         <script>
+            function shareOrCopy() {
+                var url = window.location.href;
+                var title = "DrainCtl — Remote Desktop Services Monitor";
+                var text = "Real-time drain mode, session, and performance monitoring for RDS farms.";
+                if (navigator.share) {
+                    navigator.share({ title: title, text: text, url: url }).catch(function(){});
+                } else {
+                    navigator.clipboard.writeText(url).then(function() {
+                        var btn = document.getElementById("share-btn");
+                        btn.innerHTML = "&#x2713; Link copied!";
+                        setTimeout(function() { btn.innerHTML = "&#x1F517; Share"; }, 2000);
+                    });
+                }
+            }
+
             (function () {
                 var toggle = document.getElementById("nav-toggle");
                 var links = document.getElementById("nav-links");
