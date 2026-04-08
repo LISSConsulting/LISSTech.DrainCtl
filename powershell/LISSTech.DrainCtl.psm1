@@ -222,29 +222,32 @@ function Get-RDSHDrainMode {
         ChangedBy            = Get-SafeProperty $raw 'changed_by'
         Message              = Get-SafeProperty $raw 'message'
         ExitCode             = $raw.exit_code
-        Performance          = if ($null -ne $raw.performance) {
-            [PSCustomObject]@{
-                CPUPct        = $raw.performance.cpu_pct
-                MemAvailMB    = $raw.performance.mem_avail_mb
-                MemTotalMB    = $raw.performance.mem_total_mb
-                PagesSec      = $raw.performance.pages_sec
-                DiskQueue     = $raw.performance.disk_queue
-                TCPRetrans    = $raw.performance.tcp_retrans_sec
-                InputDelayP50 = $raw.performance.input_delay_p50_ms
-                InputDelayP95 = $raw.performance.input_delay_p95_ms
-                InputDelayMax = $raw.performance.input_delay_max_ms
-                SessionCPUP95 = $raw.performance.session_cpu_p95_pct
-                SessionMemP95 = $raw.performance.session_mem_p95_bytes
-                RFXAvailable  = $raw.performance.rfx_available
-                RFXFPSOut     = $raw.performance.rfx_fps_out
-                RFXSkipServer = $raw.performance.rfx_skip_server_sec
-                RFXSkipNet    = $raw.performance.rfx_skip_net_sec
-                RFXEncodeMS   = $raw.performance.rfx_encode_ms
-                RFXQuality    = $raw.performance.rfx_quality_pct
-                RFXRTT        = $raw.performance.rfx_rtt_ms
-                RFXLoss       = $raw.performance.rfx_loss_pct
-            }
-        } else { $null }
+        Performance          = $(
+            $perf = Get-SafeProperty $raw 'performance'
+            if ($null -ne $perf) {
+                [PSCustomObject]@{
+                    CPUPct        = Get-SafeProperty $perf 'cpu_pct' 0
+                    MemAvailMB    = Get-SafeProperty $perf 'mem_avail_mb' 0
+                    MemTotalMB    = Get-SafeProperty $perf 'mem_total_mb' 0
+                    PagesSec      = Get-SafeProperty $perf 'pages_sec' 0
+                    DiskQueue     = Get-SafeProperty $perf 'disk_queue' 0
+                    TCPRetrans    = Get-SafeProperty $perf 'tcp_retrans_sec' 0
+                    InputDelayP50 = Get-SafeProperty $perf 'input_delay_p50_ms' 0
+                    InputDelayP95 = Get-SafeProperty $perf 'input_delay_p95_ms' 0
+                    InputDelayMax = Get-SafeProperty $perf 'input_delay_max_ms' 0
+                    SessionCPUP95 = Get-SafeProperty $perf 'session_cpu_p95_pct' 0
+                    SessionMemP95 = Get-SafeProperty $perf 'session_mem_p95_bytes' 0
+                    RFXAvailable  = Get-SafeProperty $perf 'rfx_available' $false
+                    RFXFPSOut     = Get-SafeProperty $perf 'rfx_fps_out' 0
+                    RFXSkipServer = Get-SafeProperty $perf 'rfx_skip_server_sec' 0
+                    RFXSkipNet    = Get-SafeProperty $perf 'rfx_skip_net_sec' 0
+                    RFXEncodeMS   = Get-SafeProperty $perf 'rfx_encode_ms' 0
+                    RFXQuality    = Get-SafeProperty $perf 'rfx_quality_pct' 0
+                    RFXRTT        = Get-SafeProperty $perf 'rfx_rtt_ms' 0
+                    RFXLoss       = Get-SafeProperty $perf 'rfx_loss_pct' 0
+                }
+            } else { $null }
+        )
     }
 }
 
