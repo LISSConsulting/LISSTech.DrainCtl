@@ -1712,6 +1712,47 @@
                 <div class="settings-divider"></div>
 
                 <div class="settings-group">
+                    <div class="settings-label">Performance Monitoring</div>
+                    <p class="target-desc">Collect CPU, memory, disk I/O, and input delay metrics via PDH counters. Thresholds fire notification triggers.</p>
+                    <label class="settings-check"><input type="checkbox" id="cfg-perf-enabled" onchange="_cfgDirty=true"> Enable performance monitoring</label>
+                    <div id="perf-thresholds" style="margin-top:12px;display:none">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                            <div>
+                                <label class="target-field-label">CPU Warn %</label>
+                                <input class="settings-num" id="cfg-cpu-warn" type="number" min="-1" max="100" value="70" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                            <div>
+                                <label class="target-field-label">CPU Crit %</label>
+                                <input class="settings-num" id="cfg-cpu-crit" type="number" min="-1" max="100" value="85" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                            <div>
+                                <label class="target-field-label">Mem Warn % Free</label>
+                                <input class="settings-num" id="cfg-mem-warn" type="number" min="-1" max="100" value="20" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                            <div>
+                                <label class="target-field-label">Mem Crit % Free</label>
+                                <input class="settings-num" id="cfg-mem-crit" type="number" min="-1" max="100" value="10" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                            <div>
+                                <label class="target-field-label">Delay Warn ms</label>
+                                <input class="settings-num" id="cfg-delay-warn" type="number" min="-1" value="50" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                            <div>
+                                <label class="target-field-label">Delay Crit ms</label>
+                                <input class="settings-num" id="cfg-delay-crit" type="number" min="-1" value="100" style="width:100%" onchange="_cfgDirty=true">
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:20px">
+                            <label class="settings-check"><input type="checkbox" id="cfg-perf-session" checked onchange="_cfgDirty=true"> Per-session counters</label>
+                            <label class="settings-check"><input type="checkbox" id="cfg-perf-rfx" onchange="_cfgDirty=true"> RemoteFX counters</label>
+                        </div>
+                        <p class="target-desc" style="margin-top:4px;font-size:0.7rem">Set any threshold to <strong>0</strong> for default or <strong>-1</strong> to disable.</p>
+                    </div>
+                </div>
+
+                <div class="settings-divider"></div>
+
+                <div class="settings-group">
                     <div class="settings-label">Notification Targets</div>
                     <div class="target-list" id="target-list"></div>
                     <button
@@ -6177,6 +6218,20 @@
                     document.getElementById("cfg-grace").value = gr;
                     syncPills("grace-pills", gr, "mins");
                     syncPills("threshold-pills", th, "val");
+                    // Performance config
+                    var perf = c.performance || {};
+                    var perfChk = document.getElementById("cfg-perf-enabled");
+                    perfChk.checked = !!perf.enabled;
+                    document.getElementById("perf-thresholds").style.display = perf.enabled ? "block" : "none";
+                    perfChk.onchange = function() { document.getElementById("perf-thresholds").style.display = this.checked ? "block" : "none"; _cfgDirty = true; };
+                    document.getElementById("cfg-cpu-warn").value = perf.cpu_warn_pct || 0;
+                    document.getElementById("cfg-cpu-crit").value = perf.cpu_crit_pct || 0;
+                    document.getElementById("cfg-mem-warn").value = perf.mem_warn_pct || 0;
+                    document.getElementById("cfg-mem-crit").value = perf.mem_crit_pct || 0;
+                    document.getElementById("cfg-delay-warn").value = perf.input_delay_warn_ms || 0;
+                    document.getElementById("cfg-delay-crit").value = perf.input_delay_crit_ms || 0;
+                    document.getElementById("cfg-perf-session").checked = perf.collect_per_session !== false;
+                    document.getElementById("cfg-perf-rfx").checked = !!perf.collect_remotefx;
                     _cfgDirty = false; // clear any dirty state set during DOM population
                 } catch (e) {
                     if (e.name === "AbortError") return;
@@ -6216,10 +6271,27 @@
                 const saveBtn = document.querySelector(".btn-save");
                 if (saveBtn) saveBtn.disabled = true;
                 try {
+                    var perfBody = null;
+                    if (document.getElementById("cfg-perf-enabled").checked) {
+                        perfBody = {
+                            enabled: true,
+                            cpu_warn_pct: parseInt(document.getElementById("cfg-cpu-warn").value) || 0,
+                            cpu_crit_pct: parseInt(document.getElementById("cfg-cpu-crit").value) || 0,
+                            mem_warn_pct: parseInt(document.getElementById("cfg-mem-warn").value) || 0,
+                            mem_crit_pct: parseInt(document.getElementById("cfg-mem-crit").value) || 0,
+                            input_delay_warn_ms: parseInt(document.getElementById("cfg-delay-warn").value) || 0,
+                            input_delay_crit_ms: parseInt(document.getElementById("cfg-delay-crit").value) || 0,
+                            collect_per_session: document.getElementById("cfg-perf-session").checked,
+                            collect_remotefx: document.getElementById("cfg-perf-rfx").checked,
+                        };
+                    } else {
+                        perfBody = { enabled: false };
+                    }
                     const body = JSON.stringify({
                         notifications,
                         session_warning_threshold: threshold,
                         grace_period: grace,
+                        performance: perfBody,
                     });
                     const r = await fetch("/api/v1/notify-config", {
                         method: "PUT",
