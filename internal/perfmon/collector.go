@@ -173,10 +173,55 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 
 // Prime performs the first PDH collection to seed rate counters.
 // Must be called once before Collect() returns meaningful data.
+//
+// After the first collect, a test read is performed on host-level counters.
+// On some Windows configurations, PdhAddEnglishCounterW-registered counters
+// permanently return PDH_INVALID_DATA (0xC0000BC6) while PdhAddCounterW
+// works fine (this is what typeperf uses). When this is detected, the
+// affected counter is removed and re-added with PdhAddCounterW.
 func (c *Collector) Prime() error {
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
+	// Second collect so GetFormatted has a baseline for rate counters.
+	if err := pdhCollectQueryData(c.query); err != nil {
+		return err
+	}
+
+	// Test host-level counters and fall back to PdhAddCounterW if needed.
+	type counterRef struct {
+		handle *syscall.Handle
+		path   string
+		name   string
+	}
+	counters := []counterRef{
+		{&c.cpuH, counterCPU, "cpu"},
+		{&c.memH, counterMemAvail, "mem_avail"},
+		{&c.pagesH, counterPagesSec, "pages_sec"},
+		{&c.diskH, counterDiskQueue, "disk_queue"},
+	}
+	if c.retransH != 0 {
+		counters = append(counters, counterRef{&c.retransH, counterTCPRetrans, "tcp_retrans"})
+	}
+	for _, cr := range counters {
+		if _, err := pdhGetFormattedDouble(*cr.handle); err != nil {
+			// PdhAddEnglishCounterW returned data but it's invalid.
+			// Try PdhAddCounterW (localized name, same as typeperf).
+			dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: English counter returned invalid data, retrying with localized API", cr.name), fmt.Sprintf("error=%q path=%s", err, cr.path))
+			pdhRemoveCounter(*cr.handle)
+			h, addErr := pdhAddCounter(c.query, cr.path)
+			if addErr != nil {
+				dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: localized fallback also failed", cr.name), fmt.Sprintf("error=%q", addErr))
+				*cr.handle = 0 // mark as unavailable
+			} else {
+				*cr.handle = h
+				dc.LogMsg(c.log, dc.LvlINF, fmt.Sprintf("perfmon %s: using localized counter (PdhAddCounterW)", cr.name))
+			}
+		}
+	}
+	// Re-collect after any counter changes so next Collect() has a clean baseline.
+	_ = pdhCollectQueryData(c.query)
+
 	c.primed = true
 	return nil
 }
@@ -202,26 +247,34 @@ func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 		MemTotalMB: c.memTotalMB,
 	}
 
-	// Host-level counters.
-	if v, err := pdhGetFormattedDouble(c.cpuH); err == nil {
-		snap.CPUPct = RoundTo(v, 1)
-	} else {
-		c.logCounterError("cpu", err)
+	// Host-level counters (handle may be 0 if counter was unavailable).
+	if c.cpuH != 0 {
+		if v, err := pdhGetFormattedDouble(c.cpuH); err == nil {
+			snap.CPUPct = RoundTo(v, 1)
+		} else {
+			c.logCounterError("cpu", err)
+		}
 	}
-	if v, err := pdhGetFormattedDouble(c.memH); err == nil {
-		snap.MemAvailMB = RoundTo(v, 0)
-	} else {
-		c.logCounterError("mem_avail", err)
+	if c.memH != 0 {
+		if v, err := pdhGetFormattedDouble(c.memH); err == nil {
+			snap.MemAvailMB = RoundTo(v, 0)
+		} else {
+			c.logCounterError("mem_avail", err)
+		}
 	}
-	if v, err := pdhGetFormattedDouble(c.pagesH); err == nil {
-		snap.PagesSec = RoundTo(v, 1)
-	} else {
-		c.logCounterError("pages_sec", err)
+	if c.pagesH != 0 {
+		if v, err := pdhGetFormattedDouble(c.pagesH); err == nil {
+			snap.PagesSec = RoundTo(v, 1)
+		} else {
+			c.logCounterError("pages_sec", err)
+		}
 	}
-	if v, err := pdhGetFormattedDouble(c.diskH); err == nil {
-		snap.DiskQueue = RoundTo(v, 2)
-	} else {
-		c.logCounterError("disk_queue", err)
+	if c.diskH != 0 {
+		if v, err := pdhGetFormattedDouble(c.diskH); err == nil {
+			snap.DiskQueue = RoundTo(v, 2)
+		} else {
+			c.logCounterError("disk_queue", err)
+		}
 	}
 	if c.retransH != 0 {
 		if v, err := pdhGetFormattedDouble(c.retransH); err == nil {
