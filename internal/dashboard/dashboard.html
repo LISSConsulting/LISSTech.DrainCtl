@@ -1712,7 +1712,14 @@
             </div>
             <div class="grid-toast" id="grid-toast" role="alert" aria-live="assertive"></div>
             <div class="grid" id="grid">
-                <div class="empty"><h2>Connecting...</h2></div>
+                <table class="srv-tbl">
+                    <thead><tr>
+                        <th></th><th>Host</th><th>Status</th><th>Mode</th><th>Duration</th>
+                        <th>Sessions</th><th>CPU</th><th>Mem Free</th><th>Input Dly</th><th>Last Seen</th>
+                    </tr></thead>
+                    <tbody id="srv-tbody"></tbody>
+                </table>
+                <div class="empty" id="grid-empty"><h2>Connecting...</h2></div>
             </div>
         </div>
 
@@ -1867,6 +1874,23 @@
                     </div>
                 </div>
                 <div class="hist-body" id="hist-body"></div>
+            </div>
+        </div>
+
+        <div id="rm-overlay" class="hist-overlay" onclick="if(event.target===this)closeRmModal()">
+            <div class="hist-modal" style="max-width:400px;text-align:center" onclick="event.stopPropagation()">
+                <div class="hist-head">
+                    <span class="hist-title">Remove Server</span>
+                    <button class="hist-close" onclick="closeRmModal()" aria-label="Close">&times;</button>
+                </div>
+                <div class="hist-body" style="padding:20px">
+                    <p style="margin-bottom:8px">Remove <strong id="rm-hostname" class="mono"></strong> from the dashboard?</p>
+                    <p style="color:var(--red);font-size:12px;margin-bottom:16px">The server will reappear on its next heartbeat.</p>
+                    <div style="display:flex;gap:8px;justify-content:center">
+                        <button class="btn" onclick="closeRmModal()">Cancel</button>
+                        <button class="btn" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="confirmRm()">Remove</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -5168,6 +5192,58 @@
                 return { ok: "Healthy", grace: "Grace", alert: "Alert", off: "Offline" }[s] || s;
             }
 
+            function ringSvg(pct, color, size) {
+                size = size || 56;
+                var r = size / 2 - 5, c = size / 2, circ = 2 * Math.PI * r;
+                var offset = circ * (1 - Math.min(Math.max(pct, 0), 100) / 100);
+                return '<div class="ring" style="width:'+size+'px;height:'+size+'px">' +
+                    '<svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'">' +
+                    '<circle class="ring-bg" cx="'+c+'" cy="'+c+'" r="'+r+'" stroke-width="5"/>' +
+                    '<circle class="ring-fill" cx="'+c+'" cy="'+c+'" r="'+r+'" stroke="'+color+'" stroke-width="5" ' +
+                    'stroke-dasharray="'+circ.toFixed(1)+'" stroke-dashoffset="'+offset.toFixed(1)+'"/></svg>' +
+                    '<div class="ring-val"><span class="ring-pct">' + (typeof pct === 'number' ? Math.round(pct) + '%' : pct) + '</span></div></div>';
+            }
+
+            function ringValSvg(val, unit, color, size) {
+                size = size || 56;
+                var r = size / 2 - 5, c = size / 2, circ = 2 * Math.PI * r;
+                return '<div class="ring" style="width:'+size+'px;height:'+size+'px">' +
+                    '<svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'">' +
+                    '<circle class="ring-bg" cx="'+c+'" cy="'+c+'" r="'+r+'" stroke-width="5"/>' +
+                    '<circle class="ring-fill" cx="'+c+'" cy="'+c+'" r="'+r+'" stroke="'+color+'" stroke-width="5" ' +
+                    'stroke-dasharray="'+circ.toFixed(1)+'" stroke-dashoffset="'+circ.toFixed(1)+'"/></svg>' +
+                    '<div class="ring-val"><span class="ring-pct">'+esc(String(val))+'</span>' +
+                    (unit ? '<span class="ring-unit">'+esc(unit)+'</span>' : '') + '</div></div>';
+            }
+
+            function ringColor(pct) {
+                if (pct >= 80) return 'var(--red)';
+                if (pct >= 60) return 'var(--amber)';
+                return 'var(--green)';
+            }
+
+            function tip(label, text) {
+                return '<span class="has-tip">' + esc(label) + '<span class="tip">' + esc(text) + '</span></span>';
+            }
+
+            function relSec(iso) {
+                if (!iso) return 999999;
+                var d = new Date(iso);
+                if (isNaN(d)) return 999999;
+                return Math.floor((Date.now() - d) / 1000);
+            }
+
+            function seenColor(sec) {
+                if (sec < 120) return 'var(--green)';
+                if (sec < 300) return 'var(--amber)';
+                return 'var(--red)';
+            }
+
+            function fmtMB(mb) {
+                if (mb >= 1000) return Math.round(mb).toLocaleString();
+                return Math.round(mb).toString();
+            }
+
             function render(servers) {
                 const c = { ok: 0, grace: 0, alert: 0, off: 0 };
                 (servers || []).forEach((s) => c[st(s)]++);
@@ -5347,192 +5423,206 @@
 
                 // Grid
                 const g = document.getElementById("grid");
+                const tbody = document.getElementById("srv-tbody");
+                const gridEmpty = document.getElementById("grid-empty");
+                const srvTbl = g.querySelector(".srv-tbl");
                 // Show/hide sections based on data
                 document.querySelector(".chart-wrap").style.display = t ? "" : "none";
                 document.querySelector(".log-section").style.display = t ? "" : "none";
                 document.getElementById("srv-bar").style.display = t ? "" : "none";
 
                 if (!servers || !servers.length) {
-                    g.innerHTML =
-                        '<div class="empty card" style="padding:48px 32px;grid-column:1/-1"><h2 style="margin-bottom:8px">No servers registered yet</h2><p style="margin-bottom:20px;max-width:400px;margin-left:auto;margin-right:auto">Register your RDSH servers to start monitoring drain mode, sessions, and alerts.</p><div style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:16px 20px;display:inline-block;text-align:left"><code style="font-family:JetBrains Mono,monospace;font-size:.82rem;line-height:2"><span style="color:var(--muted)"># On each RDSH server, run:</span><br>drainctl register https://' +
+                    if (srvTbl) srvTbl.style.display = "none";
+                    gridEmpty.style.display = "";
+                    gridEmpty.innerHTML =
+                        '<div class="empty card" style="padding:48px 32px"><h2 style="margin-bottom:8px">No servers registered yet</h2><p style="margin-bottom:20px;max-width:400px;margin-left:auto;margin-right:auto">Register your RDSH servers to start monitoring drain mode, sessions, and alerts.</p><div style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:16px 20px;display:inline-block;text-align:left"><code style="font-family:JetBrains Mono,monospace;font-size:.82rem;line-height:2"><span style="color:var(--muted)"># On each RDSH server, run:</span><br>drainctl register https://' +
                         esc(location.host) +
                         "</code></div></div>";
                     return;
                 }
+                if (srvTbl) srvTbl.style.display = "";
+                gridEmpty.style.display = "none";
+
                 let html = "";
                 servers.forEach((srv) => {
                     const s = st(srv),
                         r = srv.last_result,
-                        m = r ? mode(r.drain_mode) : "—",
-                        d = r ? dur(r.state_duration_seconds) : "—",
-                        by = r && r.changed_by ? esc(r.changed_by) : "—",
-                        seen = s === "off" ? "offline" : rel(srv.last_seen);
-                    html +=
-                        '<div class="srv card ' +
-                        s +
-                        '" data-host="' +
-                        esc(srv.hostname) +
-                        '" data-status="' +
-                        s +
-                        '"><div class="srv-h"><span class="srv-host" title="' +
-                        esc(srv.hostname) +
-                        '">' +
-                        esc(srv.hostname.split(".")[0]) +
-                        '</span><span class="badge ' +
-                        s +
-                        '">' +
-                        stLabel(s) +
-                        '</span></div><div class="srv-rows">';
-                    html +=
-                        '<div class="srv-row"><span class="srv-k">Mode</span><span class="srv-v">' +
-                        esc(m) +
-                        "</span></div>";
-                    html +=
-                        '<div class="srv-row"><span class="srv-k">Duration</span><span class="srv-v">' +
-                        d +
-                        "</span></div>";
-                    if (s === "grace" && r && r.state_duration_seconds != null) {
-                        // Prefer the grace period reported by this server's last
-                        // check (already in seconds); fall back to the dashboard-
-                        // wide graceMinutes for servers running older agent versions.
-                        const gpSec =
-                            r.grace_period_seconds > 0
-                                ? r.grace_period_seconds
-                                : graceMinutes !== null
-                                  ? graceMinutes * 60
-                                  : null;
-                        if (gpSec !== null) {
-                            const remainSec = Math.max(0, gpSec - r.state_duration_seconds);
-                            const remainLabel = remainSec > 0 ? dur(remainSec) + " left" : "expiring";
-                            html +=
-                                '<div class="srv-row"><span class="srv-k">Grace Left</span><span class="srv-v srv-v--amber">' +
-                                remainLabel +
-                                "</span></div>";
-                        }
-                    }
-                    html +=
-                        '<div class="srv-row"><span class="srv-k">Changed By</span><span class="srv-v">' +
-                        by +
-                        "</span></div>";
-                    html +=
-                        '<div class="srv-row"><span class="srv-k">Last Seen</span><span class="srv-v">' +
-                        seen +
-                        "</span></div>";
-                    // Session gauge
+                        m = r ? mode(r.drain_mode) : "\u2014",
+                        d = r ? dur(r.state_duration_seconds) : "\u2014",
+                        by = r && r.changed_by ? esc(r.changed_by) : "\u2014",
+                        seen = s === "off" ? "offline" : rel(srv.last_seen),
+                        secAgo = relSec(srv.last_seen),
+                        sColor = seenColor(secAgo);
                     const sess = r && r.sessions;
-                    if (sess && sess.max_sessions > 0) {
-                        const pct = sess.utilization_pct,
-                            cls = pct >= 90 ? "alert" : pct >= 70 ? "grace" : "ok";
-                        html +=
-                            '<div class="srv-gauge"><div class="gauge-bar"><div class="gauge-fill ' +
-                            cls +
-                            '" style="width:' +
-                            Math.min(pct, 100) +
-                            '%"></div></div><span class="gauge-label">' +
-                            sess.total_sessions +
-                            "/" +
-                            sess.max_sessions +
-                            " sessions (" +
-                            pct +
-                            "%)</span></div>";
-                    } else if (sess) {
-                        var sessVal = sess.active_sessions + " active";
-                        if (sess.disconnected_sessions > 0)
-                            sessVal += ", " + sess.disconnected_sessions + " disconnected";
-                        html +=
-                            '<div class="srv-row"><span class="srv-k">Sessions</span><span class="srv-v">' +
-                            sessVal +
-                            "</span></div>";
-                    }
-                    // Performance section
                     const perf = r && r.performance;
-                    if (perf) {
-                        const perfId = "perf-" + esc(srv.hostname).replace(/[^a-zA-Z0-9]/g, "_");
-                        html += '<div class="srv-perf">';
-                        html += '<div class="perf-toggle" onclick="var d=document.getElementById(\'' + perfId + '\');d.classList.toggle(\'show\');this.classList.toggle(\'open\')">';
-                        html += '<span class="arrow">\u25B6</span> Performance</div>';
-                        html += '<div class="perf-detail" id="' + perfId + '">';
-                        // CPU gauge
-                        const cpuCls = perf.cpu_pct >= 85 ? "alert" : perf.cpu_pct >= 70 ? "grace" : "ok";
-                        const cpuValCls = perf.cpu_pct >= 85 ? " perf-v--crit" : perf.cpu_pct >= 70 ? " perf-v--warn" : "";
-                        html += '<div class="perf-gauges">';
-                        html += '<div class="perf-mini-gauge"><div class="gauge-bar"><div class="gauge-fill ' + cpuCls + '" style="width:' + Math.min(perf.cpu_pct, 100) + '%"></div></div>';
-                        html += '<span class="gauge-label">CPU ' + perf.cpu_pct.toFixed(0) + '%</span></div>';
-                        // Memory gauge
-                        if (perf.mem_total_mb > 0) {
-                            const memUsedPct = Math.round((1 - perf.mem_avail_mb / perf.mem_total_mb) * 100);
-                            const memFreePct = Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100);
-                            const memCls = memFreePct <= 10 ? "alert" : memFreePct <= 20 ? "grace" : "ok";
-                            html += '<div class="perf-mini-gauge"><div class="gauge-bar"><div class="gauge-fill ' + memCls + '" style="width:' + Math.min(memUsedPct, 100) + '%"></div></div>';
-                            html += '<span class="gauge-label">Mem ' + memFreePct + '% free</span></div>';
-                        }
-                        html += '</div>';
-                        // Input delay
-                        if (perf.input_delay_p95_ms > 0 || perf.input_delay_max_ms > 0) {
-                            const idCls = perf.input_delay_p95_ms >= 100 ? " perf-v--crit" : perf.input_delay_p95_ms >= 50 ? " perf-v--warn" : "";
-                            html += '<div class="perf-row"><span class="perf-k">Input Delay P95</span><span class="perf-v' + idCls + '">' + perf.input_delay_p95_ms.toFixed(0) + 'ms</span></div>';
-                            html += '<div class="perf-row"><span class="perf-k">Input Delay Max</span><span class="perf-v">' + perf.input_delay_max_ms.toFixed(0) + 'ms</span></div>';
-                        }
-                        // Disk queue
-                        if (perf.disk_queue > 0) {
-                            const dqCls = perf.disk_queue >= 4 ? " perf-v--crit" : perf.disk_queue >= 2 ? " perf-v--warn" : "";
-                            html += '<div class="perf-row"><span class="perf-k">Disk Queue</span><span class="perf-v' + dqCls + '">' + perf.disk_queue.toFixed(1) + '</span></div>';
-                        }
-                        // Pages/sec
-                        if (perf.pages_sec > 0) {
-                            const pgCls = perf.pages_sec >= 1000 ? " perf-v--crit" : perf.pages_sec >= 500 ? " perf-v--warn" : "";
-                            html += '<div class="perf-row"><span class="perf-k">Pages/sec</span><span class="perf-v' + pgCls + '">' + perf.pages_sec.toFixed(0) + '</span></div>';
-                        }
-                        // Session CPU P95
-                        if (perf.session_cpu_p95_pct > 0) {
-                            html += '<div class="perf-row"><span class="perf-k">Session CPU P95</span><span class="perf-v">' + perf.session_cpu_p95_pct.toFixed(0) + '%</span></div>';
-                        }
-                        // TCP Retransmits
-                        if (perf.tcp_retrans_sec > 0) {
-                            html += '<div class="perf-row"><span class="perf-k">TCP Retrans/s</span><span class="perf-v">' + perf.tcp_retrans_sec.toFixed(1) + '</span></div>';
-                        }
-                        // RemoteFX (Phase 3)
-                        if (perf.rfx_available) {
-                            html += '<div class="perf-row" style="margin-top:4px;border-top:1px solid var(--border);padding-top:4px"><span class="perf-k" style="font-weight:600">RemoteFX</span><span class="perf-v"></span></div>';
-                            if (perf.rfx_fps_out > 0) {
-                                html += '<div class="perf-row"><span class="perf-k">Output FPS</span><span class="perf-v">' + perf.rfx_fps_out.toFixed(0) + '</span></div>';
-                            }
-                            if (perf.rfx_encode_ms > 0) {
-                                const encCls = perf.rfx_encode_ms >= 33 ? " perf-v--crit" : perf.rfx_encode_ms >= 17 ? " perf-v--warn" : "";
-                                html += '<div class="perf-row"><span class="perf-k">Encode Time</span><span class="perf-v' + encCls + '">' + perf.rfx_encode_ms.toFixed(1) + 'ms</span></div>';
-                            }
-                            if (perf.rfx_quality_pct > 0) {
-                                const qCls = perf.rfx_quality_pct <= 50 ? " perf-v--crit" : perf.rfx_quality_pct <= 70 ? " perf-v--warn" : "";
-                                html += '<div class="perf-row"><span class="perf-k">Frame Quality</span><span class="perf-v' + qCls + '">' + perf.rfx_quality_pct.toFixed(0) + '%</span></div>';
-                            }
-                            if (perf.rfx_rtt_ms > 0) {
-                                const rttCls = perf.rfx_rtt_ms >= 150 ? " perf-v--crit" : perf.rfx_rtt_ms >= 100 ? " perf-v--warn" : "";
-                                html += '<div class="perf-row"><span class="perf-k">RTT</span><span class="perf-v' + rttCls + '">' + perf.rfx_rtt_ms.toFixed(0) + 'ms</span></div>';
-                            }
-                            if (perf.rfx_loss_pct > 0) {
-                                const lossCls = perf.rfx_loss_pct >= 2 ? " perf-v--crit" : perf.rfx_loss_pct >= 0.5 ? " perf-v--warn" : "";
-                                html += '<div class="perf-row"><span class="perf-k">Packet Loss</span><span class="perf-v' + lossCls + '">' + perf.rfx_loss_pct.toFixed(1) + '%</span></div>';
-                            }
-                            if (perf.rfx_skip_server_sec > 0 || perf.rfx_skip_net_sec > 0) {
-                                const skipSrvCls = perf.rfx_skip_server_sec >= 5 ? " perf-v--crit" : perf.rfx_skip_server_sec >= 1 ? " perf-v--warn" : "";
-                                const skipNetCls = perf.rfx_skip_net_sec >= 5 ? " perf-v--crit" : perf.rfx_skip_net_sec >= 1 ? " perf-v--warn" : "";
-                                html += '<div class="perf-row"><span class="perf-k">Skip (Srv/Net)</span><span class="perf-v' + (skipSrvCls || skipNetCls) + '">' + (perf.rfx_skip_server_sec || 0).toFixed(0) + ' / ' + (perf.rfx_skip_net_sec || 0).toFixed(0) + '/s</span></div>';
-                            }
-                        }
-                        html += '</div></div>';
+                    const isOff = s === "off";
+
+                    // --- Sessions column ---
+                    var sessCell = "\u2014";
+                    if (!isOff && sess) {
+                        sessCell = sess.max_sessions > 0
+                            ? sess.total_sessions + "/" + sess.max_sessions
+                            : String(sess.active_sessions);
                     }
-                    html +=
-                        '</div><div class="srv-act"><button class="btn-hist" data-host="' +
-                        esc(srv.hostname) +
-                        '" aria-label="View history for ' +
-                        esc(srv.hostname) +
-                        '">\u29c9 History</button><button class="btn-rm" data-host="' +
-                        esc(srv.hostname) +
-                        '" aria-label="Remove ' +
-                        esc(srv.hostname) +
-                        '">Remove</button></div></div>';
+                    // --- CPU column ---
+                    var cpuCell = "\u2014";
+                    if (!isOff && perf) cpuCell = perf.cpu_pct.toFixed(0) + "%";
+                    // --- Mem Free column ---
+                    var memCell = "\u2014";
+                    if (!isOff && perf && perf.mem_total_mb > 0) {
+                        memCell = Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) + "%";
+                    }
+                    // --- Input Delay column ---
+                    var idCell = "\u2014";
+                    if (!isOff && perf && perf.input_delay_max_ms > 0) {
+                        idCell = perf.input_delay_max_ms.toFixed(0) + "ms";
+                    }
+
+                    // Data row
+                    html += '<tr class="clickable' + (isOff ? '" style="opacity:0.5"' : '"') +
+                        ' data-host="' + esc(srv.hostname) + '" data-status="' + s + '">';
+                    html += '<td><span class="dot dot-' + s + '"></span></td>';
+                    html += '<td class="mono" style="font-weight:600">' + esc(srv.hostname.split(".")[0]) + '</td>';
+                    html += '<td><span class="badge badge-' + s + '">' + stLabel(s) + '</span></td>';
+                    html += '<td style="font-size:12px">' + (isOff ? "\u2014" : esc(m)) + '</td>';
+                    html += '<td class="mono">' + (isOff ? "\u2014" : d) + '</td>';
+                    html += '<td class="mono">' + sessCell + '</td>';
+                    html += '<td class="mono">' + cpuCell + '</td>';
+                    html += '<td class="mono">' + memCell + '</td>';
+                    html += '<td class="mono">' + idCell + '</td>';
+                    html += '<td class="mono" style="color:' + sColor + '">' + seen + '</td>';
+                    html += '</tr>';
+
+                    // Detail (accordion) row
+                    html += '<tr class="detail-row" style="display:none"><td colspan="10"><div class="d-inner">';
+
+                    if (!isOff) {
+                        // --- Resource Utilization tile ---
+                        var sessPct = (sess && sess.max_sessions > 0) ? sess.utilization_pct : 0;
+                        var cpuPct = perf ? perf.cpu_pct : 0;
+                        var memFreePct = (perf && perf.mem_total_mb > 0) ? Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) : 0;
+                        var memUsedPct = 100 - memFreePct;
+
+                        html += '<div class="d-tile d-tile-util"><div class="d-tile-label">Resource Utilization</div>';
+                        // Ring row
+                        html += '<div class="d-ring-row">';
+                        html += '<div class="d-ring-cell">' + ringSvg(sessPct, ringColor(sessPct)) + '<div class="d-ring-lbl">Sessions</div></div>';
+                        html += '<div class="d-ring-cell">' + ringSvg(cpuPct, ringColor(cpuPct)) + '<div class="d-ring-lbl">CPU</div></div>';
+                        html += '<div class="d-ring-cell">' + ringSvg(memUsedPct, ringColor(memUsedPct)) + '<div class="d-ring-lbl">Memory</div></div>';
+                        html += '</div>';
+                        // Sparkline row (canvases drawn by Task 4)
+                        html += '<div class="d-spark-row">';
+                        html += '<div class="d-spark-cell"><canvas data-spark="sess" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="cpu" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="mem" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '</div>';
+                        // Legend
+                        html += '<div class="d-legend">';
+                        // Sessions column
+                        html += '<div class="d-leg-col"><div class="d-leg-head">Sessions</div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Active</span><span class="d-leg-v">' + (sess ? sess.active_sessions : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Disconn.</span><span class="d-leg-v">' + (sess ? sess.disconnected_sessions : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Total/Max</span><span class="d-leg-v">' +
+                            (sess ? (sess.max_sessions > 0 ? sess.total_sessions + '/' + sess.max_sessions : String(sess.total_sessions)) : "\u2014") + '</span></div>';
+                        html += '</div>';
+                        // CPU column
+                        html += '<div class="d-leg-col"><div class="d-leg-head">CPU</div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Host</span><span class="d-leg-v">' + (perf ? perf.cpu_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">' +
+                            tip('Sess P95', '95th percentile across all sessions \u2014 95% of sessions use less than this. Highlights the heaviest users without being skewed by a single outlier.') +
+                            '</span><span class="d-leg-v">' + (perf && perf.session_cpu_p95_pct > 0 ? perf.session_cpu_p95_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
+                        html += '</div>';
+                        // Memory column
+                        html += '<div class="d-leg-col"><div class="d-leg-head">Memory</div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Free</span><span class="d-leg-v">' + (perf && perf.mem_total_mb > 0 ? fmtMB(perf.mem_avail_mb) + ' MB' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Total</span><span class="d-leg-v">' + (perf && perf.mem_total_mb > 0 ? fmtMB(perf.mem_total_mb) + ' MB' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">' +
+                            tip('Sess P95', '95th percentile across all sessions \u2014 95% of sessions use less than this. Highlights the heaviest users without being skewed by a single outlier.') +
+                            '</span><span class="d-leg-v">' + (perf && perf.session_mem_p95_bytes > 0 ? fmtMB(perf.session_mem_p95_bytes / (1024*1024)) + ' MB' : "\u2014") + '</span></div>';
+                        html += '</div></div></div>';
+
+                        // --- I/O & Network tile ---
+                        html += '<div class="d-tile d-tile-io"><div class="d-tile-label">I/O &amp; Network</div>';
+                        // Ring row
+                        var dq = perf ? perf.disk_queue : 0;
+                        var idP50 = perf ? perf.input_delay_p50_ms : 0;
+                        var idMax = perf ? perf.input_delay_max_ms : 0;
+                        var tcpR = perf ? perf.tcp_retrans_sec : 0;
+                        html += '<div class="d-ring-row">';
+                        html += '<div class="d-ring-cell">' + ringValSvg(perf ? dq.toFixed(2) : "\u2014", null, perf ? ringColor(Math.min(dq / 4 * 100, 100)) : 'var(--subtle)') + '<div class="d-ring-lbl">Disk Q</div></div>';
+                        if (perf && idMax > 0) {
+                            html += '<div class="d-ring-cell">' + ringValSvg(idMax.toFixed(0), 'ms', ringColor(Math.min(idMax / 100 * 100, 100))) + '<div class="d-ring-lbl">Inp Dly</div></div>';
+                        } else {
+                            html += '<div class="d-ring-cell">' + ringValSvg("\u2014", 'ms', 'var(--subtle)') + '<div class="d-ring-lbl">Inp Dly</div></div>';
+                        }
+                        html += '<div class="d-ring-cell">' + ringValSvg(perf ? tcpR.toFixed(1) : "\u2014", '/s', perf ? ringColor(Math.min(tcpR / 5 * 100, 100)) : 'var(--subtle)') + '<div class="d-ring-lbl">TCP Rx</div></div>';
+                        html += '</div>';
+                        // Sparkline row (canvases drawn by Task 4)
+                        html += '<div class="d-spark-row">';
+                        html += '<div class="d-spark-cell"><canvas data-spark="dq" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="id" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="tcp" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '</div>';
+                        // Legend
+                        html += '<div class="d-legend">';
+                        html += '<div class="d-leg-col"><div class="d-leg-head">Input Delay</div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">' +
+                            tip('P50', 'Median \u2014 half of all measurements are below this value. Represents the typical user experience.') +
+                            '</span><span class="d-leg-v">' + (perf && idP50 > 0 ? idP50.toFixed(0) + ' ms' : '\u2014 ms') + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">' +
+                            tip('P95', '95th percentile \u2014 95% of measurements are below this value. Shows the worst experience most users face, excluding extreme outliers.') +
+                            '</span><span class="d-leg-v">' + (perf && perf.input_delay_p95_ms > 0 ? perf.input_delay_p95_ms.toFixed(0) + ' ms' : '\u2014 ms') + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Max</span><span class="d-leg-v">' + (perf && idMax > 0 ? idMax.toFixed(0) + ' ms' : '\u2014 ms') + '</span></div>';
+                        html += '</div>';
+                        html += '<div class="d-leg-col"><div class="d-leg-head">Disk &amp; Net</div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Pages/sec</span><span class="d-leg-v">' + (perf ? perf.pages_sec.toFixed(1) : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Disk Queue</span><span class="d-leg-v">' + (perf ? dq.toFixed(2) : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">TCP Retrans</span><span class="d-leg-v">' + (perf ? tcpR.toFixed(1) + '/s' : "\u2014") + '</span></div>';
+                        html += '</div></div></div>';
+                    }
+
+                    // --- Server Details tile ---
+                    html += '<div class="d-tile d-tile-details"><div class="d-tile-label">Server Details</div>';
+                    if (!isOff) {
+                        html += '<div class="d-kv-row"><span class="d-kv-k">Drain Mode</span><span class="d-kv-v">' + esc(m) + '</span></div>';
+                        if (r && r.state_since) {
+                            var since = new Date(r.state_since);
+                            html += '<div class="d-kv-row"><span class="d-kv-k">State Since</span><span class="d-kv-v">' +
+                                (isNaN(since) ? "\u2014" : since.toISOString().replace('T', ' ').slice(0, 19)) + '</span></div>';
+                        }
+                        html += '<div class="d-kv-row"><span class="d-kv-k">Duration</span><span class="d-kv-v">' + d + '</span></div>';
+                        // Grace period
+                        var gpSec = r && r.grace_period_seconds > 0
+                            ? r.grace_period_seconds
+                            : graceMinutes !== null ? graceMinutes * 60 : null;
+                        if (gpSec !== null) {
+                            html += '<div class="d-kv-row"><span class="d-kv-k">Grace Period</span><span class="d-kv-v">' + Math.round(gpSec / 60) + 'm</span></div>';
+                        }
+                        // Grace left / exceeded
+                        if (s === "grace" && r && r.state_duration_seconds != null && gpSec !== null) {
+                            var remainSec = Math.max(0, gpSec - r.state_duration_seconds);
+                            if (remainSec > 0) {
+                                html += '<div class="d-kv-row"><span class="d-kv-k">Grace Left</span><span class="d-kv-v" style="color:var(--amber)">' + dur(remainSec) + '</span></div>';
+                            }
+                        } else if (s === "alert" && r && r.state_duration_seconds != null && gpSec !== null) {
+                            var exceeded = r.state_duration_seconds - gpSec;
+                            if (exceeded > 0) {
+                                html += '<div class="d-kv-row"><span class="d-kv-k">Grace Exceeded</span><span class="d-kv-v" style="color:var(--red)">' + dur(exceeded) + ' ago</span></div>';
+                            }
+                        }
+                        html += '<div class="d-kv-row"><span class="d-kv-k">Changed By</span><span class="d-kv-v">' + by + '</span></div>';
+                    }
+                    html += '<div class="d-kv-row"><span class="d-kv-k">Last Seen</span><span class="d-kv-v" style="color:' + sColor + '">' + seen + '</span></div>';
+                    var ver = r && r.version ? esc(r.version) : "\u2014";
+                    html += '<div class="d-kv-row"><span class="d-kv-k">Version</span><span class="d-kv-v">' + ver + '</span></div>';
+                    html += '<div style="display:flex;gap:6px;margin-top:auto;padding-top:6px;border-top:1px solid var(--surface);">';
+                    html += '<button class="btn btn-hist" style="flex:1" data-host="' + esc(srv.hostname) + '" aria-label="View history for ' + esc(srv.hostname) + '">History</button>';
+                    html += '<button class="btn btn-danger btn-rm" style="flex:1" data-host="' + esc(srv.hostname) + '" aria-label="Remove ' + esc(srv.hostname) + '">Remove</button>';
+                    html += '</div></div>';
+
+                    html += '</div></td></tr>';
                 });
-                g.innerHTML = html;
+                tbody.innerHTML = html;
                 filterGrid();
 
                 // Status pill
@@ -5737,22 +5827,31 @@
                 const q = searchEl ? searchEl.value.toLowerCase() : "";
                 if (searchEl) localStorage.setItem("drainctl-search", searchEl.value);
                 let visible = 0;
-                document.querySelectorAll("#grid .srv").forEach(function (card) {
-                    const host = (card.dataset.host || "").toLowerCase();
-                    const status = card.dataset.status || "off";
-                    const matchText = !q || host.includes(q);
-                    const matchStatus = activeFilter === "all" || status === activeFilter;
-                    const show = matchText && matchStatus;
-                    card.classList.toggle("hidden", !show);
+                var rows = document.querySelectorAll("#srv-tbody tr[data-host]");
+                rows.forEach(function (row) {
+                    var host = (row.dataset.host || "").toLowerCase();
+                    var status = row.dataset.status || "off";
+                    var matchText = !q || host.includes(q);
+                    var matchStatus = activeFilter === "all" || status === activeFilter;
+                    var show = matchText && matchStatus;
+                    row.style.display = show ? "" : "none";
+                    // Also hide/show the detail row (next sibling)
+                    var detail = row.nextElementSibling;
+                    if (detail && detail.classList.contains("detail-row")) {
+                        if (!show) {
+                            detail.style.display = "none";
+                            row.classList.remove("sel");
+                        }
+                    }
                     if (show) visible++;
                 });
-                const total = document.querySelectorAll("#grid .srv").length;
-                let noMatch = document.getElementById("grid-no-match");
+                var total = rows.length;
+                var noMatch = document.getElementById("grid-no-match");
                 if (!noMatch && total > 0) {
                     noMatch = document.createElement("div");
                     noMatch.id = "grid-no-match";
                     noMatch.className = "empty";
-                    noMatch.style.cssText = "grid-column:1/-1;padding:32px;text-align:center";
+                    noMatch.style.cssText = "padding:32px;text-align:center";
                     noMatch.textContent = "No servers match the current filter.";
                     document.getElementById("grid").appendChild(noMatch);
                 }
@@ -5772,8 +5871,11 @@
                 try {
                     const r = await fetch("/api/v1/servers");
                     if (r.status === 401 || r.status === 403) {
-                        document.getElementById("grid").innerHTML =
-                            '<div class="empty"><h2>Access Denied</h2><p>Your account is not authorized.</p></div>';
+                        var srvTbl = document.querySelector(".srv-tbl");
+                        if (srvTbl) srvTbl.style.display = "none";
+                        var ge = document.getElementById("grid-empty");
+                        ge.style.display = "";
+                        ge.innerHTML = '<h2>Access Denied</h2><p>Your account is not authorized.</p>';
                         const pill = document.getElementById("status-pill");
                         pill.textContent = "Auth Error";
                         pill.style.borderColor = "var(--amber)";
@@ -6462,44 +6564,45 @@
                 });
             })();
 
-            // Event delegation for server card buttons — avoids inline onclick with interpolated hostnames.
-            // Remove uses a two-stage inline confirm: first click → "Sure?", second click → delete.
-            document.getElementById("grid").addEventListener("click", function (e) {
-                const hist = e.target.closest(".btn-hist");
+            // Event delegation for server table rows and buttons.
+            var _rmHost = null;
+            function openRmModal(hostname) {
+                _rmHost = hostname;
+                document.getElementById('rm-hostname').textContent = hostname;
+                document.getElementById('rm-overlay').classList.add('open');
+            }
+            function closeRmModal() {
+                document.getElementById('rm-overlay').classList.remove('open');
+                _rmHost = null;
+            }
+            function confirmRm() {
+                if (!_rmHost) return;
+                rmConfirmed(_rmHost);
+                closeRmModal();
+            }
+            document.getElementById("srv-tbody").addEventListener("click", function (e) {
+                // History button
+                var hist = e.target.closest(".btn-hist");
                 if (hist && hist.dataset.host) {
+                    e.stopPropagation();
                     showHistory(hist.dataset.host, hist);
                     return;
                 }
-                const rmBtn = e.target.closest(".btn-rm");
+                // Remove button — open confirmation modal
+                var rmBtn = e.target.closest(".btn-rm");
                 if (rmBtn && rmBtn.dataset.host) {
-                    const h = rmBtn.dataset.host;
-                    if (rmBtn.dataset.confirm === "1") {
-                        // Second click — execute removal.
-                        clearTimeout(_rmTimers[h]);
-                        delete _rmTimers[h];
-                        rmConfirmed(h);
-                    } else {
-                        // First click — enter confirm state.
-                        // Clear any previous timer for this host (e.g. from a
-                        // prior click before the grid re-rendered) so we never
-                        // accumulate orphaned timers.
-                        clearTimeout(_rmTimers[h]);
-                        rmBtn.dataset.confirm = "1";
-                        rmBtn.setAttribute("aria-label", "Confirm removal of " + h);
-                        rmBtn.textContent = "Sure?";
-                        // Auto-cancel after 5 s if no second click.
-                        // Re-query the button inside the callback: the grid may have
-                        // re-rendered during the 5 s window, replacing the old DOM node.
-                        _rmTimers[h] = setTimeout(function () {
-                            var btn = document.querySelector('.btn-rm[data-host="' + esc(h) + '"]');
-                            if (btn && btn.dataset.confirm === "1") {
-                                btn.dataset.confirm = "";
-                                btn.setAttribute("aria-label", "Remove " + h);
-                                btn.textContent = "Remove";
-                            }
-                            delete _rmTimers[h];
-                        }, 5000);
-                    }
+                    e.stopPropagation();
+                    openRmModal(rmBtn.dataset.host);
+                    return;
+                }
+                // Row click — toggle accordion
+                var row = e.target.closest("tr.clickable");
+                if (row) {
+                    var detail = row.nextElementSibling;
+                    if (!detail || !detail.classList.contains("detail-row")) return;
+                    var isOpen = detail.style.display === "table-row";
+                    detail.style.display = isOpen ? "none" : "table-row";
+                    row.classList.toggle("sel", !isOpen);
                 }
             });
 
