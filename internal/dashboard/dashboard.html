@@ -5486,11 +5486,13 @@
                             : String(sess.active_sessions);
                     }
                     // --- CPU column ---
+                    // perfReady is computed below for rings; pre-compute here for table cells too.
+                    var tblPerfReady = !isOff && perf && (perf.cpu_pct > 0 || perf.mem_avail_mb > 0 || perf.pages_sec > 0 || perf.disk_queue > 0);
                     var cpuCell = "\u2014";
-                    if (!isOff && perf) cpuCell = perf.cpu_pct.toFixed(0) + "%";
+                    if (tblPerfReady) cpuCell = perf.cpu_pct.toFixed(0) + "%";
                     // --- Mem Free column ---
                     var memCell = "\u2014";
-                    if (!isOff && perf && perf.mem_total_mb > 0) {
+                    if (tblPerfReady && perf.mem_total_mb > 0 && perf.mem_avail_mb > 0) {
                         memCell = Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) + "%";
                     }
                     // --- Input Delay column ---
@@ -5519,9 +5521,14 @@
 
                     if (!isOff) {
                         // --- Resource Utilization tile ---
+                        // Detect "not primed" state: PDH counters return all-zero on the
+                        // first collection(s) before rate counters have two samples.
+                        // mem_avail_mb=0 with mem_total_mb>0 on a real machine means the
+                        // counter hasn't populated yet — genuine 0 free memory is impossible.
+                        var perfReady = perf && (perf.cpu_pct > 0 || perf.mem_avail_mb > 0 || perf.pages_sec > 0 || perf.disk_queue > 0);
                         var sessPct = (sess && sess.max_sessions > 0) ? sess.utilization_pct : null;
-                        var cpuPct = perf ? perf.cpu_pct : null;
-                        var hasMem = perf && perf.mem_total_mb > 0;
+                        var cpuPct = perfReady ? perf.cpu_pct : null;
+                        var hasMem = perfReady && perf.mem_total_mb > 0 && perf.mem_avail_mb > 0;
                         var memFreePct = hasMem ? Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) : null;
                         var memUsedPct = hasMem ? (100 - memFreePct) : null;
 
@@ -5549,15 +5556,15 @@
                         html += '</div>';
                         // CPU column
                         html += '<div class="d-leg-col"><div class="d-leg-head">CPU</div>';
-                        html += '<div class="d-leg-row"><span class="d-leg-k">Host</span><span class="d-leg-v">' + (perf ? perf.cpu_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Host</span><span class="d-leg-v">' + (perfReady ? perf.cpu_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
                         html += '<div class="d-leg-row"><span class="d-leg-k">' +
                             tip('Sess P95', '95th percentile across all sessions \u2014 95% of sessions use less than this. Highlights the heaviest users without being skewed by a single outlier.') +
-                            '</span><span class="d-leg-v">' + (perf && perf.session_cpu_p95_pct > 0 ? perf.session_cpu_p95_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
+                            '</span><span class="d-leg-v">' + (perfReady && perf.session_cpu_p95_pct > 0 ? perf.session_cpu_p95_pct.toFixed(0) + '%' : "\u2014") + '</span></div>';
                         html += '</div>';
                         // Memory column
                         html += '<div class="d-leg-col"><div class="d-leg-head">Memory</div>';
-                        html += '<div class="d-leg-row"><span class="d-leg-k">Free</span><span class="d-leg-v">' + (perf && perf.mem_total_mb > 0 ? fmtMB(perf.mem_avail_mb) + ' MB' : "\u2014") + '</span></div>';
-                        html += '<div class="d-leg-row"><span class="d-leg-k">Total</span><span class="d-leg-v">' + (perf && perf.mem_total_mb > 0 ? fmtMB(perf.mem_total_mb) + ' MB' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Free</span><span class="d-leg-v">' + (hasMem ? fmtMB(perf.mem_avail_mb) + ' MB' : "\u2014") + '</span></div>';
+                        html += '<div class="d-leg-row"><span class="d-leg-k">Total</span><span class="d-leg-v">' + (perfReady && perf.mem_total_mb > 0 ? fmtMB(perf.mem_total_mb) + ' MB' : "\u2014") + '</span></div>';
                         html += '<div class="d-leg-row"><span class="d-leg-k">' +
                             tip('Sess P95', '95th percentile across all sessions \u2014 95% of sessions use less than this. Highlights the heaviest users without being skewed by a single outlier.') +
                             '</span><span class="d-leg-v">' + (perf && perf.session_mem_p95_bytes > 0 ? fmtMB(perf.session_mem_p95_bytes / (1024*1024)) + ' MB' : "\u2014") + '</span></div>';
@@ -5565,19 +5572,19 @@
 
                         // --- I/O & Network tile ---
                         html += '<div class="d-tile d-tile-io"><div class="d-tile-label">I/O &amp; Network</div>';
-                        // Ring row
-                        var dq = perf ? perf.disk_queue : 0;
-                        var idP50 = perf ? perf.input_delay_p50_ms : 0;
-                        var idMax = perf ? perf.input_delay_max_ms : 0;
-                        var tcpR = perf ? perf.tcp_retrans_sec : 0;
+                        // Ring row — use perfReady to avoid showing 0.00 when counters aren't primed
+                        var dq = perfReady ? perf.disk_queue : 0;
+                        var idP50 = perfReady ? perf.input_delay_p50_ms : 0;
+                        var idMax = perfReady ? perf.input_delay_max_ms : 0;
+                        var tcpR = perfReady ? perf.tcp_retrans_sec : 0;
                         html += '<div class="d-ring-row">';
-                        html += '<div class="d-ring-cell">' + ringValSvg(perf ? dq.toFixed(2) : "\u2014", null, perf ? ringColor(Math.min(dq / 4 * 100, 100)) : 'var(--subtle)') + '<div class="d-ring-lbl">Disk Q</div></div>';
-                        if (perf && idMax > 0) {
+                        html += '<div class="d-ring-cell">' + (perfReady ? ringValSvg(dq.toFixed(2), null, ringColor(Math.min(dq / 4 * 100, 100))) : ringValSvg("\u2014", null, 'var(--subtle)')) + '<div class="d-ring-lbl">Disk Q</div></div>';
+                        if (perfReady && idMax > 0) {
                             html += '<div class="d-ring-cell">' + ringValSvg(idMax.toFixed(0), 'ms', ringColor(Math.min(idMax / 100 * 100, 100))) + '<div class="d-ring-lbl">Inp Dly</div></div>';
                         } else {
                             html += '<div class="d-ring-cell">' + ringValSvg("\u2014", 'ms', 'var(--subtle)') + '<div class="d-ring-lbl">Inp Dly</div></div>';
                         }
-                        html += '<div class="d-ring-cell">' + ringValSvg(perf ? tcpR.toFixed(1) : "\u2014", '/s', perf ? ringColor(Math.min(tcpR / 5 * 100, 100)) : 'var(--subtle)') + '<div class="d-ring-lbl">TCP Rx</div></div>';
+                        html += '<div class="d-ring-cell">' + (perfReady ? ringValSvg(tcpR.toFixed(1), '/s', ringColor(Math.min(tcpR / 5 * 100, 100))) : ringValSvg("\u2014", '/s', 'var(--subtle)')) + '<div class="d-ring-lbl">TCP Rx</div></div>';
                         html += '</div>';
                         // Sparkline row (canvases drawn by Task 4)
                         html += '<div class="d-spark-row">';
