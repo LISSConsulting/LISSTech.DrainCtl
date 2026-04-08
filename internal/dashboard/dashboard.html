@@ -6329,7 +6329,32 @@
                 closeTargetDel();
             }
 
+            function readTargetFromModal() {
+                var activePill = document.querySelector("#tgt-type-pills .tgt-type-pill.active");
+                var type = activePill ? activePill.dataset.type : "webhook";
+                var url = document.getElementById("tgt-url-input").value.trim();
+                var secret = document.getElementById("tgt-secret-input").value;
+                var from = document.getElementById("tgt-from-input").value.trim();
+                var toRaw = document.getElementById("tgt-to-input").value.trim();
+                var to = toRaw ? toRaw.split(",").map(function(s) { return s.trim(); }).filter(Boolean) : [];
+                var triggers = [];
+                document.querySelectorAll("#tgt-trigger-grid .tgt-trigger-check input:checked").forEach(function(cb) {
+                    triggers.push(cb.closest(".tgt-trigger-check").dataset.trigger);
+                });
+                var repeatPill = document.querySelector("#tgt-repeat-pills .tgt-repeat-pill.active");
+                var repeat = repeatPill ? parseInt(repeatPill.dataset.mins) : 0;
+                var enabled = document.getElementById("tgt-enabled-check").checked;
+                return { type: type, url: url, secret: secret, from: from, to: to, triggers: triggers, repeat_minutes: repeat, enabled: enabled };
+            }
+
             async function testTargetNotification() {
+                var target = readTargetFromModal();
+                if (!target.url) {
+                    var el = document.getElementById("tgt-test-result");
+                    el.className = "tgt-test-result err"; el.style = "";
+                    el.textContent = "\u2717 Enter a URL first";
+                    return;
+                }
                 var el = document.getElementById("tgt-test-result");
                 el.className = "tgt-test-result";
                 el.textContent = "Sending\u2026";
@@ -6339,7 +6364,11 @@
                 el.style.border = "1px solid var(--subtle)";
                 try {
                     var t0 = Date.now();
-                    var r = await fetch("/api/v1/notify-test", { method: "POST" });
+                    var r = await fetch("/api/v1/notify-test", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(target)
+                    });
                     var elapsed = Date.now() - t0;
                     if (r.ok) {
                         el.className = "tgt-test-result ok";
