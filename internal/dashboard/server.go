@@ -487,32 +487,51 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleNotifyTest sends a test notification to all currently configured targets.
+// handleNotifyTest sends a test notification.
+// If the request body contains a JSON-encoded NotificationTarget, only that
+// single target is tested (used by the target edit modal). Otherwise, all
+// currently saved targets are tested (used by the config modal "Send Test").
 func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
-	// testNotifyFunc can be injected in tests to avoid real config/network I/O.
-	fn := ds.testNotifyFunc
-	if fn == nil {
-		fn = func() error {
-			loadFn := ds.testLoadConfigFunc
-			if loadFn == nil {
-				loadFn = func() (*dc.Config, error) { return dc.LoadConfig(ds.log) }
-			}
-			cfg, err := loadFn()
-			if err != nil {
-				return fmt.Errorf("failed to load config: %w", err)
-			}
-			return dc.SendTestNotification(cfg.Notifications, ds.log)
-		}
-	}
-
 	auth := GetAuthInfo(r)
 	user := ""
 	if auth != nil {
 		user = auth.Username
 	}
-	ds.log(dc.LvlINF, "dashboard=notify-test", fmt.Sprintf("user=%s", user))
 
-	if err := fn(); err != nil {
+	// Try to decode a single target from the body.
+	var singleTarget *dc.NotificationTarget
+	if r.Body != nil && r.ContentLength > 0 {
+		var t dc.NotificationTarget
+		if err := json.NewDecoder(r.Body).Decode(&t); err == nil && t.URL != "" {
+			singleTarget = &t
+		}
+	}
+
+	var err error
+	if singleTarget != nil {
+		ds.log(dc.LvlINF, "dashboard=notify-test-target", fmt.Sprintf("user=%s type=%s url=%s", user, singleTarget.Type, singleTarget.URL))
+		err = dc.SendTestNotification([]dc.NotificationTarget{*singleTarget}, ds.log)
+	} else {
+		ds.log(dc.LvlINF, "dashboard=notify-test", fmt.Sprintf("user=%s", user))
+		// testNotifyFunc can be injected in tests to avoid real config/network I/O.
+		fn := ds.testNotifyFunc
+		if fn == nil {
+			fn = func() error {
+				loadFn := ds.testLoadConfigFunc
+				if loadFn == nil {
+					loadFn = func() (*dc.Config, error) { return dc.LoadConfig(ds.log) }
+				}
+				cfg, err := loadFn()
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+				return dc.SendTestNotification(cfg.Notifications, ds.log)
+			}
+		}
+		err = fn()
+	}
+
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
