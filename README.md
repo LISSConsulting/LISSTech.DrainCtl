@@ -36,7 +36,7 @@ Know the instant someone blocks new connections on your RDSH servers. DrainCtl r
 
 ## 🔭 Overview
 
-DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and answers one question: **are new connections allowed?**
+DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and answers one question: **are new connections allowed?** And when performance matters: CPU, memory, input delay, and RemoteFX metrics — collected every poll cycle, with threshold alerts that fire before users open tickets.
 
 ### Key Features
 
@@ -50,9 +50,10 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | 📊 **N-central ready** | Exit codes + structured stdout slot directly into AMP threshold monitoring |
 | 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` -- pipeline-friendly |
 | 📡 **Multi-target notifications** | N webhooks + M ntfy.sh + email (SMTP) -- each target gets its own triggers and repeat cadence |
-| 🎯 **Granular triggers** | Subscribe per-event: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, and more |
+| 🎯 **Granular triggers** | 12 trigger types: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, `cpu_warning`, `cpu_critical`, and more |
 | 📈 **Live session tracking** | `WTSEnumerateSessionsW` counts active, disconnected, and total sessions with utilization % |
 | 🚨 **Utilization alerts** | Configurable threshold fires `session_warning` before your RDSH boxes hit capacity |
+| 📊 **Performance monitoring** | PDH counters track CPU, memory, disk queue, input delay, and RemoteFX metrics per poll cycle — with configurable thresholds that fire `cpu_warning`, `memory_critical`, `input_delay_warning`, and more |
 
 ---
 
@@ -68,6 +69,7 @@ graph TB
         CFG["config.json Watcher (RDCW+poll)"] -->|"config changed"| RELOAD["ReloadConfig()"]
         CHECK --> SESS["WTS Session Enum"]
         SESS --> STORE["MemAuditStore"]
+        CHECK --> PERF["PDH Counters"]
         CHECK --> STORE
         CHECK --> ELOG["Event Log"]
         CHECK --> NOTIFY["Multi-Target Dispatch"]
@@ -353,6 +355,12 @@ Each notification target can subscribe to specific event types:
 | `alert` | Drain mode exceeded grace period |
 | `healthy` | Returned to healthy state |
 | `session_warning` | Session utilization threshold exceeded |
+| `cpu_warning` | Host CPU exceeds warning threshold (2 consecutive polls) |
+| `cpu_critical` | Host CPU exceeds critical threshold (2 consecutive polls) |
+| `memory_warning` | Available memory below warning threshold (2 consecutive polls) |
+| `memory_critical` | Available memory below critical threshold (2 consecutive polls) |
+| `input_delay_warning` | User input delay P95 exceeds warning threshold |
+| `input_delay_critical` | User input delay P95 exceeds critical threshold |
 
 If no triggers are specified, the target receives all events.
 
@@ -406,11 +414,19 @@ Notification targets are defined in `config.json`:
     "total_sessions": 15,
     "max_sessions": 25,
     "utilization_pct": 60
+  },
+  "performance": {
+    "cpu_pct": 78.3,
+    "mem_avail_mb": 2048,
+    "mem_total_mb": 16384,
+    "input_delay_p95_ms": 42,
+    "input_delay_max_ms": 88,
+    "disk_queue": 0.3
   }
 }
 ```
 
-The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered`, `alert`, `healthy`, `session_warning`). ntfy messages use priority `high` for alerts, `default` for other events.
+The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered`, `alert`, `healthy`, `session_warning`, `cpu_warning`, `cpu_critical`, `memory_warning`, `memory_critical`, `input_delay_warning`, `input_delay_critical`). ntfy messages use priority `high` for alerts, `default` for other events.
 
 ---
 
@@ -433,6 +449,17 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
   "poll_interval_seconds": 300,
   "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
   "session_warning_threshold": 80,
+  "performance": {
+    "enabled": true,
+    "cpu_warn_pct": 70,
+    "cpu_crit_pct": 85,
+    "mem_warn_pct": 20,
+    "mem_crit_pct": 10,
+    "input_delay_warn_ms": 50,
+    "input_delay_crit_ms": 100,
+    "collect_remotefx": false,
+    "collect_per_session": true
+  },
   "dashboard": {
     "url": ""
   },
@@ -474,6 +501,15 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 | `dashboard.tls_cert` | string | *(empty)* | Path to PEM certificate file (auto-generated if empty) |
 | `dashboard.tls_key` | string | *(empty)* | Path to PEM private key file |
 | `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning |
+| `performance.enabled` | bool | `false` | Enable PDH performance counter collection |
+| `performance.cpu_warn_pct` | int | `70` | CPU % warning threshold (0=default, -1=disabled) |
+| `performance.cpu_crit_pct` | int | `85` | CPU % critical threshold |
+| `performance.mem_warn_pct` | int | `20` | Memory % free warning threshold |
+| `performance.mem_crit_pct` | int | `10` | Memory % free critical threshold |
+| `performance.input_delay_warn_ms` | int | `50` | Input delay P95 warning threshold (ms) |
+| `performance.input_delay_crit_ms` | int | `100` | Input delay P95 critical threshold (ms) |
+| `performance.collect_remotefx` | bool | `false` | Collect RemoteFX Graphics/Network counters |
+| `performance.collect_per_session` | bool | `true` | Collect per-session CPU, memory, input delay |
 | `notifications` | array | `[]` | Notification targets (see below) |
 
 ### Notification Target Fields
@@ -562,6 +598,7 @@ LISSTech.DrainCtl/
 │   ├── svc/                 # Windows Service handler + install/uninstall
 │   ├── pipe/                # Named pipe IPC server + client
 │   ├── store/               # MemAuditStore (in-memory + JSONL flush)
+│   ├── perfmon/             # PDH performance counter collection
 │   └── watcher/             # RegNotifyChangeKeyValue + EvtSubscribe
 ├── cmd/
 │   ├── drainctl/            # CLI entry point (cobra)
