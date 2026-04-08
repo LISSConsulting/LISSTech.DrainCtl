@@ -1063,32 +1063,56 @@
                 padding: 22px 24px;
                 position: relative;
             }
-            .target-row-head {
+            .target-type-pills {
                 display: flex;
-                align-items: center;
-                gap: 10px;
+                gap: 6px;
                 margin-bottom: 14px;
             }
-            .target-type {
+            .target-type-pill {
+                padding: 6px 16px;
                 font-family: "Work Sans", sans-serif;
-                font-size: 0.82rem;
-                font-weight: 600;
-                padding: 8px 12px;
-                background: var(--card);
-                color: var(--fg);
+                font-size: 0.78rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
                 border: var(--bw) solid var(--border);
-                border-radius: var(--r);
-                outline: none;
+                border-radius: 20px;
+                background: var(--card);
+                color: var(--muted);
                 cursor: pointer;
+                transition: background 0.15s, color 0.15s;
             }
-            .target-type:focus {
-                box-shadow: 0 0 0 2px var(--accent);
+            .target-type-pill.active {
+                background: var(--accent);
+                color: #fff;
+                border-color: var(--accent);
             }
-            .target-url {
-                flex: 1;
-                min-width: 0;
+            .target-type-pill:hover:not(.active) {
+                background: var(--surface);
+                color: var(--fg);
+            }
+            .target-field {
+                margin-bottom: 12px;
+            }
+            .target-field-label {
+                display: block;
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: var(--accent);
+                margin-bottom: 4px;
+            }
+            .target-field-error {
+                font-size: 0.72rem;
+                color: var(--red);
+                margin-top: 2px;
+                display: none;
             }
             .btn-rm-target {
+                position: absolute;
+                top: 12px;
+                right: 12px;
                 width: 32px;
                 height: 32px;
                 display: flex;
@@ -1133,19 +1157,7 @@
                 padding: 8px 0 8px 12px;
                 white-space: nowrap;
             }
-            .webhook-secret-wrap {
-                align-items: center;
-                gap: 10px;
-                margin-bottom: 14px;
-            }
-            .webhook-secret-wrap .settings-input {
-                flex: 1;
-            }
-            .hmac-header-label {
-                font-size: 0.72rem;
-                color: var(--muted);
-                white-space: nowrap;
-            }
+
             .target-triggers {
                 display: flex;
                 flex-wrap: wrap;
@@ -1537,7 +1549,7 @@
             <div class="nav-in">
                 <div class="nav-brand"><span class="mark">DC</span>DrainCtl</div><span class="nav-ver" id="nav-ver" style="font-size:0.7rem;opacity:0.5;margin-left:8px"></span>
                 <div class="nav-right" id="ns"></div>
-                <div style="display:flex;align-items:center;gap:6px">
+                <div style="display:flex;align-items:center;gap:12px">
                     <button
                         class="btn-gear"
                         id="btn-gear"
@@ -5885,36 +5897,41 @@
                 }
                 var secretVal = !isNtfy && t.secret ? t.secret : "";
                 row.innerHTML =
-                    '<div class="target-row-head">' +
-                    '<select class="target-type" data-field="type"><option value="webhook"' +
-                    (t.type === "webhook" ? " selected" : "") +
-                    '>Webhook</option><option value="ntfy"' +
-                    (isNtfy ? " selected" : "") +
-                    '>Ntfy.sh</option><option value="email"' +
-                    (isEmail ? " selected" : "") +
-                    ">Email (SMTP)</option></select>" +
-                    '<span class="ntfy-prefix" style="display:' +
-                    (isNtfy ? "inline" : "none") +
-                    '">ntfy.sh /</span>' +
+                    '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
+                    '<div class="target-type-pills">' +
+                    '<button class="target-type-pill' + (t.type === "webhook" ? " active" : "") + '" data-type="webhook">Webhook</button>' +
+                    '<button class="target-type-pill' + (isNtfy ? " active" : "") + '" data-type="ntfy">Ntfy.sh</button>' +
+                    '<button class="target-type-pill' + (isEmail ? " active" : "") + '" data-type="email">Email</button>' +
+                    '</div>' +
+                    '<div class="target-field">' +
+                    '<label class="target-field-label">' + (isNtfy ? "Topic" : isEmail ? "SMTP URL" : "URL") + '</label>' +
+                    '<div style="display:flex;align-items:center;gap:0">' +
+                    '<span class="ntfy-prefix" style="display:' + (isNtfy ? "inline" : "none") + '">ntfy.sh /</span>' +
                     '<input class="settings-input target-url" data-field="url" type="text" value="' +
                     displayUrl.replace(/"/g, "&quot;") +
                     '" placeholder="' +
                     (isNtfy ? "my-drainctl-alerts" : isEmail ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...") +
-                    '">' +
-                    '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
-                    "</div>" +
-                    '<div class="webhook-secret-wrap" style="display:' +
-                    (isNtfy ? "none" : "flex") +
-                    '">' +
-                    '<div class="target-section-label target-section-label--nowrap">' + (isEmail ? "SMTP Password" : "HMAC Secret") + '</div>' +
+                    '" style="flex:1;min-width:0">' +
+                    '</div>' +
+                    '<div class="target-field-error" data-error="url">Please enter a valid URL.</div>' +
+                    '</div>' +
+                    '<div class="target-field target-secret-field" style="display:' + (isNtfy ? "none" : "block") + '">' +
+                    '<label class="target-field-label secret-label">' + (isEmail ? "SMTP Password" : "HMAC Secret") + '</label>' +
                     '<input class="settings-input" data-field="secret" type="password" value="' +
                     secretVal.replace(/"/g, "&quot;") +
                     '" placeholder="' + (isEmail ? "SMTP password" : "Optional signing secret") + '" autocomplete="new-password">' +
-                    '<span class="hmac-header-label" style="display:' + (isEmail ? "none" : "") + '">X-DrainCtl-Signature</span>' +
-                    "</div>" +
-                    '<div class="email-fields" style="display:' + (isEmail ? "flex" : "none") + ';gap:8px;margin-top:6px">' +
-                    '<input class="settings-input" data-field="from" type="text" value="' + (t.from || "").replace(/"/g, "&quot;") + '" placeholder="from@example.com" style="flex:1">' +
-                    '<input class="settings-input" data-field="to" type="text" value="' + ((t.to || []).join(", ")).replace(/"/g, "&quot;") + '" placeholder="to@example.com, ops@example.com" style="flex:2">' +
+                    '</div>' +
+                    '<div class="target-field email-fields" style="display:' + (isEmail ? "block" : "none") + '">' +
+                    '<div style="display:flex;gap:8px">' +
+                    '<div style="flex:1">' +
+                    '<label class="target-field-label">From</label>' +
+                    '<input class="settings-input" data-field="from" type="text" value="' + (t.from || "").replace(/"/g, "&quot;") + '" placeholder="from@example.com">' +
+                    '</div>' +
+                    '<div style="flex:2">' +
+                    '<label class="target-field-label">To (comma-separated)</label>' +
+                    '<input class="settings-input" data-field="to" type="text" value="' + ((t.to || []).join(", ")).replace(/"/g, "&quot;") + '" placeholder="to@example.com, ops@example.com">' +
+                    '</div>' +
+                    '</div>' +
                     '</div>' +
                     '<div class="target-section-label">Triggers</div>' +
                     '<p class="target-desc">Which events send a notification to this target.</p>' +
@@ -5969,36 +5986,47 @@
                     _cfgDirty = true;
                 });
 
-                var sel = row.querySelector(".target-type");
                 var urlInput = row.querySelector(".target-url");
                 var ntfyPrefix = row.querySelector(".ntfy-prefix");
-                var secretWrap = row.querySelector(".webhook-secret-wrap");
+                var secretField = row.querySelector(".target-secret-field");
+                var secretLabel = row.querySelector(".secret-label");
+                var secretInput = row.querySelector('[data-field="secret"]');
                 var emailFields = row.querySelector(".email-fields");
-                sel.addEventListener("change", function () {
-                    var isN = sel.value === "ntfy";
-                    var isE = sel.value === "email";
+
+                function applyType(type) {
+                    var isN = type === "ntfy";
+                    var isE = type === "email";
                     ntfyPrefix.style.display = isN ? "inline" : "none";
-                    secretWrap.style.display = isN ? "none" : "flex";
-                    var secretLabel = secretWrap.querySelector(".target-section-label");
+                    secretField.style.display = isN ? "none" : "block";
                     if (secretLabel) secretLabel.textContent = isE ? "SMTP Password" : "HMAC Secret";
-                    var secretPlaceholder = secretWrap.querySelector('[data-field="secret"]');
-                    if (secretPlaceholder) secretPlaceholder.placeholder = isE ? "SMTP password" : "Optional signing secret";
-                    var hmacLabel = secretWrap.querySelector(".hmac-header-label");
-                    if (hmacLabel) hmacLabel.style.display = isE ? "none" : "";
-                    if (emailFields) emailFields.style.display = isE ? "flex" : "none";
+                    if (secretInput) secretInput.placeholder = isE ? "SMTP password" : "Optional signing secret";
+                    if (emailFields) emailFields.style.display = isE ? "block" : "none";
+                    var urlLabel = row.querySelector(".target-field-label");
+                    if (urlLabel) urlLabel.textContent = isN ? "Topic" : isE ? "SMTP URL" : "URL";
                     urlInput.placeholder = isN ? "my-drainctl-alerts" : isE ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...";
-                    if (isN) {
-                        // Switching to ntfy: strip https://ntfy.sh/ prefix if present
-                        if (urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
-                            urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
+                }
+
+                row.querySelectorAll(".target-type-pill").forEach(function (pill) {
+                    pill.addEventListener("click", function () {
+                        row.querySelectorAll(".target-type-pill").forEach(function (p) {
+                            p.classList.remove("active");
+                        });
+                        pill.classList.add("active");
+                        var newType = pill.dataset.type;
+                        if (newType === "ntfy") {
+                            // Switching to ntfy: strip https://ntfy.sh/ prefix if present
+                            if (urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
+                                urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
+                            }
+                        } else if (newType === "webhook") {
+                            // Switching to webhook: clear field if it looks like a topic name, not a URL
+                            if (!urlInput.value.match(/^https?:\/\//)) {
+                                urlInput.value = "";
+                            }
                         }
-                    } else if (!isE) {
-                        // Switching to webhook: clear field if it looks like a topic name, not a URL
-                        if (!urlInput.value.match(/^https?:\/\//)) {
-                            urlInput.value = "";
-                        }
-                    }
-                    _cfgDirty = true;
+                        applyType(newType);
+                        _cfgDirty = true;
+                    });
                 });
 
                 // Trigger pill toggles
@@ -6035,7 +6063,6 @@
                 urlInput.addEventListener("input", function () {
                     _cfgDirty = true;
                 });
-                var secretInput = row.querySelector('[data-field="secret"]');
                 if (secretInput) {
                     secretInput.addEventListener("input", function () {
                         _cfgDirty = true;
@@ -6052,7 +6079,8 @@
                 rows.forEach((row) => {
                     const urlInput = row.querySelector('[data-field="url"]');
                     var url = urlInput.value.trim();
-                    const type = row.querySelector('[data-field="type"]').value;
+                    const activePill = row.querySelector(".target-type-pill.active");
+                    const type = activePill ? activePill.dataset.type : "webhook";
                     if (!url) {
                         urlInput.style.borderColor = "var(--red)";
                         valid = false;
