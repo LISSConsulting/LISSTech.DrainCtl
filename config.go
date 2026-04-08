@@ -105,6 +105,7 @@ func (t NotificationTarget) HasTrigger(trigger Trigger) bool {
 // PerformanceConfig holds performance monitoring settings.
 type PerformanceConfig struct {
 	Enabled           bool `json:"enabled"`             // default: false
+	ForceDisabled     bool `json:"force_disabled"`      // when true, dashboard cannot enable perf on this server
 	CPUWarnPct        int  `json:"cpu_warn_pct"`        // default: 70, -1=disabled
 	CPUCritPct        int  `json:"cpu_crit_pct"`        // default: 85, -1=disabled
 	MemWarnPct        int  `json:"mem_warn_pct"`        // default: 20 (% free), -1=disabled
@@ -542,6 +543,17 @@ func UpdateGracePeriod(minutes int, log LogFunc) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.GracePeriod = minutes
+	return saveConfigToFile(cfg, log)
+}
+
+// UpdatePerformanceConfig replaces the performance monitoring settings in config.json.
+func UpdatePerformanceConfig(perf PerformanceConfig, log LogFunc) error {
+	cfg, err := LoadConfig(log)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg.Performance = perf
+	cfg.Validate(log)
 	return saveConfigToFile(cfg, log)
 }
 
