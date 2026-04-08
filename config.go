@@ -46,12 +46,18 @@ const (
 type Trigger string
 
 const (
-	TriggerDrainOn        Trigger = "drain_on"
-	TriggerDrainOff       Trigger = "drain_off"
-	TriggerGraceEntered   Trigger = "grace_entered"
-	TriggerAlert          Trigger = "alert"
-	TriggerHealthy        Trigger = "healthy"
-	TriggerSessionWarning Trigger = "session_warning"
+	TriggerDrainOn            Trigger = "drain_on"
+	TriggerDrainOff           Trigger = "drain_off"
+	TriggerGraceEntered       Trigger = "grace_entered"
+	TriggerAlert              Trigger = "alert"
+	TriggerHealthy            Trigger = "healthy"
+	TriggerSessionWarning     Trigger = "session_warning"
+	TriggerCPUWarning         Trigger = "cpu_warning"
+	TriggerCPUCritical        Trigger = "cpu_critical"
+	TriggerInputDelayWarning  Trigger = "input_delay_warning"
+	TriggerInputDelayCritical Trigger = "input_delay_critical"
+	TriggerMemoryWarning      Trigger = "memory_warning"
+	TriggerMemoryCritical     Trigger = "memory_critical"
 )
 
 // DefaultTriggers is used when a target specifies no triggers.
@@ -62,6 +68,9 @@ var ValidTriggers = map[Trigger]bool{
 	TriggerDrainOn: true, TriggerDrainOff: true,
 	TriggerGraceEntered: true, TriggerAlert: true,
 	TriggerHealthy: true, TriggerSessionWarning: true,
+	TriggerCPUWarning: true, TriggerCPUCritical: true,
+	TriggerInputDelayWarning: true, TriggerInputDelayCritical: true,
+	TriggerMemoryWarning: true, TriggerMemoryCritical: true,
 }
 
 // ── NotificationTarget ───────────────────────────────────────────────────
@@ -93,6 +102,19 @@ func (t NotificationTarget) HasTrigger(trigger Trigger) bool {
 
 // ── Config (JSON file) ──────────────────────────────────────────────────
 
+// PerformanceConfig holds performance monitoring settings.
+type PerformanceConfig struct {
+	Enabled           bool `json:"enabled"`             // default: false
+	CPUWarnPct        int  `json:"cpu_warn_pct"`        // default: 70, -1=disabled
+	CPUCritPct        int  `json:"cpu_crit_pct"`        // default: 85, -1=disabled
+	MemWarnPct        int  `json:"mem_warn_pct"`        // default: 20 (% free), -1=disabled
+	MemCritPct        int  `json:"mem_crit_pct"`        // default: 10 (% free), -1=disabled
+	InputDelayWarnMS  int  `json:"input_delay_warn_ms"` // default: 50, -1=disabled
+	InputDelayCritMS  int  `json:"input_delay_crit_ms"` // default: 100, -1=disabled
+	CollectRemoteFX   bool `json:"collect_remotefx"`    // default: false
+	CollectPerSession bool `json:"collect_per_session"` // default: true
+}
+
 // Config is the top-level config file structure (config.json).
 type Config struct {
 	GracePeriod   int    `json:"grace_period"` // minutes
@@ -105,6 +127,8 @@ type Config struct {
 	Dashboard DashboardJSON `json:"dashboard"`
 
 	SessionWarningThreshold int `json:"session_warning_threshold"` // 0=disabled, 1-100
+
+	Performance PerformanceConfig `json:"performance"`
 }
 
 // DashboardJSON holds dashboard settings in config.json.
@@ -128,6 +152,7 @@ type ServiceConfig struct {
 	PollInterval            time.Duration
 	AuditPath               string
 	SessionWarningThreshold int
+	Performance             PerformanceConfig
 }
 
 // DashboardConfig holds runtime dashboard parameters.
@@ -159,6 +184,7 @@ func DefaultConfig() *Config {
 		Notifications:           []NotificationTarget{},
 		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup},
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
+		Performance:             PerformanceConfig{CollectPerSession: true},
 	}
 }
 
@@ -172,6 +198,7 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 		PollInterval:            time.Duration(c.PollInterval) * time.Second,
 		AuditPath:               c.AuditPath,
 		SessionWarningThreshold: c.SessionWarningThreshold,
+		Performance:             c.Performance,
 	}
 }
 
