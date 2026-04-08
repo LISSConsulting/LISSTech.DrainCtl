@@ -164,6 +164,6 @@ func pdhGetFormattedDoubleArray(counter syscall.Handle) ([]float64, error) {
 // pdhCloseQuery releases a PDH query handle and all associated counters.
 func pdhCloseQuery(query syscall.Handle) {
 	if query != 0 {
-		procPdhCloseQuery.Call(uintptr(query))
+		_, _, _ = procPdhCloseQuery.Call(uintptr(query))
 	}
 }
