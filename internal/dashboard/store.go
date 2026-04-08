@@ -177,6 +177,7 @@ func GetNotifyConfig(log dc.LogFunc) (*RemoteNotifyConfig, error) {
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
+		Performance:             &cfg.Performance,
 	}, nil
 }
 
