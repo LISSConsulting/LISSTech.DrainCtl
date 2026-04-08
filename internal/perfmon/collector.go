@@ -5,7 +5,6 @@ package perfmon
 import (
 	"fmt"
 	"syscall"
-	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
@@ -179,13 +178,10 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 
 // Prime performs the first PDH collection to seed rate counters.
 // Must be called once before Collect() returns meaningful data.
-// Rate counters (CPU, pages/sec, disk queue, TCP retrans) need two
-// PdhCollectQueryData calls with a real time gap to compute a delta.
+// Rate counters need two samples to compute a delta — the first real
+// Collect() provides the second sample. Values will be zero/invalid
+// on that first Collect() and valid from the second onward.
 func (c *Collector) Prime() error {
-	if err := pdhCollectQueryData(c.query); err != nil {
-		return err
-	}
-	time.Sleep(1500 * time.Millisecond)
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
