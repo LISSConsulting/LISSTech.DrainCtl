@@ -219,7 +219,9 @@ func (c *Collector) Prime() error {
 			}
 		}
 	}
-	// Re-collect after any counter changes so next Collect() has a clean baseline.
+	// Re-collect twice after counter changes: localized counters also need
+	// two PdhCollectQueryData calls to establish a rate counter baseline.
+	_ = pdhCollectQueryData(c.query)
 	_ = pdhCollectQueryData(c.query)
 
 	c.primed = true
