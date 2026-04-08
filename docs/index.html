@@ -383,37 +383,66 @@
             }
 
             /* ── Features ─────────────────────────────────────────── */
-            .features-hero {
-                display: grid;
-                grid-template-columns: 1fr 1fr 1fr 1fr;
-                gap: 18px;
-                margin-bottom: 18px;
-            }
-            .feature-h {
-                padding: 32px;
-                border-left: 5px solid var(--accent);
-            }
-            .feature-h .icon {
-                font-size: 2rem;
-                margin-bottom: 14px;
-                display: block;
-            }
-            .feature-h h3 {
-                font-size: 1.15rem;
-                font-family: "Fraunces", serif;
-                font-weight: 800;
-                margin-bottom: 8px;
-            }
-            .feature-h p {
-                font-size: 0.92rem;
-                color: var(--muted);
-                line-height: 1.6;
-            }
-
-            .features-grid {
+            .bento-grid {
                 display: grid;
                 grid-template-columns: repeat(4, 1fr);
                 gap: 18px;
+                margin-top: 40px;
+            }
+            .bento-card {
+                background: var(--card);
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                padding: 28px;
+            }
+            .bento-hero {
+                grid-column: span 2;
+                padding: 36px;
+                border-left: 5px solid var(--accent);
+            }
+            .bento-hero .bento-title {
+                font-size: 1.3rem;
+            }
+            .bento-hero .bento-icon {
+                font-size: 2.4rem;
+            }
+            .bento-wide {
+                grid-column: span 3;
+                background: var(--accent);
+                color: #fff;
+                display: flex;
+                align-items: center;
+                gap: 32px;
+                padding: 32px 40px;
+            }
+            .bento-wide .bento-desc {
+                color: rgba(255,255,255,0.85);
+            }
+            .bento-wide .bento-title {
+                color: #fff;
+            }
+            .bento-icon {
+                font-size: 1.8rem;
+                margin-bottom: 12px;
+                display: block;
+            }
+            .bento-title {
+                font-family: "Work Sans", sans-serif;
+                font-size: 1.05rem;
+                font-weight: 700;
+                margin-bottom: 8px;
+                color: var(--text);
+            }
+            .bento-desc {
+                font-size: 0.88rem;
+                color: var(--muted);
+                line-height: 1.6;
+            }
+            .features-grid--2col {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 18px;
+                margin-bottom: 0;
             }
             .feature {
                 padding: 24px 26px;
@@ -441,10 +470,6 @@
                 color: var(--muted);
                 line-height: 1.55;
             }
-            .features-grid--2col {
-                grid-template-columns: repeat(2, 1fr);
-                margin-bottom: 0;
-            }
             .dashboard-ss {
                 margin-bottom: 28px;
             }
@@ -460,26 +485,16 @@
                 gap: 14px;
                 flex-wrap: wrap;
             }
-            @media (max-width: 768px) {
-                .features-hero {
-                    grid-template-columns: 1fr 1fr;
-                }
-                .features-grid {
-                    grid-template-columns: 1fr 1fr;
-                }
+            @media (max-width: 900px) {
+                .bento-grid { grid-template-columns: repeat(2, 1fr); }
+                .bento-hero { grid-column: span 2; }
+                .bento-wide { grid-column: span 2; flex-direction: column; text-align: center; }
+                .features-grid--2col { grid-template-columns: 1fr 1fr; }
             }
-            @media (max-width: 640px) {
-                .features-hero {
-                    grid-template-columns: 1fr;
-                }
-            }
-            @media (max-width: 480px) {
-                .features-grid {
-                    grid-template-columns: 1fr;
-                }
-                .features-grid--2col {
-                    grid-template-columns: 1fr;
-                }
+            @media (max-width: 600px) {
+                .bento-grid { grid-template-columns: 1fr; }
+                .bento-hero, .bento-wide { grid-column: span 1; }
+                .features-grid--2col { grid-template-columns: 1fr; }
             }
 
             /* ── How it works ─────────────────────────────────────── */
@@ -950,70 +965,72 @@
                 <div class="section-desc">
                     One binary. One service. Real-time drain mode and performance visibility across your entire RDSH farm &mdash; with a dashboard to prove it.
                 </div>
-                <div class="features-hero">
-                    <div class="feature-h card">
-                        <span class="icon">&#9889;</span>
-                        <h3>Instant Detection</h3>
-                        <p>
+                <div class="bento-grid">
+                    <!-- Row 1 -->
+                    <div class="bento-card bento-hero">
+                        <span class="bento-icon">&#9889;</span>
+                        <div class="bento-title">Instant Detection</div>
+                        <div class="bento-desc">
                             The moment someone runs <code>chglogon /drain</code>, the service knows. No polling delay
                             &mdash; Windows notifies DrainCtl directly through the kernel.
-                        </p>
+                        </div>
                     </div>
-                    <div class="feature-h card">
-                        <span class="icon">&#128100;</span>
-                        <h3>Who Changed It</h3>
-                        <p>
+                    <div class="bento-card">
+                        <span class="bento-icon">&#128100;</span>
+                        <div class="bento-title">Who Changed It</div>
+                        <div class="bento-desc">
                             DrainCtl tells you the exact user account that enabled drain mode. Not just that it changed
                             &mdash; who did it, and when.
-                        </p>
+                        </div>
                     </div>
-                    <div class="feature-h card">
-                        <span class="icon">&#128101;</span>
-                        <h3>Session Tracking</h3>
-                        <p>
+                    <div class="bento-card">
+                        <span class="bento-icon">&#128101;</span>
+                        <div class="bento-title">Session Tracking</div>
+                        <div class="bento-desc">
                             See active and disconnected sessions on every server. Set a capacity threshold and get
                             alerted before your farm runs out of slots.
-                        </p>
+                        </div>
                     </div>
-                    <div class="feature-h card">
-                        <span class="icon">&#128200;</span>
-                        <h3>Performance Monitoring</h3>
-                        <p>
-                            CPU, memory, disk I/O, input delay, and RemoteFX — collected every poll cycle through the Windows PDH API. Threshold alerts fire before users notice.
-                        </p>
-                    </div>
-                </div>
-
-                <div class="features-grid">
-                    <div class="feature card">
-                        <div class="icon">&#127760;</div>
-                        <h3>Farm Dashboard</h3>
-                        <p>
+                    <!-- Row 2 -->
+                    <div class="bento-card">
+                        <span class="bento-icon">&#127760;</span>
+                        <div class="bento-title">Farm Dashboard</div>
+                        <div class="bento-desc">
                             One page for your entire RDSH farm. Live status, session gauges, state history chart, and
                             event log &mdash; secured with Kerberos SSO.
-                        </p>
+                        </div>
                     </div>
-                    <div class="feature card">
-                        <div class="icon">&#128276;</div>
-                        <h3>Smart Alerts</h3>
-                        <p>
-                            12 trigger types &mdash; drain mode, session capacity, CPU, memory, input delay &mdash; each with its own threshold. Unlimited webhook, ntfy.sh, and email (SMTP) targets with per-target repeat intervals. Two consecutive breaches required for CPU/memory to eliminate flap noise.
-                        </p>
+                    <div class="bento-card">
+                        <span class="bento-icon">&#128276;</span>
+                        <div class="bento-title">Smart Alerts</div>
+                        <div class="bento-desc">
+                            12 trigger types &mdash; drain mode, session capacity, CPU, memory, input delay &mdash; each with its own threshold. Unlimited webhook, ntfy.sh, and email targets with per-target repeat intervals. Two consecutive breaches required to eliminate flap noise.
+                        </div>
                     </div>
-                    <div class="feature card">
-                        <div class="icon">&#128203;</div>
-                        <h3>90-Day Audit Trail</h3>
-                        <p>
+                    <div class="bento-card bento-hero">
+                        <span class="bento-icon">&#128200;</span>
+                        <div class="bento-title">Performance Monitoring</div>
+                        <div class="bento-desc">
+                            CPU, memory, disk I/O, input delay, and RemoteFX &mdash; collected every poll cycle through the Windows PDH API. Threshold alerts fire before users notice.
+                        </div>
+                    </div>
+                    <!-- Row 3 -->
+                    <div class="bento-card">
+                        <span class="bento-icon">&#128203;</span>
+                        <div class="bento-title">90-Day Audit Trail</div>
+                        <div class="bento-desc">
                             Every state change logged with timestamps, durations, and attribution. Query it from the
                             CLI, PowerShell, or the dashboard.
-                        </p>
+                        </div>
                     </div>
-                    <div class="feature card">
-                        <div class="icon">&#128274;</div>
-                        <h3>Enterprise Ready</h3>
-                        <p>
-                            DNS SRV discovery &mdash; install and walk away. EV code-signed binaries, DLLs, and MSIs. Kerberos SSO. Virtual service account (NT SERVICE\DrainCtl). 12 native PowerShell cmdlets + CLI with JSON output for any RMM.
-                        </p>
+                    <div class="bento-card bento-wide">
+                        <span class="bento-icon" style="font-size:2.4rem;margin-bottom:0;flex-shrink:0">&#128274;</span>
+                        <div>
+                            <div class="bento-title">Enterprise Ready</div>
+                            <div class="bento-desc">
+                                DNS SRV discovery &mdash; install and walk away. EV code-signed binaries, DLLs, and MSIs. Kerberos SSO. Virtual service account (NT SERVICE\DrainCtl). 12 native PowerShell cmdlets + CLI with JSON output for any RMM.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
