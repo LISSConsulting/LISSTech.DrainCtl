@@ -18,8 +18,9 @@ import (
 
 // NotifyState tracks per-target notification timing for repeat intervals.
 type NotifyState struct {
-	LastAlertNotify       map[string]time.Time // key = target URL (alert trigger)
-	LastSessionWarnNotify map[string]time.Time // key = target URL (session_warning trigger)
+	LastAlertNotify       map[string]time.Time             // key = target URL (alert trigger)
+	LastSessionWarnNotify map[string]time.Time             // key = target URL (session_warning trigger)
+	LastPerfNotify        map[string]map[Trigger]time.Time // key = target URL -> trigger -> last sent
 }
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
@@ -39,6 +40,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	}
 	if state.LastSessionWarnNotify == nil {
 		state.LastSessionWarnNotify = make(map[string]time.Time)
+	}
+	if state.LastPerfNotify == nil {
+		state.LastPerfNotify = make(map[string]map[Trigger]time.Time)
 	}
 
 	// Reset alert tracking when returning to healthy.
@@ -76,36 +80,32 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	if result.Sessions != nil {
 		payload["sessions"] = result.Sessions
 	}
+	if result.Performance != nil {
+		payload["performance"] = result.Performance
+	}
 
 	for _, target := range targets {
 		if target.URL == "" || !target.HasTrigger(trigger) {
 			continue
 		}
 
-		// For repeating triggers (alert, session_warning), check per-target repeat interval.
-		// alert uses LastAlertNotify; session_warning uses LastSessionWarnNotify so its
-		// suppression window survives healthy/drain_off transitions independently.
-		if trigger == TriggerAlert || trigger == TriggerSessionWarning {
-			trackMap := state.LastAlertNotify
-			if trigger == TriggerSessionWarning {
-				trackMap = state.LastSessionWarnNotify
-			}
-
+		// For repeating triggers (alert, session_warning, perf triggers), check
+		// per-target repeat interval.
+		if isRepeatTrigger(trigger) {
 			now := time.Now()
 			repeatInterval := time.Duration(target.RepeatMinutes) * time.Minute
-			lastSent := trackMap[target.URL]
+			lastSent := getLastSent(state, target.URL, trigger)
 
 			if repeatInterval > 0 {
 				if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
 					continue
 				}
 			} else {
-				// RepeatMinutes == 0 means fire once only.
 				if !lastSent.IsZero() {
 					continue
 				}
 			}
-			trackMap[target.URL] = now
+			setLastSent(state, target.URL, trigger, now)
 		}
 
 		// Dispatch to backend.
@@ -293,6 +293,18 @@ func ntfyTitle(trigger Trigger, host string) string {
 		label = "All Connections Allowed"
 	case TriggerSessionWarning:
 		label = "Session Utilization Warning"
+	case TriggerCPUWarning:
+		label = "CPU Warning"
+	case TriggerCPUCritical:
+		label = "CPU Critical"
+	case TriggerInputDelayWarning:
+		label = "Input Delay Warning"
+	case TriggerInputDelayCritical:
+		label = "Input Delay Critical"
+	case TriggerMemoryWarning:
+		label = "Memory Warning"
+	case TriggerMemoryCritical:
+		label = "Memory Critical"
 	default:
 		label = string(trigger)
 	}
@@ -343,6 +355,21 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 				host, result.Sessions.UtilizationPct, result.Sessions.TotalSessions, result.Sessions.MaxSessions)
 		}
 		return fmt.Sprintf("%s \u2014 Session utilization warning", host)
+	case TriggerCPUWarning, TriggerCPUCritical:
+		if result.Performance != nil {
+			return fmt.Sprintf("%s \u2014 CPU at %.0f%%", host, result.Performance.CPUPct)
+		}
+		return fmt.Sprintf("%s \u2014 %s", host, trigger)
+	case TriggerMemoryWarning, TriggerMemoryCritical:
+		if result.Performance != nil {
+			return fmt.Sprintf("%s \u2014 Available memory %.0f MB", host, result.Performance.MemAvailMB)
+		}
+		return fmt.Sprintf("%s \u2014 %s", host, trigger)
+	case TriggerInputDelayWarning, TriggerInputDelayCritical:
+		if result.Performance != nil {
+			return fmt.Sprintf("%s \u2014 Input delay P95 %.0fms", host, result.Performance.InputDelayP95)
+		}
+		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	default:
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	}
@@ -387,4 +414,68 @@ func sendNtfy(url string, title string, message string, priority string, tags st
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// perfTriggers is the set of performance-related triggers that use repeat intervals.
+var perfTriggers = map[Trigger]bool{
+	TriggerCPUWarning:         true,
+	TriggerCPUCritical:        true,
+	TriggerInputDelayWarning:  true,
+	TriggerInputDelayCritical: true,
+	TriggerMemoryWarning:      true,
+	TriggerMemoryCritical:     true,
+}
+
+// isRepeatTrigger returns true for triggers that use per-target repeat intervals.
+func isRepeatTrigger(t Trigger) bool {
+	return t == TriggerAlert || t == TriggerSessionWarning || perfTriggers[t]
+}
+
+// getLastSent returns the last time a notification was sent for a given target+trigger.
+func getLastSent(state *NotifyState, url string, trigger Trigger) time.Time {
+	switch trigger {
+	case TriggerAlert:
+		return state.LastAlertNotify[url]
+	case TriggerSessionWarning:
+		return state.LastSessionWarnNotify[url]
+	default:
+		if m, ok := state.LastPerfNotify[url]; ok {
+			return m[trigger]
+		}
+		return time.Time{}
+	}
+}
+
+// setLastSent records the last time a notification was sent for a given target+trigger.
+func setLastSent(state *NotifyState, url string, trigger Trigger, t time.Time) {
+	switch trigger {
+	case TriggerAlert:
+		state.LastAlertNotify[url] = t
+	case TriggerSessionWarning:
+		state.LastSessionWarnNotify[url] = t
+	default:
+		if state.LastPerfNotify[url] == nil {
+			state.LastPerfNotify[url] = make(map[Trigger]time.Time)
+		}
+		state.LastPerfNotify[url][trigger] = t
+	}
+}
+
+// ResetPerfCooldown clears per-target cooldown entries for all performance
+// triggers that are no longer active.
+func ResetPerfCooldown(state *NotifyState, activeTriggers []Trigger) {
+	active := make(map[Trigger]bool, len(activeTriggers))
+	for _, t := range activeTriggers {
+		active[t] = true
+	}
+	for url, m := range state.LastPerfNotify {
+		for t := range m {
+			if !active[t] {
+				delete(m, t)
+			}
+		}
+		if len(m) == 0 {
+			delete(state.LastPerfNotify, url)
+		}
+	}
 }

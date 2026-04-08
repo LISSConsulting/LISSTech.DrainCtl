@@ -8,6 +8,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
@@ -16,7 +17,7 @@ import (
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, log dc.LogFunc, elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, log dc.LogFunc, elog *eventlog.Log) {
 	checkStart := time.Now()
 	state, err := dc.ReadDrainMode()
 	if err != nil {
@@ -73,6 +74,17 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	// Session tracking.
 	sess := dc.GetSessionSummary()
 
+	// Performance counters (service-mode only).
+	var perfSnap *dc.PerfSnapshot
+	if perfCollector != nil {
+		snap, err := perfCollector.Collect()
+		if err != nil {
+			dc.LogMsg(log, dc.LvlWRN, "perfmon collect failed", fmt.Sprintf("error=%q", err))
+		} else {
+			perfSnap = snap
+		}
+	}
+
 	rec := &dc.AuditRecord{
 		Timestamp:   time.Now(),
 		Host:        state.Host,
@@ -88,6 +100,10 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		rec.DisconnectedSessions = sess.DisconnectedSessions
 		rec.TotalSessions = sess.TotalSessions
 		rec.MaxSessions = sess.MaxSessions
+	}
+	if perfSnap != nil {
+		rec.CPUPct = perfSnap.CPUPct
+		rec.InputDelayMax = perfSnap.InputDelayMax
 	}
 	st.Append(rec)
 
@@ -147,6 +163,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		TransitionFrom:       transitionFrom,
 		ChangedBy:            changedBy,
 		Sessions:             sess,
+		Performance:          perfSnap,
 		Message:              message,
 		ExitCode:             exitCode,
 	}
@@ -183,6 +200,18 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 			// (uncapped server): in both cases we cannot confirm utilization is
 			// safe, so keeping the cooldown avoids spurious re-notifications.
 			resetSessionWarnCooldown(notifyState, cfg)
+		}
+
+		// Performance threshold evaluation.
+		if perfSnap != nil && perfTriggerState != nil {
+			perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
+			for _, pt := range perfTriggers {
+				triggers = append(triggers, pt)
+				// Override message with performance-specific detail.
+				result.Message = perfmon.TriggerMessage(pt, perfSnap, cfg.Performance)
+			}
+			// Reset cooldowns for perf triggers that are no longer active.
+			dc.ResetPerfCooldown(notifyState, perfTriggers)
 		}
 
 		for _, trigger := range triggers {
@@ -230,6 +259,11 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 	for k := range state.LastSessionWarnNotify {
 		if !active[k] {
 			delete(state.LastSessionWarnNotify, k)
+		}
+	}
+	for k := range state.LastPerfNotify {
+		if !active[k] {
+			delete(state.LastPerfNotify, k)
 		}
 	}
 }
