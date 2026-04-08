@@ -935,17 +935,6 @@
                         >Download MSI</a
                     >
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
-                    <div style="position:relative;display:inline-block">
-                        <button class="btn btn-ghost" onclick="document.getElementById('share-menu').style.display=document.getElementById('share-menu').style.display==='block'?'none':'block'" style="cursor:pointer">&#x1F517; Share</button>
-                        <div id="share-menu" style="display:none;position:absolute;top:100%;left:0;margin-top:8px;background:var(--card);border:var(--bw) solid var(--border);border-radius:var(--r);box-shadow:var(--so) var(--so) 0 var(--shadow);padding:8px 0;min-width:180px;z-index:100">
-                            <a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Flissconsulting.github.io%2FLISSTech.DrainCtl%2F" target="_blank" rel="noopener" style="display:block;padding:8px 18px;color:var(--fg);text-decoration:none;font-size:0.85rem;font-weight:600">LinkedIn</a>
-                            <a href="https://twitter.com/intent/tweet?text=DrainCtl%20%E2%80%94%20Real-time%20Remote%20Desktop%20Services%20drain%20mode%2C%20session%2C%20and%20performance%20monitoring.%20One%20service%2C%20one%20dashboard%2C%20instant%20alerts.&url=https%3A%2F%2Flissconsulting.github.io%2FLISSTech.DrainCtl%2F" target="_blank" rel="noopener" style="display:block;padding:8px 18px;color:var(--fg);text-decoration:none;font-size:0.85rem;font-weight:600">Twitter / X</a>
-                            <a href="mailto:?subject=DrainCtl%20%E2%80%94%20Remote%20Desktop%20Services%20Monitor&body=Real-time%20drain%20mode%2C%20session%2C%20and%20performance%20monitoring%20for%20RDS%20farms.%0A%0Ahttps%3A%2F%2Flissconsulting.github.io%2FLISSTech.DrainCtl%2F" style="display:block;padding:8px 18px;color:var(--fg);text-decoration:none;font-size:0.85rem;font-weight:600">Email</a>
-                            <a href="https://teams.microsoft.com/share?href=https%3A%2F%2Flissconsulting.github.io%2FLISSTech.DrainCtl%2F&msgText=DrainCtl%20%E2%80%94%20Real-time%20Remote%20Desktop%20Services%20drain%20mode%2C%20session%2C%20and%20performance%20monitoring." target="_blank" rel="noopener" style="display:block;padding:8px 18px;color:var(--fg);text-decoration:none;font-size:0.85rem;font-weight:600">Microsoft Teams</a>
-                            <div style="border-top:1px solid var(--border);margin:4px 0"></div>
-                            <a href="#" onclick="navigator.clipboard.writeText('https://lissconsulting.github.io/LISSTech.DrainCtl/');this.textContent='✓ Copied!';setTimeout(function(){this.textContent='Copy link'},1500);return false" style="display:block;padding:8px 18px;color:var(--fg);text-decoration:none;font-size:0.85rem;font-weight:600">Copy link</a>
-                        </div>
-                    </div>
                 </div>
                 <div class="hero-ps">
                     <div class="ps-oneliner">
@@ -1430,13 +1419,6 @@
         </footer>
 
         <script>
-            document.addEventListener("click", function(e) {
-                var menu = document.getElementById("share-menu");
-                if (menu && !e.target.closest("#share-menu") && !e.target.closest("[onclick*=share-menu]")) {
-                    menu.style.display = "none";
-                }
-            });
-
             (function () {
                 var toggle = document.getElementById("nav-toggle");
                 var links = document.getElementById("nav-links");
