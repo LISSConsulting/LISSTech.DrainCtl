@@ -715,6 +715,77 @@
                 display: block;
             }
 
+            /* Performance section */
+            .srv-perf {
+                margin-top: 8px;
+                border-top: 1px solid var(--border);
+                padding-top: 8px;
+            }
+            .perf-toggle {
+                font-size: 0.72rem;
+                font-family: "JetBrains Mono", monospace;
+                color: var(--muted);
+                cursor: pointer;
+                user-select: none;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .perf-toggle:hover {
+                color: var(--fg);
+            }
+            .perf-toggle .arrow {
+                display: inline-block;
+                transition: transform 0.15s;
+                font-size: 0.6rem;
+            }
+            .perf-toggle.open .arrow {
+                transform: rotate(90deg);
+            }
+            .perf-detail {
+                display: none;
+                margin-top: 6px;
+            }
+            .perf-detail.show {
+                display: block;
+            }
+            .perf-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 0.72rem;
+                font-family: "JetBrains Mono", monospace;
+                padding: 1px 0;
+            }
+            .perf-row .perf-k {
+                color: var(--muted);
+            }
+            .perf-row .perf-v {
+                font-weight: 600;
+            }
+            .perf-v--warn {
+                color: var(--amber) !important;
+            }
+            .perf-v--crit {
+                color: var(--red) !important;
+            }
+            .perf-gauges {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px;
+                margin-top: 4px;
+            }
+            .perf-mini-gauge {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .perf-mini-gauge .gauge-bar {
+                height: 6px;
+            }
+            .perf-mini-gauge .gauge-label {
+                font-size: 0.62rem;
+            }
+
             /* Footer */
             .footer {
                 background: var(--bg);
@@ -5236,6 +5307,51 @@
                             '<div class="srv-row"><span class="srv-k">Sessions</span><span class="srv-v">' +
                             sessVal +
                             "</span></div>";
+                    }
+                    // Performance section
+                    const perf = r && r.performance;
+                    if (perf) {
+                        const perfId = "perf-" + esc(srv.hostname).replace(/[^a-zA-Z0-9]/g, "_");
+                        html += '<div class="srv-perf">';
+                        html += '<div class="perf-toggle" onclick="var d=document.getElementById(\'' + perfId + '\');d.classList.toggle(\'show\');this.classList.toggle(\'open\')">';
+                        html += '<span class="arrow">\u25B6</span> Performance</div>';
+                        html += '<div class="perf-detail" id="' + perfId + '">';
+                        // CPU gauge
+                        const cpuCls = perf.cpu_pct >= 85 ? "alert" : perf.cpu_pct >= 70 ? "grace" : "ok";
+                        const cpuValCls = perf.cpu_pct >= 85 ? " perf-v--crit" : perf.cpu_pct >= 70 ? " perf-v--warn" : "";
+                        html += '<div class="perf-gauges">';
+                        html += '<div class="perf-mini-gauge"><div class="gauge-bar"><div class="gauge-fill ' + cpuCls + '" style="width:' + Math.min(perf.cpu_pct, 100) + '%"></div></div>';
+                        html += '<span class="gauge-label">CPU ' + perf.cpu_pct.toFixed(0) + '%</span></div>';
+                        // Memory gauge
+                        if (perf.mem_total_mb > 0) {
+                            const memUsedPct = Math.round((1 - perf.mem_avail_mb / perf.mem_total_mb) * 100);
+                            const memFreePct = Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100);
+                            const memCls = memFreePct <= 10 ? "alert" : memFreePct <= 20 ? "grace" : "ok";
+                            html += '<div class="perf-mini-gauge"><div class="gauge-bar"><div class="gauge-fill ' + memCls + '" style="width:' + Math.min(memUsedPct, 100) + '%"></div></div>';
+                            html += '<span class="gauge-label">Mem ' + memFreePct + '% free</span></div>';
+                        }
+                        html += '</div>';
+                        // Input delay
+                        if (perf.input_delay_p95_ms > 0 || perf.input_delay_max_ms > 0) {
+                            const idCls = perf.input_delay_p95_ms >= 100 ? " perf-v--crit" : perf.input_delay_p95_ms >= 50 ? " perf-v--warn" : "";
+                            html += '<div class="perf-row"><span class="perf-k">Input Delay P95</span><span class="perf-v' + idCls + '">' + perf.input_delay_p95_ms.toFixed(0) + 'ms</span></div>';
+                            html += '<div class="perf-row"><span class="perf-k">Input Delay Max</span><span class="perf-v">' + perf.input_delay_max_ms.toFixed(0) + 'ms</span></div>';
+                        }
+                        // Disk queue
+                        if (perf.disk_queue > 0) {
+                            const dqCls = perf.disk_queue >= 4 ? " perf-v--crit" : perf.disk_queue >= 2 ? " perf-v--warn" : "";
+                            html += '<div class="perf-row"><span class="perf-k">Disk Queue</span><span class="perf-v' + dqCls + '">' + perf.disk_queue.toFixed(1) + '</span></div>';
+                        }
+                        // Pages/sec
+                        if (perf.pages_sec > 0) {
+                            const pgCls = perf.pages_sec >= 1000 ? " perf-v--crit" : perf.pages_sec >= 500 ? " perf-v--warn" : "";
+                            html += '<div class="perf-row"><span class="perf-k">Pages/sec</span><span class="perf-v' + pgCls + '">' + perf.pages_sec.toFixed(0) + '</span></div>';
+                        }
+                        // Session CPU P95
+                        if (perf.session_cpu_p95_pct > 0) {
+                            html += '<div class="perf-row"><span class="perf-k">Session CPU P95</span><span class="perf-v">' + perf.session_cpu_p95_pct.toFixed(0) + '%</span></div>';
+                        }
+                        html += '</div></div>';
                     }
                     html +=
                         '</div><div class="srv-act"><button class="btn-hist" data-host="' +
