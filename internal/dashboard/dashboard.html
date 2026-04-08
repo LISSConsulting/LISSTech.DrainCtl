@@ -5231,6 +5231,82 @@
                 return '<span class="has-tip">' + esc(label) + '<span class="tip">' + esc(text) + '</span></span>';
             }
 
+            function drawSparks(container) {
+                container.querySelectorAll('canvas[data-spark]').forEach(function(c) {
+                    var vals = JSON.parse(c.dataset.values || '[]');
+                    var max = parseFloat(c.dataset.max) || 100;
+                    var color = c.dataset.color || '#5d8a6e';
+                    var dpr = window.devicePixelRatio || 1;
+                    var w = c.offsetWidth, h = c.offsetHeight;
+                    if (!w || !h) return;
+                    c.width = w * dpr; c.height = h * dpr;
+                    var ctx = c.getContext('2d');
+                    ctx.scale(dpr, dpr);
+                    var n = vals.length; if (n < 2) return;
+                    var step = w / (n - 1), pad = 2;
+                    ctx.beginPath(); ctx.moveTo(0, h);
+                    for (var i = 0; i < n; i++) {
+                        var x = i * step;
+                        var y = h - pad - (Math.min(vals[i], max) / max) * (h - pad * 2);
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(w, h); ctx.closePath();
+                    ctx.fillStyle = color + '22'; ctx.fill();
+                    ctx.beginPath();
+                    for (var i = 0; i < n; i++) {
+                        var x = i * step;
+                        var y = h - pad - (Math.min(vals[i], max) / max) * (h - pad * 2);
+                        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+                });
+            }
+
+            function loadSparkData(hostname, detailRow) {
+                fetch('/api/v1/history/' + encodeURIComponent(hostname) + '?limit=20')
+                    .then(function(r) { return r.ok ? r.json() : []; })
+                    .then(function(entries) {
+                        if (!entries || !entries.length) return;
+                        var rev = entries.slice().reverse();
+                        var sessVals = [], cpuVals = [], memVals = [];
+                        var dqVals = [], idVals = [], tcpVals = [];
+                        rev.forEach(function(e) {
+                            sessVals.push(e.max_sessions > 0 ? (e.total_sessions / e.max_sessions * 100) : 0);
+                            cpuVals.push(e.cpu_pct || 0);
+                            var memUsed = (e.mem_total_mb && e.mem_avail_mb) ? ((e.mem_total_mb - e.mem_avail_mb) / e.mem_total_mb * 100) : 0;
+                            memVals.push(memUsed);
+                            dqVals.push(e.disk_queue || 0);
+                            idVals.push(e.input_delay_max_ms || 0);
+                            tcpVals.push(e.tcp_retrans_sec || 0);
+                        });
+                        var canvases = detailRow.querySelectorAll('canvas[data-spark]');
+                        var sets = [sessVals, cpuVals, memVals, dqVals, idVals, tcpVals];
+                        canvases.forEach(function(c, i) {
+                            if (sets[i]) {
+                                c.dataset.values = JSON.stringify(sets[i]);
+                                // Set appropriate max for each metric
+                                if (i === 0) c.dataset.max = '100'; // sessions %
+                                else if (i <= 2) c.dataset.max = '100'; // cpu/mem %
+                                else if (i === 3) c.dataset.max = String(Math.max(1, Math.max.apply(null, sets[i]) * 2 || 1)); // disk queue
+                                else if (i === 4) c.dataset.max = String(Math.max(100, Math.max.apply(null, sets[i]) * 1.2 || 100)); // input delay ms
+                                else c.dataset.max = String(Math.max(5, Math.max.apply(null, sets[i]) * 2 || 5)); // tcp retrans
+                            }
+                        });
+                        // Compute time label from oldest entry
+                        if (rev.length > 1) {
+                            var oldest = new Date(rev[0].timestamp);
+                            var newest = new Date(rev[rev.length - 1].timestamp);
+                            var diffMin = Math.round((newest - oldest) / 60000);
+                            var label = diffMin >= 60 ? Math.round(diffMin / 60) + 'h ago' : diffMin + 'm ago';
+                            detailRow.querySelectorAll('.d-spark-labels span:first-child').forEach(function(s) {
+                                s.textContent = label;
+                            });
+                        }
+                        drawSparks(detailRow);
+                    })
+                    .catch(function() { /* sparklines stay empty on error */ });
+            }
+
             function relSec(iso) {
                 if (!iso) return 999999;
                 var d = new Date(iso);
@@ -5517,9 +5593,9 @@
                         html += '</div>';
                         // Sparkline row (canvases drawn by Task 4)
                         html += '<div class="d-spark-row">';
-                        html += '<div class="d-spark-cell"><canvas data-spark="sess" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
-                        html += '<div class="d-spark-cell"><canvas data-spark="cpu" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
-                        html += '<div class="d-spark-cell"><canvas data-spark="mem" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="sess" data-host="' + esc(srv.hostname) + '" data-color="#5d8a6e"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="cpu" data-host="' + esc(srv.hostname) + '" data-color="#5d8a6e"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="mem" data-host="' + esc(srv.hostname) + '" data-color="#5d8a6e"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
                         html += '</div>';
                         // Legend
                         html += '<div class="d-legend">';
@@ -5564,9 +5640,9 @@
                         html += '</div>';
                         // Sparkline row (canvases drawn by Task 4)
                         html += '<div class="d-spark-row">';
-                        html += '<div class="d-spark-cell"><canvas data-spark="dq" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
-                        html += '<div class="d-spark-cell"><canvas data-spark="id" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
-                        html += '<div class="d-spark-cell"><canvas data-spark="tcp" data-host="' + esc(srv.hostname) + '"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="dq" data-host="' + esc(srv.hostname) + '" data-color="#b87843"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="id" data-host="' + esc(srv.hostname) + '" data-color="#b87843"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
+                        html += '<div class="d-spark-cell"><canvas data-spark="tcp" data-host="' + esc(srv.hostname) + '" data-color="#b87843"></canvas><div class="d-spark-labels"><span></span><span>now</span></div></div>';
                         html += '</div>';
                         // Legend
                         html += '<div class="d-legend">';
@@ -6608,6 +6684,9 @@
                     var isOpen = detail.style.display === "table-row";
                     detail.style.display = isOpen ? "none" : "table-row";
                     row.classList.toggle("sel", !isOpen);
+                    if (!isOpen && row.dataset.host) {
+                        loadSparkData(row.dataset.host, detail);
+                    }
                 }
             });
 
