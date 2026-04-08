@@ -65,6 +65,34 @@ func runCheck(cmd *cobra.Command, args []string) error {
 					log(dc.LvlINF, "sessions="+sessStr)
 				}
 			}
+			if perf := result.Performance; perf != nil {
+				log(dc.LvlINF,
+					fmt.Sprintf("cpu=%.1f%%", perf.CPUPct),
+					fmt.Sprintf("mem_avail=%.0fMB/%.0fMB", perf.MemAvailMB, perf.MemTotalMB),
+					fmt.Sprintf("pages_sec=%.1f", perf.PagesSec),
+					fmt.Sprintf("disk_queue=%.2f", perf.DiskQueue),
+				)
+				if perf.InputDelayP50 > 0 || perf.InputDelayP95 > 0 || perf.InputDelayMax > 0 {
+					log(dc.LvlINF,
+						fmt.Sprintf("input_delay p50=%.0fms p95=%.0fms max=%.0fms", perf.InputDelayP50, perf.InputDelayP95, perf.InputDelayMax),
+					)
+				}
+				if perf.SessionCPUP95 > 0 || perf.SessionMemP95 > 0 {
+					log(dc.LvlINF,
+						fmt.Sprintf("session_cpu_p95=%.0f%%", perf.SessionCPUP95),
+						fmt.Sprintf("session_mem_p95=%.0fB", perf.SessionMemP95),
+					)
+				}
+				if perf.TCPRetrans > 0 {
+					log(dc.LvlINF, fmt.Sprintf("tcp_retrans=%.1f/s", perf.TCPRetrans))
+				}
+				if perf.RFXAvailable {
+					log(dc.LvlINF,
+						fmt.Sprintf("rfx fps=%.0f encode=%.1fms quality=%.0f%% rtt=%.0fms loss=%.1f%%",
+							perf.RFXFPSOut, perf.RFXEncodeMS, perf.RFXQuality, perf.RFXRTT, perf.RFXLoss),
+					)
+				}
+			}
 
 			// Final status line
 			switch result.Status {

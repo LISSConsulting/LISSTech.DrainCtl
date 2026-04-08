@@ -222,6 +222,29 @@ function Get-RDSHDrainMode {
         ChangedBy            = Get-SafeProperty $raw 'changed_by'
         Message              = Get-SafeProperty $raw 'message'
         ExitCode             = $raw.exit_code
+        Performance          = if ($null -ne $raw.performance) {
+            [PSCustomObject]@{
+                CPUPct        = $raw.performance.cpu_pct
+                MemAvailMB    = $raw.performance.mem_avail_mb
+                MemTotalMB    = $raw.performance.mem_total_mb
+                PagesSec      = $raw.performance.pages_sec
+                DiskQueue     = $raw.performance.disk_queue
+                TCPRetrans    = $raw.performance.tcp_retrans_sec
+                InputDelayP50 = $raw.performance.input_delay_p50_ms
+                InputDelayP95 = $raw.performance.input_delay_p95_ms
+                InputDelayMax = $raw.performance.input_delay_max_ms
+                SessionCPUP95 = $raw.performance.session_cpu_p95_pct
+                SessionMemP95 = $raw.performance.session_mem_p95_bytes
+                RFXAvailable  = $raw.performance.rfx_available
+                RFXFPSOut     = $raw.performance.rfx_fps_out
+                RFXSkipServer = $raw.performance.rfx_skip_server_sec
+                RFXSkipNet    = $raw.performance.rfx_skip_net_sec
+                RFXEncodeMS   = $raw.performance.rfx_encode_ms
+                RFXQuality    = $raw.performance.rfx_quality_pct
+                RFXRTT        = $raw.performance.rfx_rtt_ms
+                RFXLoss       = $raw.performance.rfx_loss_pct
+            }
+        } else { $null }
     }
 }
 
@@ -343,6 +366,8 @@ function Get-RDSHDrainHistory {
             DisconnectedSessions = Get-SafeProperty $r 'disconnected_sessions' 0
             TotalSessions        = Get-SafeProperty $r 'total_sessions' 0
             MaxSessions          = Get-SafeProperty $r 'max_sessions' 0
+            CPUPct               = Get-SafeProperty $r 'cpu_pct' $null
+            InputDelayMax        = Get-SafeProperty $r 'input_delay_max_ms' $null
             ExitCode             = $r.exit_code
         }
     }
