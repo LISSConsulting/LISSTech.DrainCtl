@@ -5,6 +5,7 @@ package perfmon
 import (
 	"fmt"
 	"syscall"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
@@ -183,7 +184,10 @@ func (c *Collector) Prime() error {
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
-	// Second collect so GetFormatted has a baseline for rate counters.
+	// Rate counters (CPU, pages/sec, disk queue, TCP retrans) need two
+	// PdhCollectQueryData calls with a real time gap to compute a delta.
+	// Without a pause, PDH returns PDH_INVALID_DATA (0xC0000BC6).
+	time.Sleep(1500 * time.Millisecond)
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
@@ -219,9 +223,10 @@ func (c *Collector) Prime() error {
 			}
 		}
 	}
-	// Re-collect twice after counter changes: localized counters also need
-	// two PdhCollectQueryData calls to establish a rate counter baseline.
+	// Re-collect with time gap after counter changes: localized counters
+	// also need two samples with a real delta for rate computation.
 	_ = pdhCollectQueryData(c.query)
+	time.Sleep(1500 * time.Millisecond)
 	_ = pdhCollectQueryData(c.query)
 
 	c.primed = true
