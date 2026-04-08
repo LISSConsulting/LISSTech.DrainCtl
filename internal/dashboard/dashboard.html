@@ -5644,7 +5644,21 @@
 
                     html += '</div></td></tr>';
                 });
+                // Preserve expanded accordion state across re-renders.
+                var expanded = {};
+                tbody.querySelectorAll('tr.sel[data-host]').forEach(function(r) { expanded[r.dataset.host] = true; });
                 tbody.innerHTML = html;
+                // Re-expand previously open rows and redraw their sparklines.
+                Object.keys(expanded).forEach(function(h) {
+                    var row = tbody.querySelector('tr[data-host="' + h + '"]');
+                    if (!row) return;
+                    var detail = row.nextElementSibling;
+                    if (detail && detail.classList.contains('detail-row')) {
+                        detail.style.display = 'table-row';
+                        row.classList.add('sel');
+                        loadSparkData(h, detail);
+                    }
+                });
                 filterGrid();
 
                 // Status pill
