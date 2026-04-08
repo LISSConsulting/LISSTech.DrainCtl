@@ -1323,6 +1323,98 @@
                 background: var(--accent);
                 color: #fff;
             }
+
+            /* Notification target table */
+            .target-tbl-wrap { border: 1.5px solid #d8c8c4; border-radius: 8px; overflow: hidden; }
+            .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .target-tbl th { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 500;
+              text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); text-align: left;
+              padding: 8px 12px; border-bottom: 2px solid var(--border); background: var(--card); }
+            .target-tbl td { padding: 10px 12px; border-bottom: 1px solid var(--surface); vertical-align: middle; }
+            .target-tbl tr:nth-child(even) td { background: #f9f2ef; }
+            .target-tbl tr:hover td { background: var(--surface); }
+
+            .pill-type { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 700;
+              padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.8px;
+              border: 2px solid var(--border); box-shadow: 2px 2px 0 var(--shadow); background: var(--accent); color: #fff; }
+            .pill-type-ntfy { background: var(--green); }
+            .pill-type-email { background: var(--amber); }
+
+            .tgt-pill { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 10px;
+              padding: 2px 6px; border-radius: 3px; background: var(--surface); color: var(--muted); margin: 1px 2px; }
+            .tgt-truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              display: inline-block; vertical-align: middle; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+            .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+            .status-dot.on { background: var(--green); }
+            .status-dot.off { background: var(--subtle); }
+
+            .target-tbl .btn-row { display: flex; gap: 6px; }
+            .target-tbl .btn-tbl { font-family: "Work Sans", sans-serif; font-size: 11px; font-weight: 600; padding: 4px 10px;
+              border: 1.5px solid var(--border); border-radius: 6px; cursor: pointer;
+              background: var(--card); color: var(--fg); transition: all .15s; }
+            .target-tbl .btn-tbl:hover { background: var(--surface); transform: translateY(-1px); }
+            .target-tbl .btn-tbl-danger { color: var(--red); border-color: var(--red); }
+            .target-tbl .btn-tbl-danger:hover { background: #fce4ec; }
+            .target-tbl-empty { text-align: center; padding: 32px; color: var(--subtle); font-size: 13px; }
+
+            /* Target edit modal - layers above config modal */
+            .tgt-edit-overlay { display: none; position: fixed; inset: 0; background: rgba(45,26,26,0.5);
+              z-index: 200; align-items: center; justify-content: center; }
+            .tgt-edit-overlay.open { display: flex; }
+            .tgt-edit-modal { background: var(--card); border: var(--bw) solid var(--border); border-radius: var(--r);
+              box-shadow: 8px 8px 0 var(--shadow); max-width: 560px; width: 94vw; max-height: 90vh;
+              overflow-y: auto; padding: 24px; }
+            .tgt-edit-modal h3 { font-family: "DM Serif Display", serif; font-size: 18px; margin-bottom: 16px; text-align: center; }
+
+            /* Target delete modal */
+            .tgt-del-overlay { display: none; position: fixed; inset: 0; background: rgba(45,26,26,0.5);
+              z-index: 210; align-items: center; justify-content: center; }
+            .tgt-del-overlay.open { display: flex; }
+            .tgt-del-modal { background: var(--card); border: var(--bw) solid var(--border); border-radius: var(--r);
+              box-shadow: 8px 8px 0 var(--shadow); max-width: 400px; width: 94vw; padding: 24px; text-align: center; }
+            .tgt-del-modal h3 { font-family: "DM Serif Display", serif; font-size: 18px; margin-bottom: 16px; }
+            .tgt-del-modal p { font-size: 14px; margin-bottom: 8px; line-height: 1.5; }
+            .tgt-del-modal .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+
+            /* Form elements for edit modal */
+            .tgt-form-row { margin-bottom: 14px; }
+            .tgt-form-label { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 600;
+              text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 4px; }
+            .tgt-form-input { width: 100%; padding: 8px 10px; border: 1.5px solid #d0c0c0; border-radius: 6px;
+              font-family: "JetBrains Mono", monospace; font-size: 12px; background: var(--bg); color: var(--fg); }
+            .tgt-form-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(163,71,91,0.15); }
+            .tgt-form-hint { font-size: 11px; color: var(--subtle); margin-top: 3px; }
+
+            .tgt-type-pills { display: flex; gap: 6px; }
+            .tgt-type-pill { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 600; padding: 6px 14px;
+              border: 1.5px solid #d0c0c0; border-radius: 6px; cursor: pointer; background: var(--bg); color: var(--muted);
+              text-transform: uppercase; letter-spacing: 0.5px; transition: all .15s; }
+            .tgt-type-pill:hover { border-color: var(--accent); color: var(--fg); }
+            .tgt-type-pill.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+            .tgt-trigger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+            .tgt-trigger-check { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 8px;
+              background: var(--bg); border: 1.5px solid #d0c0c0; border-radius: 6px; cursor: pointer; transition: all .15s; }
+            .tgt-trigger-check:hover { border-color: var(--accent); }
+            .tgt-trigger-check.checked { background: #f5e8ec; border-color: var(--accent); }
+            .tgt-trigger-check input { accent-color: var(--accent); }
+
+            .tgt-repeat-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+            .tgt-repeat-pill { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 600; padding: 5px 12px;
+              border: 1.5px solid #d0c0c0; border-radius: 6px; cursor: pointer; background: var(--bg); color: var(--muted);
+              transition: all .15s; }
+            .tgt-repeat-pill:hover { border-color: var(--accent); color: var(--fg); }
+            .tgt-repeat-pill.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+            .tgt-form-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px;
+              padding-top: 14px; border-top: 2px solid var(--surface); }
+            .tgt-form-actions-right { display: flex; gap: 8px; }
+            .tgt-test-result { font-family: "JetBrains Mono", monospace; font-size: 11px; margin-top: 6px;
+              padding: 6px 10px; border-radius: 4px; display: none; }
+            .tgt-test-result.ok { display: block; background: #e8f5e9; color: var(--green); border: 1px solid var(--green); }
+            .tgt-test-result.err { display: block; background: #fce4ec; color: var(--red); border: 1px solid var(--red); }
+
+            .tgt-form-divider { border: none; border-top: 1px solid var(--surface); margin: 16px 0; }
             .settings-divider {
                 height: 1px;
                 background: var(--border);
@@ -1825,17 +1917,23 @@
                 <div class="settings-divider"></div>
 
                 <div class="settings-group">
-                    <div class="settings-label">Notification Targets</div>
-                    <div class="target-list" id="target-list"></div>
-                    <button
-                        class="btn-add-target"
-                        onclick="
-                            addTargetRow();
-                            _cfgDirty = true;
-                        "
-                    >
-                        + Add Target
-                    </button>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                        <div class="settings-label" style="margin-bottom:0">Notification Targets</div>
+                        <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px" onclick="openTargetEdit(null)">+ Add Target</button>
+                    </div>
+                    <div class="target-tbl-wrap" id="target-list">
+                        <table class="target-tbl">
+                            <thead><tr>
+                                <th></th>
+                                <th>Type</th>
+                                <th>Destination</th>
+                                <th>Triggers</th>
+                                <th>Repeat</th>
+                                <th>Actions</th>
+                            </tr></thead>
+                            <tbody id="target-tbody"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <div class="settings-divider"></div>
@@ -1895,6 +1993,94 @@
                         <button class="btn" onclick="closeRmModal()">Cancel</button>
                         <button class="btn" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="confirmRm()">Remove</button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Target Edit/Add Modal -->
+        <div class="tgt-edit-overlay" id="tgt-edit-overlay" onclick="if(event.target===this)closeTargetEdit()">
+            <div class="tgt-edit-modal" onclick="event.stopPropagation()">
+                <h3 id="tgt-edit-title">Edit Notification Target</h3>
+
+                <div class="tgt-form-row">
+                    <div class="tgt-form-label">Type</div>
+                    <div class="tgt-type-pills" id="tgt-type-pills">
+                        <div class="tgt-type-pill active" data-type="webhook" onclick="switchTargetType(this,'webhook')">Webhook</div>
+                        <div class="tgt-type-pill" data-type="ntfy" onclick="switchTargetType(this,'ntfy')">Ntfy</div>
+                        <div class="tgt-type-pill" data-type="email" onclick="switchTargetType(this,'email')">Email</div>
+                    </div>
+                </div>
+
+                <div class="tgt-form-row" id="tgt-field-url">
+                    <div class="tgt-form-label" id="tgt-url-label">Webhook URL</div>
+                    <input class="tgt-form-input" id="tgt-url-input" type="text" placeholder="https://...">
+                    <div class="tgt-form-hint" id="tgt-url-hint">Incoming webhook endpoint. Must be HTTPS.</div>
+                </div>
+
+                <div class="tgt-form-row" id="tgt-field-secret">
+                    <div class="tgt-form-label" id="tgt-secret-label">HMAC Secret</div>
+                    <input class="tgt-form-input" id="tgt-secret-input" type="password" placeholder="Optional HMAC signing secret" autocomplete="new-password">
+                    <div class="tgt-form-hint" id="tgt-secret-hint">If set, payloads are signed with HMAC-SHA256 in the X-Signature header.</div>
+                </div>
+
+                <div class="tgt-form-row" id="tgt-field-from" style="display:none">
+                    <div class="tgt-form-label">From Address</div>
+                    <input class="tgt-form-input" id="tgt-from-input" type="text" placeholder="drainctl@lisstech.com">
+                </div>
+                <div class="tgt-form-row" id="tgt-field-to" style="display:none">
+                    <div class="tgt-form-label">To Addresses</div>
+                    <input class="tgt-form-input" id="tgt-to-input" type="text" placeholder="ops@lisstech.com, helpdesk@lisstech.com">
+                    <div class="tgt-form-hint">Comma-separated list of recipients.</div>
+                </div>
+
+                <hr class="tgt-form-divider">
+
+                <div class="tgt-form-row">
+                    <div class="tgt-form-label">Triggers</div>
+                    <div class="tgt-trigger-grid" id="tgt-trigger-grid"></div>
+                </div>
+
+                <div class="tgt-form-row">
+                    <div class="tgt-form-label">Repeat Interval</div>
+                    <div class="tgt-repeat-pills" id="tgt-repeat-pills">
+                        <div class="tgt-repeat-pill" data-mins="0" onclick="pickTargetRepeat(this)">Once</div>
+                        <div class="tgt-repeat-pill" data-mins="15" onclick="pickTargetRepeat(this)">15m</div>
+                        <div class="tgt-repeat-pill" data-mins="60" onclick="pickTargetRepeat(this)">1h</div>
+                        <div class="tgt-repeat-pill" data-mins="240" onclick="pickTargetRepeat(this)">4h</div>
+                        <div class="tgt-repeat-pill" data-mins="480" onclick="pickTargetRepeat(this)">8h</div>
+                    </div>
+                    <div class="tgt-form-hint">How often to re-send while the condition persists. "Once" sends only on the initial trigger.</div>
+                </div>
+
+                <div class="tgt-form-row">
+                    <div class="tgt-form-label">Enabled</div>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                        <input type="checkbox" id="tgt-enabled-check" checked style="accent-color:var(--accent);width:16px;height:16px"> Target is active and will fire on matching triggers
+                    </label>
+                </div>
+
+                <div class="tgt-form-actions">
+                    <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px;border-style:solid;background:var(--green);color:#fff;border-color:var(--green)" onclick="testTargetNotification()">Test</button>
+                    <div class="tgt-form-actions-right">
+                        <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px;border-style:solid;background:var(--card);color:var(--fg)" onclick="closeTargetEdit()">Cancel</button>
+                        <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px;border-style:solid;background:var(--accent);color:#fff;border-color:var(--accent)" onclick="saveTargetFromModal()">Save</button>
+                    </div>
+                </div>
+                <div class="tgt-test-result" id="tgt-test-result"></div>
+            </div>
+        </div>
+
+        <!-- Target Delete Confirmation Modal -->
+        <div class="tgt-del-overlay" id="tgt-del-overlay" onclick="if(event.target===this)closeTargetDel()">
+            <div class="tgt-del-modal" onclick="event.stopPropagation()">
+                <h3>Delete Target</h3>
+                <p>Are you sure you want to delete this notification target?</p>
+                <p><strong id="tgt-del-type"></strong></p>
+                <p class="mono" id="tgt-del-dest" style="color:var(--muted);font-size:12px;word-break:break-all"></p>
+                <p style="color:var(--red);font-size:12px;margin-top:8px">This action cannot be undone. Active notifications using this target will stop immediately.</p>
+                <div class="btn-row" style="display:flex;gap:8px;justify-content:center;margin-top:16px">
+                    <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px;border-style:solid;background:var(--card);color:var(--fg)" onclick="closeTargetDel()">Cancel</button>
+                    <button class="btn-add-target" style="width:auto;margin-top:0;padding:6px 14px;border-style:solid;background:var(--red);color:#fff;border-color:var(--red)" onclick="confirmTargetDel()">Delete Target</button>
                 </div>
             </div>
         </div>
@@ -5151,7 +5337,10 @@
                 _histAbortCtrl = null,
                 _cfgAbortCtrl = null,
                 _saveStatusTimer = null,
-                _cfgDirty = false;
+                _cfgDirty = false,
+                _cfgTargets = [],
+                _tgtEditIdx = null,
+                _tgtDelIdx = null;
             const ML = {
                 ALLOW_ALL_CONNECTIONS: "All Connections",
                 ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: "Drain (No New Logons)",
@@ -6178,6 +6367,244 @@
                 input_delay_warning: "User input delay P95 exceeded warning threshold",
                 input_delay_critical: "User input delay P95 exceeded critical threshold",
             };
+            const REPEAT_MAP = {0:"Once",15:"15m",60:"1h",240:"4h",480:"8h"};
+            function repeatLabel(mins) { return REPEAT_MAP[mins] || (mins + "m"); }
+
+            function renderTargetTable(targets) {
+                var tbody = document.getElementById("target-tbody");
+                if (!targets || targets.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="target-tbl-empty">No notification targets configured. Click <strong>+ Add Target</strong> to create one.</td></tr>';
+                    return;
+                }
+                var h = "";
+                targets.forEach(function(t, idx) {
+                    var enabled = t.enabled !== false;
+                    var typeCls = t.type === "ntfy" ? " pill-type-ntfy" : t.type === "email" ? " pill-type-email" : "";
+                    var typeLabel = t.type === "ntfy" ? "Ntfy" : t.type === "email" ? "Email" : "Webhook";
+                    var dest = t.type === "email" ? (t.to || []).join(", ") : (t.url || "");
+                    var dimStyle = enabled ? "" : ' style="opacity:0.5"';
+                    h += "<tr>";
+                    h += '<td><span class="status-dot ' + (enabled ? "on" : "off") + '" title="' + (enabled ? "Enabled" : "Disabled") + '"></span></td>';
+                    h += '<td><span class="pill-type' + typeCls + '">' + esc(typeLabel) + "</span></td>";
+                    h += '<td><span class="tgt-truncate"' + dimStyle + ' title="' + esc(dest) + '">' + esc(dest) + "</span></td>";
+                    h += "<td" + dimStyle + ">";
+                    var trigs = t.triggers || [];
+                    trigs.forEach(function(tr) {
+                        h += '<span class="tgt-pill">' + esc(TRIGGER_LABELS[tr] || tr) + "</span>";
+                    });
+                    if (trigs.length === 0) h += '<span style="color:var(--subtle);font-size:11px">none</span>';
+                    h += "</td>";
+                    h += '<td class="mono"' + dimStyle + ">" + esc(repeatLabel(t.repeat_minutes || 0)) + "</td>";
+                    h += '<td><div class="btn-row">';
+                    h += '<button class="btn-tbl" onclick="openTargetEdit(' + idx + ')">Edit</button>';
+                    h += '<button class="btn-tbl btn-tbl-danger" onclick="openTargetDel(' + idx + ')">Delete</button>';
+                    h += "</div></td>";
+                    h += "</tr>";
+                });
+                tbody.innerHTML = h;
+            }
+
+            function openTargetEdit(idx) {
+                _tgtEditIdx = idx;
+                var isNew = idx === null || idx === undefined;
+                document.getElementById("tgt-edit-title").textContent = isNew ? "Add Notification Target" : "Edit Notification Target";
+                var t = isNew ? { type: "webhook", url: "", triggers: ["drain_on","drain_off","alert","healthy"], repeat_minutes: 0, enabled: true } : _cfgTargets[idx];
+                // Type pills
+                document.querySelectorAll("#tgt-type-pills .tgt-type-pill").forEach(function(p) {
+                    p.classList.toggle("active", p.dataset.type === t.type);
+                });
+                switchTargetType(document.querySelector('#tgt-type-pills .tgt-type-pill[data-type="' + t.type + '"]'), t.type);
+                // URL
+                document.getElementById("tgt-url-input").value = t.url || "";
+                document.getElementById("tgt-url-input").style.borderColor = "";
+                // Secret
+                document.getElementById("tgt-secret-input").value = t.secret || "";
+                // Email fields
+                document.getElementById("tgt-from-input").value = t.from || "";
+                document.getElementById("tgt-to-input").value = (t.to || []).join(", ");
+                // Triggers
+                var grid = document.getElementById("tgt-trigger-grid");
+                var trigs = t.triggers || [];
+                var trigHtml = "";
+                ALL_TRIGGERS.forEach(function(tr) {
+                    var chk = trigs.includes(tr);
+                    trigHtml += '<label class="tgt-trigger-check' + (chk ? " checked" : "") + '" data-trigger="' + tr + '">';
+                    trigHtml += '<input type="checkbox"' + (chk ? " checked" : "") + '> ' + esc(TRIGGER_LABELS[tr] || tr);
+                    trigHtml += "</label>";
+                });
+                grid.innerHTML = trigHtml;
+                // Wire up trigger click toggles
+                grid.querySelectorAll(".tgt-trigger-check").forEach(function(lbl) {
+                    lbl.addEventListener("click", function(e) {
+                        if (e.target.tagName === "INPUT") return; // let checkbox handle itself
+                        e.preventDefault();
+                        var cb = lbl.querySelector("input");
+                        cb.checked = !cb.checked;
+                        lbl.classList.toggle("checked", cb.checked);
+                    });
+                    lbl.querySelector("input").addEventListener("change", function() {
+                        lbl.classList.toggle("checked", this.checked);
+                    });
+                });
+                // Repeat pills
+                var rv = t.repeat_minutes || 0;
+                document.querySelectorAll("#tgt-repeat-pills .tgt-repeat-pill").forEach(function(p) {
+                    p.classList.toggle("active", parseInt(p.dataset.mins) === rv);
+                });
+                // Enabled
+                document.getElementById("tgt-enabled-check").checked = t.enabled !== false;
+                // Clear test result
+                var testEl = document.getElementById("tgt-test-result");
+                testEl.className = "tgt-test-result";
+                testEl.textContent = "";
+                // Show overlay
+                document.getElementById("tgt-edit-overlay").classList.add("open");
+            }
+
+            function closeTargetEdit() {
+                document.getElementById("tgt-edit-overlay").classList.remove("open");
+                _tgtEditIdx = null;
+            }
+
+            function switchTargetType(pill, type) {
+                if (!pill) return;
+                document.querySelectorAll("#tgt-type-pills .tgt-type-pill").forEach(function(p) { p.classList.remove("active"); });
+                pill.classList.add("active");
+                var urlLabel = document.getElementById("tgt-url-label");
+                var urlInput = document.getElementById("tgt-url-input");
+                var urlHint = document.getElementById("tgt-url-hint");
+                var secretField = document.getElementById("tgt-field-secret");
+                var secretLabel = document.getElementById("tgt-secret-label");
+                var secretHint = document.getElementById("tgt-secret-hint");
+                var fromField = document.getElementById("tgt-field-from");
+                var toField = document.getElementById("tgt-field-to");
+                fromField.style.display = "none";
+                toField.style.display = "none";
+                secretField.style.display = "block";
+                if (type === "webhook") {
+                    urlLabel.textContent = "Webhook URL";
+                    urlInput.placeholder = "https://hooks.slack.com/...";
+                    urlHint.textContent = "Incoming webhook endpoint. Must be HTTPS.";
+                    secretLabel.textContent = "HMAC Secret";
+                    secretHint.textContent = "If set, payloads are signed with HMAC-SHA256 in the X-Signature header.";
+                } else if (type === "ntfy") {
+                    urlLabel.textContent = "Ntfy Topic URL";
+                    urlInput.placeholder = "https://ntfy.sh/my-topic";
+                    urlHint.textContent = "Full ntfy topic URL including server.";
+                    secretLabel.textContent = "Access Token";
+                    secretHint.textContent = "Optional authentication token for private topics.";
+                } else if (type === "email") {
+                    urlLabel.textContent = "SMTP Server";
+                    urlInput.placeholder = "smtp://mail.lisstech.com:587";
+                    urlHint.textContent = "SMTP server URL. Use smtps:// for implicit TLS or smtp:// for STARTTLS.";
+                    secretLabel.textContent = "SMTP Password";
+                    secretHint.textContent = "Authentication password for the SMTP server.";
+                    fromField.style.display = "block";
+                    toField.style.display = "block";
+                }
+            }
+
+            function pickTargetRepeat(pill) {
+                document.querySelectorAll("#tgt-repeat-pills .tgt-repeat-pill").forEach(function(p) { p.classList.remove("active"); });
+                pill.classList.add("active");
+            }
+
+            function saveTargetFromModal() {
+                var activePill = document.querySelector("#tgt-type-pills .tgt-type-pill.active");
+                var type = activePill ? activePill.dataset.type : "webhook";
+                var url = document.getElementById("tgt-url-input").value.trim();
+                // Validate URL
+                if (!url) {
+                    document.getElementById("tgt-url-input").style.borderColor = "var(--red)";
+                    return;
+                }
+                if (type === "webhook") {
+                    var schemeOk = false;
+                    try { var parsed = new URL(url); schemeOk = parsed.protocol === "http:" || parsed.protocol === "https:"; } catch(_) {}
+                    if (!schemeOk) {
+                        document.getElementById("tgt-url-input").style.borderColor = "var(--red)";
+                        return;
+                    }
+                }
+                document.getElementById("tgt-url-input").style.borderColor = "";
+                var secret = document.getElementById("tgt-secret-input").value;
+                var triggers = [];
+                document.querySelectorAll("#tgt-trigger-grid .tgt-trigger-check input").forEach(function(cb) {
+                    if (cb.checked) triggers.push(cb.parentElement.dataset.trigger);
+                });
+                var repeatPill = document.querySelector("#tgt-repeat-pills .tgt-repeat-pill.active");
+                var repeat_minutes = repeatPill ? parseInt(repeatPill.dataset.mins) : 0;
+                var enabled = document.getElementById("tgt-enabled-check").checked;
+                var target = { type: type, url: url, triggers: triggers, repeat_minutes: repeat_minutes, enabled: enabled };
+                if (secret && (type === "webhook" || type === "email")) target.secret = secret;
+                if (type === "ntfy" && secret) target.secret = secret;
+                if (type === "email") {
+                    target.from = document.getElementById("tgt-from-input").value.trim();
+                    target.to = document.getElementById("tgt-to-input").value.split(",").map(function(s){return s.trim();}).filter(Boolean);
+                }
+                if (_tgtEditIdx !== null && _tgtEditIdx !== undefined) {
+                    _cfgTargets[_tgtEditIdx] = target;
+                } else {
+                    _cfgTargets.push(target);
+                }
+                renderTargetTable(_cfgTargets);
+                _cfgDirty = true;
+                closeTargetEdit();
+            }
+
+            function openTargetDel(idx) {
+                _tgtDelIdx = idx;
+                var t = _cfgTargets[idx];
+                var typeLabel = t.type === "ntfy" ? "Ntfy target" : t.type === "email" ? "Email target" : "Webhook";
+                var dest = t.type === "email" ? (t.to || []).join(", ") : (t.url || "");
+                document.getElementById("tgt-del-type").textContent = typeLabel;
+                document.getElementById("tgt-del-dest").textContent = dest;
+                document.getElementById("tgt-del-overlay").classList.add("open");
+            }
+
+            function closeTargetDel() {
+                document.getElementById("tgt-del-overlay").classList.remove("open");
+                _tgtDelIdx = null;
+            }
+
+            function confirmTargetDel() {
+                if (_tgtDelIdx !== null && _tgtDelIdx !== undefined) {
+                    _cfgTargets.splice(_tgtDelIdx, 1);
+                    renderTargetTable(_cfgTargets);
+                    _cfgDirty = true;
+                }
+                closeTargetDel();
+            }
+
+            async function testTargetNotification() {
+                var el = document.getElementById("tgt-test-result");
+                el.className = "tgt-test-result";
+                el.textContent = "Sending\u2026";
+                el.style.display = "block";
+                el.style.background = "var(--surface)";
+                el.style.color = "var(--muted)";
+                el.style.border = "1px solid var(--subtle)";
+                try {
+                    var t0 = Date.now();
+                    var r = await fetch("/api/v1/notify-test", { method: "POST" });
+                    var elapsed = Date.now() - t0;
+                    if (r.ok) {
+                        el.className = "tgt-test-result ok";
+                        el.style = "";
+                        el.textContent = "\u2713 Test notification sent successfully (" + r.status + " " + r.statusText + ", " + elapsed + "ms)";
+                    } else {
+                        var msg = await r.text();
+                        el.className = "tgt-test-result err";
+                        el.style = "";
+                        el.textContent = "\u2717 " + (msg.trim() || "HTTP " + r.status);
+                    }
+                } catch(e) {
+                    el.className = "tgt-test-result err";
+                    el.style = "";
+                    el.textContent = "\u2717 " + e.message;
+                }
+            }
+
             let targetCounter = 0;
             function addTargetRow(data) {
                 const id = targetCounter++;
@@ -6437,23 +6864,23 @@
                 }
                 _cfgAbortCtrl = new AbortController();
                 const signal = _cfgAbortCtrl.signal;
-                const targetList = document.getElementById("target-list");
-                targetList.innerHTML = '<div style="color:var(--muted);padding:8px 0">Loading\u2026</div>';
+                var targetTbody = document.getElementById("target-tbody");
+                targetTbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px 12px">Loading\u2026</td></tr>';
                 try {
                     const r = await fetch("/api/v1/notify-config", { signal });
                     if (!r.ok) {
-                        targetList.innerHTML =
-                            '<div style="color:var(--red);padding:8px 0">Failed to load configuration (' +
+                        targetTbody.innerHTML =
+                            '<tr><td colspan="6" style="color:var(--red);padding:8px 12px">Failed to load configuration (' +
                             r.status +
-                            "). Try closing and reopening settings.</div>";
+                            "). Try closing and reopening settings.</td></tr>";
                         return;
                     }
                     const c = await r.json();
-                    targetList.innerHTML = "";
-                    targetCounter = 0;
-                    const targets = c.notifications || [];
-                    if (targets.length === 0) addTargetRow();
-                    else targets.forEach((t) => addTargetRow(t));
+                    _cfgTargets = (c.notifications || []).map(function(t) {
+                        if (t.enabled === undefined) t.enabled = true;
+                        return t;
+                    });
+                    renderTargetTable(_cfgTargets);
                     var th = c.session_warning_threshold != null ? c.session_warning_threshold : 80;
                     var gr = c.grace_period || 60;
                     graceMinutes = gr;
@@ -6479,20 +6906,15 @@
                 } catch (e) {
                     if (e.name === "AbortError") return;
                     console.error("loadNotifyConfig:", e);
-                    targetList.innerHTML =
-                        '<div style="color:var(--red);padding:8px 0">Failed to load configuration. Try closing and reopening settings.</div>';
+                    targetTbody.innerHTML =
+                        '<tr><td colspan="6" style="color:var(--red);padding:8px 12px">Failed to load configuration. Try closing and reopening settings.</td></tr>';
                 }
             }
             async function saveNotifyConfig() {
                 const st = document.getElementById("cfg-status");
                 st.textContent = "";
                 st.className = "settings-status";
-                const notifications = readTargets();
-                if (notifications === null) {
-                    st.textContent = "Please check all target URLs — webhook URLs must start with http:// or https://.";
-                    st.className = "settings-status err";
-                    return;
-                }
+                const notifications = _cfgTargets;
                 const thresholdEl = document.getElementById("cfg-threshold");
                 const graceEl = document.getElementById("cfg-grace");
                 const threshold = parseInt(thresholdEl.value);
@@ -6591,7 +7013,9 @@
             }
             document.addEventListener("keydown", (e) => {
                 if (e.key === "Escape") {
-                    if (histOpen) closeHistory();
+                    if (document.getElementById("tgt-del-overlay").classList.contains("open")) closeTargetDel();
+                    else if (document.getElementById("tgt-edit-overlay").classList.contains("open")) closeTargetEdit();
+                    else if (histOpen) closeHistory();
                     else if (document.getElementById("settings-overlay").classList.contains("open")) toggleSettings();
                     else if (logExpanded) toggleExpand();
                 }
