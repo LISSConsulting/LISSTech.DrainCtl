@@ -16,6 +16,7 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/filelog"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -264,6 +265,30 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		evtSub = sub
 	}
 
+	// Start performance monitoring if enabled.
+	var perfCollector *perfmon.Collector
+	var perfTriggerState *perfmon.PerfTriggerState
+	if cfg.Performance.Enabled {
+		pc, err := perfmon.Open(cfg.Performance, s.log)
+		if err != nil {
+			dc.LogMsg(s.log, dc.LvlWRN, "performance monitoring failed to start", fmt.Sprintf("error=%q", err))
+		} else {
+			if err := pc.Prime(); err != nil {
+				dc.LogMsg(s.log, dc.LvlWRN, "performance monitoring prime failed", fmt.Sprintf("error=%q", err))
+				pc.Close()
+			} else {
+				perfCollector = pc
+				perfTriggerState = &perfmon.PerfTriggerState{}
+				s.log(dc.LvlINF, "perfmon=started")
+			}
+		}
+	}
+	defer func() {
+		if perfCollector != nil {
+			perfCollector.Close()
+		}
+	}()
+
 	// Start pipe server.
 	handler := &serviceHandler{store: st}
 	handler.cfg.Store(&cfg)
@@ -341,7 +366,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -371,7 +396,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(dc.LvlINF, "trigger=registry_change")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
@@ -414,7 +439,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
 				}
 			}
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
 
 		case <-configCh:
 			newFullCfg, err := dc.LoadConfig(s.log)
@@ -426,6 +451,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
+			oldPerfCfg := cfg.Performance
 			cfg = newCfg
 			handler.cfg.Store(&cfg)
 			newDashCfg := newFullCfg.ToDashboardConfig()
@@ -464,6 +490,31 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 							dashState.Register(h)
 							dashRegistered = true
 							s.log(dc.LvlINF, "dashboard=self-registered", fmt.Sprintf("host=%s", h))
+						}
+					}
+				}
+			}
+
+			// Re-create performance collector if enabled state changed.
+			perfEnabledChanged := cfg.Performance.Enabled != oldPerfCfg.Enabled
+			if perfEnabledChanged || (cfg.Performance.Enabled && cfg.Performance != oldPerfCfg) {
+				if perfCollector != nil {
+					perfCollector.Close()
+					perfCollector = nil
+					perfTriggerState = nil
+				}
+				if cfg.Performance.Enabled {
+					pc, err := perfmon.Open(newCfg.Performance, s.log)
+					if err != nil {
+						dc.LogMsg(s.log, dc.LvlWRN, "perfmon restart failed on config reload", fmt.Sprintf("error=%q", err))
+					} else {
+						if err := pc.Prime(); err != nil {
+							dc.LogMsg(s.log, dc.LvlWRN, "perfmon prime failed on config reload", fmt.Sprintf("error=%q", err))
+							pc.Close()
+						} else {
+							perfCollector = pc
+							perfTriggerState = &perfmon.PerfTriggerState{}
+							s.log(dc.LvlINF, "perfmon=restarted")
 						}
 					}
 				}
