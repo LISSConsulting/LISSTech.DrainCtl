@@ -1,6 +1,6 @@
 module github.com/LISSConsulting/LISSTech.DrainCtl
 
-go 1.26
+go 1.26.2
 
 require (
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e
