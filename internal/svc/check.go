@@ -74,6 +74,9 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	// Session tracking.
 	sess := dc.GetSessionSummary()
+	if sess == nil {
+		dc.LogMsg(log, dc.LvlWRN, "session enumeration failed", "hint=\"verify service runs as LocalSystem\"")
+	}
 	if lastSessions != nil {
 		lastSessions.Store(sess)
 	}

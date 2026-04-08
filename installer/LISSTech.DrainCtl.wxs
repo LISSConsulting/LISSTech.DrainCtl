@@ -125,7 +125,7 @@
                 Start="auto"
                 ErrorControl="normal"
                 Arguments="service run"
-                Account="NT SERVICE\DrainCtl" />
+                Account="LocalSystem" />
             <ServiceControl Id="DrainCtlServiceControl"
                 Name="DrainCtl"
                 Start="install"
