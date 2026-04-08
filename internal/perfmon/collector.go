@@ -191,59 +191,125 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 // Prime performs the first PDH collection to seed rate counters.
 // Must be called once before Collect() returns meaningful data.
 //
-// After the first collect, a test read is performed on host-level counters.
-// On some Windows configurations, PdhAddEnglishCounterW-registered counters
-// permanently return PDH_INVALID_DATA (0xC0000BC6) while PdhAddCounterW
-// works fine (this is what typeperf uses). When this is detected, the
-// affected counter is removed and re-added with PdhAddCounterW.
+// After the initial two-sample collection, host-level counters are test-read.
+// On Windows 11 / Server 2022+, PdhAddCounterW (or PdhAddEnglishCounterW)
+// may return PDH_INVALID_DATA (0xC0000BC6) if the query was polluted by
+// failed counter additions. When this is detected, the entire query is
+// closed and rebuilt from scratch with PdhAddCounterW only — matching what
+// typeperf does internally. This is the only reliable approach: removing
+// and re-adding counters to an existing query does NOT clear PDH's
+// internal state, and subsequent reads continue to fail.
 func (c *Collector) Prime() error {
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
-	// Rate counters (CPU, pages/sec, disk queue, TCP retrans) need two
-	// PdhCollectQueryData calls with a real time gap to compute a delta.
-	// Without a pause, PDH returns PDH_INVALID_DATA (0xC0000BC6).
+	// Rate counters need two samples with a real time gap.
 	time.Sleep(1500 * time.Millisecond)
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return err
 	}
 
-	// Test host-level counters and fall back to PdhAddCounterW if needed.
-	type counterRef struct {
-		handle *syscall.Handle
+	// Test host-level counters. If any fail, rebuild the entire query.
+	needsRebuild := false
+	type counterTest struct {
+		handle syscall.Handle
 		path   string
 		name   string
 	}
-	counters := []counterRef{
-		{&c.cpuH, counterCPU, "cpu"},
-		{&c.memH, counterMemAvail, "mem_avail"},
-		{&c.pagesH, counterPagesSec, "pages_sec"},
-		{&c.diskH, counterDiskQueue, "disk_queue"},
+	tests := []counterTest{
+		{c.cpuH, counterCPU, "cpu"},
+		{c.memH, counterMemAvail, "mem_avail"},
+		{c.pagesH, counterPagesSec, "pages_sec"},
+		{c.diskH, counterDiskQueue, "disk_queue"},
 	}
 	if c.retransH != 0 {
-		counters = append(counters, counterRef{&c.retransH, counterTCPRetrans, "tcp_retrans"})
+		tests = append(tests, counterTest{c.retransH, counterTCPRetrans, "tcp_retrans"})
 	}
-	for _, cr := range counters {
-		if _, err := pdhGetFormattedDouble(*cr.handle); err != nil {
-			// PdhAddEnglishCounterW returned data but it's invalid.
-			// Try PdhAddCounterW (localized name, same as typeperf).
-			dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: English counter returned invalid data, retrying with localized API", cr.name), fmt.Sprintf("error=%q path=%s", err, cr.path))
-			pdhRemoveCounter(*cr.handle)
-			h, addErr := pdhAddCounter(c.query, cr.path)
-			if addErr != nil {
-				dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: localized fallback also failed", cr.name), fmt.Sprintf("error=%q", addErr))
-				*cr.handle = 0 // mark as unavailable
-			} else {
-				*cr.handle = h
-				dc.LogMsg(c.log, dc.LvlINF, fmt.Sprintf("perfmon %s: using localized counter (PdhAddCounterW)", cr.name))
-			}
+	for _, t := range tests {
+		if _, err := pdhGetFormattedDouble(t.handle); err != nil {
+			dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: counter returned invalid data, will rebuild query", t.name), fmt.Sprintf("error=%q path=%s", err, t.path))
+			needsRebuild = true
+			break
 		}
 	}
-	// Re-collect with time gap after counter changes: localized counters
-	// also need two samples with a real delta for rate computation.
-	_ = pdhCollectQueryData(c.query)
-	time.Sleep(1500 * time.Millisecond)
-	_ = pdhCollectQueryData(c.query)
+
+	if needsRebuild {
+		dc.LogMsg(c.log, dc.LvlINF, "perfmon: rebuilding query with PdhAddCounterW (fresh query)")
+		// Close the polluted query entirely.
+		pdhCloseQuery(c.query)
+
+		// Open a fresh query.
+		query, err := pdhOpenQuery()
+		if err != nil {
+			return fmt.Errorf("rebuild query: %w", err)
+		}
+		c.query = query
+
+		// Re-add host-level counters with PdhAddCounterW only.
+		addOrZero := func(path, name string) syscall.Handle {
+			h, err := pdhAddCounter(query, path)
+			if err != nil {
+				dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon %s: PdhAddCounterW failed on rebuild", name), fmt.Sprintf("error=%q", err))
+				return 0
+			}
+			return h
+		}
+		c.cpuH = addOrZero(counterCPU, "cpu")
+		c.memH = addOrZero(counterMemAvail, "mem_avail")
+		c.pagesH = addOrZero(counterPagesSec, "pages_sec")
+		c.diskH = addOrZero(counterDiskQueue, "disk_queue")
+		c.retransH = addOrZero(counterTCPRetrans, "tcp_retrans")
+
+		// Re-add per-session counters if configured.
+		if c.collectPerSession {
+			if h, err := pdhAddCounter(query, counterInputDelay); err == nil {
+				c.inputDelayH = h
+				c.inputDelayAvail = true
+			} else {
+				c.inputDelayH = 0
+				c.inputDelayAvail = false
+			}
+			if h, err := pdhAddCounter(query, counterSessCPU); err == nil {
+				c.sessCPUH = h
+			} else {
+				c.sessCPUH = 0
+			}
+			if h, err := pdhAddCounter(query, counterSessMem); err == nil {
+				c.sessMemH = h
+			} else {
+				c.sessMemH = 0
+			}
+		}
+
+		// Re-add RemoteFX counters if configured.
+		if c.collectRemoteFX {
+			rfxAdd := func(path string) syscall.Handle {
+				h, err := pdhAddCounter(query, path)
+				if err != nil {
+					c.rfxAvailable = false
+					return 0
+				}
+				return h
+			}
+			c.rfxFPSH = rfxAdd(counterRFXFPS)
+			c.rfxSkipSrvH = rfxAdd(counterRFXSkipSrv)
+			c.rfxSkipNetH = rfxAdd(counterRFXSkipNet)
+			c.rfxEncH = rfxAdd(counterRFXEncode)
+			c.rfxQualH = rfxAdd(counterRFXQuality)
+			c.rfxRTTH = rfxAdd(counterRFXRTT)
+			c.rfxLossH = rfxAdd(counterRFXLoss)
+		}
+
+		// Prime the fresh query with two collections + time gap.
+		if err := pdhCollectQueryData(c.query); err != nil {
+			return fmt.Errorf("rebuild prime: %w", err)
+		}
+		time.Sleep(1500 * time.Millisecond)
+		if err := pdhCollectQueryData(c.query); err != nil {
+			return fmt.Errorf("rebuild prime 2: %w", err)
+		}
+		dc.LogMsg(c.log, dc.LvlINF, "perfmon: query rebuilt successfully")
+	}
 
 	c.primed = true
 	return nil
