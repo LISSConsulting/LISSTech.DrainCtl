@@ -478,6 +478,11 @@
             .srv-tbl tr.clickable { cursor: pointer; }
             .srv-tbl tr.clickable:hover td { background: var(--surface); }
             .srv-tbl tr.sel td { background: #f0e8e5 !important; }
+            .srv-tbl .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+            .srv-tbl .dot.ok { background: var(--green); }
+            .srv-tbl .dot.grace { background: var(--amber); }
+            .srv-tbl .dot.alert { background: var(--red); }
+            .srv-tbl .dot.off { background: var(--subtle); }
 
             /* ===== Ring gauges ===== */
             .ring { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -5481,9 +5486,9 @@
                     // Data row
                     html += '<tr class="clickable' + (isOff ? '" style="opacity:0.5"' : '"') +
                         ' data-host="' + esc(srv.hostname) + '" data-status="' + s + '">';
-                    html += '<td><span class="dot dot-' + s + '"></span></td>';
+                    html += '<td><span class="dot ' + s + '"></span></td>';
                     html += '<td class="mono" style="font-weight:600">' + esc(srv.hostname.split(".")[0]) + '</td>';
-                    html += '<td><span class="badge badge-' + s + '">' + stLabel(s) + '</span></td>';
+                    html += '<td><span class="badge ' + s + '">' + stLabel(s) + '</span></td>';
                     html += '<td style="font-size:12px">' + (isOff ? "\u2014" : esc(m)) + '</td>';
                     html += '<td class="mono">' + (isOff ? "\u2014" : d) + '</td>';
                     html += '<td class="mono">' + sessCell + '</td>';
