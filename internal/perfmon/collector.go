@@ -64,6 +64,9 @@ type Collector struct {
 
 	// Track whether we've collected at least once (rate counters need 2 samples).
 	primed bool
+
+	log          dc.LogFunc
+	loggedErrors map[string]bool // track which counter errors we've already logged (avoid spam)
 }
 
 // Open creates the PDH query and adds counters based on the config.
@@ -84,6 +87,8 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 		collectPerSession: cfg.CollectPerSession,
 		collectRemoteFX:   cfg.CollectRemoteFX,
 		memTotalMB:        totalPhysicalMemoryMB(),
+		log:               log,
+		loggedErrors:      make(map[string]bool),
 	}
 
 	// Host-level counters (required).
@@ -179,6 +184,15 @@ func (c *Collector) Prime() error {
 // Collect samples all counters and returns a PerfSnapshot.
 // Returns partial data if the collector has not been primed (rate counters
 // require two samples). Callers should call Prime() once at startup.
+// logCounterError logs a PDH counter error once per counter name to avoid spam.
+func (c *Collector) logCounterError(name string, err error) {
+	if c.log == nil || c.loggedErrors[name] {
+		return
+	}
+	c.loggedErrors[name] = true
+	dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon counter %s read failed (will not repeat)", name), fmt.Sprintf("error=%q", err))
+}
+
 func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 	if err := pdhCollectQueryData(c.query); err != nil {
 		return nil, fmt.Errorf("collect query data: %w", err)
@@ -191,19 +205,29 @@ func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 	// Host-level counters.
 	if v, err := pdhGetFormattedDouble(c.cpuH); err == nil {
 		snap.CPUPct = RoundTo(v, 1)
+	} else {
+		c.logCounterError("cpu", err)
 	}
 	if v, err := pdhGetFormattedDouble(c.memH); err == nil {
 		snap.MemAvailMB = RoundTo(v, 0)
+	} else {
+		c.logCounterError("mem_avail", err)
 	}
 	if v, err := pdhGetFormattedDouble(c.pagesH); err == nil {
 		snap.PagesSec = RoundTo(v, 1)
+	} else {
+		c.logCounterError("pages_sec", err)
 	}
 	if v, err := pdhGetFormattedDouble(c.diskH); err == nil {
 		snap.DiskQueue = RoundTo(v, 2)
+	} else {
+		c.logCounterError("disk_queue", err)
 	}
 	if c.retransH != 0 {
 		if v, err := pdhGetFormattedDouble(c.retransH); err == nil {
 			snap.TCPRetrans = RoundTo(v, 1)
+		} else {
+			c.logCounterError("tcp_retrans", err)
 		}
 	}
 
