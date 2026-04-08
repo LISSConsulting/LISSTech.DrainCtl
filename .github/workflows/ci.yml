@@ -44,6 +44,5 @@ jobs:
       - name: Go test
         run: go test -p 1 -count=1 ./...
 
-      - name: Vulnerability scan (advisory)
+      - name: Vulnerability scan
         run: govulncheck ./...
-        continue-on-error: true
