@@ -1608,8 +1608,8 @@
                         <span><span class="dot grace"></span>Grace</span>
                         <span><span class="dot alert"></span>Alert</span>
                         <span><span class="dot off"></span>Offline</span>
-                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-cpu" onchange="showPerfCPU=this.checked;renderChart()"><span class="dot" style="background:#4fc3f7"></span>CPU%</label>
-                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-id" onchange="showPerfID=this.checked;renderChart()"><span class="dot" style="background:#ff8a65"></span>Input Delay</label>
+                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-cpu" onchange="showPerfCPU=this.checked;chartColorKey='';renderChart()"><span class="dot" style="background:#4fc3f7"></span>CPU%</label>
+                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-id" onchange="showPerfID=this.checked;chartColorKey='';renderChart()"><span class="dot" style="background:#ff8a65"></span>Input Delay</label>
                     </div>
                 </div>
             </div>
@@ -5198,12 +5198,19 @@
                             : "";
                         const durInfo =
                             r && r.state_duration_seconds ? "duration=" + dur(r.state_duration_seconds) : "";
+                        const perf = r && r.performance;
+                        const perfInfo = perf
+                            ? "cpu=" + perf.cpu_pct.toFixed(0) + "%" +
+                              (perf.mem_total_mb > 0 ? " mem=" + Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) + "% free" : "") +
+                              (perf.input_delay_p95_ms > 0 ? " delay=" + perf.input_delay_p95_ms.toFixed(0) + "ms" : "")
+                            : "";
                         if (p2 && p2 !== s) {
                             // Transition event — prominent, like format plain
                             let msg = stLabel(p2) + " \u2192 " + stLabel(s);
                             if (m) msg += " mode=" + m;
                             if (by) msg += " changed_by=" + by;
                             if (sessInfo) msg += " sessions=" + sessInfo;
+                            if (perfInfo) msg += " " + perfInfo;
                             evts.unshift({ time: ts, host: h, text: msg, sev: s, transition: true });
                         } else {
                             // Status event
@@ -5215,6 +5222,7 @@
                                 if (durInfo) msg += " " + durInfo;
                                 if (by) msg += " changed_by=" + by;
                                 if (sessInfo) msg += " sessions=" + sessInfo;
+                                if (perfInfo) msg += " " + perfInfo;
                             }
                             evts.unshift({ time: ts, host: h, text: msg, sev: s, transition: false });
                         }
@@ -5857,7 +5865,7 @@
                 });
                 body.innerHTML = h;
             }
-            const ALL_TRIGGERS = ["drain_on", "drain_off", "grace_entered", "alert", "healthy", "session_warning"];
+            const ALL_TRIGGERS = ["drain_on", "drain_off", "grace_entered", "alert", "healthy", "session_warning", "cpu_warning", "cpu_critical", "memory_warning", "memory_critical", "input_delay_warning", "input_delay_critical"];
             const TRIGGER_LABELS = {
                 drain_on: "Drain On",
                 drain_off: "Drain Off",
@@ -5865,6 +5873,12 @@
                 alert: "Alert",
                 healthy: "Healthy",
                 session_warning: "Sessions",
+                cpu_warning: "CPU Warn",
+                cpu_critical: "CPU Crit",
+                memory_warning: "Mem Warn",
+                memory_critical: "Mem Crit",
+                input_delay_warning: "Delay Warn",
+                input_delay_critical: "Delay Crit",
             };
             const TRIGGER_DESCS = {
                 drain_on: "Server blocked new connections",
@@ -5873,6 +5887,12 @@
                 alert: "Drain mode active beyond the grace period",
                 healthy: "Server returned to healthy state",
                 session_warning: "Active sessions exceeded the warning threshold",
+                cpu_warning: "CPU exceeded warning threshold (2 consecutive polls)",
+                cpu_critical: "CPU exceeded critical threshold (2 consecutive polls)",
+                memory_warning: "Available memory below warning threshold (2 consecutive polls)",
+                memory_critical: "Available memory below critical threshold (2 consecutive polls)",
+                input_delay_warning: "User input delay P95 exceeded warning threshold",
+                input_delay_critical: "User input delay P95 exceeded critical threshold",
             };
             let targetCounter = 0;
             function addTargetRow(data) {
