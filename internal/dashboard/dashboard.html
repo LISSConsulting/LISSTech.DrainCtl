@@ -1596,6 +1596,8 @@
                         <span><span class="dot grace"></span>Grace</span>
                         <span><span class="dot alert"></span>Alert</span>
                         <span><span class="dot off"></span>Offline</span>
+                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-cpu" onchange="showPerfCPU=this.checked;renderChart()"><span class="dot" style="background:#4fc3f7"></span>CPU%</label>
+                        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="chk-id" onchange="showPerfID=this.checked;renderChart()"><span class="dot" style="background:#ff8a65"></span>Input Delay</label>
                     </div>
                 </div>
             </div>
@@ -5132,7 +5134,20 @@
                 // zero-server entries would cause stateHistory[0].t === 0 and
                 // block chart rendering for up to MAX_HIST × 30 s after servers register.
                 if (t > 0) {
-                    stateHistory.push({ ok: c.ok, grace: c.grace, alert: c.alert, off: c.off, t: t });
+                    // Compute avg CPU and max input delay across all reporting servers.
+                    let cpuSum = 0, cpuN = 0, idMax = 0;
+                    if (servers) servers.forEach(function(srv) {
+                        var p = srv.last_result && srv.last_result.performance;
+                        if (p) {
+                            cpuSum += p.cpu_pct; cpuN++;
+                            if (p.input_delay_p95_ms > idMax) idMax = p.input_delay_p95_ms;
+                        }
+                    });
+                    stateHistory.push({
+                        ok: c.ok, grace: c.grace, alert: c.alert, off: c.off, t: t,
+                        cpu: cpuN > 0 ? Math.round(cpuSum / cpuN) : null,
+                        idP95: idMax > 0 ? Math.round(idMax) : null
+                    });
                     if (stateHistory.length > MAX_HIST) stateHistory.shift();
                 }
                 renderChart();
@@ -5351,6 +5366,38 @@
                         if (perf.session_cpu_p95_pct > 0) {
                             html += '<div class="perf-row"><span class="perf-k">Session CPU P95</span><span class="perf-v">' + perf.session_cpu_p95_pct.toFixed(0) + '%</span></div>';
                         }
+                        // TCP Retransmits
+                        if (perf.tcp_retrans_sec > 0) {
+                            html += '<div class="perf-row"><span class="perf-k">TCP Retrans/s</span><span class="perf-v">' + perf.tcp_retrans_sec.toFixed(1) + '</span></div>';
+                        }
+                        // RemoteFX (Phase 3)
+                        if (perf.rfx_available) {
+                            html += '<div class="perf-row" style="margin-top:4px;border-top:1px solid var(--border);padding-top:4px"><span class="perf-k" style="font-weight:600">RemoteFX</span><span class="perf-v"></span></div>';
+                            if (perf.rfx_fps_out > 0) {
+                                html += '<div class="perf-row"><span class="perf-k">Output FPS</span><span class="perf-v">' + perf.rfx_fps_out.toFixed(0) + '</span></div>';
+                            }
+                            if (perf.rfx_encode_ms > 0) {
+                                const encCls = perf.rfx_encode_ms >= 33 ? " perf-v--crit" : perf.rfx_encode_ms >= 17 ? " perf-v--warn" : "";
+                                html += '<div class="perf-row"><span class="perf-k">Encode Time</span><span class="perf-v' + encCls + '">' + perf.rfx_encode_ms.toFixed(1) + 'ms</span></div>';
+                            }
+                            if (perf.rfx_quality_pct > 0) {
+                                const qCls = perf.rfx_quality_pct <= 50 ? " perf-v--crit" : perf.rfx_quality_pct <= 70 ? " perf-v--warn" : "";
+                                html += '<div class="perf-row"><span class="perf-k">Frame Quality</span><span class="perf-v' + qCls + '">' + perf.rfx_quality_pct.toFixed(0) + '%</span></div>';
+                            }
+                            if (perf.rfx_rtt_ms > 0) {
+                                const rttCls = perf.rfx_rtt_ms >= 150 ? " perf-v--crit" : perf.rfx_rtt_ms >= 100 ? " perf-v--warn" : "";
+                                html += '<div class="perf-row"><span class="perf-k">RTT</span><span class="perf-v' + rttCls + '">' + perf.rfx_rtt_ms.toFixed(0) + 'ms</span></div>';
+                            }
+                            if (perf.rfx_loss_pct > 0) {
+                                const lossCls = perf.rfx_loss_pct >= 2 ? " perf-v--crit" : perf.rfx_loss_pct >= 0.5 ? " perf-v--warn" : "";
+                                html += '<div class="perf-row"><span class="perf-k">Packet Loss</span><span class="perf-v' + lossCls + '">' + perf.rfx_loss_pct.toFixed(1) + '%</span></div>';
+                            }
+                            if (perf.rfx_skip_server_sec > 0 || perf.rfx_skip_net_sec > 0) {
+                                const skipSrvCls = perf.rfx_skip_server_sec >= 5 ? " perf-v--crit" : perf.rfx_skip_server_sec >= 1 ? " perf-v--warn" : "";
+                                const skipNetCls = perf.rfx_skip_net_sec >= 5 ? " perf-v--crit" : perf.rfx_skip_net_sec >= 1 ? " perf-v--warn" : "";
+                                html += '<div class="perf-row"><span class="perf-k">Skip (Srv/Net)</span><span class="perf-v' + (skipSrvCls || skipNetCls) + '">' + (perf.rfx_skip_server_sec || 0).toFixed(0) + ' / ' + (perf.rfx_skip_net_sec || 0).toFixed(0) + '/s</span></div>';
+                            }
+                        }
                         html += '</div></div>';
                     }
                     html +=
@@ -5387,6 +5434,9 @@
             let chartWidth = 0;
             let chartColorKey = "";
 
+            let showPerfCPU = false;
+            let showPerfID = false;
+
             function buildChartData() {
                 const now = Date.now() / 1000;
                 const xs = stateHistory.map((_, i) => now - (stateHistory.length - 1 - i) * 30);
@@ -5402,6 +5452,10 @@
                         }),
                     );
                 });
+                // CPU% overlay (series index 5)
+                data.push(stateHistory.map((d) => showPerfCPU && d.cpu != null ? d.cpu : null));
+                // Input Delay P95 overlay (series index 6) — capped at 100 for y-axis scale
+                data.push(stateHistory.map((d) => showPerfID && d.idP95 != null ? Math.min(d.idP95, 100) : null));
                 return data;
             }
 
@@ -5502,6 +5556,8 @@
                         { label: "Grace", fill: colors.grace + "b3", stroke: colors.grace, width: 1.5 },
                         { label: "Alert", fill: colors.alert + "b3", stroke: colors.alert, width: 1.5 },
                         { label: "Offline", fill: colors.off + "80", stroke: colors.off, width: 1.5 },
+                        { label: "Avg CPU %", stroke: "#4fc3f7", width: 2, dash: [6, 3], show: showPerfCPU, spanGaps: true },
+                        { label: "Input Delay P95", stroke: "#ff8a65", width: 2, dash: [6, 3], show: showPerfID, spanGaps: true },
                     ],
                     bands: [
                         { series: [4, 3], fill: colors.off + "80" },
