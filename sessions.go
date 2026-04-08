@@ -172,11 +172,14 @@ func ReadMaxSessions() int {
 	}
 	defer func() { _ = key.Close() }()
 
-	v, _, err := key.GetIntegerValue("MaxInstanceCount")
-	if err != nil {
-		return 0
+	if v, _, err := key.GetIntegerValue("MaxInstanceCount"); err == nil && v > 0 {
+		return int(v)
 	}
-	return int(v)
+	// Fall back to UserSessionLimit (RD Session Host session cap).
+	if v, _, err := key.GetIntegerValue("UserSessionLimit"); err == nil && v > 0 {
+		return int(v)
+	}
+	return 0
 }
 
 // ComputeSessionSummary builds a SessionSummary from a pre-enumerated session

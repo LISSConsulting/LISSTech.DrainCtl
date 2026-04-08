@@ -114,9 +114,11 @@ type drainService struct {
 // cfg is accessed from two goroutines (Execute loop + pipe server) and
 // must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
-	store     *store.MemAuditStore
-	cfg       atomic.Pointer[dc.ServiceConfig]
-	dashState *dashboard.ServerState // nil if dashboard not enabled
+	store        *store.MemAuditStore
+	cfg          atomic.Pointer[dc.ServiceConfig]
+	dashState    *dashboard.ServerState // nil if dashboard not enabled
+	lastPerf     atomic.Pointer[dc.PerfSnapshot]
+	lastSessions atomic.Pointer[dc.SessionSummary]
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -162,10 +164,13 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 
 	res.Status, res.Message, res.ExitCode = dc.ClassifyState(drainActive, stateDur, gp)
 
-	// Session tracking.
-	if sess := dc.GetSessionSummary(); sess != nil {
+	// Use cached session and performance data from the last poll cycle.
+	// GetSessionSummary() may fail in the pipe handler goroutine context
+	// (different thread security token), so prefer the cached snapshot.
+	if sess := h.lastSessions.Load(); sess != nil {
 		res.Sessions = sess
 	}
+	res.Performance = h.lastPerf.Load()
 
 	// Check for transition.
 	if last := h.store.LastObservation(); last != nil && last.DrainMode != state.Mode {
@@ -366,7 +371,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.log, s.elog)
 
 	// Report running.
 	statusCh <- svc.Status{
@@ -396,7 +401,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			s.log(dc.LvlINF, "trigger=registry_change")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.log, s.elog)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
@@ -439,7 +444,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
 				}
 			}
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, s.log, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.log, s.elog)
 
 		case <-configCh:
 			newFullCfg, err := dc.LoadConfig(s.log)

@@ -82,6 +82,21 @@ and saves config.json without prompting.`,
 				log(dc.LvlINF, fmt.Sprintf("dashboard_url=%q %s%s", fileCfg.Dashboard.URL, certNote, autoPinNote))
 			}
 
+			// Performance monitoring
+			perf := fileCfg.Performance
+			if perf.ForceDisabled {
+				log(dc.LvlINF, "performance=force_disabled")
+			} else if perf.Enabled {
+				log(dc.LvlINF, "performance=enabled",
+					fmt.Sprintf("cpu_warn=%d%% cpu_crit=%d%%", perf.CPUWarnPct, perf.CPUCritPct),
+					fmt.Sprintf("mem_warn=%d%% mem_crit=%d%%", perf.MemWarnPct, perf.MemCritPct),
+					fmt.Sprintf("input_delay_warn=%dms input_delay_crit=%dms", perf.InputDelayWarnMS, perf.InputDelayCritMS),
+					fmt.Sprintf("remotefx=%t per_session=%t", perf.CollectRemoteFX, perf.CollectPerSession),
+				)
+			} else {
+				log(dc.LvlINF, "performance=disabled")
+			}
+
 			// Notification targets
 			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
 			return nil
@@ -99,6 +114,8 @@ and saves config.json without prompting.`,
 	cmd.Flags().Int("poll-interval", dc.DefaultPollInterval, "Poll interval in seconds (≥10)")
 	cmd.Flags().Int("retention-days", dc.DefaultRetentionDays, "Audit retention in days (1–365)")
 	cmd.Flags().Bool("auto-pin", false, "Auto-pin dashboard TLS certificate on registration")
+	cmd.Flags().Bool("perf-enabled", false, "Enable performance monitoring (PDH counters)")
+	cmd.Flags().Bool("perf-disabled", false, "Force-disable performance monitoring (blocks dashboard override)")
 
 	return cmd
 }
@@ -259,6 +276,24 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config, log dc.LogFunc) e
 
 	if cmd.Flags().Changed("auto-pin") {
 		fileCfg.Dashboard.AutoPin = &autoPin
+	}
+
+	if cmd.Flags().Changed("perf-enabled") {
+		perfEnabled, _ := cmd.Flags().GetBool("perf-enabled")
+		fileCfg.Performance.Enabled = perfEnabled
+		if perfEnabled {
+			fileCfg.Performance.ForceDisabled = false
+			if !fileCfg.Performance.CollectPerSession {
+				fileCfg.Performance.CollectPerSession = true // default on
+			}
+		}
+	}
+	if cmd.Flags().Changed("perf-disabled") {
+		perfDisabled, _ := cmd.Flags().GetBool("perf-disabled")
+		if perfDisabled {
+			fileCfg.Performance.Enabled = false
+			fileCfg.Performance.ForceDisabled = true
+		}
 	}
 
 	// Upsert rather than append: running configure twice with the same URL

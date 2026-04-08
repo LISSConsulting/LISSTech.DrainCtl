@@ -4,6 +4,7 @@ package svc
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -17,7 +18,7 @@ import (
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, log dc.LogFunc, elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary], log dc.LogFunc, elog *eventlog.Log) {
 	checkStart := time.Now()
 	state, err := dc.ReadDrainMode()
 	if err != nil {
@@ -73,6 +74,9 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 
 	// Session tracking.
 	sess := dc.GetSessionSummary()
+	if lastSessions != nil {
+		lastSessions.Store(sess)
+	}
 
 	// Performance counters (service-mode only).
 	var perfSnap *dc.PerfSnapshot
@@ -82,6 +86,9 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 			dc.LogMsg(log, dc.LvlWRN, "perfmon collect failed", fmt.Sprintf("error=%q", err))
 		} else {
 			perfSnap = snap
+			if lastPerf != nil {
+				lastPerf.Store(snap)
+			}
 		}
 	}
 
@@ -286,6 +293,11 @@ func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConf
 			gp = 1440
 		}
 		cfg.GracePeriod = time.Duration(gp) * time.Minute
+	}
+	// Apply remote performance config unless locally force-disabled.
+	if remote.Performance != nil && !cfg.Performance.ForceDisabled {
+		remote.Performance.ForceDisabled = cfg.Performance.ForceDisabled // preserve local flag
+		cfg.Performance = *remote.Performance
 	}
 }
 

@@ -242,6 +242,7 @@ type RemoteNotifyConfig struct {
 	Notifications           []dc.NotificationTarget `json:"notifications"`
 	SessionWarningThreshold int                     `json:"session_warning_threshold"`
 	GracePeriod             int                     `json:"grace_period"`
+	Performance             *dc.PerformanceConfig   `json:"performance,omitempty"`
 }
 
 // FetchNotifyConfig retrieves the notification configuration from the dashboard.

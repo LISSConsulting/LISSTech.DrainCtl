@@ -376,10 +376,12 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
+		Performance             dc.PerformanceConfig    `json:"performance"`
 	}{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
+		Performance:             cfg.Performance,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -405,6 +407,7 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		Notifications           *[]dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold *int                     `json:"session_warning_threshold,omitempty"`
 		GracePeriod             *int                     `json:"grace_period,omitempty"`
+		Performance             *dc.PerformanceConfig    `json:"performance,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -462,6 +465,13 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 			dc.LogMsg(ds.log, dc.LvlERR, "update notify settings failed", fmt.Sprintf("error=%q", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if in.Performance != nil {
+			if err := dc.UpdatePerformanceConfig(*in.Performance, ds.log); err != nil {
+				dc.LogMsg(ds.log, dc.LvlERR, "update performance config failed", fmt.Sprintf("error=%q", err))
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
