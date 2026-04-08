@@ -114,6 +114,10 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	if perfSnap != nil {
 		rec.CPUPct = perfSnap.CPUPct
 		rec.InputDelayMax = perfSnap.InputDelayMax
+		rec.MemAvailMB = perfSnap.MemAvailMB
+		rec.MemTotalMB = perfSnap.MemTotalMB
+		rec.DiskQueue = perfSnap.DiskQueue
+		rec.TCPRetransSec = perfSnap.TCPRetrans
 	}
 	st.Append(rec)
 
