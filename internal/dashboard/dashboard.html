@@ -392,38 +392,6 @@
                 gap: 14px;
                 margin-bottom: 24px;
             }
-            .srv {
-                padding: 16px 18px;
-                border-left: 5px solid var(--border);
-            }
-            .srv.ok {
-                border-left-color: var(--green);
-            }
-            .srv.grace {
-                border-left-color: var(--amber);
-            }
-            .srv.alert {
-                border-left-color: var(--red);
-            }
-            .srv.off {
-                border-left-color: var(--subtle);
-                opacity: 0.6;
-            }
-            .srv-h {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin-bottom: 8px;
-            }
-            .srv-host {
-                font-family: "JetBrains Mono", monospace;
-                font-size: 0.88rem;
-                font-weight: 700;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                min-width: 0;
-            }
             .badge { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 700;
   padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.8px;
   border: 2px solid var(--border); box-shadow: 2px 2px 0 var(--shadow); display: inline-block; }
@@ -431,40 +399,6 @@
             .badge.grace { background: var(--amber); color: #fff; }
             .badge.alert { background: var(--red); color: #fff; }
             .badge.off { background: var(--subtle); color: #fff; }
-            .srv-rows {
-                display: flex;
-                flex-direction: column;
-                gap: 3px;
-            }
-            .srv-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 0.78rem;
-            }
-            .srv-k {
-                color: var(--muted);
-                font-weight: 600;
-            }
-            .srv-v {
-                font-family: "JetBrains Mono", monospace;
-                font-size: 0.76rem;
-                text-align: right;
-                max-width: 55%;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            .srv-v--amber {
-                color: var(--amber);
-            }
-            .srv-act {
-                margin-top: 8px;
-                padding-top: 6px;
-                border-top: 1px solid var(--surface);
-                display: flex;
-                justify-content: flex-end;
-                gap: 6px;
-            }
 
             /* ===== Server data table ===== */
             table.srv-tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
@@ -559,10 +493,6 @@
                     color 0.1s;
             }
             .btn-rm:hover {
-                background: var(--red);
-                color: #fff;
-            }
-            .btn-rm[data-confirm="1"] {
                 background: var(--red);
                 color: #fff;
             }
@@ -745,110 +675,6 @@
             }
             .evt.hidden {
                 display: none;
-            }
-
-            /* Session gauge */
-            .srv-gauge {
-                margin-top: 8px;
-            }
-            .gauge-bar {
-                height: 8px;
-                background: var(--surface);
-                border: 1px solid var(--border);
-                border-radius: 4px;
-                overflow: hidden;
-            }
-            .gauge-fill {
-                height: 100%;
-                border-radius: 3px;
-                transition: width 0.5s;
-            }
-            .gauge-fill.ok {
-                background: var(--green);
-            }
-            .gauge-fill.grace {
-                background: var(--amber);
-            }
-            .gauge-fill.alert {
-                background: var(--red);
-            }
-            .gauge-label {
-                font-family: "JetBrains Mono", monospace;
-                font-size: 0.68rem;
-                color: var(--muted);
-                margin-top: 2px;
-                display: block;
-            }
-
-            /* Performance section */
-            .srv-perf {
-                margin-top: 8px;
-                border-top: 1px solid var(--border);
-                padding-top: 8px;
-            }
-            .perf-toggle {
-                font-size: 0.72rem;
-                font-family: "JetBrains Mono", monospace;
-                color: var(--muted);
-                cursor: pointer;
-                user-select: none;
-                display: flex;
-                align-items: center;
-                gap: 4px;
-            }
-            .perf-toggle:hover {
-                color: var(--fg);
-            }
-            .perf-toggle .arrow {
-                display: inline-block;
-                transition: transform 0.15s;
-                font-size: 0.6rem;
-            }
-            .perf-toggle.open .arrow {
-                transform: rotate(90deg);
-            }
-            .perf-detail {
-                display: none;
-                margin-top: 6px;
-            }
-            .perf-detail.show {
-                display: block;
-            }
-            .perf-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 0.72rem;
-                font-family: "JetBrains Mono", monospace;
-                padding: 1px 0;
-            }
-            .perf-row .perf-k {
-                color: var(--muted);
-            }
-            .perf-row .perf-v {
-                font-weight: 600;
-            }
-            .perf-v--warn {
-                color: var(--amber) !important;
-            }
-            .perf-v--crit {
-                color: var(--red) !important;
-            }
-            .perf-gauges {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 6px;
-                margin-top: 4px;
-            }
-            .perf-mini-gauge {
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-            }
-            .perf-mini-gauge .gauge-bar {
-                height: 6px;
-            }
-            .perf-mini-gauge .gauge-label {
-                font-size: 0.62rem;
             }
 
             /* Footer */
@@ -1115,50 +941,6 @@
                 flex-wrap: wrap;
             }
 
-            /* Target rows */
-            .target-list {
-                display: flex;
-                flex-direction: column;
-                gap: 16px;
-            }
-            .target-row {
-                background: var(--surface);
-                border: var(--bw) solid var(--border);
-                border-radius: var(--r);
-                padding: 22px 24px;
-                position: relative;
-            }
-            .target-type-pills {
-                display: flex;
-                gap: 6px;
-                margin-bottom: 14px;
-            }
-            .target-type-pill {
-                padding: 6px 16px;
-                font-family: "Work Sans", sans-serif;
-                font-size: 0.78rem;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                border: var(--bw) solid var(--border);
-                border-radius: 20px;
-                background: var(--card);
-                color: var(--muted);
-                cursor: pointer;
-                transition: background 0.15s, color 0.15s;
-            }
-            .target-type-pill.active {
-                background: var(--accent);
-                color: #fff;
-                border-color: var(--accent);
-            }
-            .target-type-pill:hover:not(.active) {
-                background: var(--surface);
-                color: var(--fg);
-            }
-            .target-field {
-                margin-bottom: 12px;
-            }
             .target-field-label {
                 display: block;
                 font-size: 0.72rem;
@@ -1167,41 +949,6 @@
                 letter-spacing: 0.08em;
                 color: var(--accent);
                 margin-bottom: 4px;
-            }
-            .target-field-error {
-                font-size: 0.72rem;
-                color: var(--red);
-                margin-top: 2px;
-                display: none;
-            }
-            .btn-rm-target {
-                position: absolute;
-                top: 12px;
-                right: 12px;
-                width: 32px;
-                height: 32px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 1.1rem;
-                font-weight: 700;
-                background: none;
-                color: var(--muted);
-                border: 1.5px solid var(--border);
-                border-radius: 6px;
-                cursor: pointer;
-                transition:
-                    background 0.1s,
-                    color 0.1s,
-                    border-color 0.1s;
-                flex-shrink: 0;
-                padding: 0;
-                line-height: 1;
-            }
-            .btn-rm-target:hover {
-                background: var(--red);
-                color: #fff;
-                border-color: var(--red);
             }
             .target-section-label {
                 font-size: 0.7rem;
@@ -1695,9 +1442,6 @@
             .filter-pill.active[data-status="alert"] {
                 background: var(--red);
                 border-color: var(--red);
-            }
-            .srv.hidden {
-                display: none !important;
             }
         </style>
     </head>
@@ -6170,7 +5914,6 @@
                     pill.style.color = "var(--red)";
                 }
             }
-            var _rmTimers = {};
             function showGridToast(msg) {
                 var el = document.getElementById("grid-toast");
                 el.textContent = msg;
@@ -6605,256 +6348,7 @@
                 }
             }
 
-            let targetCounter = 0;
-            function addTargetRow(data) {
-                const id = targetCounter++;
-                const t = data || {
-                    type: "webhook",
-                    url: "",
-                    triggers: ["drain_on", "drain_off", "alert", "healthy"],
-                    repeat_minutes: 0,
-                };
-                const row = document.createElement("div");
-                row.className = "target-row";
-                row.dataset.targetId = id;
-                const triggers = t.triggers || [];
-                var rv = t.repeat_minutes || 0;
-                // For ntfy, extract topic from URL
-                var isNtfy = t.type === "ntfy";
-                var isEmail = t.type === "email";
-                var displayUrl = t.url || "";
-                if (isNtfy && displayUrl.match(/^https?:\/\/ntfy\.sh\//)) {
-                    displayUrl = displayUrl.replace(/^https?:\/\/ntfy\.sh\//, "");
-                }
-                var secretVal = !isNtfy && t.secret ? t.secret : "";
-                row.innerHTML =
-                    '<button class="btn-rm-target" title="Remove target" aria-label="Remove notification target">&times;</button>' +
-                    '<div class="target-type-pills">' +
-                    '<button class="target-type-pill' + (t.type === "webhook" ? " active" : "") + '" data-type="webhook">Webhook</button>' +
-                    '<button class="target-type-pill' + (isNtfy ? " active" : "") + '" data-type="ntfy">Ntfy.sh</button>' +
-                    '<button class="target-type-pill' + (isEmail ? " active" : "") + '" data-type="email">Email</button>' +
-                    '</div>' +
-                    '<div class="target-field">' +
-                    '<label class="target-field-label">' + (isNtfy ? "Topic" : isEmail ? "SMTP URL" : "URL") + '</label>' +
-                    '<div style="display:flex;align-items:center;gap:0">' +
-                    '<span class="ntfy-prefix" style="display:' + (isNtfy ? "inline" : "none") + '">ntfy.sh /</span>' +
-                    '<input class="settings-input target-url" data-field="url" type="text" value="' +
-                    displayUrl.replace(/"/g, "&quot;") +
-                    '" placeholder="' +
-                    (isNtfy ? "my-drainctl-alerts" : isEmail ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...") +
-                    '" style="flex:1;min-width:0">' +
-                    '</div>' +
-                    '<div class="target-field-error" data-error="url">Please enter a valid URL.</div>' +
-                    '</div>' +
-                    '<div class="target-field target-secret-field" style="display:' + (isNtfy ? "none" : "block") + '">' +
-                    '<label class="target-field-label secret-label">' + (isEmail ? "SMTP Password" : "HMAC Secret") + '</label>' +
-                    '<input class="settings-input" data-field="secret" type="password" value="' +
-                    secretVal.replace(/"/g, "&quot;") +
-                    '" placeholder="' + (isEmail ? "SMTP password" : "Optional signing secret") + '" autocomplete="new-password">' +
-                    '</div>' +
-                    '<div class="target-field email-fields" style="display:' + (isEmail ? "block" : "none") + '">' +
-                    '<div style="display:flex;gap:8px">' +
-                    '<div style="flex:1">' +
-                    '<label class="target-field-label">From</label>' +
-                    '<input class="settings-input" data-field="from" type="text" value="' + (t.from || "").replace(/"/g, "&quot;") + '" placeholder="from@example.com">' +
-                    '</div>' +
-                    '<div style="flex:2">' +
-                    '<label class="target-field-label">To (comma-separated)</label>' +
-                    '<input class="settings-input" data-field="to" type="text" value="' + ((t.to || []).join(", ")).replace(/"/g, "&quot;") + '" placeholder="to@example.com, ops@example.com">' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="target-section-label">Triggers</div>' +
-                    '<p class="target-desc">Which events send a notification to this target.</p>' +
-                    '<div class="target-triggers">' +
-                    ALL_TRIGGERS.map(function (tr) {
-                        return (
-                            '<span class="trigger-pill' +
-                            (triggers.includes(tr) ? " active" : "") +
-                            '" data-trigger="' +
-                            tr +
-                            '" title="' +
-                            TRIGGER_DESCS[tr] +
-                            '"><input type="checkbox" data-trigger="' +
-                            tr +
-                            '"' +
-                            (triggers.includes(tr) ? " checked" : "") +
-                            ">" +
-                            TRIGGER_LABELS[tr] +
-                            "</span>"
-                        );
-                    }).join("") +
-                    "</div>" +
-                    '<div class="target-section-label">Repeat interval</div>' +
-                    '<p class="target-desc">Re-send while the condition persists. <strong>Once</strong> = only on state change.</p>' +
-                    '<div class="repeat-pills">' +
-                    '<span class="repeat-pill' +
-                    (rv === 0 ? " active" : "") +
-                    '" data-mins="0">Once</span>' +
-                    '<span class="repeat-pill' +
-                    (rv === 15 ? " active" : "") +
-                    '" data-mins="15">15 min</span>' +
-                    '<span class="repeat-pill' +
-                    (rv === 60 ? " active" : "") +
-                    '" data-mins="60">1 hour</span>' +
-                    '<span class="repeat-pill' +
-                    (rv === 240 ? " active" : "") +
-                    '" data-mins="240">4 hours</span>' +
-                    '<span class="repeat-pill' +
-                    (rv === 480 ? " active" : "") +
-                    '" data-mins="480">8 hours</span>' +
-                    "</div>" +
-                    '<div class="target-repeat">' +
-                    '<input class="settings-num" data-field="repeat" type="number" min="0" value="' +
-                    rv +
-                    '">' +
-                    '<span class="settings-num-label">minutes (custom value)</span></div>';
 
-                // Wire up events
-                var rmBtn = row.querySelector(".btn-rm-target");
-                rmBtn.addEventListener("click", function () {
-                    row.remove();
-                    _cfgDirty = true;
-                });
-
-                var urlInput = row.querySelector(".target-url");
-                var ntfyPrefix = row.querySelector(".ntfy-prefix");
-                var secretField = row.querySelector(".target-secret-field");
-                var secretLabel = row.querySelector(".secret-label");
-                var secretInput = row.querySelector('[data-field="secret"]');
-                var emailFields = row.querySelector(".email-fields");
-
-                function applyType(type) {
-                    var isN = type === "ntfy";
-                    var isE = type === "email";
-                    ntfyPrefix.style.display = isN ? "inline" : "none";
-                    secretField.style.display = isN ? "none" : "block";
-                    if (secretLabel) secretLabel.textContent = isE ? "SMTP Password" : "HMAC Secret";
-                    if (secretInput) secretInput.placeholder = isE ? "SMTP password" : "Optional signing secret";
-                    if (emailFields) emailFields.style.display = isE ? "block" : "none";
-                    var urlLabel = row.querySelector(".target-field-label");
-                    if (urlLabel) urlLabel.textContent = isN ? "Topic" : isE ? "SMTP URL" : "URL";
-                    urlInput.placeholder = isN ? "my-drainctl-alerts" : isE ? "smtp://smtp.example.com:587" : "https://hooks.example.com/...";
-                }
-
-                row.querySelectorAll(".target-type-pill").forEach(function (pill) {
-                    pill.addEventListener("click", function () {
-                        row.querySelectorAll(".target-type-pill").forEach(function (p) {
-                            p.classList.remove("active");
-                        });
-                        pill.classList.add("active");
-                        var newType = pill.dataset.type;
-                        if (newType === "ntfy") {
-                            // Switching to ntfy: strip https://ntfy.sh/ prefix if present
-                            if (urlInput.value.match(/^https?:\/\/ntfy\.sh\//)) {
-                                urlInput.value = urlInput.value.replace(/^https?:\/\/ntfy\.sh\//, "");
-                            }
-                        } else if (newType === "webhook") {
-                            // Switching to webhook: clear field if it looks like a topic name, not a URL
-                            if (!urlInput.value.match(/^https?:\/\//)) {
-                                urlInput.value = "";
-                            }
-                        }
-                        applyType(newType);
-                        _cfgDirty = true;
-                    });
-                });
-
-                // Trigger pill toggles
-                row.querySelectorAll(".trigger-pill").forEach(function (pill) {
-                    pill.addEventListener("click", function (e) {
-                        e.preventDefault();
-                        pill.classList.toggle("active");
-                        var cb = pill.querySelector("input");
-                        cb.checked = pill.classList.contains("active");
-                        _cfgDirty = true;
-                    });
-                });
-
-                // Repeat pill presets
-                var repeatInput = row.querySelector('[data-field="repeat"]');
-                row.querySelectorAll(".repeat-pill").forEach(function (pill) {
-                    pill.addEventListener("click", function () {
-                        var mins = parseInt(pill.dataset.mins);
-                        repeatInput.value = mins;
-                        row.querySelectorAll(".repeat-pill").forEach(function (p) {
-                            p.classList.remove("active");
-                        });
-                        pill.classList.add("active");
-                        _cfgDirty = true;
-                    });
-                });
-                repeatInput.addEventListener("input", function () {
-                    var v = parseInt(repeatInput.value) || 0;
-                    row.querySelectorAll(".repeat-pill").forEach(function (p) {
-                        p.classList.toggle("active", parseInt(p.dataset.mins) === v);
-                    });
-                    _cfgDirty = true;
-                });
-                urlInput.addEventListener("input", function () {
-                    _cfgDirty = true;
-                });
-                if (secretInput) {
-                    secretInput.addEventListener("input", function () {
-                        _cfgDirty = true;
-                    });
-                }
-
-                document.getElementById("target-list").appendChild(row);
-                return row;
-            }
-            function readTargets() {
-                const rows = document.querySelectorAll(".target-row");
-                const targets = [];
-                var valid = true;
-                rows.forEach((row) => {
-                    const urlInput = row.querySelector('[data-field="url"]');
-                    var url = urlInput.value.trim();
-                    const activePill = row.querySelector(".target-type-pill.active");
-                    const type = activePill ? activePill.dataset.type : "webhook";
-                    if (!url) {
-                        urlInput.style.borderColor = "var(--red)";
-                        valid = false;
-                        return;
-                    }
-                    // Reconstruct full ntfy URL from topic name
-                    if (type === "ntfy" && !url.match(/^https?:\/\//)) {
-                        url = "https://ntfy.sh/" + url;
-                    }
-                    // Webhook URLs must be a valid http:// or https:// URL.
-                    if (type === "webhook") {
-                        var schemeOk = false;
-                        try {
-                            var parsed = new URL(url);
-                            schemeOk = parsed.protocol === "http:" || parsed.protocol === "https:";
-                        } catch (_) {
-                            /* invalid URL */
-                        }
-                        if (!schemeOk) {
-                            urlInput.style.borderColor = "var(--red)";
-                            valid = false;
-                            return;
-                        }
-                    }
-                    urlInput.style.borderColor = "";
-                    const repeat = parseInt(row.querySelector('[data-field="repeat"]').value) || 0;
-                    const secretInput = row.querySelector('[data-field="secret"]');
-                    const secret = (type === "webhook" || type === "email") && secretInput ? secretInput.value : "";
-                    const triggers = [];
-                    row.querySelectorAll("input[data-trigger]").forEach((cb) => {
-                        if (cb.checked) triggers.push(cb.dataset.trigger);
-                    });
-                    const target = { type, url, triggers, repeat_minutes: repeat };
-                    if (secret) target.secret = secret;
-                    const fromField = row.querySelector('[data-field="from"]');
-                    const toField = row.querySelector('[data-field="to"]');
-                    if (fromField) target.from = fromField.value.trim();
-                    if (toField) target.to = toField.value.split(",").map((s) => s.trim()).filter(Boolean);
-                    targets.push(target);
-                });
-                if (!valid) return null;
-                return targets;
-            }
             async function loadNotifyConfig() {
                 // Cancel any in-flight request so a stale response cannot
                 // overwrite the UI when settings is closed and reopened quickly.
