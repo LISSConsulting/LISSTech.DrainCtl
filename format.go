@@ -192,6 +192,10 @@ type HistoryRecord struct {
 	MaxSessions          int      `json:"max_sessions,omitempty"`
 	CPUPct               *float64 `json:"cpu_pct,omitempty"`
 	InputDelayMax        *float64 `json:"input_delay_max_ms,omitempty"`
+	MemAvailMB           *float64 `json:"mem_avail_mb,omitempty"`
+	MemTotalMB           *float64 `json:"mem_total_mb,omitempty"`
+	DiskQueue            *float64 `json:"disk_queue,omitempty"`
+	TCPRetransSec        *float64 `json:"tcp_retrans_sec,omitempty"`
 	ExitCode             int      `json:"exit_code"`
 }
 
@@ -245,6 +249,22 @@ func AuditToHistory(rec AuditRecord, stateDur *int) HistoryRecord {
 	if rec.InputDelayMax != 0 {
 		v := rec.InputDelayMax
 		hr.InputDelayMax = &v
+	}
+	if rec.MemAvailMB != 0 {
+		v := rec.MemAvailMB
+		hr.MemAvailMB = &v
+	}
+	if rec.MemTotalMB != 0 {
+		v := rec.MemTotalMB
+		hr.MemTotalMB = &v
+	}
+	if rec.DiskQueue != 0 {
+		v := rec.DiskQueue
+		hr.DiskQueue = &v
+	}
+	if rec.TCPRetransSec != 0 {
+		v := rec.TCPRetransSec
+		hr.TCPRetransSec = &v
 	}
 	if !rec.KeyModified.IsZero() {
 		hr.KeyModified = rec.KeyModified.Local().Format(time.RFC3339)

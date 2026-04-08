@@ -27,6 +27,10 @@ type AuditRecord struct {
 	MaxSessions          int       `json:"max_sessions,omitempty"`
 	CPUPct               float64   `json:"cpu_pct,omitempty"`
 	InputDelayMax        float64   `json:"input_delay_max_ms,omitempty"`
+	MemAvailMB           float64   `json:"mem_avail_mb,omitempty"`
+	MemTotalMB           float64   `json:"mem_total_mb,omitempty"`
+	DiskQueue            float64   `json:"disk_queue,omitempty"`
+	TCPRetransSec        float64   `json:"tcp_retrans_sec,omitempty"`
 	ExitCode             int       `json:"exit"`
 }
 
