@@ -786,7 +786,13 @@
                 box-shadow: 8px 8px 0 var(--shadow);
                 overflow-y: auto;
                 padding: 32px 36px;
+                scrollbar-width: thin;
+                scrollbar-color: var(--subtle) transparent;
             }
+            .settings-modal::-webkit-scrollbar { width: 6px; }
+            .settings-modal::-webkit-scrollbar-track { background: transparent; margin: 10px 0; }
+            .settings-modal::-webkit-scrollbar-thumb { background: var(--subtle); border-radius: 3px; }
+            .settings-modal::-webkit-scrollbar-thumb:hover { background: var(--accent); }
             .settings-title {
                 font-family: "DM Serif Display", serif;
                 font-size: 1.3rem;
