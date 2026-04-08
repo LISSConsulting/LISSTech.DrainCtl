@@ -1687,8 +1687,9 @@
                 <div class="settings-divider"></div>
 
                 <div class="settings-actions">
-                    <button class="btn-save" onclick="saveNotifyConfig()">Save Configuration</button>
+                    <button class="btn-save" onclick="saveNotifyConfig()">Save</button>
                     <button class="btn-test" id="btn-test" onclick="sendTestNotification()">Send Test</button>
+                    <button class="btn-save" style="background:var(--card);color:var(--fg);border-color:var(--border)" onclick="toggleSettings()">Close</button>
                     <div class="settings-status" id="cfg-status"></div>
                 </div>
             </div>
@@ -5518,17 +5519,18 @@
 
                     if (!isOff) {
                         // --- Resource Utilization tile ---
-                        var sessPct = (sess && sess.max_sessions > 0) ? sess.utilization_pct : 0;
-                        var cpuPct = perf ? perf.cpu_pct : 0;
-                        var memFreePct = (perf && perf.mem_total_mb > 0) ? Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) : 0;
-                        var memUsedPct = 100 - memFreePct;
+                        var sessPct = (sess && sess.max_sessions > 0) ? sess.utilization_pct : null;
+                        var cpuPct = perf ? perf.cpu_pct : null;
+                        var hasMem = perf && perf.mem_total_mb > 0;
+                        var memFreePct = hasMem ? Math.round(perf.mem_avail_mb / perf.mem_total_mb * 100) : null;
+                        var memUsedPct = hasMem ? (100 - memFreePct) : null;
 
                         html += '<div class="d-tile d-tile-util"><div class="d-tile-label">Resource Utilization</div>';
                         // Ring row
                         html += '<div class="d-ring-row">';
-                        html += '<div class="d-ring-cell">' + ringSvg(sessPct, ringColor(sessPct)) + '<div class="d-ring-lbl">Sessions</div></div>';
-                        html += '<div class="d-ring-cell">' + ringSvg(cpuPct, ringColor(cpuPct)) + '<div class="d-ring-lbl">CPU</div></div>';
-                        html += '<div class="d-ring-cell">' + ringSvg(memUsedPct, ringColor(memUsedPct)) + '<div class="d-ring-lbl">Memory</div></div>';
+                        html += '<div class="d-ring-cell">' + (sessPct != null ? ringSvg(sessPct, ringColor(sessPct)) : ringValSvg('\u2014', '', 'var(--subtle)')) + '<div class="d-ring-lbl">Sessions</div></div>';
+                        html += '<div class="d-ring-cell">' + (cpuPct != null ? ringSvg(cpuPct, ringColor(cpuPct)) : ringValSvg('\u2014', '', 'var(--subtle)')) + '<div class="d-ring-lbl">CPU</div></div>';
+                        html += '<div class="d-ring-cell">' + (memUsedPct != null ? ringSvg(memUsedPct, ringColor(memUsedPct)) : ringValSvg('\u2014', '', 'var(--subtle)')) + '<div class="d-ring-lbl">Memory</div></div>';
                         html += '</div>';
                         // Sparkline row (canvases drawn by Task 4)
                         html += '<div class="d-spark-row">';
@@ -6157,6 +6159,7 @@
                 _tgtEditIdx = idx;
                 var isNew = idx === null || idx === undefined;
                 document.getElementById("tgt-edit-title").textContent = isNew ? "Add Notification Target" : "Edit Notification Target";
+                document.getElementById("settings-overlay").style.visibility = "hidden";
                 var t = isNew ? { type: "webhook", url: "", triggers: ["drain_on","drain_off","alert","healthy"], repeat_minutes: 0, enabled: true } : _cfgTargets[idx];
                 // Type pills
                 document.querySelectorAll("#tgt-type-pills .tgt-type-pill").forEach(function(p) {
@@ -6212,6 +6215,7 @@
 
             function closeTargetEdit() {
                 document.getElementById("tgt-edit-overlay").classList.remove("open");
+                document.getElementById("settings-overlay").style.visibility = "";
                 _tgtEditIdx = null;
             }
 
