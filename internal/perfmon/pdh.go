@@ -10,38 +10,32 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// PDH error codes.
+// PDH status codes.
 const (
-	pdhCStatusValidData     = 0x00000000
-	pdhCStatusNewData       = 0x00000001
-	pdhCStatusNoInstance    = 0x800007D1
-	pdhCStatusInvalidData   = 0xC0000BBA
-	pdhCStatusNoObject      = 0xC0000BB8
-	pdhCStatusNoCounter     = 0xC0000BB9
-	pdhMoreData             = 0x800007D2
-	pdhInvalidHandle        = 0xC0000BBC
-	pdhNoData               = 0x800007D5
-	pdhCalcNegativeDenom    = 0x800007D6
-	pdhCalcNegativeValue    = 0x800007D8
-	pdhInvalidArgument      = 0xC0000BBD
-	pdhEntryNotInLogFile    = 0xC0000BCD
-	pdhCStatusNoCountername = 0xC0000BBF
+	pdhCStatusValidData   = 0x00000000
+	pdhCStatusNewData     = 0x00000001
+	pdhCStatusNoInstance  = 0x800007D1
+	pdhMoreData           = 0x800007D2
+	pdhNoData             = 0x800007D5
+	pdhCalcNegativeDenom  = 0x800007D6
+	pdhCalcNegativeValue  = 0x800007D8
+	pdhCStatusNoObject    = 0xC0000BB8
+	pdhCStatusNoCounter   = 0xC0000BB9
+	pdhCStatusInvalidData = 0xC0000BBA
+	pdhInvalidData        = 0xC0000BC6
 )
 
-// PDH_FMT constants for PdhGetFormattedCounterValue.
-const (
-	pdhFmtDouble = 0x00000200
-	pdhFmtLarge  = 0x00000400
-)
+// pdhFmtDouble requests double-precision formatted values.
+const pdhFmtDouble = 0x00000200
 
-// PDH_FMT_COUNTERVALUE for double values.
+// pdhFmtCountervalueDouble maps PDH_FMT_COUNTERVALUE for double format.
 type pdhFmtCountervalueDouble struct {
 	CStatus uint32
-	_       [4]byte // padding
+	_       [4]byte // alignment padding
 	Value   float64
 }
 
-// PDH_FMT_COUNTERVALUE_ITEM_DOUBLE for array queries.
+// pdhFmtCountervalueItemDouble maps PDH_FMT_COUNTERVALUE_ITEM_DOUBLE.
 type pdhFmtCountervalueItemDouble struct {
 	Name  *uint16
 	Value pdhFmtCountervalueDouble
@@ -58,102 +52,103 @@ var (
 	procPdhCloseQuery               = modPdh.NewProc("PdhCloseQuery")
 )
 
-// pdhOpenQuery creates a new PDH query handle.
 func pdhOpenQuery() (syscall.Handle, error) {
 	var query syscall.Handle
 	ret, _, _ := procPdhOpenQueryW.Call(0, 0, uintptr(unsafe.Pointer(&query)))
 	if ret != 0 {
-		return 0, fmt.Errorf("PdhOpenQueryW failed: 0x%08X", ret)
+		return 0, fmt.Errorf("PdhOpenQueryW: 0x%08X", ret)
 	}
 	return query, nil
 }
 
-// pdhAddCounter adds a counter using PdhAddCounterW (same API as typeperf).
-// Uses the counter path directly — on English systems, English paths work;
-// on non-English systems, localized paths are needed. PdhAddEnglishCounterW
-// is intentionally not used: it's broken on Win11/Server 2022+ where its
-// internal Perflib translation layer produces invalid counter handles.
-func pdhAddCounter(query syscall.Handle, counterPath string) (syscall.Handle, error) {
-	path, err := windows.UTF16PtrFromString(counterPath)
+func pdhAddCounter(query syscall.Handle, path string) (syscall.Handle, error) {
+	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return 0, fmt.Errorf("invalid counter path %q: %w", counterPath, err)
+		return 0, fmt.Errorf("invalid counter path %q: %w", path, err)
 	}
 	var counter syscall.Handle
 	ret, _, _ := procPdhAddCounterW.Call(
 		uintptr(query),
-		uintptr(unsafe.Pointer(path)),
+		uintptr(unsafe.Pointer(p)),
 		0,
 		uintptr(unsafe.Pointer(&counter)),
 	)
 	if ret != 0 {
-		return 0, fmt.Errorf("PdhAddCounterW(%s) failed: 0x%08X", counterPath, ret)
+		return 0, fmt.Errorf("PdhAddCounterW(%s): 0x%08X", path, ret)
 	}
 	return counter, nil
 }
 
-// pdhCollectQueryData collects current data for all counters in the query.
 func pdhCollectQueryData(query syscall.Handle) error {
 	ret, _, _ := procPdhCollectQueryData.Call(uintptr(query))
 	if ret != 0 {
-		return fmt.Errorf("PdhCollectQueryData failed: 0x%08X", ret)
+		return fmt.Errorf("PdhCollectQueryData: 0x%08X", ret)
 	}
 	return nil
 }
 
-// pdhGetFormattedDouble reads a scalar counter value as float64.
-// Returns 0 and a non-nil error if the counter has no valid data.
-func pdhGetFormattedDouble(counter syscall.Handle) (float64, error) {
+// isTransientError returns true for PDH codes that indicate a counter is
+// temporarily unavailable (rate counter still priming, instance disappeared,
+// counter overflow). The counter should be silently skipped for this cycle.
+func isTransientError(code uint32) bool {
+	switch code {
+	case pdhInvalidData, pdhCalcNegativeDenom, pdhCalcNegativeValue,
+		pdhCStatusInvalidData, pdhCStatusNoInstance, pdhNoData:
+		return true
+	}
+	return false
+}
+
+// errCounterNotReady signals a transient PDH condition. Callers skip the value.
+var errCounterNotReady = fmt.Errorf("counter data not yet available")
+
+func pdhGetDouble(counter syscall.Handle) (float64, error) {
 	var val pdhFmtCountervalueDouble
 	ret, _, _ := procPdhGetFormattedCounterValue.Call(
-		uintptr(counter),
-		pdhFmtDouble,
-		0,
+		uintptr(counter), pdhFmtDouble, 0,
 		uintptr(unsafe.Pointer(&val)),
 	)
 	if ret != 0 {
-		return 0, fmt.Errorf("PdhGetFormattedCounterValue failed: 0x%08X", ret)
+		if isTransientError(uint32(ret)) {
+			return 0, errCounterNotReady
+		}
+		return 0, fmt.Errorf("PdhGetFormattedCounterValue: 0x%08X", ret)
 	}
 	if val.CStatus != pdhCStatusValidData && val.CStatus != pdhCStatusNewData {
-		return 0, fmt.Errorf("counter status: 0x%08X", val.CStatus)
+		if isTransientError(val.CStatus) {
+			return 0, errCounterNotReady
+		}
+		return 0, fmt.Errorf("counter CStatus: 0x%08X", val.CStatus)
 	}
 	return val.Value, nil
 }
 
-// pdhGetFormattedDoubleArray reads a multi-instance counter and returns all
-// instance values as float64 slices. Used for per-session counters.
-func pdhGetFormattedDoubleArray(counter syscall.Handle) ([]float64, error) {
-	var bufSize uint32
-	var itemCount uint32
-
-	// First call: determine required buffer size.
+func pdhGetDoubleArray(counter syscall.Handle) ([]float64, error) {
+	var bufSize, itemCount uint32
 	ret, _, _ := procPdhGetFormattedCounterArray.Call(
-		uintptr(counter),
-		pdhFmtDouble,
+		uintptr(counter), pdhFmtDouble,
 		uintptr(unsafe.Pointer(&bufSize)),
 		uintptr(unsafe.Pointer(&itemCount)),
 		0,
 	)
 	if ret != pdhMoreData && ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW size query failed: 0x%08X", ret)
+		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW size: 0x%08X", ret)
 	}
 	if itemCount == 0 || bufSize == 0 {
 		return nil, nil
 	}
 
-	// Allocate buffer and collect.
 	buf := make([]byte, bufSize)
 	ret, _, _ = procPdhGetFormattedCounterArray.Call(
-		uintptr(counter),
-		pdhFmtDouble,
+		uintptr(counter), pdhFmtDouble,
 		uintptr(unsafe.Pointer(&bufSize)),
 		uintptr(unsafe.Pointer(&itemCount)),
 		uintptr(unsafe.Pointer(&buf[0])),
 	)
 	if ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW failed: 0x%08X", ret)
+		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW: 0x%08X", ret)
 	}
 
-	// Parse items from the buffer.
 	itemSize := unsafe.Sizeof(pdhFmtCountervalueItemDouble{})
 	values := make([]float64, 0, itemCount)
 	for i := uint32(0); i < itemCount; i++ {
@@ -165,7 +160,6 @@ func pdhGetFormattedDoubleArray(counter syscall.Handle) ([]float64, error) {
 	return values, nil
 }
 
-// pdhCloseQuery releases a PDH query handle and all associated counters.
 func pdhCloseQuery(query syscall.Handle) {
 	if query != 0 {
 		_, _, _ = procPdhCloseQuery.Call(uintptr(query))
