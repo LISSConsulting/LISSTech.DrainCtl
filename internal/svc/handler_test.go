@@ -4,10 +4,12 @@ package svc
 
 import (
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 )
 
@@ -65,5 +67,63 @@ func TestHandleHistory_ChangesOnly(t *testing.T) {
 		if !r.Changed {
 			t.Errorf("changesOnly=true returned record with Changed=false: %+v", r)
 		}
+	}
+}
+
+// ── syncPerfCollector ────────────────────────────────────────────────────────
+
+func TestSyncPerfCollector_NoChangeIsNoop(t *testing.T) {
+	cfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
+	var collector *perfmon.Collector
+	var triggerState *perfmon.PerfTriggerState
+	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+
+	// Store a snapshot to verify it is NOT cleared on no-op.
+	snap := &dc.PerfSnapshot{CPUPct: 42}
+	lastPerf.Store(snap)
+
+	changed := syncPerfCollector(cfg, cfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	if changed {
+		t.Error("syncPerfCollector returned changed=true for identical configs")
+	}
+	if lastPerf.Load() != snap {
+		t.Error("lastPerf was cleared despite no config change")
+	}
+}
+
+func TestSyncPerfCollector_DisableClearsLastPerf(t *testing.T) {
+	oldCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
+	newCfg := dc.PerformanceConfig{Enabled: false}
+	var collector *perfmon.Collector
+	var triggerState *perfmon.PerfTriggerState
+	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+
+	// Simulate cached snapshot from when perfmon was enabled.
+	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
+
+	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	if !changed {
+		t.Error("syncPerfCollector returned changed=false when disabling perfmon")
+	}
+	if lastPerf.Load() != nil {
+		t.Error("lastPerf not cleared after disabling perfmon")
+	}
+}
+
+func TestSyncPerfCollector_ThresholdChangeClearsLastPerf(t *testing.T) {
+	oldCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
+	newCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 80}
+	var collector *perfmon.Collector
+	var triggerState *perfmon.PerfTriggerState
+	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+
+	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
+
+	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	if !changed {
+		t.Error("syncPerfCollector returned changed=false when thresholds changed")
+	}
+	if lastPerf.Load() != nil {
+		t.Error("lastPerf not cleared after threshold change")
 	}
 }
