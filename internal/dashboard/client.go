@@ -153,11 +153,26 @@ func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
 	log(dc.LvlINF, "dashboard=reported", fmt.Sprintf("host=%s status=%s", result.Host, result.Status))
 }
 
+// negotiateLog is set during service startup to enable step-by-step diagnostic
+// logging of SSPI negotiate requests.  Nil outside the service (CLI paths).
+var negotiateLog atomic.Pointer[dc.LogFunc]
+
+// SetNegotiateLog sets the log function for SSPI negotiate diagnostics.
+func SetNegotiateLog(log dc.LogFunc) { negotiateLog.Store(&log) }
+
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
 // Makes an initial request, and if a 401 is returned, acquires an SSPI client
 // token and retries with the Authorization header.
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
+	logp := negotiateLog.Load()
+	log := func(msg string) {
+		if logp != nil {
+			(*logp)(dc.LvlDBG, "negotiate: "+msg)
+		}
+	}
+
 	rawURL = rewriteLoopback(rawURL)
+	log(fmt.Sprintf("step=create_request method=%s url=%s", method, rawURL))
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -165,29 +180,40 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 
+	log("step=initial_request")
 	resp, err := dashClientPtr.Load().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
+	log(fmt.Sprintf("step=initial_response status=%d", resp.StatusCode))
 	if resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
+	log("step=sspi_acquire_credentials")
 	cred, err := negotiate.AcquireCurrentUserCredentials()
 	if err != nil {
 		return nil, fmt.Errorf("sspi acquire credentials: %w", err)
 	}
-	defer func() { _ = cred.Release() }()
+	defer func() {
+		log("step=sspi_release_credentials")
+		_ = cred.Release()
+	}()
 
 	spn := targetSPN(rawURL)
+	log(fmt.Sprintf("step=sspi_new_client_context spn=%s", spn))
 	secCtx, token, err := negotiate.NewClientContext(cred, spn)
 	if err != nil {
 		return nil, fmt.Errorf("sspi client context: %w", err)
 	}
-	defer func() { _ = secCtx.Release() }()
+	defer func() {
+		log("step=sspi_release_context")
+		_ = secCtx.Release()
+	}()
 
+	log(fmt.Sprintf("step=retry_request token_len=%d", len(token)))
 	req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create retry request: %w", err)
@@ -196,7 +222,13 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 	req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
 
-	return dashClientPtr.Load().Do(req)
+	log("step=retry_do")
+	resp2, err := dashClientPtr.Load().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http retry request: %w", err)
+	}
+	log(fmt.Sprintf("step=retry_response status=%d", resp2.StatusCode))
+	return resp2, nil
 }
 
 // targetSPN derives the HTTP service SPN from a URL, e.g. "HTTP/server.domain.com".
