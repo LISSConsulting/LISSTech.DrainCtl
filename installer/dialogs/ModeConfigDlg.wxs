@@ -46,10 +46,22 @@
         <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15"
           Transparent="yes" NoPrefix="yes" Text="!(loc.RegistrationConfigDlgDescription)" />
 
-        <Control Id="DashUrlLabel" Type="Text" X="20" Y="60" Width="330" Height="30"
-          NoPrefix="yes" Text="!(loc.ModeConfigDlgDashUrlLabel)" />
-        <Control Id="DashUrlEdit" Type="Edit" X="20" Y="100" Width="330" Height="18"
-          Property="DASHBOARD_URL" />
+        <!-- Autodiscovery -->
+        <Control Id="AutodiscoverCheck" Type="CheckBox" X="20" Y="60" Width="310" Height="17"
+          Property="AUTODISCOVER" CheckBoxValue="1"
+          Text="!(loc.RegistrationConfigDlgAutoDiscoverLabel)" />
+        <Control Id="AutodiscoverHint" Type="Text" X="36" Y="79" Width="314" Height="26"
+          NoPrefix="yes" Text="!(loc.RegistrationConfigDlgAutoDiscoverHint)" />
+
+        <!-- Dashboard URL (disabled when autodiscovery is enabled) -->
+        <Control Id="DashUrlLabel" Type="Text" X="20" Y="115" Width="330" Height="17"
+          NoPrefix="yes" Text="!(loc.ModeConfigDlgDashUrlLabel)"
+          EnableCondition="AUTODISCOVER &lt;&gt; &quot;1&quot;"
+          DisableCondition="AUTODISCOVER = &quot;1&quot;" />
+        <Control Id="DashUrlEdit" Type="Edit" X="20" Y="133" Width="330" Height="18"
+          Property="DASHBOARD_URL"
+          EnableCondition="AUTODISCOVER &lt;&gt; &quot;1&quot;"
+          DisableCondition="AUTODISCOVER = &quot;1&quot;" />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
           Text="!(loc.WixUIBack)" />
