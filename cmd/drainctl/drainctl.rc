@@ -13,12 +13,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "LISS Consulting, Corp."
             VALUE "FileDescription",  "Remote Desktop Drain Mode Monitor"
-            VALUE "FileVersion",      "26.98.1"
+            VALUE "FileVersion",      "26.99.19"
             VALUE "InternalName",     "drainctl"
             VALUE "LegalCopyright",   "\251 2026 LISS Consulting, Corp."
             VALUE "OriginalFilename", "drainctl.exe"
             VALUE "ProductName",      "LISSTech DrainCtl"
-            VALUE "ProductVersion",   "26.98.1"
+            VALUE "ProductVersion",   "26.99.19"
         END
     END
     BLOCK "VarFileInfo"
