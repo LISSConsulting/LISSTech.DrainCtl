@@ -39,11 +39,8 @@ prune_*.html
 # Tool state
 .ralph/
 .superpowers/
-.claude/skills/
 
 # Scratch / temp files
 MSG00409.bin
 drainctl.h
 drainctl.rc
-ralph.toml
-PLAN.md
