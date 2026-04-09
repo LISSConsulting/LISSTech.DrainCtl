@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -210,6 +211,19 @@ func (h *serviceHandler) HandleRemoveServer(hostname string) error {
 // Execute is the Windows service main loop.
 func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, statusCh chan<- svc.Status) (bool, uint32) {
 	statusCh <- svc.Status{State: svc.StartPending, WaitHint: 10000}
+
+	// Capture panics so the stack trace is written to both the file log and
+	// the Windows Event Log before the process terminates.  Without this the
+	// SCM records Event 7034 ("terminated unexpectedly") but we get no
+	// indication of what actually went wrong.
+	defer func() {
+		if r := recover(); r != nil {
+			stack := string(debug.Stack())
+			s.log(dc.LvlERR, fmt.Sprintf("PANIC: %v\n%s", r, stack))
+			_ = s.elog.Error(EvtServiceError, fmt.Sprintf("Service panicked: %v\n%s", r, stack))
+			panic(r) // re-panic so the SCM sees the crash
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
