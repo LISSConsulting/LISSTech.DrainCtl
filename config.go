@@ -22,14 +22,15 @@ const (
 	ServiceDescription = "Monitors Remote Desktop Session Host drain mode (TSServerDrainMode) and maintains an audit trail of state changes."
 	ParametersKeyPath  = `SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters`
 
-	DefaultGracePeriod    = 60 // minutes
-	DefaultRetentionDays  = 90
-	MaxRetentionDays      = 365
-	MinRetentionDays      = 1
-	DefaultPollInterval   = 300   // seconds
-	MaxPollInterval       = 86400 // seconds (1 day)
-	DefaultDashboardPort  = 49470
-	DefaultDashboardGroup = "Domain Admins"
+	DefaultGracePeriod            = 60 // minutes
+	DefaultRetentionDays          = 90
+	MaxRetentionDays              = 365
+	MinRetentionDays              = 1
+	DefaultPollInterval           = 300   // seconds
+	MaxPollInterval               = 86400 // seconds (1 day)
+	DefaultDashboardPort          = 49470
+	DefaultDashboardGroup         = "Domain Admins"
+	DefaultDashboardFetchInterval = 300 // seconds (5 minutes)
 
 	DefaultSessionWarningThreshold = 80 // percent
 
@@ -142,6 +143,7 @@ type DashboardJSON struct {
 	TLSKey         string `json:"tls_key,omitempty"`         // path to PEM private key file
 	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // SHA-256 cert fingerprint for pinning (agent-side)
 	AutoPin        *bool  `json:"auto_pin,omitempty"`        // auto-pin dashboard cert on register (default false)
+	FetchInterval  int    `json:"fetch_interval,omitempty"`  // seconds between config fetches from dashboard (default 300)
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -161,11 +163,12 @@ type DashboardConfig struct {
 	Enabled        bool
 	Port           int
 	Group          string
-	URL            string // agent-side: dashboard URL to report to
-	TLSCert        string // path to PEM certificate file
-	TLSKey         string // path to PEM private key file
-	TLSFingerprint string // SHA-256 cert fingerprint for pinning (agent-side)
-	AutoPin        bool   // auto-pin dashboard cert on register (default false)
+	URL            string        // agent-side: dashboard URL to report to
+	TLSCert        string        // path to PEM certificate file
+	TLSKey         string        // path to PEM private key file
+	TLSFingerprint string        // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin        bool          // auto-pin dashboard cert on register (default false)
+	FetchInterval  time.Duration // interval between config fetches from dashboard
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -214,7 +217,16 @@ func (c *Config) ToDashboardConfig() DashboardConfig {
 		TLSKey:         c.Dashboard.TLSKey,
 		TLSFingerprint: c.Dashboard.TLSFingerprint,
 		AutoPin:        c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
+		FetchInterval:  c.dashFetchInterval(),
 	}
+}
+
+func (c *Config) dashFetchInterval() time.Duration {
+	s := c.Dashboard.FetchInterval
+	if s < 10 || s > 86400 {
+		s = DefaultDashboardFetchInterval
+	}
+	return time.Duration(s) * time.Second
 }
 
 // HasTargets returns true if at least one notification target is configured.
