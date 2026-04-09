@@ -8,6 +8,7 @@ import (
 )
 
 func TestBackoffDuration(t *testing.T) {
+	base := 5 * time.Minute
 	cases := []struct {
 		failures int
 		want     time.Duration
@@ -25,9 +26,9 @@ func TestBackoffDuration(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		got := backoffDuration(tc.failures)
+		got := backoffDuration(base, tc.failures)
 		if got != tc.want {
-			t.Errorf("backoffDuration(%d) = %s, want %s", tc.failures, got, tc.want)
+			t.Errorf("backoffDuration(%s, %d) = %s, want %s", base, tc.failures, got, tc.want)
 		}
 	}
 }
@@ -35,10 +36,36 @@ func TestBackoffDuration(t *testing.T) {
 // TestBackoffDuration_NeverExceedsMax verifies the invariant that backoffDuration
 // never returns more than configFetchMax for any non-negative failure count.
 func TestBackoffDuration_NeverExceedsMax(t *testing.T) {
+	base := 5 * time.Minute
 	for failures := 0; failures <= 20; failures++ {
-		got := backoffDuration(failures)
+		got := backoffDuration(base, failures)
 		if got > configFetchMax {
-			t.Errorf("backoffDuration(%d) = %s, exceeds configFetchMax %s", failures, got, configFetchMax)
+			t.Errorf("backoffDuration(%s, %d) = %s, exceeds configFetchMax %s", base, failures, got, configFetchMax)
 		}
+	}
+}
+
+func TestBackoffDuration_CustomBase(t *testing.T) {
+	base := 30 * time.Second
+	cases := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{0, 30 * time.Second},
+		{1, 60 * time.Second},
+		{2, 2 * time.Minute},
+	}
+	for _, tc := range cases {
+		got := backoffDuration(base, tc.failures)
+		if got != tc.want {
+			t.Errorf("backoffDuration(%s, %d) = %s, want %s", base, tc.failures, got, tc.want)
+		}
+	}
+}
+
+func TestBackoffDuration_ZeroBaseFallsBackToDefault(t *testing.T) {
+	got := backoffDuration(0, 0)
+	if got != configFetchBase {
+		t.Errorf("backoffDuration(0, 0) = %s, want configFetchBase %s", got, configFetchBase)
 	}
 }
