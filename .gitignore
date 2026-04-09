@@ -26,4 +26,24 @@ assets/*.o
 .idea/
 *.swp
 *~
-.ralph/regent-state.json
+
+# Coverage / test output
+*.out
+*.cov
+cov_*.html
+dash_*.html
+pipe_*.html
+root_*.html
+prune_*.html
+
+# Tool state
+.ralph/
+.superpowers/
+.claude/skills/
+
+# Scratch / temp files
+MSG00409.bin
+drainctl.h
+drainctl.rc
+ralph.toml
+PLAN.md
