@@ -167,6 +167,9 @@ func (c *Collector) open(log dc.LogFunc) error {
 				if h, err := addS(counterInputDelay); err == nil {
 					c.inputDelayH = h
 					c.inputDelayAvail = true
+					dc.LogMsg(log, dc.LvlDBG, "perfmon: input_delay counter added OK")
+				} else {
+					dc.LogMsg(log, dc.LvlWRN, "perfmon: input_delay counter add failed", fmt.Sprintf("error=%q", err))
 				}
 				if h, err := addS(counterSessCPU); err == nil {
 					c.sessCPUH = h
@@ -233,20 +236,27 @@ func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 }
 
 func (c *Collector) collect() (*dc.PerfSnapshot, error) {
+	sessionCollectOK := true
 	if c.skipNextCollect {
 		c.skipNextCollect = false
 	} else {
+		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=host_query_collect")
 		if err := pdhCollectQueryData(c.hostQuery); err != nil {
 			return nil, fmt.Errorf("host query collect: %w", err)
 		}
 		if c.sessionQuery != 0 {
-			_ = pdhCollectQueryData(c.sessionQuery)
+			dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=session_query_collect")
+			if err := pdhCollectQueryData(c.sessionQuery); err != nil {
+				dc.LogMsg(c.log, dc.LvlWRN, "perfmon: session query collect failed (skipping session counters)", fmt.Sprintf("error=%q", err))
+				sessionCollectOK = false
+			}
 		}
 	}
 
 	snap := &dc.PerfSnapshot{MemTotalMB: c.memTotalMB}
 
 	// Host-level (V1).
+	dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_host_counters")
 	if v, ok := c.scalar(c.cpuH, "cpu"); ok {
 		snap.CPUPct = RoundTo(v, 1)
 	}
@@ -264,15 +274,23 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	}
 
 	// Per-session (V2).
-	if c.collectPerSession {
+	if c.collectPerSession && sessionCollectOK {
+		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_input_delay")
 		if c.inputDelayAvail && c.inputDelayH != 0 {
-			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil && len(vals) > 0 {
+			vals, err := pdhGetDoubleArray(c.inputDelayH)
+			dc.LogMsg(c.log, dc.LvlDBG,
+				fmt.Sprintf("perfmon: input_delay read: err=%v len=%d vals=%v", err, len(vals), vals))
+			if err == nil && len(vals) > 0 {
 				snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
 				snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
 				snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
 				snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
 			}
+		} else {
+			dc.LogMsg(c.log, dc.LvlDBG,
+				fmt.Sprintf("perfmon: input_delay skipped: avail=%t handle=%d", c.inputDelayAvail, c.inputDelayH))
 		}
+		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_session_cpu_mem")
 		if c.sessCPUH != 0 {
 			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil && len(vals) > 0 {
 				_, p95, _ := AggregateValues(vals)
@@ -288,7 +306,8 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	}
 
 	// RemoteFX (V2).
-	if c.collectRemoteFX && c.rfxAvailable {
+	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
+		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_rfx")
 		snap.RFXAvailable = true
 		c.rfxScalar(c.rfxEncH, &snap.RFXEncodeMS, 1)
 		c.rfxScalar(c.rfxQualH, &snap.RFXQuality, 1)
@@ -315,8 +334,8 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	}
 
 	dc.LogMsg(c.log, dc.LvlDBG,
-		fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f",
-			snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans))
+		fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
+			snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans, snap.InputDelayMax))
 
 	return snap, nil
 }
