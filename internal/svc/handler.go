@@ -30,22 +30,26 @@ import (
 // refreshes. The actual interval grows exponentially after consecutive failures
 // up to configFetchMax.
 const (
-	configFetchBase = 5 * time.Minute   // baseline re-fetch interval
+	configFetchBase = 5 * time.Minute   // baseline re-fetch interval (overridden by dashboard.fetch_interval)
 	configFetchMax  = 160 * time.Minute // ceiling (~maxConfigFetchInterval * 30s)
 )
 
 // backoffDuration returns the time interval to wait before the next dashboard
-// config fetch attempt. failures is the count of consecutive failures; the
-// interval doubles per failure up to configFetchMax.
-func backoffDuration(failures int) time.Duration {
+// config fetch attempt. base is the configured fetch interval; failures is the
+// count of consecutive failures. The interval doubles per failure up to
+// configFetchMax.
+func backoffDuration(base time.Duration, failures int) time.Duration {
+	if base <= 0 {
+		base = configFetchBase
+	}
 	if failures <= 0 {
-		return configFetchBase
+		return base
 	}
 	shift := failures
 	if shift > 5 {
 		shift = 5 // cap doubling at 2^5 = 32×
 	}
-	d := configFetchBase << shift
+	d := base << shift
 	if d >= configFetchMax {
 		return configFetchMax
 	}
@@ -246,8 +250,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		LastSessionWarnNotify: make(map[string]time.Time),
 	}
 
-	s.log(dc.LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd",
-		dc.Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays))
+	s.log(dc.LvlINF, fmt.Sprintf("service=starting version=%s grace=%s poll=%s retention=%dd fetch_interval=%s",
+		dc.Version, cfg.GracePeriod, cfg.PollInterval, cfg.RetentionDays, dashCfg.FetchInterval))
 
 	// Open in-memory audit store.
 	st, err := store.OpenMemAuditStore(cfg.AuditPath, s.log)
@@ -441,7 +445,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// changes at runtime. The interval doubles on each consecutive failure
 			// (exponential backoff) so a downed dashboard does not generate log
 			// spam every poll.
-			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashConfigFailures) {
+			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
 				lastConfigFetch = time.Now()
 				s.log(dc.LvlDBG, "msg=\"dashboard config fetch\"", fmt.Sprintf("url=%s", dashCfg.URL))
 				var cfgRemote *dashboard.RemoteNotifyConfig
@@ -453,7 +457,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 				if cfgErr != nil {
 					dashConfigFailures++
-					nextIn := backoffDuration(dashConfigFailures)
+					nextIn := backoffDuration(dashCfg.FetchInterval, dashConfigFailures)
 					dc.LogMsg(s.log, dc.LvlWRN, "dashboard: notify config refresh failed, using cached",
 						fmt.Sprintf("error=%q next_retry_in=%s", cfgErr, nextIn.Round(time.Minute)))
 				} else {
