@@ -500,37 +500,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 
-			// Re-create performance collector if enabled state changed.
-			perfEnabledChanged := cfg.Performance.Enabled != oldPerfCfg.Enabled
-			if perfEnabledChanged || (cfg.Performance.Enabled && cfg.Performance != oldPerfCfg) {
-				if perfCollector != nil {
-					perfCollector.Close()
-					perfCollector = nil
-					perfTriggerState = nil
-				}
-				if cfg.Performance.Enabled {
-					pc, err := perfmon.Open(newCfg.Performance, s.log)
-					if err != nil {
-						dc.LogMsg(s.log, dc.LvlWRN, "perfmon restart failed on config reload", fmt.Sprintf("error=%q", err))
-					} else {
-						if err := pc.Prime(); err != nil {
-							dc.LogMsg(s.log, dc.LvlWRN, "perfmon prime failed on config reload", fmt.Sprintf("error=%q", err))
-							pc.Close()
-						} else {
-							perfCollector = pc
-							perfTriggerState = &perfmon.PerfTriggerState{}
-							s.log(dc.LvlINF, "perfmon=restarted")
-						}
-					}
-				}
-			}
-
 			// Preserve SRV-discovered URL if the config file doesn't set one.
 			if newDashCfg.URL == "" && dashCfg.URL != "" {
 				newDashCfg.URL = dashCfg.URL
 			}
 			dashCfg = newDashCfg
 			s.log(dc.LvlINF, "config=reloaded")
+
+			// Sync performance collector with new config. Placed after dashCfg
+			// update so the immediate svcRunCheck reports to the current URL.
+			if syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf, s.log) {
+				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.log, s.elog)
+			}
 			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
 
 		case <-flushTicker.C:
