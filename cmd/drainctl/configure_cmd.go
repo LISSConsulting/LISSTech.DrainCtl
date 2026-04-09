@@ -116,6 +116,7 @@ and saves config.json without prompting.`,
 	cmd.Flags().Bool("auto-pin", false, "Auto-pin dashboard TLS certificate on registration")
 	cmd.Flags().Bool("perf-enabled", false, "Enable performance monitoring (PDH counters)")
 	cmd.Flags().Bool("perf-disabled", false, "Force-disable performance monitoring (blocks dashboard override)")
+	cmd.Flags().Bool("perf-rfx", false, "Enable RemoteFX counter collection")
 
 	return cmd
 }
@@ -294,6 +295,10 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config, log dc.LogFunc) e
 			fileCfg.Performance.Enabled = false
 			fileCfg.Performance.ForceDisabled = true
 		}
+	}
+	if cmd.Flags().Changed("perf-rfx") {
+		perfRFX, _ := cmd.Flags().GetBool("perf-rfx")
+		fileCfg.Performance.CollectRemoteFX = perfRFX
 	}
 
 	// Upsert rather than append: running configure twice with the same URL
