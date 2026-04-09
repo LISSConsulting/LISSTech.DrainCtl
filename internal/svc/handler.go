@@ -539,6 +539,51 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 }
 
+// syncPerfCollector reconciles the running performance collector with a config
+// change. It tears down the old collector (if any), clears the cached snapshot,
+// and starts a new collector when the new config enables perfmon.
+// Returns true if the config actually changed (and action was taken).
+func syncPerfCollector(
+	oldPerf, newPerf dc.PerformanceConfig,
+	perfCollector **perfmon.Collector,
+	perfTriggerState **perfmon.PerfTriggerState,
+	lastPerf *atomic.Pointer[dc.PerfSnapshot],
+	log dc.LogFunc,
+) bool {
+	if oldPerf == newPerf {
+		return false
+	}
+
+	// Tear down old collector.
+	if *perfCollector != nil {
+		(*perfCollector).Close()
+		*perfCollector = nil
+		*perfTriggerState = nil
+	}
+
+	// Always clear cached snapshot so stale data is never served.
+	lastPerf.Store(nil)
+
+	if newPerf.Enabled {
+		pc, err := perfmon.Open(newPerf, log)
+		if err != nil {
+			dc.LogMsg(log, dc.LvlWRN, "perfmon start failed on config change", fmt.Sprintf("error=%q", err))
+			return true
+		}
+		if err := pc.Prime(); err != nil {
+			dc.LogMsg(log, dc.LvlWRN, "perfmon prime failed on config change", fmt.Sprintf("error=%q", err))
+			pc.Close()
+			return true
+		}
+		*perfCollector = pc
+		*perfTriggerState = &perfmon.PerfTriggerState{}
+		log(dc.LvlINF, "perfmon=restarted")
+	} else {
+		log(dc.LvlINF, "perfmon=stopped")
+	}
+	return true
+}
+
 // registerWithDashboard registers this host with the dashboard and performs
 // auto-pin if enabled. Returns true on success. Safe to call multiple times;
 // the dashboard treats re-registration as a no-op for already-known hosts.
