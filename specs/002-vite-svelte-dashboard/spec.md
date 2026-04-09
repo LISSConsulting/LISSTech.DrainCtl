@@ -109,7 +109,7 @@ The migrated dashboard preserves the existing light and dark theme support with 
 
 - What happens when the dashboard configuration modal has many notification targets causing overflow? The scrollbar should be styled consistently.
 - How does the dirty form indicator behave when the administrator saves, then makes another change? It should re-enter the dirty state.
-- What happens when the save operation fails (network error, validation error)? The modal should display an error message in a negative color, and the dirty indicator should persist.
+- What happens when the save operation fails (network error, validation error)? The modal displays an inline error banner with red-tinted background flash and descriptive error message text, mirroring the success feedback pattern. The dirty-state indicator persists.
 - How do I/O ring gauges render when metric data is missing or zero? They should show an empty ring (no fill) in a neutral color.
 - What happens when performance monitoring is disabled? The I/O ring thresholds should use sensible defaults since custom thresholds are unavailable.
 
@@ -131,6 +131,7 @@ The migrated dashboard preserves the existing light and dark theme support with 
 - **FR-012**: System MUST render per-server sparkline mini-charts in accordion detail rows.
 - **FR-013**: System MUST preserve real-time data update behavior (SSE/polling) without page reload.
 - **FR-014**: System MUST preserve all modal dialogs (Dashboard Configuration, History, Target Edit, Target Delete Confirmation) with their existing functionality and z-index stacking order.
+- **FR-015**: System MUST display an inline error banner within the Dashboard Configuration modal when a save operation fails, using a red-tinted background flash and error message text, mirroring the success feedback pattern. The dirty-state indicator MUST persist after a failed save.
 
 ### Key Entities
 
@@ -152,11 +153,22 @@ The migrated dashboard preserves the existing light and dark theme support with 
 - **SC-007**: The built dashboard loads in under 2 seconds on a local network, comparable to or faster than the current monolithic HTML implementation.
 - **SC-008**: The Go binary embeds the dashboard successfully, and the deployment remains a single binary with no external asset files.
 
+## Clarifications
+
+### Session 2026-04-09
+
+- Q: Which Svelte version should the migration target? → A: Svelte 5 (runes, snippets, current stable)
+- Q: Which Tailwind CSS version should the migration use? → A: Tailwind CSS v4 (CSS-based config, Oxide engine)
+- Q: What default I/O ring gauge thresholds when perf monitoring disabled? → A: Reuse existing PerformanceConfig thresholds (Input Delay: warn 50ms, crit 100ms); hardcode defaults for Disk Queue (warn: 2, crit: 5) and TCP Retransmits (warn: 5%, crit: 10%)
+- Q: How should a failed save operation in the Dashboard Configuration modal be communicated? → A: Inline error banner within modal (red-tinted background flash + error message text, mirroring the success pattern)
+
 ## Assumptions
 
+- The migration targets **Svelte 5** (runes, snippets) as the component framework. All components will use Svelte 5's explicit reactivity model (`$state`, `$derived`, `$effect`).
+- The migration uses **Tailwind CSS v4** with CSS-based configuration (Oxide engine). The existing CSS custom property system will be mapped to Tailwind's `@theme` directive.
 - The existing Go backend API (routes, authentication, data store) remains unchanged; only the frontend assets are migrated.
 - The uPlot charting library will continue to be used for time-series and sparkline charts, integrated as a dependency rather than inline script.
 - The landing page (docs/index.html) is a separate static site and is NOT part of this migration; only the internal dashboard (internal/dashboard/dashboard.html) is being migrated.
 - The existing CSS custom property system (color palette, typography, spacing) will be translated to the new styling approach while preserving identical visual output.
 - The build output will replace the current single monolithic HTML file with a build artifact directory that the Go embed directive references.
-- Performance monitoring thresholds (CPU warn/crit, Memory warn/crit, Input Delay warn/crit) will be reused as the threshold breakpoints for I/O ring gauge coloring when available; sensible defaults will be used when performance monitoring is disabled.
+- Performance monitoring thresholds (CPU warn/crit, Memory warn/crit, Input Delay warn/crit) from `PerformanceConfig` will be reused as the threshold breakpoints for I/O ring gauge coloring when available. When performance monitoring is disabled, the dashboard will use the existing config defaults (Input Delay: warn 50ms, crit 100ms) and hardcoded defaults for metrics without configurable thresholds (Disk Queue: warn 2, crit 5; TCP Retransmits: warn 5%, crit 10%).
