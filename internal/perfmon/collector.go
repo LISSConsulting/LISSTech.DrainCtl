@@ -3,24 +3,32 @@
 package perfmon
 
 import (
+	"errors"
 	"fmt"
+	"runtime"
 	"syscall"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
-// Counter paths (English canonical names for PdhAddEnglishCounterW).
+// Counter paths. V1 (PerfLib) and V2 (PCW/ETW) counters must live in
+// separate PDH queries — on Server 2022+, mixing them in one query
+// causes PDH to skip V1 provider DLL loading.
 const (
-	counterCPU        = `\Processor(_Total)\% Processor Time`
+	// V1 host-level counters.
+	counterCPU        = `\Processor Information(_Total)\% Processor Utility`
 	counterMemAvail   = `\Memory\Available MBytes`
 	counterPagesSec   = `\Memory\Pages/sec`
 	counterDiskQueue  = `\PhysicalDisk(_Total)\Avg. Disk Queue Length`
 	counterTCPRetrans = `\TCPv4\Segments Retransmitted/sec`
 
+	// V2 per-session counters.
 	counterInputDelay = `\User Input Delay per Session(*)\Max Input Delay`
 	counterSessCPU    = `\Terminal Services Session(*)\% Processor Time`
 	counterSessMem    = `\Terminal Services Session(*)\Working Set`
 
+	// V2 RemoteFX counters.
 	counterRFXFPS     = `\RemoteFX Graphics(*)\Output Frames/Second`
 	counterRFXSkipSrv = `\RemoteFX Graphics(*)\Frames Skipped/Second - Insufficient Server Resources`
 	counterRFXSkipNet = `\RemoteFX Graphics(*)\Frames Skipped/Second - Insufficient Network Resources`
@@ -30,25 +38,28 @@ const (
 	counterRFXLoss    = `\RemoteFX Network(*)\Loss Rate`
 )
 
-// Collector manages a PDH query with pre-added counter handles.
+// request is a command dispatched to the PDH worker goroutine.
+type request struct {
+	fn   func()
+	done chan struct{}
+}
+
+// Collector manages PDH performance counter queries. All PDH syscalls run
+// on a dedicated goroutine pinned to a Go-created OS thread — Windows
+// services run their handler on an SCM-created thread that cannot load
+// V1 PerfLib provider DLLs.
 type Collector struct {
-	query syscall.Handle
+	hostQuery    syscall.Handle // V1: Processor, Memory, PhysicalDisk, TCPv4
+	sessionQuery syscall.Handle // V2: per-session, RemoteFX
 
-	// Host-level counters (always added)
-	cpuH     syscall.Handle
-	memH     syscall.Handle
-	pagesH   syscall.Handle
-	diskH    syscall.Handle
-	retransH syscall.Handle
+	cpuH, memH, pagesH, diskH, retransH syscall.Handle
 
-	// Per-session counters (optional)
 	collectPerSession bool
 	inputDelayH       syscall.Handle
 	sessCPUH          syscall.Handle
 	sessMemH          syscall.Handle
 	inputDelayAvail   bool
 
-	// RemoteFX counters (optional, may be unavailable)
 	collectRemoteFX bool
 	rfxAvailable    bool
 	rfxFPSH         syscall.Handle
@@ -59,266 +70,295 @@ type Collector struct {
 	rfxRTTH         syscall.Handle
 	rfxLossH        syscall.Handle
 
-	// Total physical memory in MB (queried once at open).
-	memTotalMB float64
-
-	// Track whether we've collected at least once (rate counters need 2 samples).
-	primed bool
+	memTotalMB      float64
+	primed          bool
+	skipNextCollect bool
 
 	log          dc.LogFunc
-	loggedErrors map[string]bool // track which counter errors we've already logged (avoid spam)
+	loggedErrors map[string]bool
+	reqCh        chan request
 }
 
-// Open creates the PDH query and adds counters based on the config.
-// Counters that fail to add (e.g., RemoteFX not installed, User Input Delay
-// not available) are logged at LvlWRN and skipped.
+// do dispatches fn to the dedicated PDH thread and blocks until completion.
+func (c *Collector) do(fn func()) {
+	r := request{fn: fn, done: make(chan struct{})}
+	c.reqCh <- r
+	<-r.done
+}
+
+func startWorker() chan request {
+	ch := make(chan request)
+	go func() {
+		runtime.LockOSThread()
+		for r := range ch {
+			r.fn()
+			close(r.done)
+		}
+	}()
+	return ch
+}
+
+// Open creates the PDH queries and adds counters.
 func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	if log == nil {
 		log = dc.DiscardLogger()
 	}
-
-	query, err := pdhOpenQuery()
-	if err != nil {
-		return nil, err
-	}
-
 	c := &Collector{
-		query:             query,
 		collectPerSession: cfg.CollectPerSession,
 		collectRemoteFX:   cfg.CollectRemoteFX,
 		memTotalMB:        totalPhysicalMemoryMB(),
 		log:               log,
 		loggedErrors:      make(map[string]bool),
+		reqCh:             startWorker(),
 	}
+	var err error
+	c.do(func() { err = c.open(log) })
+	if err != nil {
+		close(c.reqCh)
+		return nil, err
+	}
+	return c, nil
+}
 
-	// Host-level counters (required).
-	// PdhAddCounterW is the only reliable API across all Windows versions.
-	// PdhAddEnglishCounterW is broken on Win11/Server 2022+ (PDH_INVALID_DATA).
-	must := func(path string, dest *syscall.Handle) error {
-		h, err := pdhAddCounter(query, path)
-		if err != nil {
-			return fmt.Errorf("required counter %s: %w", path, err)
-		}
-		*dest = h
-		return nil
+func (c *Collector) open(log dc.LogFunc) error {
+	// --- V1 host query ---
+	hq, err := pdhOpenQuery()
+	if err != nil {
+		return err
 	}
+	c.hostQuery = hq
 
-	if err := must(counterCPU, &c.cpuH); err != nil {
-		pdhCloseQuery(query)
-		return nil, err
-	}
-	if err := must(counterMemAvail, &c.memH); err != nil {
-		pdhCloseQuery(query)
-		return nil, err
-	}
-	if err := must(counterPagesSec, &c.pagesH); err != nil {
-		pdhCloseQuery(query)
-		return nil, err
-	}
-	if err := must(counterDiskQueue, &c.diskH); err != nil {
-		pdhCloseQuery(query)
-		return nil, err
-	}
+	add := func(path string) (syscall.Handle, error) { return pdhAddCounter(hq, path) }
 
-	// TCP retransmits — optional (counter set may not exist on some configs).
-	if h, err := pdhAddCounter(query, counterTCPRetrans); err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "TCP retransmit counter unavailable, skipping", fmt.Sprintf("error=%q", err))
+	if c.cpuH, err = add(counterCPU); err != nil {
+		pdhCloseQuery(hq)
+		return fmt.Errorf("required counter %s: %w", counterCPU, err)
+	}
+	if c.memH, err = add(counterMemAvail); err != nil {
+		pdhCloseQuery(hq)
+		return fmt.Errorf("required counter %s: %w", counterMemAvail, err)
+	}
+	if c.pagesH, err = add(counterPagesSec); err != nil {
+		pdhCloseQuery(hq)
+		return fmt.Errorf("required counter %s: %w", counterPagesSec, err)
+	}
+	if c.diskH, err = add(counterDiskQueue); err != nil {
+		pdhCloseQuery(hq)
+		return fmt.Errorf("required counter %s: %w", counterDiskQueue, err)
+	}
+	if h, err := add(counterTCPRetrans); err != nil {
+		dc.LogMsg(log, dc.LvlWRN, "perfmon: TCPv4 retransmit counter unavailable", fmt.Sprintf("error=%q", err))
 	} else {
 		c.retransH = h
 	}
 
-	// Per-session counters.
-	addOpt := func(path string) (syscall.Handle, error) {
-		return pdhAddCounter(query, path)
-	}
-	if cfg.CollectPerSession {
-		if h, err := addOpt(counterInputDelay); err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "User Input Delay counter unavailable — requires Server 2019+ or registry key HKLM\\System\\CurrentControlSet\\Control\\Terminal Server\\EnableLagCounter=1", fmt.Sprintf("error=%q", err))
-		} else {
-			c.inputDelayH = h
-			c.inputDelayAvail = true
-		}
+	dc.LogMsg(log, dc.LvlINF, "perfmon: host counters added (V1 query)")
 
-		if h, err := addOpt(counterSessCPU); err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "Terminal Services Session CPU counter unavailable", fmt.Sprintf("error=%q", err))
+	// --- V2 session/RFX query ---
+	if c.collectPerSession || c.collectRemoteFX {
+		sq, err := pdhOpenQuery()
+		if err != nil {
+			dc.LogMsg(log, dc.LvlWRN, "perfmon: session query open failed", fmt.Sprintf("error=%q", err))
 		} else {
-			c.sessCPUH = h
-		}
+			c.sessionQuery = sq
+			addS := func(path string) (syscall.Handle, error) { return pdhAddCounter(sq, path) }
 
-		if h, err := addOpt(counterSessMem); err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "Terminal Services Session memory counter unavailable", fmt.Sprintf("error=%q", err))
-		} else {
-			c.sessMemH = h
-		}
-	}
-
-	// RemoteFX counters.
-	if cfg.CollectRemoteFX {
-		c.rfxAvailable = true
-		optRFX := func(path string, dest *syscall.Handle) {
-			h, err := addOpt(path)
-			if err != nil {
-				dc.LogMsg(log, dc.LvlWRN, "RemoteFX counter unavailable", fmt.Sprintf("counter=%q error=%q", path, err))
-				c.rfxAvailable = false
-			} else {
-				*dest = h
+			if c.collectPerSession {
+				if h, err := addS(counterInputDelay); err == nil {
+					c.inputDelayH = h
+					c.inputDelayAvail = true
+				}
+				if h, err := addS(counterSessCPU); err == nil {
+					c.sessCPUH = h
+				}
+				if h, err := addS(counterSessMem); err == nil {
+					c.sessMemH = h
+				}
 			}
+			if c.collectRemoteFX {
+				c.rfxAvailable = true
+				rfx := func(path string, dest *syscall.Handle) {
+					if h, err := addS(path); err != nil {
+						c.rfxAvailable = false
+					} else {
+						*dest = h
+					}
+				}
+				rfx(counterRFXFPS, &c.rfxFPSH)
+				rfx(counterRFXSkipSrv, &c.rfxSkipSrvH)
+				rfx(counterRFXSkipNet, &c.rfxSkipNetH)
+				rfx(counterRFXEncode, &c.rfxEncH)
+				rfx(counterRFXQuality, &c.rfxQualH)
+				rfx(counterRFXRTT, &c.rfxRTTH)
+				rfx(counterRFXLoss, &c.rfxLossH)
+			}
+			dc.LogMsg(log, dc.LvlINF, "perfmon: session counters added (V2 query)")
 		}
-		optRFX(counterRFXFPS, &c.rfxFPSH)
-		optRFX(counterRFXSkipSrv, &c.rfxSkipSrvH)
-		optRFX(counterRFXSkipNet, &c.rfxSkipNetH)
-		optRFX(counterRFXEncode, &c.rfxEncH)
-		optRFX(counterRFXQuality, &c.rfxQualH)
-		optRFX(counterRFXRTT, &c.rfxRTTH)
-		optRFX(counterRFXLoss, &c.rfxLossH)
 	}
-
-	return c, nil
-}
-
-// Prime performs the first PDH collection to seed rate counters.
-// Must be called once before Collect() returns meaningful data.
-// Rate counters need two samples to compute a delta — the first real
-// Collect() provides the second sample. Values will be zero/invalid
-// on that first Collect() and valid from the second onward.
-func (c *Collector) Prime() error {
-	if err := pdhCollectQueryData(c.query); err != nil {
-		return err
-	}
-	c.primed = true
 	return nil
 }
 
-// Collect samples all counters and returns a PerfSnapshot.
-// Returns partial data if the collector has not been primed (rate counters
-// require two samples). Callers should call Prime() once at startup.
-// logCounterError logs a PDH counter error once per counter name to avoid spam.
-func (c *Collector) logCounterError(name string, err error) {
-	if c.log == nil || c.loggedErrors[name] {
-		return
-	}
-	c.loggedErrors[name] = true
-	dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon counter %s read failed (will not repeat)", name), fmt.Sprintf("error=%q", err))
+// Prime collects two samples with a 1-second gap to seed rate counters.
+func (c *Collector) Prime() error {
+	var err error
+	c.do(func() { err = c.prime() })
+	return err
 }
 
+func (c *Collector) prime() error {
+	if err := pdhCollectQueryData(c.hostQuery); err != nil {
+		return err
+	}
+	if c.sessionQuery != 0 {
+		_ = pdhCollectQueryData(c.sessionQuery)
+	}
+	time.Sleep(time.Second)
+	if err := pdhCollectQueryData(c.hostQuery); err != nil {
+		return err
+	}
+	if c.sessionQuery != 0 {
+		_ = pdhCollectQueryData(c.sessionQuery)
+	}
+	c.primed = true
+	c.skipNextCollect = true
+	return nil
+}
+
+// Collect samples all counters and returns a snapshot.
 func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
-	if err := pdhCollectQueryData(c.query); err != nil {
-		return nil, fmt.Errorf("collect query data: %w", err)
-	}
+	var snap *dc.PerfSnapshot
+	var err error
+	c.do(func() { snap, err = c.collect() })
+	return snap, err
+}
 
-	snap := &dc.PerfSnapshot{
-		MemTotalMB: c.memTotalMB,
-	}
-
-	// Host-level counters (handle may be 0 if counter was unavailable).
-	if c.cpuH != 0 {
-		if v, err := pdhGetFormattedDouble(c.cpuH); err == nil {
-			snap.CPUPct = RoundTo(v, 1)
-		} else {
-			c.logCounterError("cpu", err)
+func (c *Collector) collect() (*dc.PerfSnapshot, error) {
+	if c.skipNextCollect {
+		c.skipNextCollect = false
+	} else {
+		if err := pdhCollectQueryData(c.hostQuery); err != nil {
+			return nil, fmt.Errorf("host query collect: %w", err)
 		}
-	}
-	if c.memH != 0 {
-		if v, err := pdhGetFormattedDouble(c.memH); err == nil {
-			snap.MemAvailMB = RoundTo(v, 0)
-		} else {
-			c.logCounterError("mem_avail", err)
-		}
-	}
-	if c.pagesH != 0 {
-		if v, err := pdhGetFormattedDouble(c.pagesH); err == nil {
-			snap.PagesSec = RoundTo(v, 1)
-		} else {
-			c.logCounterError("pages_sec", err)
-		}
-	}
-	if c.diskH != 0 {
-		if v, err := pdhGetFormattedDouble(c.diskH); err == nil {
-			snap.DiskQueue = RoundTo(v, 2)
-		} else {
-			c.logCounterError("disk_queue", err)
-		}
-	}
-	if c.retransH != 0 {
-		if v, err := pdhGetFormattedDouble(c.retransH); err == nil {
-			snap.TCPRetrans = RoundTo(v, 1)
-		} else {
-			c.logCounterError("tcp_retrans", err)
+		if c.sessionQuery != 0 {
+			_ = pdhCollectQueryData(c.sessionQuery)
 		}
 	}
 
-	// Per-session counters.
+	snap := &dc.PerfSnapshot{MemTotalMB: c.memTotalMB}
+
+	// Host-level (V1).
+	if v, ok := c.scalar(c.cpuH, "cpu"); ok {
+		snap.CPUPct = RoundTo(v, 1)
+	}
+	if v, ok := c.scalar(c.memH, "mem_avail"); ok {
+		snap.MemAvailMB = RoundTo(v, 0)
+	}
+	if v, ok := c.scalar(c.pagesH, "pages_sec"); ok {
+		snap.PagesSec = RoundTo(v, 1)
+	}
+	if v, ok := c.scalar(c.diskH, "disk_queue"); ok {
+		snap.DiskQueue = RoundTo(v, 2)
+	}
+	if v, ok := c.scalar(c.retransH, "tcp_retrans"); ok {
+		snap.TCPRetrans = RoundTo(v, 1)
+	}
+
+	// Per-session (V2).
 	if c.collectPerSession {
 		if c.inputDelayAvail && c.inputDelayH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.inputDelayH); err == nil && len(values) > 0 {
-				snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil && len(vals) > 0 {
+				snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
 				snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
 				snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
 				snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
 			}
 		}
-
 		if c.sessCPUH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.sessCPUH); err == nil && len(values) > 0 {
-				_, p95, _ := AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil && len(vals) > 0 {
+				_, p95, _ := AggregateValues(vals)
 				snap.SessionCPUP95 = RoundTo(p95, 1)
 			}
 		}
-
 		if c.sessMemH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.sessMemH); err == nil && len(values) > 0 {
-				_, p95, _ := AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.sessMemH); err == nil && len(vals) > 0 {
+				_, p95, _ := AggregateValues(vals)
 				snap.SessionMemP95 = RoundTo(p95, 0)
 			}
 		}
 	}
 
-	// RemoteFX counters.
+	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable {
 		snap.RFXAvailable = true
-		c.collectRFXScalar(c.rfxEncH, &snap.RFXEncodeMS, 1)
-		c.collectRFXScalar(c.rfxQualH, &snap.RFXQuality, 1)
-		c.collectRFXScalar(c.rfxRTTH, &snap.RFXRTT, 1)
-		c.collectRFXScalar(c.rfxLossH, &snap.RFXLoss, 2)
-
-		// Array counters — aggregate across sessions.
+		c.rfxScalar(c.rfxEncH, &snap.RFXEncodeMS, 1)
+		c.rfxScalar(c.rfxQualH, &snap.RFXQuality, 1)
+		c.rfxScalar(c.rfxRTTH, &snap.RFXRTT, 1)
+		c.rfxScalar(c.rfxLossH, &snap.RFXLoss, 2)
 		if c.rfxFPSH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.rfxFPSH); err == nil && len(values) > 0 {
-				_, p95, _ := AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.rfxFPSH); err == nil && len(vals) > 0 {
+				_, p95, _ := AggregateValues(vals)
 				snap.RFXFPSOut = RoundTo(p95, 1)
 			}
 		}
 		if c.rfxSkipSrvH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.rfxSkipSrvH); err == nil && len(values) > 0 {
-				_, p95, _ := AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.rfxSkipSrvH); err == nil && len(vals) > 0 {
+				_, p95, _ := AggregateValues(vals)
 				snap.RFXSkipServer = RoundTo(p95, 1)
 			}
 		}
 		if c.rfxSkipNetH != 0 {
-			if values, err := pdhGetFormattedDoubleArray(c.rfxSkipNetH); err == nil && len(values) > 0 {
-				_, p95, _ := AggregateValues(values)
+			if vals, err := pdhGetDoubleArray(c.rfxSkipNetH); err == nil && len(vals) > 0 {
+				_, p95, _ := AggregateValues(vals)
 				snap.RFXSkipNet = RoundTo(p95, 1)
 			}
 		}
 	}
 
+	dc.LogMsg(c.log, dc.LvlDBG,
+		fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f",
+			snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans))
+
 	return snap, nil
 }
 
-// collectRFXScalar reads a scalar RemoteFX counter into dst.
-func (c *Collector) collectRFXScalar(h syscall.Handle, dst *float64, places int) {
+// scalar reads a single counter value, logging permanent errors once.
+func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
+	if h == 0 {
+		return 0, false
+	}
+	v, err := pdhGetDouble(h)
+	if err == nil {
+		return v, true
+	}
+	if !errors.Is(err, errCounterNotReady) {
+		if !c.loggedErrors[name] {
+			c.loggedErrors[name] = true
+			dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon: %s read failed", name), fmt.Sprintf("error=%q", err))
+		}
+	}
+	return 0, false
+}
+
+func (c *Collector) rfxScalar(h syscall.Handle, dst *float64, places int) {
 	if h == 0 {
 		return
 	}
-	if v, err := pdhGetFormattedDouble(h); err == nil {
+	if v, err := pdhGetDouble(h); err == nil {
 		*dst = RoundTo(v, places)
 	}
 }
 
-// Close releases the PDH query and all counter handles.
+// Close releases PDH queries and stops the worker goroutine.
 func (c *Collector) Close() {
-	if c != nil && c.query != 0 {
-		pdhCloseQuery(c.query)
-		c.query = 0
+	if c == nil || c.reqCh == nil {
+		return
 	}
+	c.do(func() {
+		pdhCloseQuery(c.hostQuery)
+		c.hostQuery = 0
+		pdhCloseQuery(c.sessionQuery)
+		c.sessionQuery = 0
+	})
+	close(c.reqCh)
+	c.reqCh = nil
 }
