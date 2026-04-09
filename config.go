@@ -186,7 +186,7 @@ func DefaultConfig() *Config {
 		PollInterval:            DefaultPollInterval,
 		AuditPath:               DefaultAuditPath(),
 		Notifications:           []NotificationTarget{},
-		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup},
+		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup, FetchInterval: DefaultDashboardFetchInterval},
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
 		Performance:             PerformanceConfig{CollectPerSession: true},
 	}

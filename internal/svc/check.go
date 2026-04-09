@@ -20,6 +20,7 @@ import (
 // dashState is non-nil when the dashboard runs in this process (local reporting).
 func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary], log dc.LogFunc, elog *eventlog.Log) {
 	checkStart := time.Now()
+	log(dc.LvlDBG, "diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
 	if err != nil {
 		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
@@ -73,6 +74,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	status, message, exitCode = dc.ClassifyState(drainActive, stateDur, cfg.GracePeriod)
 
 	// Session tracking.
+	log(dc.LvlDBG, "diag: check=get_sessions")
 	sess := dc.GetSessionSummary()
 	if sess == nil {
 		dc.LogMsg(log, dc.LvlWRN, "session enumeration failed", "hint=\"verify service runs as LocalSystem\"")
@@ -82,6 +84,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 
 	// Performance counters (service-mode only).
+	log(dc.LvlDBG, fmt.Sprintf("diag: check=perfmon collector_nil=%v", perfCollector == nil))
 	var perfSnap *dc.PerfSnapshot
 	if perfCollector != nil {
 		snap, err := perfCollector.Collect()
@@ -120,6 +123,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		rec.TCPRetransSec = perfSnap.TCPRetrans
 	}
 	st.Append(rec)
+	log(dc.LvlDBG, "diag: check=audit_appended")
 
 	if state.Mode == dc.AllowAll {
 		log(dc.LvlINF, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
@@ -183,6 +187,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 
 	// Determine triggers and send notifications.
+	log(dc.LvlDBG, fmt.Sprintf("diag: check=notifications targets=%d", len(targets)))
 	if len(targets) > 0 {
 		var triggers []dc.Trigger
 
@@ -234,6 +239,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 
 	// Report to dashboard if configured.
+	log(dc.LvlDBG, fmt.Sprintf("diag: check=dashboard_report url=%s", dashCfg.URL))
 	if dashCfg != nil && dashCfg.URL != "" {
 		if dashState != nil {
 			if dashState.ReportLocal(result.Host, result) {

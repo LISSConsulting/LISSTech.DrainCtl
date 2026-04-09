@@ -463,12 +463,16 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				} else {
 					dashConfigFailures = 0
 					useRemoteConfig = true
+					s.log(dc.LvlDBG, "diag: step=apply_remote_config")
 					oldPerfCfg := cfg.Performance
 					applyRemoteConfig(cfgRemote, &cfg, &notifyTargets)
 					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
+					s.log(dc.LvlDBG, fmt.Sprintf("diag: step=sync_perf_collector old_enabled=%v new_enabled=%v", oldPerfCfg.Enabled, cfg.Performance.Enabled))
 					syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf, s.log)
+					s.log(dc.LvlDBG, "diag: step=sync_perf_done")
 				}
 			}
+			s.log(dc.LvlDBG, "diag: step=svc_run_check")
 			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.log, s.elog)
 
 		case <-configCh:
