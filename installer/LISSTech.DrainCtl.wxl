@@ -18,6 +18,8 @@
     <String Id="InstallModeDlgGraceHint" Value="minutes" />
     <String Id="InstallModeDlgWebhookLabel" Value="Webhook URL (optional):" />
     <String Id="InstallModeDlgNtfyLabel" Value="ntfy URL (optional):" />
+    <String Id="InstallModeDlgPerfLabel" Value="Enable performance monitoring" />
+    <String Id="InstallModeDlgRfxLabel" Value="Collect RemoteFX metrics" />
 
     <!-- ModeConfigDlg (shared) -->
     <String Id="ModeConfigDlg_Title" Value="[ProductName] Setup" />
@@ -36,5 +38,9 @@
     <String Id="RegistrationConfigDlgTitle"
         Value="{\WixUI_Font_Title}Dashboard Registration" />
     <String Id="RegistrationConfigDlgDescription"
-        Value="Specify which dashboard server to register with." />
+        Value="Configure how this machine finds and registers with a dashboard server." />
+    <String Id="RegistrationConfigDlgAutoDiscoverLabel"
+        Value="Use DNS auto-discovery (recommended)" />
+    <String Id="RegistrationConfigDlgAutoDiscoverHint"
+        Value="Automatically find the dashboard server using DNS SRV records (_drainctl._tcp)." />
 </WixLocalization>
