@@ -228,6 +228,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Enable step-by-step SSPI negotiate logging for diagnostics.
+	dashboard.SetNegotiateLog(s.log)
+
 	// Load config from config.json (migrates from registry if needed).
 	fullCfg, err := dc.LoadConfig(s.log)
 	if err != nil {
