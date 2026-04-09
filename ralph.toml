@@ -1,0 +1,50 @@
+# ralph.toml — RalphSpec project configuration
+# Place this file in the root of your project.
+
+[project]
+name = ""
+
+[claude]
+model = "sonnet"
+max_turns = 0  # 0 = unlimited agentic turns per iteration
+danger_skip_permissions = true
+
+[plan]
+prompt_file = "PLAN.md"
+max_iterations = 3
+
+[build]
+prompt_file = "BUILD.md"
+max_iterations = 0  # 0 = unlimited
+roam = false        # roam freely across the codebase (--roam flag overrides)
+focus = ""          # constrain roam to a specific topic (--focus flag overrides)
+
+[git]
+auto_pull_rebase = true
+auto_push = true
+
+[regent]
+enabled = true
+rollback_on_test_failure = false
+test_command = ""
+max_retries = 3
+retry_backoff_seconds = 30
+hang_timeout_seconds = 300
+
+[tui]
+accent_color = "#7D56F4"  # hex color for header/accent elements
+log_retention = 20        # number of session logs to keep; 0 = unlimited
+
+[notifications]
+url = ""           # ntfy.sh topic URL or any HTTP webhook (empty = disabled)
+on_complete = true # notify on each iteration complete
+on_error = true    # notify on loop error
+on_stop = true     # notify when loop finishes or is stopped
+
+[worktree]
+enabled = false        # enable git worktree support via worktrunk
+max_parallel = 5       # maximum number of concurrent worktree agents
+auto_merge = false     # automatically merge on spec-complete + tests pass
+merge_target = ""      # branch to merge into (empty = branch worktree was created from)
+path_template = ""     # deprecated: use worktree_dir
+worktree_dir = ""      # base directory for worktrees (default: ~/.ralph/worktrees)
