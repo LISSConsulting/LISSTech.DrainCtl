@@ -62,9 +62,12 @@ func serviceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			format, _ := getFormat(dc.FormatPlain)
 			switch state {
 			case "Running":
-				dc.PrintResult(os.Stdout, fmt.Sprintf("service=%s", state))
+				if format == dc.FormatPlain {
+					dc.PrintResult(os.Stdout, fmt.Sprintf("service=%s", state))
+				}
 			case "Stopped":
 				slog.Warn(fmt.Sprintf("service=%s", state))
 			default:

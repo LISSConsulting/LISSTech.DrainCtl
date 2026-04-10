@@ -205,7 +205,9 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) er
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
-	dc.PrintResult(os.Stdout, fmt.Sprintf("%s_url=%q", typ, url))
+	if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+		dc.PrintResult(os.Stdout, fmt.Sprintf("%s_url=%q", typ, url))
+	}
 	return nil
 }
 
@@ -270,7 +272,9 @@ func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
 			i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
 	}
 	if hasTargets {
-		dc.PrintResult(os.Stdout, "notifications=enabled")
+		if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+			dc.PrintResult(os.Stdout, "notifications=enabled")
+		}
 	} else {
 		slog.Warn("notifications=disabled (no targets with URLs configured)")
 	}
