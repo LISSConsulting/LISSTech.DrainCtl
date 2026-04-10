@@ -18,10 +18,10 @@
 
 **Purpose**: Create the `internal/logging` package skeleton and shared utilities that all stories depend on.
 
-- [ ] T001 Create `internal/logging/` package directory and `level.go` with `ParseLevel()` function mapping `"debug"/"info"/"warn"/"error"` strings to `slog.Level` constants (case-insensitive), returning error for invalid input
-- [ ] T002 [P] Create `internal/logging/result.go` with `PrintResult(w io.Writer, msg string, fields ...string)` function that writes `--- <msg> [key=value ...]\n` to `w`
-- [ ] T003 [P] Create `internal/logging/multi.go` with `MultiHandler` implementing `slog.Handler` that fans out to a slice of handlers, each with its own `Enabled()` check
-- [ ] T004 [P] Create `internal/logging/level_test.go` with table-driven tests for `ParseLevel()`: valid inputs (all cases), invalid inputs, empty string
+- [x] T001 Create `internal/logging/` package directory and `level.go` with `ParseLevel()` function mapping `"debug"/"info"/"warn"/"error"` strings to `slog.Level` constants (case-insensitive), returning error for invalid input
+- [x] T002 [P] Create `internal/logging/result.go` with `PrintResult(w io.Writer, msg string, fields ...string)` function that writes `--- <msg> [key=value ...]\n` to `w`
+- [x] T003 [P] Create `internal/logging/multi.go` with `MultiHandler` implementing `slog.Handler` that fans out to a slice of handlers, each with its own `Enabled()` check
+- [x] T004 [P] Create `internal/logging/level_test.go` with table-driven tests for `ParseLevel()`: valid inputs (all cases), invalid inputs, empty string
 
 **Checkpoint**: Package skeleton exists with shared utilities. No functional changes to the codebase yet.
 
@@ -37,53 +37,53 @@
 
 ### slog Handlers
 
-- [ ] T005 [US3] Create `internal/logging/cli.go` with `CLIHandler` implementing `slog.Handler` — writes to `io.Writer` (stderr) with format `<timestamp> [<LVL>] <msg> <key=value ...>\n`, timestamps in local time with offset, configurable min level via `slog.LevelVar`
-- [ ] T006 [P] [US3] Create `internal/logging/file.go` with `FileHandler` implementing `slog.Handler` — writes to `io.Writer` (filelog.Writer) with format `<timestamp> <LVL> <msg> <key=value ...>\n`, timestamps in local time with offset (FR-011), configurable min level
-- [ ] T007 [P] [US3] Create `internal/logging/cli_test.go` with tests for `CLIHandler`: level filtering (messages below min suppressed), output format matches `[DBG]/[INF]/[WRN]/[ERR]` tags, structured attributes preserved
-- [ ] T008 [P] [US3] Create `internal/logging/file_test.go` with tests for `FileHandler`: level filtering, local timestamp format with offset, structured attributes preserved
-- [ ] T009 [P] [US3] Create `internal/logging/multi_test.go` with tests for `MultiHandler`: fan-out to multiple handlers, per-handler level filtering
+- [x] T005 [US3] Create `internal/logging/cli.go` with `CLIHandler` implementing `slog.Handler` — writes to `io.Writer` (stderr) with format `<timestamp> [<LVL>] <msg> <key=value ...>\n`, timestamps in local time with offset, configurable min level via `slog.LevelVar`
+- [x] T006 [P] [US3] Create `internal/logging/file.go` with `FileHandler` implementing `slog.Handler` — writes to `io.Writer` (filelog.Writer) with format `<timestamp> <LVL> <msg> <key=value ...>\n`, timestamps in local time with offset (FR-011), configurable min level
+- [x] T007 [P] [US3] Create `internal/logging/cli_test.go` with tests for `CLIHandler`: level filtering (messages below min suppressed), output format matches `[DBG]/[INF]/[WRN]/[ERR]` tags, structured attributes preserved
+- [x] T008 [P] [US3] Create `internal/logging/file_test.go` with tests for `FileHandler`: level filtering, local timestamp format with offset, structured attributes preserved
+- [x] T009 [P] [US3] Create `internal/logging/multi_test.go` with tests for `MultiHandler`: fan-out to multiple handlers, per-handler level filtering
 
 ### Migrate Root Package (public API)
 
-- [ ] T010 [US3] Refactor `log.go` — remove `Level` type, `LvlDBG/INF/WRN/ERR/OK` constants, `LogFunc` type, `DefaultLogger()`, `DiscardLogger()`, `LogMsg()`. File may be deleted entirely or retained with just the `PrintResult` re-export if needed
-- [ ] T011 [US3] Update all function signatures in root package that accept `LogFunc` parameter — change to accept `*slog.Logger` or use `slog.Default()`. Key files: `check.go` (RunCheck), `audit_setup.go` (RunAuditSetup), `notify.go`, and any other exported functions with `log LogFunc` parameter
-- [ ] T012 [US3] Migrate ~15 log call sites in `check.go` — replace `log(LvlINF, ...)` with `slog.Info(...)`, `log(LvlERR, ...)` with `slog.Error(...)`, etc. Convert `log(LvlOK, ...)` calls to `PrintResult()`. Convert `LogMsg()` calls to direct `slog` calls. Preserve all structured fields as slog attributes
-- [ ] T013 [P] [US3] Migrate ~12 log call sites in `audit_setup.go` — same pattern as T012. Convert `LvlOK` calls to `PrintResult()`
-- [ ] T014 [P] [US3] Migrate log call sites in `notify.go` — replace LogFunc usage with slog calls
-- [ ] T015 [P] [US3] Migrate log call sites in any remaining root package files (`sessions.go`, `registry.go`, `history.go`, `perf.go`, etc.) that reference `LogFunc` or `Level`
+- [x] T010 [US3] Refactor `log.go` — remove `Level` type, `LvlDBG/INF/WRN/ERR/OK` constants, `LogFunc` type, `DefaultLogger()`, `DiscardLogger()`, `LogMsg()`. File may be deleted entirely or retained with just the `PrintResult` re-export if needed
+- [x] T011 [US3] Update all function signatures in root package that accept `LogFunc` parameter — change to accept `*slog.Logger` or use `slog.Default()`. Key files: `check.go` (RunCheck), `audit_setup.go` (RunAuditSetup), `notify.go`, and any other exported functions with `log LogFunc` parameter
+- [x] T012 [US3] Migrate ~15 log call sites in `check.go` — replace `log(LvlINF, ...)` with `slog.Info(...)`, `log(LvlERR, ...)` with `slog.Error(...)`, etc. Convert `log(LvlOK, ...)` calls to `PrintResult()`. Convert `LogMsg()` calls to direct `slog` calls. Preserve all structured fields as slog attributes
+- [x] T013 [P] [US3] Migrate ~12 log call sites in `audit_setup.go` — same pattern as T012. Convert `LvlOK` calls to `PrintResult()`
+- [x] T014 [P] [US3] Migrate log call sites in `notify.go` — replace LogFunc usage with slog calls
+- [x] T015 [P] [US3] Migrate log call sites in any remaining root package files (`sessions.go`, `registry.go`, `history.go`, `perf.go`, etc.) that reference `LogFunc` or `Level`
 
 ### Migrate CLI Commands
 
-- [ ] T016 [US3] Update `cmd/drainctl/main.go` — replace `cfg.Quiet bool` with `cfg.LogLevel string`, change persistent flag from `--quiet` to `--log-level` with default `"info"`. In `PersistentPreRunE` (or add one): parse level with `ParseLevel()`, create `CLIHandler` writing to `os.Stderr`, set as `slog.SetDefault()`. On invalid level, exit with error listing valid values
-- [ ] T017 [US3] Migrate ~20 log call sites in `cmd/drainctl/check_cmd.go` — replace `log(LvlINF, ...)` with `slog.Info(...)`, convert `log(LvlOK, ...)` to `PrintResult(os.Stdout, ...)`. Remove `log := dc.DefaultLogger(os.Stdout, cfg.Quiet)` initialization. Ensure result line is suppressed when `cfg.Format` is json/csv/table
-- [ ] T018 [P] [US3] Migrate log call sites in `cmd/drainctl/audit_cmd.go` — remove `DefaultLogger` call, use slog
-- [ ] T019 [P] [US3] Migrate log call sites in `cmd/drainctl/configure_cmd.go` — remove `DefaultLogger` calls, use slog
-- [ ] T020 [P] [US3] Migrate log call sites in `cmd/drainctl/dashboard_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog for others
-- [ ] T021 [P] [US3] Migrate log call sites in `cmd/drainctl/notify_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog
-- [ ] T022 [P] [US3] Migrate log call sites in `cmd/drainctl/register_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog
-- [ ] T023 [P] [US3] Migrate log call sites in `cmd/drainctl/service_cmd.go` — convert `LvlOK` to `PrintResult()`, replace `DefaultLogger` call, use slog
-- [ ] T024 [P] [US3] Migrate log call sites in `cmd/drainctl/sessions_cmd.go` — use slog
+- [x] T016 [US3] Update `cmd/drainctl/main.go` — replace `cfg.Quiet bool` with `cfg.LogLevel string`, change persistent flag from `--quiet` to `--log-level` with default `"info"`. In `PersistentPreRunE` (or add one): parse level with `ParseLevel()`, create `CLIHandler` writing to `os.Stderr`, set as `slog.SetDefault()`. On invalid level, exit with error listing valid values
+- [x] T017 [US3] Migrate ~20 log call sites in `cmd/drainctl/check_cmd.go` — replace `log(LvlINF, ...)` with `slog.Info(...)`, convert `log(LvlOK, ...)` to `PrintResult(os.Stdout, ...)`. Remove `log := dc.DefaultLogger(os.Stdout, cfg.Quiet)` initialization. Ensure result line is suppressed when `cfg.Format` is json/csv/table
+- [x] T018 [P] [US3] Migrate log call sites in `cmd/drainctl/audit_cmd.go` — remove `DefaultLogger` call, use slog
+- [x] T019 [P] [US3] Migrate log call sites in `cmd/drainctl/configure_cmd.go` — remove `DefaultLogger` calls, use slog
+- [x] T020 [P] [US3] Migrate log call sites in `cmd/drainctl/dashboard_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog for others
+- [x] T021 [P] [US3] Migrate log call sites in `cmd/drainctl/notify_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog
+- [x] T022 [P] [US3] Migrate log call sites in `cmd/drainctl/register_cmd.go` — convert `LvlOK` to `PrintResult()`, use slog
+- [x] T023 [P] [US3] Migrate log call sites in `cmd/drainctl/service_cmd.go` — convert `LvlOK` to `PrintResult()`, replace `DefaultLogger` call, use slog
+- [x] T024 [P] [US3] Migrate log call sites in `cmd/drainctl/sessions_cmd.go` — use slog
 
 ### Migrate Service Handler
 
-- [ ] T025 [US3] Refactor `internal/svc/handler.go` — remove `EventLogLogger()`, `FileLogger()`, `MultiLogger()` functions. Replace `log dc.LogFunc` field in `drainService` struct with `logger *slog.Logger`. In service startup (`Execute` method), create `MultiHandler(FileHandler, legacyEventLogHandler)` and set as logger. Migrate all ~30+ log call sites to `slog` calls. Preserve specific event ID writes (1000-1004, 2000, 3000-3002) as direct `elog.Info/Warning/Error` calls alongside slog — these become ETW events in US4
-- [ ] T026 [P] [US3] Migrate log call sites in `internal/svc/check.go` — use slog via logger from handler
-- [ ] T027 [P] [US3] Migrate log call sites in `internal/watcher/` package — registry.go, evtsubscribe.go, params.go
-- [ ] T028 [P] [US3] Migrate log call sites in `internal/dashboard/client.go` — SSPI negotiation logging
-- [ ] T029 [P] [US3] Migrate log call sites in `internal/pipe/` package — pipe handler logging
-- [ ] T030 [P] [US3] Migrate log call sites in `internal/perfmon/` package — performance collection logging
+- [x] T025 [US3] Refactor `internal/svc/handler.go` — remove `EventLogLogger()`, `FileLogger()`, `MultiLogger()` functions. Replace `log dc.LogFunc` field in `drainService` struct with `logger *slog.Logger`. In service startup (`Execute` method), create `MultiHandler(FileHandler, legacyEventLogHandler)` and set as logger. Migrate all ~30+ log call sites to `slog` calls. Preserve specific event ID writes (1000-1004, 2000, 3000-3002) as direct `elog.Info/Warning/Error` calls alongside slog — these become ETW events in US4
+- [x] T026 [P] [US3] Migrate log call sites in `internal/svc/check.go` — use slog via logger from handler
+- [x] T027 [P] [US3] Migrate log call sites in `internal/watcher/` package — registry.go, evtsubscribe.go, params.go
+- [x] T028 [P] [US3] Migrate log call sites in `internal/dashboard/client.go` — SSPI negotiation logging
+- [x] T029 [P] [US3] Migrate log call sites in `internal/pipe/` package — pipe handler logging
+- [x] T030 [P] [US3] Migrate log call sites in `internal/perfmon/` package — performance collection logging
 
 ### Migrate DLL Exports
 
-- [ ] T031 [US3] Update `cmd/cshared/exports.go` — replace all ~15 `dc.DiscardLogger()` calls. Either set `slog.SetDefault(slog.New(slog.DiscardHandler))` once in `init()` and remove per-function logger setup, or pass `slog.New(slog.DiscardHandler)` where individual loggers are needed
+- [x] T031 [US3] Update `cmd/cshared/exports.go` — replace all ~15 `dc.DiscardLogger()` calls. Either set `slog.SetDefault(slog.New(slog.DiscardHandler))` once in `init()` and remove per-function logger setup, or pass `slog.New(slog.DiscardHandler)` where individual loggers are needed
 
 ### Update Tests
 
-- [ ] T032 [US3] Update `log_test.go` — rewrite tests for new logging behavior. Remove tests for `LogFunc`, `DefaultLogger`, `DiscardLogger`, `LogMsg`. Add tests validating slog integration works (or delete file if no root-package logging code remains)
-- [ ] T033 [P] [US3] Update `cmd/drainctl/main_test.go` — update for `--log-level` flag instead of `--quiet`
-- [ ] T034 [P] [US3] Update `internal/svc/handler_test.go` — remove references to `EventLogLogger`, `FileLogger`, `MultiLogger`, update to use slog-based service handler
-- [ ] T035 [P] [US3] Scan for and fix any remaining test files that reference `LogFunc`, `Level`, `DefaultLogger`, `DiscardLogger`, or `LogMsg` across `config_test.go`, `audit_test.go`, `notify_test.go`, and other test files
-- [ ] T036 [US3] Run `just gotest` and `just lint` — verify all tests pass and no lint errors. Fix any compilation issues from the migration
+- [x] T032 [US3] Update `log_test.go` — rewrite tests for new logging behavior. Remove tests for `LogFunc`, `DefaultLogger`, `DiscardLogger`, `LogMsg`. Add tests validating slog integration works (or delete file if no root-package logging code remains)
+- [x] T033 [P] [US3] Update `cmd/drainctl/main_test.go` — update for `--log-level` flag instead of `--quiet`
+- [x] T034 [P] [US3] Update `internal/svc/handler_test.go` — remove references to `EventLogLogger`, `FileLogger`, `MultiLogger`, update to use slog-based service handler
+- [x] T035 [P] [US3] Scan for and fix any remaining test files that reference `LogFunc`, `Level`, `DefaultLogger`, `DiscardLogger`, or `LogMsg` across `config_test.go`, `audit_test.go`, `notify_test.go`, and other test files
+- [x] T036 [US3] Run `just gotest` and `just lint` — verify all tests pass and no lint errors. Fix any compilation issues from the migration
 
 **Checkpoint**: Entire codebase uses slog. Zero references to `LogFunc` or old `Level` type. `--quiet` flag removed. `[OK]` log level replaced with `---` result lines. `just gotest` passes. `just lint` passes.
 
@@ -97,9 +97,9 @@
 
 > Note: The `--log-level` flag and `CLIHandler` were already created in Phase 2 (T005, T016). This phase validates and polishes the behavior.
 
-- [ ] T037 [US1] Verify `--log-level` flag behavior in `cmd/drainctl/main.go` — confirm `PersistentPreRunE` correctly parses level, sets `CLIHandler` min level on `slog.Default()`, and exits with clear error on invalid input per contract (`invalid log level "<value>"; valid levels: debug, info, warn, error`)
-- [ ] T038 [US1] Verify log output routing — confirm log messages go to stderr (not stdout), structured data (`--format json/csv/table`) goes to stdout, and `---` result line goes to stdout. Ensure `--log-level` only affects log messages, not data output or result line
-- [ ] T039 [US1] Verify default level behavior — confirm that when no `--log-level` flag is provided, CLI defaults to INFO (DEBUG messages suppressed, INFO+ visible)
+- [x] T037 [US1] Verify `--log-level` flag behavior in `cmd/drainctl/main.go` — confirm `PersistentPreRunE` correctly parses level, sets `CLIHandler` min level on `slog.Default()`, and exits with clear error on invalid input per contract (`invalid log level "<value>"; valid levels: debug, info, warn, error`)
+- [x] T038 [US1] Verify log output routing — confirm log messages go to stderr (not stdout), structured data (`--format json/csv/table`) goes to stdout, and `---` result line goes to stdout. Ensure `--log-level` only affects log messages, not data output or result line
+- [x] T039 [US1] Verify default level behavior — confirm that when no `--log-level` flag is provided, CLI defaults to INFO (DEBUG messages suppressed, INFO+ visible)
 
 **Checkpoint**: US1 acceptance scenarios 1-4 all pass. CLI flag contract fully satisfied.
 
@@ -111,12 +111,12 @@
 
 **Independent Test**: Set `"log_file_level": "warn"` in config.json, restart the service, emit an INFO message — verify the file log does NOT contain it. Set `"log_event_level": "error"` — verify only errors reach the event log.
 
-- [ ] T040 [US2] Add `LogFileLevel string` and `LogEventLevel string` fields to `Config` struct in `config.go` with JSON tags `"log_file_level"` and `"log_event_level"`
-- [ ] T041 [US2] Update config validation in `config.go` — validate `LogFileLevel` and `LogEventLevel` with `ParseLevel()`. Missing/empty → use defaults (`"debug"` for file, `"info"` for event). Invalid → log warning, fall back to defaults. Same pattern as `ClampRetention()`
-- [ ] T042 [US2] Update `internal/svc/handler.go` service startup — read `LogFileLevel` and `LogEventLevel` from config, pass parsed `slog.Level` values to `FileHandler` and legacy event log handler (or ETW handler if US4 is complete). Apply config values to handler `LevelVar` on startup
-- [ ] T043 [US2] Update config file watcher in `internal/svc/handler.go` — when config is reloaded at runtime, update handler level vars dynamically (use `slog.LevelVar.Set()` so levels change without service restart)
-- [ ] T044 [US2] Update `config_test.go` — add test cases for `LogFileLevel`/`LogEventLevel` parsing: valid values, invalid values (warning + default), missing values (defaults), empty strings (defaults)
-- [ ] T045 [US2] Update installer default config template `installer/config.json` — add `"log_file_level": "debug"` and `"log_event_level": "info"` to the default configuration
+- [x] T040 [US2] Add `LogFileLevel string` and `LogEventLevel string` fields to `Config` struct in `config.go` with JSON tags `"log_file_level"` and `"log_event_level"`
+- [x] T041 [US2] Update config validation in `config.go` — validate `LogFileLevel` and `LogEventLevel` with `ParseLevel()`. Missing/empty → use defaults (`"debug"` for file, `"info"` for event). Invalid → log warning, fall back to defaults. Same pattern as `ClampRetention()`
+- [x] T042 [US2] Update `internal/svc/handler.go` service startup — read `LogFileLevel` and `LogEventLevel` from config, pass parsed `slog.Level` values to `FileHandler` and legacy event log handler (or ETW handler if US4 is complete). Apply config values to handler `LevelVar` on startup
+- [x] T043 [US2] Update config file watcher in `internal/svc/handler.go` — when config is reloaded at runtime, update handler level vars dynamically (use `slog.LevelVar.Set()` so levels change without service restart)
+- [x] T044 [US2] Update `config_test.go` — add test cases for `LogFileLevel`/`LogEventLevel` parsing: valid values, invalid values (warning + default), missing values (defaults), empty strings (defaults)
+- [x] T045 [US2] Update installer default config template `installer/config.json` — add `"log_file_level": "debug"` and `"log_event_level": "info"` to the default configuration
 
 **Checkpoint**: US2 acceptance scenarios 1-5 all pass. Per-sink levels configurable. CLI flag takes precedence.
 
@@ -130,19 +130,19 @@
 
 ### ETW Manifest & Build
 
-- [ ] T046 [US4] Create `assets/drainctl.man` — ETW instrumentation manifest XML with provider name `LISS Technologies-DrainCtl`, generated GUID, Operational channel (enabled, type=Operational), Debug channel (disabled, type=Debug), event definitions for IDs 1000-1004/1099/2000/2099/3000-3002/3099/4000 per contracts/etw-provider.md, string template for message data
-- [ ] T047 [US4] Update build system (`justfile`) — replace `mc` compilation of `drainctl.mc` with `mc -um drainctl.man` to compile the manifest. Update `resource` recipe if needed. Ensure compiled resource DLL output goes to `assets/drainctl-msg.dll`
-- [ ] T048 [US4] Retire `assets/drainctl.mc` — remove or rename the legacy message compiler file (keep in git history). The manifest replaces it
+- [x] T046 [US4] Create `assets/drainctl.man` — ETW instrumentation manifest XML with provider name `LISS Technologies-DrainCtl`, generated GUID, Operational channel (enabled, type=Operational), Debug channel (disabled, type=Debug), event definitions for IDs 1000-1004/1099/2000/2099/3000-3002/3099/4000 per contracts/etw-provider.md, string template for message data
+- [x] T047 [US4] Update build system (`justfile`) — replace `mc` compilation of `drainctl.mc` with `mc -um drainctl.man` to compile the manifest. Update `resource` recipe if needed. Ensure compiled resource DLL output goes to `assets/drainctl-msg.dll`
+- [x] T048 [US4] Retire `assets/drainctl.mc` — remove or rename the legacy message compiler file (keep in git history). The manifest replaces it
 
 ### ETW slog Handler
 
-- [ ] T049 [US4] Create `internal/logging/etw.go` with `ETWHandler` implementing `slog.Handler` — use `advapi32.dll` syscalls (`EventRegister`, `EventEnabled`, `EventWriteString`) via `golang.org/x/sys/windows` `LazyDLL`/`LazyProc`. Route DEBUG records to Debug channel descriptor, INFO/WARN/ERROR to Operational channel descriptor. Use `EventEnabled` to skip writes to disabled channels (zero-cost when Debug channel is off). Support specific event IDs for known events (1000-3002) via slog attribute, fall back to generic IDs (1099/2099/3099/4000) for untagged messages. Implement `Close()` method calling `EventUnregister`
-- [ ] T050 [US4] Update `internal/svc/handler.go` — replace legacy `eventlog.Open()` + direct `elog.Info/Warning/Error` calls with `ETWHandler`. In service startup: create `ETWHandler`, compose with `FileHandler` via `MultiHandler`, set as `slog.Default()`. Remove `elog *eventlog.Log` field from `drainService` struct. Update all specific event ID writes (EvtServiceStarted, etc.) to use slog with an `"event_id"` attribute that the ETWHandler maps to the manifest event ID
+- [x] T049 [US4] Create `internal/logging/etw.go` with `ETWHandler` implementing `slog.Handler` — use `advapi32.dll` syscalls (`EventRegister`, `EventEnabled`, `EventWriteString`) via `golang.org/x/sys/windows` `LazyDLL`/`LazyProc`. Route DEBUG records to Debug channel descriptor, INFO/WARN/ERROR to Operational channel descriptor. Use `EventEnabled` to skip writes to disabled channels (zero-cost when Debug channel is off). Support specific event IDs for known events (1000-3002) via slog attribute, fall back to generic IDs (1099/2099/3099/4000) for untagged messages. Implement `Close()` method calling `EventUnregister`
+- [x] T050 [US4] Update `internal/svc/handler.go` — replace legacy `eventlog.Open()` + direct `elog.Info/Warning/Error` calls with `ETWHandler`. In service startup: create `ETWHandler`, compose with `FileHandler` via `MultiHandler`, set as `slog.Default()`. Remove `elog *eventlog.Log` field from `drainService` struct. Update all specific event ID writes (EvtServiceStarted, etc.) to use slog with an `"event_id"` attribute that the ETWHandler maps to the manifest event ID
 
 ### Installer Updates
 
-- [ ] T051 [US4] Update `installer/LISSTech.DrainCtl.wxs` — replace `EventLogSource` component (registry-based event log source) with ETW provider registration. Add `drainctl.man` as an installed file. Add custom actions: `wevtutil im` on install, `wevtutil um` on uninstall. Remove legacy `EventLog\DrainCtl\DrainCtl` registry key creation. Keep the legacy Application log cleanup (`RemoveRegistryKey`)
-- [ ] T052 [US4] Add `drainctl.man` to the MSI file list in `installer/LISSTech.DrainCtl.wxs` — ensure the manifest is installed alongside the resource DLL in `[BinFolder]`
+- [x] T051 [US4] Update `installer/LISSTech.DrainCtl.wxs` — replace `EventLogSource` component (registry-based event log source) with ETW provider registration. Add `drainctl.man` as an installed file. Add custom actions: `wevtutil im` on install, `wevtutil um` on uninstall. Remove legacy `EventLog\DrainCtl\DrainCtl` registry key creation. Keep the legacy Application log cleanup (`RemoveRegistryKey`)
+- [x] T052 [US4] Add `drainctl.man` to the MSI file list in `installer/LISSTech.DrainCtl.wxs` — ensure the manifest is installed alongside the resource DLL in `[BinFolder]`
 
 **Checkpoint**: US4 acceptance scenarios 1-4 all pass. `wevtutil gp` shows provider. Events route to correct channels. Debug channel toggleable.
 
@@ -156,8 +156,8 @@
 
 > Note: If the `FileHandler` (T006) was already implemented with local timestamps in Phase 2, this phase is just validation.
 
-- [ ] T053 [US5] Verify `FileHandler` in `internal/logging/file.go` uses `time.Now().Format("2006-01-02T15:04:05.000-07:00")` for timestamps (local time with offset), NOT UTC format `"2006-01-02T15:04:05.000Z"`. Fix if needed
-- [ ] T054 [US5] Verify `file_test.go` includes a test case validating that the timestamp format contains a timezone offset (not `Z` suffix)
+- [x] T053 [US5] Verify `FileHandler` in `internal/logging/file.go` uses `time.Now().Format("2006-01-02T15:04:05.000-07:00")` for timestamps (local time with offset), NOT UTC format `"2006-01-02T15:04:05.000Z"`. Fix if needed
+- [x] T054 [US5] Verify `file_test.go` includes a test case validating that the timestamp format contains a timezone offset (not `Z` suffix)
 
 **Checkpoint**: US5 acceptance scenarios 1-2 pass. File log shows local time.
 
@@ -171,9 +171,9 @@
 
 > Note: `PrintResult()` was created in T002 and call sites were migrated in Phase 2. This phase validates behavior.
 
-- [ ] T055 [US6] Verify `PrintResult()` output format in `internal/logging/result.go` — confirm format is `--- <msg> [key=value ...]\n` with no timestamp and no level tag
-- [ ] T056 [US6] Verify result line suppression — confirm `PrintResult()` is NOT called when `cfg.Format` is `json`, `csv`, or `table` in all CLI commands that emit result lines (`check_cmd.go`, `dashboard_cmd.go`, `notify_cmd.go`, `register_cmd.go`, `service_cmd.go`, `audit_cmd.go`)
-- [ ] T057 [US6] Verify result line is NOT affected by `--log-level` — confirm `---` line appears even with `--log-level error`
+- [x] T055 [US6] Verify `PrintResult()` output format in `internal/logging/result.go` — confirm format is `--- <msg> [key=value ...]\n` with no timestamp and no level tag
+- [x] T056 [US6] Verify result line suppression — confirm `PrintResult()` is NOT called when `cfg.Format` is `json`, `csv`, or `table` in all CLI commands that emit result lines (`check_cmd.go`, `dashboard_cmd.go`, `notify_cmd.go`, `register_cmd.go`, `service_cmd.go`, `audit_cmd.go`)
+- [x] T057 [US6] Verify result line is NOT affected by `--log-level` — confirm `---` line appears even with `--log-level error`
 
 **Checkpoint**: US6 acceptance scenarios 1-3 pass. Result line is visually distinct from log output.
 
@@ -183,12 +183,12 @@
 
 **Purpose**: Final validation, cleanup, and build verification.
 
-- [ ] T058 Run `just lint` — verify no lint errors across entire codebase after all migrations
-- [ ] T059 Run `just gotest` — verify all tests pass (existing + new)
-- [ ] T060 [P] Run `just all` — verify full unsigned build succeeds (CLI + DLL + PS module + MSI)
-- [ ] T061 [P] Verify no remaining references to removed types — grep for `LogFunc`, `LvlDBG`, `LvlINF`, `LvlWRN`, `LvlERR`, `LvlOK`, `DefaultLogger`, `DiscardLogger`, `MultiLogger`, `EventLogLogger`, `FileLogger`, `LogMsg`, `--quiet` across all `.go` files. Zero matches expected (excluding test assertions about removal and comments)
-- [ ] T062 Update `CLAUDE.md` Architecture section — change "Logging: dual-sink — Windows Event Log (custom 'DrainCtl' log, INF+) + file log" to reflect new architecture: "Logging: slog-based, dual-sink — ETW manifest provider (Operational channel INF+, Debug channel DBG) + file log (`%ProgramData%\...\drainctl.log`, 10 MB rotate, 7 kept, local timestamps). Per-sink levels in config.json. CLI uses `--log-level` flag."
-- [ ] T063 Run quickstart.md validation — execute the verification steps from `specs/001-tiered-logging/quickstart.md` to confirm all features work end-to-end
+- [x] T058 Run `just lint` — verify no lint errors across entire codebase after all migrations
+- [x] T059 Run `just gotest` — verify all tests pass (existing + new)
+- [x] T060 [P] Run `just all` — verify full unsigned build succeeds (CLI + DLL + PS module + MSI)
+- [x] T061 [P] Verify no remaining references to removed types — grep for `LogFunc`, `LvlDBG`, `LvlINF`, `LvlWRN`, `LvlERR`, `LvlOK`, `DefaultLogger`, `DiscardLogger`, `MultiLogger`, `EventLogLogger`, `FileLogger`, `LogMsg`, `--quiet` across all `.go` files. Zero matches expected (excluding test assertions about removal and comments)
+- [x] T062 Update `CLAUDE.md` Architecture section — change "Logging: dual-sink — Windows Event Log (custom 'DrainCtl' log, INF+) + file log" to reflect new architecture: "Logging: slog-based, dual-sink — ETW manifest provider (Operational channel INF+, Debug channel DBG) + file log (`%ProgramData%\...\drainctl.log`, 10 MB rotate, 7 kept, local timestamps). Per-sink levels in config.json. CLI uses `--log-level` flag."
+- [x] T063 Run quickstart.md validation — execute the verification steps from `specs/001-tiered-logging/quickstart.md` to confirm all features work end-to-end
 
 ---
 
