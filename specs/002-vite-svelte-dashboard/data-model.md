@@ -113,7 +113,7 @@ Returned by `GET /api/v1/history/{host}`.
 ```
 servers: $state<Server[]>          — All registered servers, refreshed every 30s
 events: $state<EventEntry[]>       — Event log entries (append-only, capped)
-stateHistory: $state<StateSample[]> — Chart data points (max 60 samples)
+metricsHistory: $state<MetricsSample[]> — Performance chart data (max 60 samples, CPU/Mem/InputDelay/Sessions)
 config: $state<NotifyConfig>       — Dashboard configuration
 theme: $state<'light'|'dark'>      — Current theme, persisted to localStorage
 ```
@@ -123,7 +123,11 @@ theme: $state<'light'|'dark'>      — Current theme, persisted to localStorage
 ```
 counters: $derived                 — { total, ok, grace, alert, off } from servers
 stateBarSegments: $derived         — Percentage widths from counters
-chartData: $derived                — uPlot-formatted array from stateHistory
+avgCpu: $derived                   — Average CPU% across all servers (for chart)
+avgMem: $derived                   — Average Memory% across all servers (for chart)
+avgInputDelay: $derived            — Average Input Delay across all servers (for chart)
+totalSessions: $derived            — Total sessions across all servers (for chart)
+chartData: $derived                — Layercake-formatted array from metricsHistory [{t, cpu, mem, inputDelay, sessions}]
 ```
 
 ### Component-Local State

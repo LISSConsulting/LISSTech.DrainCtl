@@ -78,13 +78,16 @@ base-uri 'self';
 form-action 'self'
 ```
 
-## R5: uPlot Integration as npm Dependency
+## R5: Layercake Replaces uPlot
 
-**Decision**: Install `uplot` via npm, import in Svelte component
-**Rationale**: uPlot v1.6.32 is currently inlined (~3,200 minified lines, ~50KB). As an npm dependency, Vite tree-shakes and bundles it properly. The chart wrapper becomes a Svelte component with `$effect` for reactive data binding and `onMount`/`onDestroy` for lifecycle management.
+**Decision**: Replace uPlot with Layercake (~8KB, Svelte-native, SVG-based)
+**Rationale**: uPlot is a canvas-based imperative charting library that requires manual DOM lifecycle management in Svelte (mount, resize, destroy). Layercake is built for Svelte — it provides reactive scales, layout containers, and composable SVG/Canvas/HTML layers. Since the charts render as SVG elements, full CSS control is available for neobrutalist styling (bold strokes, offset shadows, thick grid lines). Layercake handles scales and layout; we write simple `<path>`, `<line>`, and `<circle>` SVG elements for the actual chart primitives.
 **Alternatives considered**:
-- CDN import: Adds external dependency, breaks offline/air-gapped deployments
-- Keep inline: Defeats the purpose of the migration to a module-based build system
+- uPlot (current): Canvas-based, imperative, hard to style neobrutalist, requires manual lifecycle
+- Chart.js + svelte-chartjs: 200KB, canvas-based, limited CSS styling control
+- Neobrutalism.dev charts: React-only (Recharts), not compatible with Svelte
+- Raw SVG: Full control but must implement scales/axes/responsive layout from scratch
+- Recharts: React-only
 
 ## R6: Component Decomposition Strategy
 
@@ -98,12 +101,15 @@ App.svelte
 ├── Nav.svelte                    (brand, server summary, config toggle, theme toggle)
 ├── CounterGrid.svelte            (5 counter cards)
 ├── StateBar.svelte               (proportional state segments)
-├── StateChart.svelte             (uPlot area chart + CPU/InputDelay overlays)
+├── MetricsChart.svelte           (Layercake multi-series: CPU%, Mem%, Input Delay, Sessions)
+│   ├── AreaPath.svelte           (Layercake SVG layer: filled area path)
+│   ├── LinePath.svelte           (Layercake SVG layer: stroke line)
+│   └── AxisX.svelte / AxisY.svelte (Layercake SVG layers: axes with neobrutalist styling)
 ├── EventLog.svelte               (filterable, expandable log)
 ├── ServerTable.svelte            (sortable table with expandable rows)
 │   └── ServerDetail.svelte       (accordion content: 3 tiles)
 │       ├── RingGauge.svelte      (reusable SVG ring with threshold colors)
-│       └── Sparkline.svelte      (mini uPlot chart)
+│       └── Sparkline.svelte      (Layercake mini line chart)
 ├── ConfigModal.svelte            (settings, thresholds, perf toggles)
 │   ├── NotificationTargets.svelte (targets table within config modal)
 │   ├── TargetEditModal.svelte    (add/edit target, layered above config)

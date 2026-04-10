@@ -9,16 +9,16 @@
 
 ### User Story 1 - Core Dashboard Monitoring (Priority: P1)
 
-An IT administrator opens the DrainCtl dashboard to monitor the health and drain status of their Remote Desktop Services farm. They see the same counters, state bar, server state history chart, event log, and server table with expandable accordion detail rows they relied on before the migration. All real-time data updates, server registration, status reporting, and API interactions continue to function identically.
+An IT administrator opens the DrainCtl dashboard to monitor the health and drain status of their Remote Desktop Services farm. They see the same counters, state bar, performance metrics chart, event log, and server table with expandable accordion detail rows they relied on before the migration. All real-time data updates, server registration, status reporting, and API interactions continue to function identically.
 
 **Why this priority**: The dashboard is a mission-critical monitoring tool. Any regression in core monitoring functionality would break the primary value proposition.
 
-**Independent Test**: Navigate to the dashboard URL, verify all five counter cards render with live data, the state bar reflects server proportions, the uPlot history chart displays time-series data, the event log streams entries, and the server table shows all registered servers with expandable detail rows containing utilization rings, sparklines, and metadata.
+**Independent Test**: Navigate to the dashboard URL, verify all five counter cards render with live data, the state bar reflects server proportions, the performance metrics chart displays CPU/Memory/Input Delay/Sessions time-series data, the event log streams entries, and the server table shows all registered servers with expandable detail rows containing utilization rings, sparklines, and metadata.
 
 **Acceptance Scenarios**:
 
-1. **Given** the dashboard is served by the Go backend, **When** an administrator navigates to the root URL, **Then** the full dashboard renders with all existing sections (counters, state bar, chart, event log, server table) populated with live data.
-2. **Given** servers are reporting status, **When** the dashboard receives updates, **Then** counters, state bar segments, chart data points, and server rows update in real time without page reload.
+1. **Given** the dashboard is served by the Go backend, **When** an administrator navigates to the root URL, **Then** the full dashboard renders with all existing sections (counters, state bar, performance metrics chart, event log, server table) populated with live data.
+2. **Given** servers are reporting status, **When** the dashboard receives updates, **Then** counters, state bar segments, performance chart data points (CPU%, Memory%, Input Delay, Sessions), and server rows update in real time without page reload.
 3. **Given** a server row in the table, **When** the administrator clicks to expand it, **Then** the accordion detail row opens showing three tiles: resource utilization (CPU/Memory/Sessions rings + sparklines), I/O metrics (Disk Queue/Input Delay/TCP Retransmits rings), and server details (registration date, last seen, version).
 
 ---
@@ -127,8 +127,8 @@ The migrated dashboard preserves the existing light and dark theme support with 
 - **FR-008**: System MUST produce build artifacts that are embeddable into the Go binary, preserving the single-binary deployment model.
 - **FR-009**: System MUST preserve all existing API contracts, authentication, and security headers (CSP, X-Frame-Options, HSTS, Cache-Control).
 - **FR-010**: System MUST support light and dark themes with the existing color palette and typography.
-- **FR-011**: System MUST render the uPlot-based server state history chart with toggle overlays for CPU% and Input Delay.
-- **FR-012**: System MUST render per-server sparkline mini-charts in accordion detail rows.
+- **FR-011**: System MUST render a performance metrics chart using Layercake (Svelte-native, SVG-based) displaying four time-series: CPU%, Memory%, Input Delay (ms), and Session count, with toggleable series visibility and neobrutalist styling (bold strokes, offset shadows).
+- **FR-012**: System MUST render per-server sparkline mini-charts in accordion detail rows using Layercake.
 - **FR-013**: System MUST preserve real-time data update behavior (SSE/polling) without page reload.
 - **FR-014**: System MUST preserve all modal dialogs (Dashboard Configuration, History, Target Edit, Target Delete Confirmation) with their existing functionality and z-index stacking order.
 - **FR-015**: System MUST display an inline error banner within the Dashboard Configuration modal when a save operation fails, using a red-tinted background flash and error message text, mirroring the success feedback pattern. The dirty-state indicator MUST persist after a failed save.
@@ -161,13 +161,15 @@ The migrated dashboard preserves the existing light and dark theme support with 
 - Q: Which Tailwind CSS version should the migration use? → A: Tailwind CSS v4 (CSS-based config, Oxide engine)
 - Q: What default I/O ring gauge thresholds when perf monitoring disabled? → A: Reuse existing PerformanceConfig thresholds (Input Delay: warn 50ms, crit 100ms); hardcode defaults for Disk Queue (warn: 2, crit: 5) and TCP Retransmits (warn: 5%, crit: 10%)
 - Q: How should a failed save operation in the Dashboard Configuration modal be communicated? → A: Inline error banner within modal (red-tinted background flash + error message text, mirroring the success pattern)
+- Q: Should uPlot be replaced with a more Svelte-native charting library? → A: Yes, replace uPlot with Layercake (8KB, Svelte-native, SVG-based, full CSS control for neobrutalist styling)
+- Q: What should the server state history chart display? → A: Replace drain-mode stacked area chart with performance metrics time-series: CPU%, Memory%, Input Delay (ms), and Session count
 
 ## Assumptions
 
 - The migration targets **Svelte 5** (runes, snippets) as the component framework. All components will use Svelte 5's explicit reactivity model (`$state`, `$derived`, `$effect`).
 - The migration uses **Tailwind CSS v4** with CSS-based configuration (Oxide engine). The existing CSS custom property system will be mapped to Tailwind's `@theme` directive.
 - The existing Go backend API (routes, authentication, data store) remains unchanged; only the frontend assets are migrated.
-- The uPlot charting library will continue to be used for time-series and sparkline charts, integrated as a dependency rather than inline script.
+- **Layercake** replaces uPlot as the charting library. Layercake is Svelte-native (~8KB), SVG-based, and provides full CSS control for neobrutalist styling. All charts (performance metrics and sparklines) use Layercake.
 - The landing page (docs/index.html) is a separate static site and is NOT part of this migration; only the internal dashboard (internal/dashboard/dashboard.html) is being migrated.
 - The existing CSS custom property system (color palette, typography, spacing) will be translated to the new styling approach while preserving identical visual output.
 - The build output will replace the current single monolithic HTML file with a build artifact directory that the Go embed directive references.

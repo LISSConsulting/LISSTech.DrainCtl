@@ -5,12 +5,12 @@
 
 ## Summary
 
-Migrate the DrainCtl dashboard from a 6,732-line monolithic HTML file (inline CSS + vanilla JS + bundled uPlot) to a Vite + Svelte 5 + Tailwind CSS v4 architecture. The migration preserves full feature parity with the existing dashboard, fixes I/O ring gauge coloring, improves configuration modal UX, and tightens CSP by eliminating `'unsafe-inline'`. The Go backend API and single-binary deployment model remain unchanged.
+Migrate the DrainCtl dashboard from a 6,732-line monolithic HTML file (inline CSS + vanilla JS + bundled uPlot) to a Vite + Svelte 5 + Tailwind CSS v4 + Layercake architecture. The migration preserves full feature parity with the existing dashboard, replaces the drain-mode state history chart with a performance metrics chart (CPU%, Memory%, Input Delay, Sessions), fixes I/O ring gauge coloring, improves configuration modal UX, and tightens CSP by eliminating `'unsafe-inline'`. The Go backend API and single-binary deployment model remain unchanged.
 
 ## Technical Context
 
 **Language/Version**: Go 1.26+ (backend, unchanged), JavaScript/Svelte 5 (frontend, new)
-**Primary Dependencies**: Svelte 5, Vite 6, Tailwind CSS v4, uPlot 1.6.x
+**Primary Dependencies**: Svelte 5, Vite 6, Tailwind CSS v4, Layercake (charting)
 **Storage**: N/A (frontend consumes Go backend API)
 **Testing**: Playwright (E2E, visual regression), Vitest (unit for utility functions)
 **Target Platform**: Windows Server (Go backend), Modern browsers (Chrome/Edge, dashboard SPA)
@@ -57,12 +57,17 @@ frontend/                              # NEW — Svelte 5 + Vite project
 │       ├── Nav.svelte                 # Brand, server summary, config/theme toggles
 │       ├── CounterGrid.svelte         # 5 counter cards
 │       ├── StateBar.svelte            # Proportional state segments
-│       ├── StateChart.svelte          # uPlot area chart + CPU/InputDelay overlays
+│       ├── MetricsChart.svelte         # Layercake multi-series performance chart
+│       ├── chart/
+│       │   ├── AreaPath.svelte        # Layercake SVG layer: filled area
+│       │   ├── LinePath.svelte        # Layercake SVG layer: stroke line
+│       │   ├── AxisX.svelte           # Layercake SVG layer: time axis
+│       │   └── AxisY.svelte           # Layercake SVG layer: value axis
 │       ├── EventLog.svelte            # Filterable, expandable event log
 │       ├── ServerTable.svelte         # Sortable server table
 │       ├── ServerDetail.svelte        # Accordion: 3 tiles (resources, I/O, info)
 │       ├── RingGauge.svelte           # Reusable SVG ring with threshold colors
-│       ├── Sparkline.svelte           # Mini uPlot chart
+│       ├── Sparkline.svelte           # Layercake mini line chart
 │       ├── ConfigModal.svelte         # Settings modal with dirty/save feedback
 │       ├── NotificationTargets.svelte # Targets table within config modal
 │       ├── TargetEditModal.svelte     # Add/edit target (layered modal)
@@ -136,15 +141,17 @@ internal/dashboard/
 
 ### Phase 4: Charts & Visualization (P1 — Story 1, continued)
 
-**Goal**: uPlot charts render with full parity.
+**Goal**: Layercake-based performance metrics chart and sparklines with neobrutalist styling.
 
-1. Install `uplot` npm package
-2. Build `StateChart.svelte` — area chart with 4 stacked series + CPU/InputDelay overlays
-3. Build `Sparkline.svelte` — mini uPlot for per-server metrics
-4. Handle responsive resize via `ResizeObserver`
-5. Theme-aware chart colors via CSS custom property reads
+1. Install `layercake` npm package
+2. Build reusable Layercake SVG layers: `AreaPath.svelte`, `LinePath.svelte`, `AxisX.svelte`, `AxisY.svelte` in `components/chart/`
+3. Build `MetricsChart.svelte` — 4 toggleable time-series (CPU%, Memory%, Input Delay ms, Session count) using Layercake `<LayerCake>` with SVG layers
+4. Style chart with neobrutalist aesthetics: bold 2.5px strokes, offset drop shadow on container, thick grid lines, high-contrast fills with transparency
+5. Build `Sparkline.svelte` — mini Layercake line chart for per-server metrics in accordion detail rows
+6. Responsive via Layercake's built-in container-aware sizing (no manual ResizeObserver needed)
+7. Theme-aware chart colors via CSS custom property reads
 
-**Verification**: State history chart and sparklines render correctly, respond to theme toggle.
+**Verification**: Performance metrics chart shows CPU/Mem/InputDelay/Sessions with toggleable series, sparklines render in detail rows, both respond to theme toggle.
 
 ### Phase 5: Server Table & Detail Rows (P1 — Stories 1 + 2)
 
@@ -217,8 +224,8 @@ No constitution violations to justify — constitution is not defined.
 
 | Risk | Mitigation |
 |---|---|
-| uPlot Svelte lifecycle issues | Wrap in `$effect` with proper cleanup; test resize/theme toggle |
+| Layercake SVG rendering perf with many data points | Cap time-series to 60 samples (same as current MAX_HIST); Layercake handles this well |
 | CSP nonce breaks caching | Nonce only on index.html (no-cache already); assets use content hashes |
 | Font loading flash | Preload critical fonts in index.html `<link rel="preload">` |
 | Go embed path issues on Windows | Use forward slashes in embed directive; test in CI |
-| Bundle size exceeds 150 KB | Monitor with `vite build --report`; uPlot is ~45 KB minified |
+| Bundle size exceeds 150 KB | Monitor with `vite build --report`; Layercake is ~8 KB (much smaller than uPlot's 45 KB) |
