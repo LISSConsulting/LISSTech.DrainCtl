@@ -73,7 +73,9 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 				}
 			}
 
-			dc.PrintResult(os.Stdout, "registered with dashboard")
+			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+				dc.PrintResult(os.Stdout, "registered with dashboard")
+			}
 			return nil
 		},
 	}
