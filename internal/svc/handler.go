@@ -71,6 +71,7 @@ const (
 	EvtRegistryFailed = 3001
 	EvtServiceError   = 3002
 	EvtGenericError   = 3099
+	// Audit event IDs (5xxx) are in the root dc package.
 )
 
 // drainService implements svc.Handler.
