@@ -239,8 +239,8 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 
 	// Report to dashboard if configured.
-	log(dc.LvlDBG, fmt.Sprintf("diag: check=dashboard_report url=%s", dashCfg.URL))
 	if dashCfg != nil && dashCfg.URL != "" {
+		log(dc.LvlDBG, fmt.Sprintf("diag: check=dashboard_report url=%s", dashCfg.URL))
 		if dashState != nil {
 			if dashState.ReportLocal(result.Host, result) {
 				log(dc.LvlDBG, "msg=\"dashboard heartbeat (local)\"", fmt.Sprintf("host=%s", result.Host))
