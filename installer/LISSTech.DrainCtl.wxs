@@ -53,7 +53,7 @@
             The second call loads the config saved by the first and layers on URL flags.
         -->
         <SetProperty Id="ConfigureAction" Before="ConfigureAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --quiet --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX]" />
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX]" />
         <CustomAction Id="ConfigureAction"
             DllEntry="WixQuietExec"
             Execute="commit"
@@ -62,7 +62,7 @@
             BinaryRef="Wix4UtilCA_X64" />
 
         <SetProperty Id="ConfigureNotifyAction" Before="ConfigureNotifyAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --quiet --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL]" />
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL]" />
         <CustomAction Id="ConfigureNotifyAction"
             DllEntry="WixQuietExec"
             Execute="commit"
