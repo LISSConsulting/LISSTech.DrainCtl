@@ -24,13 +24,10 @@ default:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 header recipe:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host ""
-    Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkRed
-    Write-Host "  🔧  " -NoNewline -ForegroundColor White
-    Write-Host "just {{recipe}}" -NoNewline -ForegroundColor Red
-    Write-Host "  ·  $ts" -ForegroundColor DarkGray
-    Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkRed
+    $d = Get-Date -Format 'MMM d yyyy'
+    $t = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🚀 Starting just {{recipe}}  " -NoNewline -ForegroundColor Cyan
+    Write-Host "·  $d $t" -ForegroundColor DarkGray
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -112,8 +109,8 @@ dev: (header "dev")
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 man:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔨 Compiling ETW manifest  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Compiling ETW manifest  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Push-Location assets
     & mc -um drainctl.man
     if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
@@ -129,8 +126,8 @@ man:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 resource:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔨 Compiling Windows resource file  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Compiling Windows resource file  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & windres cmd/drainctl/drainctl.rc -o cmd/drainctl/drainctl.syso
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   drainctl.syso" -ForegroundColor DarkGray
@@ -139,8 +136,8 @@ resource:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 cli:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔨 Building CLI  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & go build -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
@@ -150,8 +147,8 @@ cli:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 dll:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔨 Building DLL  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Building DLL  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $env:CGO_ENABLED = "1"
     & go build -buildmode=c-shared -ldflags "-s -w" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -163,8 +160,8 @@ dll:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 psmodule: cli dll
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n📦 Copying PowerShell module  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n📦 Copying PowerShell module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Copy-Item "powershell/LISSTech.DrainCtl.psd1" "{{module_dir}}/"
     Copy-Item "powershell/LISSTech.DrainCtl.psm1" "{{module_dir}}/"
     Write-Host "   LISSTech.DrainCtl.psd1" -ForegroundColor DarkGray
@@ -174,8 +171,8 @@ psmodule: cli dll
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 msi: psmodule
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n📦 Building MSI  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n📦 Building MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 -nologo -v:q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi").Length / 1MB)
@@ -203,8 +200,8 @@ sign-binaries:
     if (-not $cert) { Write-Error "Certificate with thumbprint $thumbprint not found"; exit 1 }
 
     $cn = $cert.Subject -replace '^CN=', '' -replace ',.*', ''
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔏 Signing binaries and module  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔏 Signing binaries and module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Write-Host "   Certificate: $cn" -ForegroundColor DarkGray
     Write-Host "   Thumbprint:  $($thumbprint.Substring(0,8))..." -ForegroundColor DarkGray
 
@@ -249,8 +246,8 @@ sign-msi:
 
     if (-not (Test-Path $msiPath)) { Write-Error "MSI not found: $msiPath"; exit 1 }
 
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🔏 Signing MSI  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔏 Signing MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $msiPath 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
@@ -351,7 +348,8 @@ publish-psgallery:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 lint: (header "lint")
-    Write-Host "`n🔍 Linting" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔍 Linting  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & go vet ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $unformatted = & gofmt -l . cmd/drainctl/ cmd/cshared/ 2>&1
@@ -364,8 +362,8 @@ lint: (header "lint")
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 gotest:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🧪 Running Go tests  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🧪 Running Go tests  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & go test ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   ✅ All tests pass" -ForegroundColor Green
@@ -374,8 +372,8 @@ gotest:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 vulncheck:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🛡️ Vulnerability scan  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🛡️ Vulnerability scan  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & govulncheck ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   ✅ No vulnerabilities" -ForegroundColor Green
@@ -397,8 +395,8 @@ fmt-web:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 test:
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🧪 Testing PowerShell module  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🧪 Testing PowerShell module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Import-Module "{{module_dir}}/LISSTech.DrainCtl.psd1" -Force
     Write-Host "   Get-RDSHDrainMode" -ForegroundColor DarkGray
     Get-RDSHDrainMode | Format-List
@@ -415,7 +413,7 @@ test:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 clean: (header "clean")
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
-    Write-Host "`n🧹 Cleaning  ·  $ts" -ForegroundColor Cyan
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🧹 Cleaning  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "{{dist_dir}}"
     Write-Host "   dist/ removed" -ForegroundColor DarkGray
