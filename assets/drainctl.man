@@ -9,7 +9,7 @@
     <instrumentation>
         <events>
             <provider
-                name="LISS Technologies-DrainCtl"
+                name="DrainCtl"
                 guid="{7A2C9D5E-4B1F-4E8D-9C3A-F6B0D2E7A1C5}"
                 resourceFileName="%ProgramFiles%\LISS Technologies\LISSTech DrainCtl\bin\drainctl-msg.dll"
                 messageFileName="%ProgramFiles%\LISS Technologies\LISSTech DrainCtl\bin\drainctl-msg.dll"
@@ -17,21 +17,28 @@
                 message="$(string.Provider.Name)">
 
                 <channels>
-                    <!-- Operational channel: INFO, WARN, ERROR events (enabled by default) -->
+                    <!-- Operational: service lifecycle, health checks, state transitions -->
                     <channel
-                        name="LISS Technologies-DrainCtl/Operational"
-                        chid="DrainCtlOperational"
-                        value="0x10"
+                        name="DrainCtl/Operational"
+                        chid="Operational"
                         symbol="CHANNEL_OPERATIONAL"
                         type="Operational"
                         enabled="true"
                         isolation="Application" />
 
-                    <!-- Debug channel: DEBUG events (disabled by default, admin opt-in via wevtutil sl) -->
+                    <!-- Audit: dashboard access, config changes, authorization decisions -->
                     <channel
-                        name="LISS Technologies-DrainCtl/Debug"
-                        chid="DrainCtlDebug"
-                        value="0x11"
+                        name="DrainCtl/Audit"
+                        chid="Audit"
+                        symbol="CHANNEL_AUDIT"
+                        type="Admin"
+                        enabled="true"
+                        isolation="Application" />
+
+                    <!-- Debug: verbose diagnostics (disabled by default, opt-in via wevtutil sl) -->
+                    <channel
+                        name="DrainCtl/Debug"
+                        chid="Debug"
                         symbol="CHANNEL_DEBUG"
                         type="Debug"
                         enabled="false"
@@ -39,7 +46,6 @@
                 </channels>
 
                 <templates>
-                    <!-- Single string data field (%1) for the formatted message. -->
                     <template tid="StringTemplate">
                         <data name="Message" inType="win:UnicodeString" outType="xs:string" />
                     </template>
@@ -48,50 +54,70 @@
                 <events>
                     <!-- ── Operational: Informational (1xxx) ─────────────────────── -->
                     <event symbol="ServiceStarted"     value="1000" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1000)" />
                     <event symbol="ServiceStopped"     value="1001" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1001)" />
                     <event symbol="CheckHealthy"       value="1002" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1002)" />
                     <event symbol="ConfigReloaded"     value="1003" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1003)" />
                     <event symbol="TransitionDetected" value="1004" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1004)" />
                     <event symbol="GenericInfo"        value="1099" version="0"
-                           channel="DrainCtlOperational" level="win:Informational"
+                           channel="Operational" level="win:Informational"
                            template="StringTemplate" message="$(string.Event.1099)" />
 
                     <!-- ── Operational: Warning (2xxx) ────────────────────────────── -->
                     <event symbol="CheckGrace"     value="2000" version="0"
-                           channel="DrainCtlOperational" level="win:Warning"
+                           channel="Operational" level="win:Warning"
                            template="StringTemplate" message="$(string.Event.2000)" />
                     <event symbol="GenericWarning" value="2099" version="0"
-                           channel="DrainCtlOperational" level="win:Warning"
+                           channel="Operational" level="win:Warning"
                            template="StringTemplate" message="$(string.Event.2099)" />
 
                     <!-- ── Operational: Error (3xxx) ──────────────────────────────── -->
                     <event symbol="CheckAlert"         value="3000" version="0"
-                           channel="DrainCtlOperational" level="win:Error"
+                           channel="Operational" level="win:Error"
                            template="StringTemplate" message="$(string.Event.3000)" />
                     <event symbol="RegistryReadFailed" value="3001" version="0"
-                           channel="DrainCtlOperational" level="win:Error"
+                           channel="Operational" level="win:Error"
                            template="StringTemplate" message="$(string.Event.3001)" />
                     <event symbol="ServiceError"       value="3002" version="0"
-                           channel="DrainCtlOperational" level="win:Error"
+                           channel="Operational" level="win:Error"
                            template="StringTemplate" message="$(string.Event.3002)" />
                     <event symbol="GenericError"       value="3099" version="0"
-                           channel="DrainCtlOperational" level="win:Error"
+                           channel="Operational" level="win:Error"
                            template="StringTemplate" message="$(string.Event.3099)" />
 
                     <!-- ── Debug: Verbose (4xxx) ──────────────────────────────────── -->
                     <event symbol="GenericDebug" value="4000" version="0"
-                           channel="DrainCtlDebug" level="win:Verbose"
+                           channel="Debug" level="win:Verbose"
                            template="StringTemplate" message="$(string.Event.4000)" />
+
+                    <!-- ── Audit: admin actions (5xxx) ────────────────────────────── -->
+                    <event symbol="DashboardAccess"       value="5000" version="0"
+                           channel="Audit" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.5000)" />
+                    <event symbol="DashboardConfigChanged" value="5001" version="0"
+                           channel="Audit" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.5001)" />
+                    <event symbol="ServerRegistered"      value="5002" version="0"
+                           channel="Audit" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.5002)" />
+                    <event symbol="ServerRemoved"         value="5003" version="0"
+                           channel="Audit" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.5003)" />
+                    <event symbol="AccessDenied"          value="5004" version="0"
+                           channel="Audit" level="win:Warning"
+                           template="StringTemplate" message="$(string.Event.5004)" />
+                    <event symbol="GenericAudit"          value="5099" version="0"
+                           channel="Audit" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.5099)" />
                 </events>
 
             </provider>
@@ -101,7 +127,7 @@
     <localization>
         <resources culture="en-US">
             <stringTable>
-                <string id="Provider.Name" value="LISS Technologies-DrainCtl" />
+                <string id="Provider.Name" value="DrainCtl" />
                 <string id="Event.1000" value="%1" />
                 <string id="Event.1001" value="%1" />
                 <string id="Event.1002" value="%1" />
@@ -115,6 +141,12 @@
                 <string id="Event.3002" value="%1" />
                 <string id="Event.3099" value="%1" />
                 <string id="Event.4000" value="%1" />
+                <string id="Event.5000" value="%1" />
+                <string id="Event.5001" value="%1" />
+                <string id="Event.5002" value="%1" />
+                <string id="Event.5003" value="%1" />
+                <string id="Event.5004" value="%1" />
+                <string id="Event.5099" value="%1" />
             </stringTable>
         </resources>
     </localization>

@@ -3,25 +3,25 @@
 package logging
 
 // ETWHandler implements slog.Handler by writing records to a manifest-based
-// Windows ETW provider ("LISS Technologies-DrainCtl").
+// Windows ETW provider ("DrainCtl").
+//
+// Channels (auto-assigned by mc.exe, must match compiled WEVT_TEMPLATE):
+//
+//	Operational (0x10) — service lifecycle, health checks, state transitions
+//	Audit       (0x11) — dashboard access, config changes, authorization
+//	Debug       (0x12) — verbose diagnostics (disabled by default)
 //
 // Routing:
-//   - DEBUG  → Debug channel   (channel 0x11, event 4000, verbose level)
-//   - INFO   → Operational channel (channel 0x10, event 1099, info level)
-//   - WARN   → Operational channel (channel 0x10, event 2099, warning level)
-//   - ERROR  → Operational channel (channel 0x10, event 3099, error level)
+//   - DEBUG  → Debug channel   (event 4000, verbose)
+//   - INFO   → Operational     (event 1099, info)
+//   - WARN   → Operational     (event 2099, warning)
+//   - ERROR  → Operational     (event 3099, error)
+//   - 5xxx   → Audit channel   (explicit event_id required)
 //
-// Callers can override the event ID by adding an integer slog attribute with
-// key "event_id" (e.g. slog.Int("event_id", 1000)).  ETWHandler maps the
-// attribute to the matching manifest event descriptor so Event Viewer shows
-// the correct symbol name.
-//
-// EventEnabled is called before every write; when the Debug channel has no
-// active ETW sessions the handler skips the write entirely (zero-cost).
+// Callers override the event ID with slog.Int("event_id", N). ETWHandler
+// maps it to the matching manifest event descriptor.
 //
 // The provider GUID matches assets/drainctl.man.
-// Channel values (0x10 / 0x11) must match the `value` attributes in the
-// manifest channels.
 
 import (
 	"context"
@@ -63,13 +63,14 @@ const (
 	etwLevelVerbose uint8 = 5
 )
 
-// Channel IDs — must match the `value` attributes in assets/drainctl.man.
+// Channel IDs — auto-assigned by mc.exe; must match compiled WEVT_TEMPLATE.
 const (
-	etwChannelOperational uint8 = 0x10 // LISS Technologies-DrainCtl/Operational
-	etwChannelDebug       uint8 = 0x11 // LISS Technologies-DrainCtl/Debug
+	etwChannelOperational uint8 = 0x10 // DrainCtl/Operational
+	etwChannelAudit       uint8 = 0x11 // DrainCtl/Audit
+	etwChannelDebug       uint8 = 0x12 // DrainCtl/Debug
 )
 
-// providerGUID is the GUID for the "LISS Technologies-DrainCtl" ETW provider
+// providerGUID is the GUID for the "DrainCtl" ETW provider
 // and must match the guid attribute in assets/drainctl.man.
 var providerGUID = windows.GUID{
 	Data1: 0x7A2C9D5E,
@@ -116,6 +117,14 @@ var (
 
 	// Debug channel event
 	descGenericDebug = buildDesc(4000, etwChannelDebug, etwLevelVerbose)
+
+	// Audit channel events
+	descDashboardAccess        = buildDesc(5000, etwChannelAudit, etwLevelInfo)
+	descDashboardConfigChanged = buildDesc(5001, etwChannelAudit, etwLevelInfo)
+	descServerRegistered       = buildDesc(5002, etwChannelAudit, etwLevelInfo)
+	descServerRemoved          = buildDesc(5003, etwChannelAudit, etwLevelInfo)
+	descAccessDenied           = buildDesc(5004, etwChannelAudit, etwLevelWarning)
+	descGenericAudit           = buildDesc(5099, etwChannelAudit, etwLevelInfo)
 )
 
 // eventIDToDesc maps specific manifest event IDs to their descriptor.
@@ -133,6 +142,12 @@ var eventIDToDesc = map[int]eventDescriptor{
 	3002: descServiceError,
 	3099: descGenericError,
 	4000: descGenericDebug,
+	5000: descDashboardAccess,
+	5001: descDashboardConfigChanged,
+	5002: descServerRegistered,
+	5003: descServerRemoved,
+	5004: descAccessDenied,
+	5099: descGenericAudit,
 }
 
 // ── ETWHandler ────────────────────────────────────────────────────────────────
