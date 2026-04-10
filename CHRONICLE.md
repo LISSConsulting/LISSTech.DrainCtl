@@ -40,6 +40,7 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - `ClassifyState` promoted to root package; `audit.go` streaming refactor with `scanRecords`
 - Dashboard: all inline styles extracted to CSS classes; `mock.js` relocated with build tags
 - Landing page: zero inline styles, mobile nav, a11y (ARIA roles/labels, focus management, keyboard nav)
+- Replaced custom `LogFunc`/`Level` logging API with `log/slog` across entire codebase (~173 call sites); added `internal/logging` package with `CLIHandler`, `FileHandler`, `MultiHandler`, `ParseLevel`, `PrintResult`; service composes dual-sink via `MultiHandler`; `--quiet` replaced with `--log-level debug|info|warn|error`; DLL discard via `slog.DiscardHandler` in `init()`
 
 ## Performance
 
