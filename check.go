@@ -4,6 +4,7 @@ package drainctl
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -36,7 +37,6 @@ type CheckOptions struct {
 	DBPath        string        // audit trail path (empty = skip audit)
 	GracePeriod   time.Duration // how long drain mode must persist before alerting
 	RetentionDays int           // days to retain audit records
-	Log           LogFunc       // nil = discard
 }
 
 // CheckOutput holds the result of a check plus the recommended exit code.
@@ -48,10 +48,7 @@ type CheckOutput struct {
 // Check reads the registry, detects transitions, records audit, and evaluates
 // the drain mode state against the grace period.
 func Check(opts CheckOptions) (*CheckOutput, error) {
-	log := opts.Log
-	if log == nil {
-		log = DiscardLogger()
-	}
+	log := slog.Default()
 
 	res := &CheckResult{
 		Version:            Version,
@@ -59,12 +56,12 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 		GracePeriodSeconds: int(opts.GracePeriod.Seconds()),
 	}
 
-	log(LvlINF, fmt.Sprintf("drainctl=%s", Version), "cmd=check")
+	log.Info("", "drainctl", Version, "cmd", "check")
 
 	// ── Read registry ──────────────────────────────────────────────────
 	state, err := ReadDrainMode()
 	if err != nil {
-		LogMsg(log, LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
+		log.Error("registry read failed", "error", err)
 		res.Status = "Error"
 		res.Message = err.Error()
 		res.ExitCode = 2
@@ -75,29 +72,29 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 	res.DrainModeLabel = state.Mode.String()
 	res.DrainModeValue = uint32(state.Mode)
 
-	log(LvlINF, fmt.Sprintf("host=%s", state.Host))
+	log.Info("", "host", state.Host)
 	if state.Mode == AllowAll {
-		log(LvlINF, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("value=%d", state.Mode))
+		log.Info("", "drain_mode", state.Mode.String(), "value", uint32(state.Mode))
 	} else {
-		log(LvlWRN, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("value=%d", state.Mode))
+		log.Warn("", "drain_mode", state.Mode.String(), "value", uint32(state.Mode))
 	}
 
-	log(LvlINF, fmt.Sprintf("grace_period=%s", opts.GracePeriod))
+	log.Info("", "grace_period", opts.GracePeriod.String())
 
 	// ── Session tracking ───────────────────────────────────────────────
 	if sess := GetSessionSummary(); sess != nil {
 		res.Sessions = sess
 		if sess.MaxSessions > 0 {
-			log(LvlINF,
-				fmt.Sprintf("sessions=%d/%d", sess.TotalSessions, sess.MaxSessions),
-				fmt.Sprintf("utilization=%d%%", sess.UtilizationPct),
+			log.Info("",
+				"sessions", fmt.Sprintf("%d/%d", sess.TotalSessions, sess.MaxSessions),
+				"utilization", fmt.Sprintf("%d%%", sess.UtilizationPct),
 			)
 		} else {
 			sessStr := fmt.Sprintf("active=%d", sess.ActiveSessions)
 			if sess.DisconnectedSessions > 0 {
 				sessStr += fmt.Sprintf(" disconnected=%d", sess.DisconnectedSessions)
 			}
-			log(LvlINF, "sessions="+sessStr)
+			log.Info("sessions=" + sessStr)
 		}
 	}
 
@@ -106,7 +103,7 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 	if opts.DBPath != "" {
 		store, err = OpenAuditStore(opts.DBPath)
 		if err != nil {
-			LogMsg(log, LvlWRN, "audit store unavailable", fmt.Sprintf("error=%q", err))
+			log.Warn("audit store unavailable", "error", err)
 			store = nil
 		}
 	}
@@ -131,15 +128,15 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 	if store != nil {
 		last, err := store.LastObservation()
 		if err != nil {
-			LogMsg(log, LvlWRN, "could not read last observation", fmt.Sprintf("error=%q", err))
+			log.Warn("could not read last observation", "error", err)
 		} else if last != nil && last.DrainMode != state.Mode {
 			res.Transition = true
 			res.TransitionFrom = last.DrainMode.String()
 
-			log(LvlWRN,
-				"transition=true",
-				fmt.Sprintf("from=%s", last.DrainMode),
-				fmt.Sprintf("to=%s", state.Mode),
+			log.Warn("",
+				"transition", "true",
+				"from", last.DrainMode.String(),
+				"to", state.Mode.String(),
 			)
 
 			lookback := time.Since(last.Timestamp)
@@ -147,9 +144,9 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 				res.ChangedBy = QueryRegistryChangeUser(last.Timestamp)
 			}
 			if res.ChangedBy != "" {
-				log(LvlINF, fmt.Sprintf("changed_by=%s", res.ChangedBy))
+				log.Info("", "changed_by", res.ChangedBy)
 			} else {
-				log(LvlINF, "changed_by=unknown (run: drainctl audit-setup)")
+				log.Info("changed_by=unknown (run: drainctl audit-setup)")
 			}
 		}
 	}
@@ -162,15 +159,15 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 			now := time.Now()
 			res.StateSince = &now
 			res.StateDurationSeconds = &zero
-			log(LvlINF, "state_since=now", "state_duration=0s")
+			log.Info("", "state_since", "now", "state_duration", "0s")
 		} else if since, err := store.StateSince(state.Mode); err == nil && since != nil {
 			s := since.Local()
 			res.StateSince = &s
 			dur := time.Since(*since).Seconds()
 			res.StateDurationSeconds = &dur
-			log(LvlINF,
-				fmt.Sprintf("state_since=%s", s.Format(time.RFC3339)),
-				fmt.Sprintf("state_duration=%s", (time.Duration(dur)*time.Second).Truncate(time.Second)),
+			log.Info("",
+				"state_since", s.Format(time.RFC3339),
+				"state_duration", (time.Duration(dur) * time.Second).Truncate(time.Second).String(),
 			)
 		}
 	}
@@ -202,33 +199,37 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 			rec.MaxSessions = res.Sessions.MaxSessions
 		}
 		if err := store.Record(rec); err != nil {
-			LogMsg(log, LvlWRN, "failed to record observation", fmt.Sprintf("error=%q", err))
+			log.Warn("failed to record observation", "error", err)
 		}
 
 		retention := time.Duration(opts.RetentionDays) * 24 * time.Hour
 		if pruned, err := store.Prune(retention); err != nil {
-			LogMsg(log, LvlWRN, "prune failed", fmt.Sprintf("error=%q", err))
+			log.Warn("prune failed", "error", err)
 		} else if pruned > 0 {
-			log(LvlINF, fmt.Sprintf("pruned=%d", pruned), fmt.Sprintf("retention=%dd", opts.RetentionDays))
+			log.Info("", "pruned", pruned, "retention_days", opts.RetentionDays)
 		}
 	}
 
 	// ── Log final status ───────────────────────────────────────────────
 	switch res.Status {
 	case "Alert":
-		log(LvlERR, "status=alert", "connections_allowed=false",
-			fmt.Sprintf("drain_age=%s", effectiveDur.Truncate(time.Second)),
-			fmt.Sprintf("threshold=%s", opts.GracePeriod),
-			fmt.Sprintf("exit=%d", res.ExitCode),
+		log.Error("",
+			"status", "alert",
+			"connections_allowed", false,
+			"drain_age", effectiveDur.Truncate(time.Second).String(),
+			"threshold", opts.GracePeriod.String(),
+			"exit", res.ExitCode,
 		)
 	case "Grace":
 		remaining := opts.GracePeriod - effectiveDur
-		log(LvlWRN, "status=grace", "connections_allowed=false",
-			fmt.Sprintf("grace_remaining=%s", remaining.Truncate(time.Second)),
-			"exit=0",
+		log.Warn("",
+			"status", "grace",
+			"connections_allowed", false,
+			"grace_remaining", remaining.Truncate(time.Second).String(),
+			"exit", 0,
 		)
 	default:
-		log(LvlOK, "status=healthy", "connections_allowed=true", "exit=0")
+		log.Info("status=healthy connections_allowed=true exit=0")
 	}
 	return &CheckOutput{Result: res, ExitCode: res.ExitCode}, nil
 }

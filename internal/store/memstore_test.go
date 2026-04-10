@@ -20,7 +20,7 @@ func newTestStore(t *testing.T) (*MemAuditStore, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("OpenMemAuditStore: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestFlush_PersistsRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestFlush_PersistsRecords(t *testing.T) {
 	_ = st.Close()
 
 	// Reopen and confirm records loaded.
-	st2, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st2, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestClose_FlushesBeforeClose(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestFlushIfDirty_FlushesWhenDirty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestClose_IdempotentOnSecondCall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -423,15 +423,15 @@ func TestClose_IdempotentOnSecondCall(t *testing.T) {
 	}
 }
 
-// TestOpenMemAuditStore_NilLog verifies that passing nil as the log function
-// does not panic — the nil guard replaces it with a discard logger.
-func TestOpenMemAuditStore_NilLog(t *testing.T) {
+// TestOpenMemAuditStore_NoLog verifies that OpenMemAuditStore opens successfully
+// without a log argument.
+func TestOpenMemAuditStore_NoLog(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	st, err := OpenMemAuditStore(path, nil)
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
-		t.Fatalf("OpenMemAuditStore with nil log: %v", err)
+		t.Fatalf("OpenMemAuditStore: %v", err)
 	}
 	_ = st.Close()
 }
@@ -448,7 +448,7 @@ func TestOpenMemAuditStore_MkdirAllError(t *testing.T) {
 	}
 	path := filepath.Join(blockingFile, "audit.jsonl") // blocked\audit.jsonl
 
-	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	_, err := OpenMemAuditStore(path)
 	if err == nil {
 		t.Fatal("expected error when directory cannot be created, got nil")
 	}
@@ -462,7 +462,7 @@ func TestOpenMemAuditStore_InvalidPathError(t *testing.T) {
 	// Embed a null byte — UTF16PtrFromString rejects paths containing \x00.
 	path := filepath.Join(dir, "audit\x00.jsonl")
 
-	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	_, err := OpenMemAuditStore(path)
 	if err == nil {
 		t.Fatal("expected error for null-byte path, got nil")
 	}
@@ -483,7 +483,7 @@ func TestOpenMemAuditStore_CreateFileError(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	_, err := OpenMemAuditStore(path)
 	if err == nil {
 		t.Fatal("expected error when CreateFile targets a directory, got nil")
 	}
@@ -509,7 +509,7 @@ func TestOpenMemAuditStore_LoadError_OversizedLine(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	_, err := OpenMemAuditStore(path)
 	if err == nil {
 		t.Fatal("expected error when audit file has oversized line, got nil")
 	}
@@ -566,7 +566,7 @@ func TestLoad_EmptyLineSkipped(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("OpenMemAuditStore: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestLoad_MalformedJSONSkipped(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	st, err := OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("OpenMemAuditStore: %v", err)
 	}

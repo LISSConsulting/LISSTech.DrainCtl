@@ -3,49 +3,14 @@
 package drainctl
 
 import (
-	"fmt"
 	"io"
-	"strings"
-	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 )
 
-// Level represents a structured log severity.
-type Level string
-
-const (
-	LvlDBG Level = "DBG"
-	LvlINF Level = "INF"
-	LvlWRN Level = "WRN"
-	LvlERR Level = "ERR"
-	LvlOK  Level = "OK "
-)
-
-// LogFunc emits a single structured log line.
-type LogFunc func(l Level, fields ...string)
-
-// DefaultLogger returns a LogFunc that writes timestamped structured lines to w.
-// If quiet is true, only OK and ERR levels are emitted.
-func DefaultLogger(w io.Writer, quiet bool) LogFunc {
-	return func(l Level, fields ...string) {
-		if quiet && l != LvlOK && l != LvlERR {
-			return
-		}
-		ts := time.Now().Format(time.RFC3339)
-		_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, l, strings.Join(fields, " "))
-	}
-}
-
-// DiscardLogger returns a LogFunc that drops everything.
-func DiscardLogger() LogFunc {
-	return func(Level, ...string) {}
-}
-
-// LogMsg is a convenience for a level + freeform message + optional kv pairs.
-// A nil log is silently ignored.
-func LogMsg(log LogFunc, l Level, msg string, fields ...string) {
-	if log == nil {
-		return
-	}
-	all := append([]string{fmt.Sprintf("msg=%q", msg)}, fields...)
-	log(l, all...)
+// PrintResult writes a result line to w with format: --- <msg> [field ...]\n
+// Used by CLI commands to emit final status, distinct from log output.
+// This is a convenience re-export of internal/logging.PrintResult.
+func PrintResult(w io.Writer, msg string, fields ...string) {
+	logging.PrintResult(w, msg, fields...)
 }

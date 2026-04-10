@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -28,10 +29,7 @@ var httpClient = &http.Client{Timeout: 5 * time.Second}
 // SendNotification evaluates whether a notification should fire for the
 // given trigger and dispatches to matching targets. Errors are logged but
 // never returned — notifications must not crash the service.
-func SendNotification(targets []NotificationTarget, state *NotifyState, result *CheckResult, trigger Trigger, changedBy string, log LogFunc) {
-	if log == nil {
-		log = DiscardLogger()
-	}
+func SendNotification(targets []NotificationTarget, state *NotifyState, result *CheckResult, trigger Trigger, changedBy string) {
 	if len(targets) == 0 {
 		return
 	}
@@ -112,9 +110,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		switch target.Type {
 		case "webhook":
 			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
-				LogMsg(log, LvlWRN, "webhook notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				slog.Warn("webhook notification failed", "error", err, "url", target.URL)
 			} else {
-				log(LvlINF, "notify=webhook", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
+				slog.Info("", "notify", "webhook", "event", string(trigger), "url", target.URL)
 			}
 
 		case "ntfy":
@@ -137,27 +135,23 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				tags = "busts_in_silhouette"
 			}
 			if err := sendNtfy(target.URL, title, ntfyMsg, priority, tags); err != nil {
-				LogMsg(log, LvlWRN, "ntfy notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				slog.Warn("ntfy notification failed", "error", err, "url", target.URL)
 			} else {
-				log(LvlINF, "notify=ntfy", fmt.Sprintf("event=%s url=%s", trigger, target.URL))
+				slog.Info("", "notify", "ntfy", "event", string(trigger), "url", target.URL)
 			}
 
 		case "email":
-			if err := sendEmail(target, result, trigger, changedBy, log); err != nil {
-				LogMsg(log, LvlWRN, "email notification failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+			if err := sendEmail(target, result, trigger, changedBy); err != nil {
+				slog.Warn("email notification failed", "error", err, "url", target.URL)
 			} else {
-				log(LvlINF, "notify=email", fmt.Sprintf("event=%s to=%v", trigger, target.To))
+				slog.Info("", "notify", "email", "event", string(trigger), "to", target.To)
 			}
 		}
 	}
 }
 
 // SendTestNotification sends a test message to all configured targets.
-func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
-	if log == nil {
-		log = DiscardLogger()
-	}
-
+func SendTestNotification(targets []NotificationTarget) error {
 	hasTargets := false
 	for _, t := range targets {
 		if t.URL != "" {
@@ -198,20 +192,20 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 		switch target.Type {
 		case "webhook":
 			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
-				LogMsg(log, LvlERR, "webhook test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				slog.Error("webhook test failed", "error", err, "url", target.URL)
 				errs = append(errs, fmt.Errorf("webhook %s: %w", target.URL, err))
 			} else {
-				log(LvlOK, "notify=webhook", fmt.Sprintf("test=sent url=%s", target.URL))
+				slog.Info("notify=webhook test=sent", "url", target.URL)
 			}
 
 		case "ntfy":
 			title := fmt.Sprintf("DrainCtl Test: %s", host)
 			msg := "This is a test notification from DrainCtl."
 			if err := sendNtfy(target.URL, title, msg, "default", "test_tube"); err != nil {
-				LogMsg(log, LvlERR, "ntfy test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+				slog.Error("ntfy test failed", "error", err, "url", target.URL)
 				errs = append(errs, fmt.Errorf("ntfy %s: %w", target.URL, err))
 			} else {
-				log(LvlOK, "notify=ntfy", fmt.Sprintf("test=sent url=%s", target.URL))
+				slog.Info("notify=ntfy test=sent", "url", target.URL)
 			}
 
 		case "email":
@@ -223,11 +217,11 @@ func SendTestNotification(targets []NotificationTarget, log LogFunc) error {
 				Message:        "This is a test notification from DrainCtl.",
 				Version:        Version,
 			}
-			if err := sendEmail(target, testResult, "test", "", log); err != nil {
-				LogMsg(log, LvlERR, "email test failed", fmt.Sprintf("error=%q url=%s", err, target.URL))
+			if err := sendEmail(target, testResult, "test", ""); err != nil {
+				slog.Error("email test failed", "error", err, "url", target.URL)
 				errs = append(errs, fmt.Errorf("email %s: %w", target.URL, err))
 			} else {
-				log(LvlOK, "notify=email", fmt.Sprintf("test=sent to=%v", target.To))
+				slog.Info("notify=email test=sent", "to", target.To)
 			}
 		}
 	}
@@ -273,42 +267,6 @@ func webhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
-}
-
-// ntfyTitle returns a human-readable notification title for the given trigger
-// and host. Using raw trigger names (e.g. "drain_on") in the title produces
-// technical-looking push notifications that are hard to read at a glance.
-func ntfyTitle(trigger Trigger, host string) string {
-	var label string
-	switch trigger {
-	case TriggerDrainOn:
-		label = "Drain Mode Active"
-	case TriggerDrainOff:
-		label = "Connections Restored"
-	case TriggerGraceEntered:
-		label = "Grace Period Active"
-	case TriggerAlert:
-		label = "Alert: Drain Exceeded Grace Period"
-	case TriggerHealthy:
-		label = "All Connections Allowed"
-	case TriggerSessionWarning:
-		label = "Session Utilization Warning"
-	case TriggerCPUWarning:
-		label = "CPU Warning"
-	case TriggerCPUCritical:
-		label = "CPU Critical"
-	case TriggerInputDelayWarning:
-		label = "Input Delay Warning"
-	case TriggerInputDelayCritical:
-		label = "Input Delay Critical"
-	case TriggerMemoryWarning:
-		label = "Memory Warning"
-	case TriggerMemoryCritical:
-		label = "Memory Critical"
-	default:
-		label = string(trigger)
-	}
-	return fmt.Sprintf("DrainCtl: %s on %s", label, host)
 }
 
 // NotificationSubject returns a natural-language subject line for the given

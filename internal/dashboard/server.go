@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"regexp"
@@ -65,7 +66,6 @@ var faviconPNG []byte
 type DashboardServer struct {
 	state       *ServerState
 	cfg         dc.DashboardConfig
-	log         dc.LogFunc
 	server      *http.Server
 	fingerprint string // SHA-256 fingerprint of the TLS certificate
 
@@ -88,17 +88,12 @@ type DashboardServer struct {
 // HTTP listener. It returns the ServerState so the service main loop can
 // call state.Update() after each check cycle. The server shuts down
 // gracefully when ctx is cancelled.
-func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, log dc.LogFunc) (*ServerState, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
-	state := NewServerState(dataDir, log)
+func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string) (*ServerState, error) {
+	state := NewServerState(dataDir)
 
 	ds := &DashboardServer{
 		state: state,
 		cfg:   cfg,
-		log:   log,
 	}
 
 	// Per-IP rate limiter: 10 req/s sustained, burst 60.
@@ -111,8 +106,8 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	// wrapAuth/wrapGroup are determined at compile time via build tags.
 	// Production builds (default) use SSPI Negotiate middleware.
 	// Dev builds (-tags devmode) bypass auth entirely.
-	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group, log) }
-	wg := func(h http.Handler) http.Handler { return wrapGroup(ctx, h, cfg.Group, log) }
+	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group) }
+	wg := func(h http.Handler) http.Handler { return wrapGroup(ctx, h, cfg.Group) }
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 
@@ -143,9 +138,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 
 	// Resolve TLS configuration.
 	var tlsCfg *tls.Config
-	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir, log)
+	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard TLS setup failed, falling back to HTTP", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard TLS setup failed, falling back to HTTP", "error", err)
 		tlsCfg = nil
 	}
 
@@ -187,9 +182,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		scheme = "https"
 	}
 	go func() {
-		log(dc.LvlINF, "dashboard=listening", fmt.Sprintf("addr=%s scheme=%s", addr, scheme))
+		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
 		if err := ds.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			dc.LogMsg(log, dc.LvlERR, "dashboard server error", fmt.Sprintf("error=%q", err))
+			slog.Error("dashboard server error", "error", err)
 		}
 	}()
 
@@ -199,9 +194,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := ds.server.Shutdown(shutCtx); err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "dashboard shutdown error", fmt.Sprintf("error=%q", err))
+			slog.Warn("dashboard shutdown error", "error", err)
 		}
-		log(dc.LvlINF, "dashboard=stopped")
+		slog.Info("dashboard=stopped")
 	}()
 
 	return state, nil
@@ -236,16 +231,15 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 	if auth != nil {
 		user = auth.Username
 		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) {
-			dc.LogMsg(ds.log, dc.LvlWRN, "dashboard: register rejected: identity mismatch",
-				fmt.Sprintf("user=%s claimed_host=%s", user, req.Hostname))
+			slog.Warn("dashboard: register rejected: identity mismatch",
+				"user", user, "claimed_host", req.Hostname)
 			http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 			return
 		}
 	}
 
 	ds.state.Register(req.Hostname)
-	ds.log(dc.LvlINF, "dashboard=register",
-		fmt.Sprintf("host=%s user=%s", req.Hostname, user))
+	slog.Info("dashboard=register", "host", req.Hostname, "user", user)
 
 	resp := struct {
 		OK             bool   `json:"ok"`
@@ -284,8 +278,8 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 
 	auth := GetAuthInfo(r)
 	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) {
-		dc.LogMsg(ds.log, dc.LvlWRN, "dashboard: report rejected: identity mismatch",
-			fmt.Sprintf("user=%s claimed_host=%s", auth.Username, result.Host))
+		slog.Warn("dashboard: report rejected: identity mismatch",
+			"user", auth.Username, "claimed_host", result.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
 	}
@@ -345,8 +339,7 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	if auth != nil {
 		user = auth.Username
 	}
-	ds.log(dc.LvlINF, "dashboard=removed",
-		fmt.Sprintf("host=%s user=%s", host, user))
+	slog.Info("dashboard=removed", "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -360,10 +353,10 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	if ds.testLoadConfigFunc != nil {
 		cfg, err = ds.testLoadConfigFunc()
 	} else {
-		cfg, err = dc.LoadConfig(ds.log)
+		cfg, err = dc.LoadConfig()
 	}
 	if err != nil {
-		dc.LogMsg(ds.log, dc.LvlERR, "load config failed", fmt.Sprintf("error=%q", err))
+		slog.Error("load config failed", "error", err)
 		http.Error(w, "failed to load config", http.StatusInternalServerError)
 		return
 	}
@@ -456,19 +449,19 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 
 	if ds.testPutNotifyConfigFunc != nil {
 		if err := ds.testPutNotifyConfigFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
-			dc.LogMsg(ds.log, dc.LvlERR, "update config failed (test hook)", fmt.Sprintf("error=%q", err))
+			slog.Error("update config failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, ds.log); err != nil {
-			dc.LogMsg(ds.log, dc.LvlERR, "update notify settings failed", fmt.Sprintf("error=%q", err))
+		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
+			slog.Error("update notify settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if in.Performance != nil {
-			if err := dc.UpdatePerformanceConfig(*in.Performance, ds.log); err != nil {
-				dc.LogMsg(ds.log, dc.LvlERR, "update performance config failed", fmt.Sprintf("error=%q", err))
+			if err := dc.UpdatePerformanceConfig(*in.Performance); err != nil {
+				slog.Error("update performance config failed", "error", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -480,7 +473,7 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	if auth != nil {
 		user = auth.Username
 	}
-	ds.log(dc.LvlINF, "dashboard=notify-config-updated", fmt.Sprintf("user=%s", user))
+	slog.Info("dashboard=notify-config-updated", "user", user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -509,23 +502,23 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 
 	var err error
 	if singleTarget != nil {
-		ds.log(dc.LvlINF, "dashboard=notify-test-target", fmt.Sprintf("user=%s type=%s url=%s", user, singleTarget.Type, singleTarget.URL))
-		err = dc.SendTestNotification([]dc.NotificationTarget{*singleTarget}, ds.log)
+		slog.Info("dashboard=notify-test-target", "user", user, "type", singleTarget.Type, "url", singleTarget.URL)
+		err = dc.SendTestNotification([]dc.NotificationTarget{*singleTarget})
 	} else {
-		ds.log(dc.LvlINF, "dashboard=notify-test", fmt.Sprintf("user=%s", user))
+		slog.Info("dashboard=notify-test", "user", user)
 		// testNotifyFunc can be injected in tests to avoid real config/network I/O.
 		fn := ds.testNotifyFunc
 		if fn == nil {
 			fn = func() error {
 				loadFn := ds.testLoadConfigFunc
 				if loadFn == nil {
-					loadFn = func() (*dc.Config, error) { return dc.LoadConfig(ds.log) }
+					loadFn = func() (*dc.Config, error) { return dc.LoadConfig() }
 				}
 				cfg, err := loadFn()
 				if err != nil {
 					return fmt.Errorf("failed to load config: %w", err)
 				}
-				return dc.SendTestNotification(cfg.Notifications, ds.log)
+				return dc.SendTestNotification(cfg.Notifications)
 			}
 		}
 		err = fn()

@@ -4,16 +4,18 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/spf13/cobra"
 )
 
 var cfg struct {
 	DB            string
 	Format        string
-	Quiet         bool
+	LogLevel      string
 	Grace         int
 	RetentionDays int
 }
@@ -23,12 +25,23 @@ func main() {
 		Use:     "drainctl",
 		Short:   "Remote Desktop Session Host drain mode monitor",
 		Version: dc.Version,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			level, err := logging.ParseLevel(cfg.LogLevel)
+			if err != nil {
+				return fmt.Errorf("invalid log level %q; valid levels: debug, info, warn, error", cfg.LogLevel)
+			}
+			lv := &slog.LevelVar{}
+			lv.Set(level)
+			handler := logging.NewCLIHandler(os.Stderr, lv)
+			slog.SetDefault(slog.New(handler))
+			return nil
+		},
 	}
 
 	pf := root.PersistentFlags()
 	pf.StringVar(&cfg.DB, "db", dc.DefaultAuditPath(), "Path to audit trail file")
 	pf.StringVar(&cfg.Format, "format", "", "Output format: plain, table, csv, json")
-	pf.BoolVar(&cfg.Quiet, "quiet", false, "Suppress log output, only emit final status")
+	pf.StringVar(&cfg.LogLevel, "log-level", "info", "Log verbosity: debug, info, warn, error")
 
 	root.AddCommand(checkCmd())
 	root.AddCommand(historyCmd())

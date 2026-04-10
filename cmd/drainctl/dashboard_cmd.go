@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 
@@ -20,7 +21,7 @@ func dashboardCmd() *cobra.Command {
 		Use:   "dashboard",
 		Short: "Open the DrainCtl dashboard in your browser",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig(dc.DiscardLogger())
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -76,26 +77,25 @@ func dashboardCmd() *cobra.Command {
 		Use:   "enable",
 		Short: "Enable the dashboard on this server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			port, _ := cmd.Flags().GetInt("port")
 			group, _ := cmd.Flags().GetString("group")
 
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
 			fileCfg.Dashboard.Enabled = true
 			fileCfg.Dashboard.Port = port
 			fileCfg.Dashboard.Group = group
-			if err := dc.SaveConfig(fileCfg, log); err != nil {
+			if err := dc.SaveConfig(fileCfg); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			log(dc.LvlOK, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
+			dc.PrintResult(os.Stdout, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
 
 			// Restart the service so the dashboard listener starts.
-			if err := svc.RestartService(log); err != nil {
-				log(dc.LvlWRN, fmt.Sprintf("msg=%q error=%q", "service restart failed, restart manually", err))
+			if err := svc.RestartService(); err != nil {
+				slog.Warn("service restart failed, restart manually", "error", err)
 			}
 			return nil
 		},
@@ -108,20 +108,19 @@ func dashboardCmd() *cobra.Command {
 		Use:   "disable",
 		Short: "Disable the dashboard on this server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
 			fileCfg.Dashboard.Enabled = false
-			if err := dc.SaveConfig(fileCfg, log); err != nil {
+			if err := dc.SaveConfig(fileCfg); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
-			log(dc.LvlOK, "dashboard=disabled")
+			dc.PrintResult(os.Stdout, "dashboard=disabled")
 
 			// Restart the service to stop the dashboard listener.
-			if err := svc.RestartService(log); err != nil {
-				log(dc.LvlWRN, fmt.Sprintf("msg=%q error=%q", "service restart failed, restart manually", err))
+			if err := svc.RestartService(); err != nil {
+				slog.Warn("service restart failed, restart manually", "error", err)
 			}
 			return nil
 		},
@@ -155,12 +154,11 @@ The files are copied to:
 Restart the service after installing a new certificate.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			if err := dc.InstallCertificate(args[0], args[1], log); err != nil {
+			if err := dc.InstallCertificate(args[0], args[1]); err != nil {
 				return err
 			}
-			log(dc.LvlOK, "certificate installed")
-			log(dc.LvlINF, "restart the DrainCtl service to use the new certificate")
+			dc.PrintResult(os.Stdout, "certificate installed")
+			slog.Info("restart the DrainCtl service to use the new certificate")
 			return nil
 		},
 	}

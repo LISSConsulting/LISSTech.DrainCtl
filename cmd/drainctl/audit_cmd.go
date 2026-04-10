@@ -3,8 +3,6 @@
 package main
 
 import (
-	"os"
-
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/spf13/cobra"
 )
@@ -27,5 +25,5 @@ by this command for the GPO path to configure.`,
 }
 
 func runAuditSetup(cmd *cobra.Command, args []string) error {
-	return dc.RunAuditSetup(dc.DefaultLogger(os.Stdout, cfg.Quiet))
+	return dc.RunAuditSetup()
 }

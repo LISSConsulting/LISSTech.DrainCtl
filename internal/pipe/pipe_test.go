@@ -45,7 +45,7 @@ func pipeCall(t *testing.T, req PipeRequest, handler PipeHandler) PipeResponse {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handlePipeConn(server, handler, nil)
+		handlePipeConn(server, handler)
 	}()
 
 	data, err := json.Marshal(req)
@@ -189,7 +189,7 @@ func TestHandlePipeConn_InvalidJSON(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handlePipeConn(server, &mockHandler{}, nil)
+		handlePipeConn(server, &mockHandler{})
 	}()
 
 	_, _ = client.Write([]byte("not json {{"))
@@ -224,7 +224,7 @@ func TestHandlePipeConn_ConnectionClosed(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handlePipeConn(server, &mockHandler{}, nil)
+		handlePipeConn(server, &mockHandler{})
 	}()
 
 	// Close the client immediately — no data written.

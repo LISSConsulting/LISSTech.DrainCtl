@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -31,12 +32,11 @@ func notifyStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show current notification configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
-			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
+			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets())
 			return nil
 		},
 	}
@@ -56,8 +56,7 @@ Use --triggers to filter which events fire this webhook.
 Use --repeat-minutes to control how often repeated events notify (0=once).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
@@ -87,7 +86,7 @@ Use --repeat-minutes to control how often repeated events notify (0=once).`,
 				ov.RepeatMinutes = &m
 			}
 
-			return setNotifyTarget(fileCfg, "webhook", url, ov, log)
+			return setNotifyTarget(fileCfg, "webhook", url, ov)
 		},
 	}
 	c.Flags().String("secret", "", "HMAC-SHA256 signing secret (empty to clear)")
@@ -109,8 +108,7 @@ Use --triggers to filter which events fire this notification.
 Use --repeat-minutes to control how often repeated events notify (0=once).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
@@ -136,7 +134,7 @@ Use --repeat-minutes to control how often repeated events notify (0=once).`,
 				ov.RepeatMinutes = &m
 			}
 
-			return setNotifyTarget(fileCfg, "ntfy", url, ov, log)
+			return setNotifyTarget(fileCfg, "ntfy", url, ov)
 		},
 	}
 	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
@@ -149,12 +147,11 @@ func notifyTestCmd() *cobra.Command {
 		Use:   "test",
 		Short: "Send a test notification to all configured backends",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
-			return dc.SendTestNotification(fileCfg.Notifications, log)
+			return dc.SendTestNotification(fileCfg.Notifications)
 		},
 	}
 }
@@ -171,7 +168,7 @@ type notifyOverrides struct {
 // If url is empty, all targets of typ are removed. Otherwise the first
 // existing target of typ is updated (URL + any non-nil overrides), or a new
 // one is appended when none exists.
-func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides, log dc.LogFunc) error {
+func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) error {
 	if url == "" {
 		filtered := fileCfg.Notifications[:0]
 		for _, t := range fileCfg.Notifications {
@@ -180,10 +177,10 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides, lo
 			}
 		}
 		fileCfg.Notifications = filtered
-		if err := dc.SaveConfig(fileCfg, log); err != nil {
+		if err := dc.SaveConfig(fileCfg); err != nil {
 			return err
 		}
-		log(dc.LvlINF, typ+"=disabled")
+		slog.Info(typ + "=disabled")
 		return nil
 	}
 
@@ -205,10 +202,10 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides, lo
 		}
 	}
 
-	if err := dc.SaveConfig(fileCfg, log); err != nil {
+	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
-	log(dc.LvlOK, fmt.Sprintf("%s_url=%q", typ, url))
+	dc.PrintResult(os.Stdout, fmt.Sprintf("%s_url=%q", typ, url))
 	return nil
 }
 
@@ -245,9 +242,9 @@ func triggerList() string {
 
 // printNotifyTargets logs each notification target and the overall enabled/disabled
 // status. Used by both "notify status" and "configure show".
-func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool, log dc.LogFunc) {
+func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
 	if len(targets) == 0 {
-		log(dc.LvlWRN, "notifications=disabled (no targets configured)")
+		slog.Warn("notifications=disabled (no targets configured)")
 		return
 	}
 	for i, t := range targets {
@@ -269,13 +266,13 @@ func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool, log dc
 				hmacNote = " hmac_secret=unset"
 			}
 		}
-		log(dc.LvlINF, fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
+		slog.Info(fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
 			i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
 	}
 	if hasTargets {
-		log(dc.LvlOK, "notifications=enabled")
+		dc.PrintResult(os.Stdout, "notifications=enabled")
 	} else {
-		log(dc.LvlWRN, "notifications=disabled (no targets with URLs configured)")
+		slog.Warn("notifications=disabled (no targets with URLs configured)")
 	}
 }
 

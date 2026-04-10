@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -21,12 +22,11 @@ func serviceCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install DrainCtl as a Windows service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, false)
 			exePath, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("get executable path: %w", err)
 			}
-			return svc.InstallService(exePath, log)
+			return svc.InstallService(exePath)
 		},
 	})
 
@@ -34,8 +34,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "uninstall",
 		Short: "Uninstall the DrainCtl Windows service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, false)
-			return svc.UninstallService(log)
+			return svc.UninstallService()
 		},
 	})
 
@@ -43,8 +42,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "start",
 		Short: "Start the DrainCtl service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, false)
-			return svc.StartService(log)
+			return svc.StartService()
 		},
 	})
 
@@ -52,8 +50,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the DrainCtl service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, false)
-			return svc.StopService(log)
+			return svc.StopService()
 		},
 	})
 
@@ -65,14 +62,13 @@ func serviceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 			switch state {
 			case "Running":
-				log(dc.LvlOK, fmt.Sprintf("service=%s", state))
+				dc.PrintResult(os.Stdout, fmt.Sprintf("service=%s", state))
 			case "Stopped":
-				log(dc.LvlWRN, fmt.Sprintf("service=%s", state))
+				slog.Warn(fmt.Sprintf("service=%s", state))
 			default:
-				log(dc.LvlINF, fmt.Sprintf("service=%s", state))
+				slog.Info(fmt.Sprintf("service=%s", state))
 			}
 			return nil
 		},
@@ -92,7 +88,7 @@ func serviceCmd() *cobra.Command {
 		Short:  "Add the service account to Event Log Readers group",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return svc.GrantEventLogAccess(dc.DefaultLogger(os.Stdout, false))
+			return svc.GrantEventLogAccess()
 		},
 	})
 
@@ -101,7 +97,7 @@ func serviceCmd() *cobra.Command {
 		Short:  "Restart the DrainCtl service",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return svc.RestartService(dc.DefaultLogger(os.Stdout, false))
+			return svc.RestartService()
 		},
 	})
 

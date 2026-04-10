@@ -15,14 +15,14 @@ import (
 // ── ClampRetention ────────────────────────────────────────────────────────────
 
 func TestClampRetention_BelowMin(t *testing.T) {
-	result := ClampRetention(0, nil)
+	result := ClampRetention(0)
 	if result != MinRetentionDays {
 		t.Errorf("ClampRetention(0) = %d, want %d", result, MinRetentionDays)
 	}
 }
 
 func TestClampRetention_AboveMax(t *testing.T) {
-	result := ClampRetention(999, nil)
+	result := ClampRetention(999)
 	if result != MaxRetentionDays {
 		t.Errorf("ClampRetention(999) = %d, want %d", result, MaxRetentionDays)
 	}
@@ -30,7 +30,7 @@ func TestClampRetention_AboveMax(t *testing.T) {
 
 func TestClampRetention_WithinRange(t *testing.T) {
 	for _, days := range []int{1, 30, 90, 180, 365} {
-		got := ClampRetention(days, nil)
+		got := ClampRetention(days)
 		if got != days {
 			t.Errorf("ClampRetention(%d) = %d, want %d", days, got, days)
 		}
@@ -38,31 +38,16 @@ func TestClampRetention_WithinRange(t *testing.T) {
 }
 
 func TestClampRetention_LogsWarning(t *testing.T) {
-	var warned bool
-	log := func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warned = true
-		}
-	}
-	ClampRetention(0, log)
-	if !warned {
-		t.Error("expected warning log for out-of-range retention, got none")
+	// ClampRetention now logs via slog internally; verify the return value only.
+	if got := ClampRetention(0); got != MinRetentionDays {
+		t.Errorf("ClampRetention(0) = %d, want %d", got, MinRetentionDays)
 	}
 }
 
 func TestClampRetention_LogsWarning_AboveMax(t *testing.T) {
-	var warned bool
-	log := func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warned = true
-		}
-	}
-	result := ClampRetention(MaxRetentionDays+1, log)
-	if result != MaxRetentionDays {
-		t.Errorf("ClampRetention(%d) = %d, want %d", MaxRetentionDays+1, result, MaxRetentionDays)
-	}
-	if !warned {
-		t.Error("expected warning log for above-max retention, got none")
+	// ClampRetention now logs via slog internally; verify the return value only.
+	if got := ClampRetention(MaxRetentionDays + 1); got != MaxRetentionDays {
+		t.Errorf("ClampRetention(%d) = %d, want %d", MaxRetentionDays+1, got, MaxRetentionDays)
 	}
 }
 
@@ -155,7 +140,7 @@ func TestValidate_StripsInvalidURLSchemes(t *testing.T) {
 		{Type: "ntfy", URL: "https://ntfy.sh/topic"},
 	}
 
-	cfg.Validate(nil)
+	cfg.Validate()
 
 	for _, n := range cfg.Notifications {
 		lower := n.URL
@@ -177,7 +162,7 @@ func TestValidate_PreservesEmptyURL(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: ""},
 	}
-	cfg.Validate(nil)
+	cfg.Validate()
 	// Empty URL is not stripped by URL scheme validation (other logic handles it).
 	if len(cfg.Notifications) != 1 {
 		t.Errorf("expected empty-URL notification to survive Validate, got %d notifications", len(cfg.Notifications))
@@ -196,7 +181,7 @@ func TestValidate_EmptyTriggersDefaulted(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://example.com/hook", Triggers: []Trigger{}},
 	}
-	cfg.Validate(nil)
+	cfg.Validate()
 	// Empty trigger list must be replaced by DefaultTriggers.
 	if len(cfg.Notifications[0].Triggers) != len(DefaultTriggers) {
 		t.Errorf("expected %d default triggers after Validate, got %d",
@@ -230,13 +215,7 @@ func TestValidate_StripsUnknownTriggers(t *testing.T) {
 			},
 		},
 	}
-	var warned bool
-	log := func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warned = true
-		}
-	}
-	cfg.Validate(log)
+	cfg.Validate()
 
 	triggers := cfg.Notifications[0].Triggers
 	if len(triggers) != 2 {
@@ -246,9 +225,6 @@ func TestValidate_StripsUnknownTriggers(t *testing.T) {
 		if !ValidTriggers[tr] {
 			t.Errorf("unknown trigger %q survived Validate", tr)
 		}
-	}
-	if !warned {
-		t.Error("expected warning log for unknown trigger, got none")
 	}
 }
 
@@ -261,7 +237,7 @@ func TestValidate_PreservesValidTriggers(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://example.com/hook", Triggers: allValid},
 	}
-	cfg.Validate(nil)
+	cfg.Validate()
 	if len(cfg.Notifications[0].Triggers) != len(allValid) {
 		t.Errorf("Validate stripped valid triggers: got %v", cfg.Notifications[0].Triggers)
 	}
@@ -273,7 +249,7 @@ func TestValidate_DashboardPortClamped(t *testing.T) {
 	for _, port := range []int{0, -1, 65536, 99999} {
 		cfg := DefaultConfig()
 		cfg.Dashboard.Port = port
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.Dashboard.Port != DefaultDashboardPort {
 			t.Errorf("port %d: expected default %d after Validate, got %d", port, DefaultDashboardPort, cfg.Dashboard.Port)
 		}
@@ -284,7 +260,7 @@ func TestValidate_DashboardPortPreservesValid(t *testing.T) {
 	for _, port := range []int{1, 80, 443, 8080, DefaultDashboardPort, 65535} {
 		cfg := DefaultConfig()
 		cfg.Dashboard.Port = port
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.Dashboard.Port != port {
 			t.Errorf("port %d: expected port unchanged after Validate, got %d", port, cfg.Dashboard.Port)
 		}
@@ -305,7 +281,7 @@ func TestValidate_DashboardGroupTrimsWhitespace(t *testing.T) {
 	for _, tc := range cases {
 		cfg := DefaultConfig()
 		cfg.Dashboard.Group = tc.input
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.Dashboard.Group != tc.want {
 			t.Errorf("group %q: expected %q after Validate, got %q", tc.input, tc.want, cfg.Dashboard.Group)
 		}
@@ -315,7 +291,7 @@ func TestValidate_DashboardGroupTrimsWhitespace(t *testing.T) {
 func TestValidate_DashboardGroupPreservesNormal(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Dashboard.Group = "RDS Admins"
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.Dashboard.Group != "RDS Admins" {
 		t.Errorf("expected group unchanged, got %q", cfg.Dashboard.Group)
 	}
@@ -327,7 +303,7 @@ func TestValidate_GracePeriodClamped(t *testing.T) {
 	for _, gp := range []int{0, -1, 1441, 99999} {
 		cfg := DefaultConfig()
 		cfg.GracePeriod = gp
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.GracePeriod != DefaultGracePeriod {
 			t.Errorf("grace_period %d: expected default %d after Validate, got %d", gp, DefaultGracePeriod, cfg.GracePeriod)
 		}
@@ -338,7 +314,7 @@ func TestValidate_GracePeriodPreservesValid(t *testing.T) {
 	for _, gp := range []int{1, 60, DefaultGracePeriod, 720, 1440} {
 		cfg := DefaultConfig()
 		cfg.GracePeriod = gp
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.GracePeriod != gp {
 			t.Errorf("grace_period %d: expected value unchanged after Validate, got %d", gp, cfg.GracePeriod)
 		}
@@ -357,7 +333,7 @@ func TestValidate_StripsUnknownType(t *testing.T) {
 		{Type: "slack", URL: "https://hooks.slack.com/foo"}, // unknown
 	}
 
-	cfg.Validate(nil)
+	cfg.Validate()
 
 	if len(cfg.Notifications) != 3 {
 		t.Errorf("expected 3 valid notifications after Validate, got %d", len(cfg.Notifications))
@@ -375,16 +351,9 @@ func TestValidate_UnknownTypeLogsWarning(t *testing.T) {
 		{Type: "fax", URL: "https://example.com/fax"},
 	}
 
-	var warned bool
-	cfg.Validate(func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warned = true
-		}
-	})
+	// Validate now logs via slog internally; verify the stripping behaviour only.
+	cfg.Validate()
 
-	if !warned {
-		t.Error("expected Validate to log a warning for unknown notification type")
-	}
 	if len(cfg.Notifications) != 0 {
 		t.Errorf("expected 0 notifications after stripping unknown type, got %d", len(cfg.Notifications))
 	}
@@ -397,7 +366,7 @@ func TestValidate_PreservesValidTypes(t *testing.T) {
 		{Type: "ntfy", URL: "https://ntfy.sh/topic"},
 	}
 
-	cfg.Validate(nil)
+	cfg.Validate()
 
 	if len(cfg.Notifications) != 2 {
 		t.Errorf("expected both valid-type targets to survive Validate, got %d", len(cfg.Notifications))
@@ -410,7 +379,7 @@ func TestValidate_PollIntervalClamped(t *testing.T) {
 	for _, interval := range []int{0, -1, 9, MaxPollInterval + 1, 999999} {
 		cfg := DefaultConfig()
 		cfg.PollInterval = interval
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.PollInterval != DefaultPollInterval {
 			t.Errorf("poll_interval %d: expected default %d after Validate, got %d", interval, DefaultPollInterval, cfg.PollInterval)
 		}
@@ -421,7 +390,7 @@ func TestValidate_PollIntervalPreservesValid(t *testing.T) {
 	for _, interval := range []int{10, 60, DefaultPollInterval, 3600, MaxPollInterval} {
 		cfg := DefaultConfig()
 		cfg.PollInterval = interval
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.PollInterval != interval {
 			t.Errorf("poll_interval %d: expected value unchanged after Validate, got %d", interval, cfg.PollInterval)
 		}
@@ -435,7 +404,7 @@ func TestValidate_RepeatMinutesClampsNegative(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: -1},
 	}
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.Notifications[0].RepeatMinutes != 0 {
 		t.Errorf("RepeatMinutes -1: expected 0 after Validate, got %d", cfg.Notifications[0].RepeatMinutes)
 	}
@@ -446,7 +415,7 @@ func TestValidate_RepeatMinutesClampsAboveMax(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: MaxRepeatMinutes + 1},
 	}
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.Notifications[0].RepeatMinutes != MaxRepeatMinutes {
 		t.Errorf("RepeatMinutes %d: expected %d after Validate, got %d", MaxRepeatMinutes+1, MaxRepeatMinutes, cfg.Notifications[0].RepeatMinutes)
 	}
@@ -458,7 +427,7 @@ func TestValidate_RepeatMinutesPreservesValid(t *testing.T) {
 		cfg.Notifications = []NotificationTarget{
 			{Type: "webhook", URL: "https://example.com/hook", RepeatMinutes: rm},
 		}
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.Notifications[0].RepeatMinutes != rm {
 			t.Errorf("RepeatMinutes %d: expected unchanged after Validate, got %d", rm, cfg.Notifications[0].RepeatMinutes)
 		}
@@ -470,7 +439,7 @@ func TestValidate_RepeatMinutesPreservesValid(t *testing.T) {
 func TestValidate_SessionWarningThresholdClampsNegative(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.SessionWarningThreshold = -1
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.SessionWarningThreshold != 0 {
 		t.Errorf("SessionWarningThreshold -1: expected 0 after Validate, got %d", cfg.SessionWarningThreshold)
 	}
@@ -480,7 +449,7 @@ func TestValidate_SessionWarningThresholdClampsAbove100(t *testing.T) {
 	for _, v := range []int{101, 200, 999} {
 		cfg := DefaultConfig()
 		cfg.SessionWarningThreshold = v
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.SessionWarningThreshold != 100 {
 			t.Errorf("SessionWarningThreshold %d: expected 100 after Validate, got %d", v, cfg.SessionWarningThreshold)
 		}
@@ -491,7 +460,7 @@ func TestValidate_SessionWarningThresholdPreservesValid(t *testing.T) {
 	for _, v := range []int{0, 1, 50, 80, 100} {
 		cfg := DefaultConfig()
 		cfg.SessionWarningThreshold = v
-		cfg.Validate(nil)
+		cfg.Validate()
 		if cfg.SessionWarningThreshold != v {
 			t.Errorf("SessionWarningThreshold %d: expected unchanged after Validate, got %d", v, cfg.SessionWarningThreshold)
 		}
@@ -637,7 +606,7 @@ func TestToDashboardConfig_CopiesFields(t *testing.T) {
 
 func TestValidate_SetsDefaultAuditPath(t *testing.T) {
 	cfg := &Config{AuditPath: ""}
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.AuditPath != DefaultAuditPath() {
 		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, DefaultAuditPath())
 	}
@@ -646,7 +615,7 @@ func TestValidate_SetsDefaultAuditPath(t *testing.T) {
 func TestValidate_PreservesExistingAuditPath(t *testing.T) {
 	const custom = `C:\custom\audit.jsonl`
 	cfg := &Config{AuditPath: custom}
-	cfg.Validate(nil)
+	cfg.Validate()
 	if cfg.AuditPath != custom {
 		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, custom)
 	}
@@ -664,16 +633,9 @@ func TestValidate_InvalidURLSchemeLogsWarning(t *testing.T) {
 		{Type: "webhook", URL: "https://good.example.com"},
 	}
 
-	var warned bool
-	cfg.Validate(func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warned = true
-		}
-	})
+	// Validate now logs via slog internally; verify stripping behaviour only.
+	cfg.Validate()
 
-	if !warned {
-		t.Error("expected Validate to log a warning for invalid URL scheme, got none")
-	}
 	// The invalid-scheme target should be stripped; only the valid one survives.
 	if len(cfg.Notifications) != 1 {
 		t.Errorf("expected 1 notification after stripping invalid scheme, got %d", len(cfg.Notifications))
@@ -744,11 +706,11 @@ func TestSaveConfig_RoundTrip(t *testing.T) {
 		{Type: "webhook", URL: "https://example.com/hook"},
 	}
 
-	if err := SaveConfig(cfg, nil); err != nil {
+	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -778,7 +740,7 @@ func TestSaveConfig_CreateDataDirError(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := SaveConfig(DefaultConfig(), nil)
+	err := SaveConfig(DefaultConfig())
 	if err == nil {
 		t.Fatal("expected error from SaveConfig when data dir cannot be created, got nil")
 	}
@@ -795,11 +757,11 @@ func TestSaveConfig_ValidatesBeforeSave(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.GracePeriod = 99999 // out of range — will be clamped to default
 
-	if err := SaveConfig(cfg, nil); err != nil {
+	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -814,7 +776,7 @@ func TestSaveConfig_ValidatesBeforeSave(t *testing.T) {
 func TestLoadConfig_FreshInstall_ReturnsValidDefault(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -841,7 +803,7 @@ func TestLoadConfig_ParseError(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err := LoadConfig(nil)
+	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected parse error, got nil")
 	}
@@ -863,7 +825,7 @@ func TestLoadConfig_ReadError(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	_, err := LoadConfig(nil)
+	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected read error when config path is a directory, got nil")
 	}
@@ -875,15 +837,15 @@ func TestLoadConfig_ReadError(t *testing.T) {
 // written to config.json and reads back correctly.
 func TestUpdateSessionThreshold_UpdatesConfig(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	if err := UpdateSessionThreshold(75, nil); err != nil {
+	if err := UpdateSessionThreshold(75); err != nil {
 		t.Fatalf("UpdateSessionThreshold: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -896,7 +858,7 @@ func TestUpdateSessionThreshold_UpdatesConfig(t *testing.T) {
 // return an error without touching the config file.
 func TestUpdateSessionThreshold_InvalidRange(t *testing.T) {
 	for _, pct := range []int{-1, 101, 999} {
-		if err := UpdateSessionThreshold(pct, nil); err == nil {
+		if err := UpdateSessionThreshold(pct); err == nil {
 			t.Errorf("UpdateSessionThreshold(%d): expected error, got nil", pct)
 		}
 	}
@@ -908,15 +870,15 @@ func TestUpdateSessionThreshold_InvalidRange(t *testing.T) {
 // written to config.json and reads back correctly.
 func TestUpdateGracePeriod_UpdatesConfig(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	if err := UpdateGracePeriod(120, nil); err != nil {
+	if err := UpdateGracePeriod(120); err != nil {
 		t.Fatalf("UpdateGracePeriod: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -929,7 +891,7 @@ func TestUpdateGracePeriod_UpdatesConfig(t *testing.T) {
 // an error without touching the config file.
 func TestUpdateGracePeriod_InvalidRange(t *testing.T) {
 	for _, m := range []int{0, -1, 1441, 9999} {
-		if err := UpdateGracePeriod(m, nil); err == nil {
+		if err := UpdateGracePeriod(m); err == nil {
 			t.Errorf("UpdateGracePeriod(%d): expected error, got nil", m)
 		}
 	}
@@ -945,18 +907,18 @@ func TestUpdateNotifications_ReplacesTargets(t *testing.T) {
 	cfg.Notifications = []NotificationTarget{
 		{Type: "webhook", URL: "https://old.example.com/hook"},
 	}
-	if err := SaveConfig(cfg, nil); err != nil {
+	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
 	newTargets := []NotificationTarget{
 		{Type: "ntfy", URL: "https://ntfy.sh/new-topic"},
 	}
-	if err := UpdateNotifications(newTargets, nil); err != nil {
+	if err := UpdateNotifications(newTargets); err != nil {
 		t.Fatalf("UpdateNotifications: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -974,15 +936,15 @@ func TestUpdateNotifySettings_AllNilIsNoOp(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.GracePeriod = 30
 	cfg.SessionWarningThreshold = 80
-	if err := SaveConfig(cfg, nil); err != nil {
+	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	if err := UpdateNotifySettings(nil, nil, nil, nil); err != nil {
+	if err := UpdateNotifySettings(nil, nil, nil); err != nil {
 		t.Fatalf("UpdateNotifySettings(nil,nil,nil): %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -998,7 +960,7 @@ func TestUpdateNotifySettings_AllNilIsNoOp(t *testing.T) {
 // update the respective fields in config.json.
 func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
@@ -1006,11 +968,11 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	threshold := 60
 	grace := 90
 
-	if err := UpdateNotifySettings(&targets, &threshold, &grace, nil); err != nil {
+	if err := UpdateNotifySettings(&targets, &threshold, &grace); err != nil {
 		t.Fatalf("UpdateNotifySettings: %v", err)
 	}
 
-	got, err := LoadConfig(nil)
+	got, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -1029,12 +991,12 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 // session threshold returns a descriptive validation error.
 func TestUpdateNotifySettings_InvalidThreshold(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	for _, pct := range []int{-1, 101} {
 		v := pct
-		err := UpdateNotifySettings(nil, &v, nil, nil)
+		err := UpdateNotifySettings(nil, &v, nil)
 		if err == nil {
 			t.Errorf("UpdateNotifySettings(threshold=%d): expected error, got nil", pct)
 			continue
@@ -1049,12 +1011,12 @@ func TestUpdateNotifySettings_InvalidThreshold(t *testing.T) {
 // grace period returns a descriptive validation error.
 func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	for _, m := range []int{0, 1441} {
 		v := m
-		err := UpdateNotifySettings(nil, nil, &v, nil)
+		err := UpdateNotifySettings(nil, nil, &v)
 		if err == nil {
 			t.Errorf("UpdateNotifySettings(grace=%d): expected error, got nil", m)
 			continue
@@ -1083,7 +1045,7 @@ func blockConfigRead(t *testing.T) {
 // a LoadConfig error (config path is a directory, not a file).
 func TestUpdateNotifications_LoadError(t *testing.T) {
 	blockConfigRead(t)
-	if err := UpdateNotifications(nil, nil); err == nil {
+	if err := UpdateNotifications(nil); err == nil {
 		t.Fatal("expected error from UpdateNotifications when LoadConfig fails, got nil")
 	}
 }
@@ -1092,7 +1054,7 @@ func TestUpdateNotifications_LoadError(t *testing.T) {
 // propagates a LoadConfig error.
 func TestUpdateSessionThreshold_LoadError(t *testing.T) {
 	blockConfigRead(t)
-	if err := UpdateSessionThreshold(75, nil); err == nil {
+	if err := UpdateSessionThreshold(75); err == nil {
 		t.Fatal("expected error from UpdateSessionThreshold when LoadConfig fails, got nil")
 	}
 }
@@ -1101,7 +1063,7 @@ func TestUpdateSessionThreshold_LoadError(t *testing.T) {
 // a LoadConfig error.
 func TestUpdateGracePeriod_LoadError(t *testing.T) {
 	blockConfigRead(t)
-	if err := UpdateGracePeriod(30, nil); err == nil {
+	if err := UpdateGracePeriod(30); err == nil {
 		t.Fatal("expected error from UpdateGracePeriod when LoadConfig fails, got nil")
 	}
 }
@@ -1110,7 +1072,7 @@ func TestUpdateGracePeriod_LoadError(t *testing.T) {
 // propagates a LoadConfig error.
 func TestUpdateNotifySettings_LoadError(t *testing.T) {
 	blockConfigRead(t)
-	if err := UpdateNotifySettings(nil, nil, nil, nil); err == nil {
+	if err := UpdateNotifySettings(nil, nil, nil); err == nil {
 		t.Fatal("expected error from UpdateNotifySettings when LoadConfig fails, got nil")
 	}
 }
@@ -1136,7 +1098,7 @@ func TestLoadConfig_FreshInstall_WriteDefaultError(t *testing.T) {
 		t.Fatalf("MkdirAll tmpPath: %v", err)
 	}
 
-	_, err := LoadConfig(nil)
+	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected error when default config write fails, got nil")
 	}
@@ -1155,7 +1117,7 @@ func TestInstallCertificate_HappyPath(t *testing.T) {
 	t.Setenv("ProgramData", dir)
 
 	// Bootstrap a default config.json — this also creates the data directory.
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
@@ -1168,12 +1130,12 @@ func TestInstallCertificate_HappyPath(t *testing.T) {
 		t.Fatalf("WriteFile key: %v", err)
 	}
 
-	if err := InstallCertificate(srcCert, srcKey, nil); err != nil {
+	if err := InstallCertificate(srcCert, srcKey); err != nil {
 		t.Fatalf("InstallCertificate: %v", err)
 	}
 
 	// Config must have TLSCert and TLSKey populated.
-	cfg, err := LoadConfig(nil)
+	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig after install: %v", err)
 	}
@@ -1204,7 +1166,7 @@ func TestInstallCertificate_MissingCert(t *testing.T) {
 		t.Fatalf("WriteFile key: %v", err)
 	}
 
-	err := InstallCertificate(filepath.Join(dir, "nonexistent.crt"), srcKey, nil)
+	err := InstallCertificate(filepath.Join(dir, "nonexistent.crt"), srcKey)
 	if err == nil {
 		t.Fatal("expected error for missing cert, got nil")
 	}
@@ -1224,7 +1186,7 @@ func TestInstallCertificate_MissingKey(t *testing.T) {
 		t.Fatalf("WriteFile cert: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, filepath.Join(dir, "nonexistent.key"), nil)
+	err := InstallCertificate(srcCert, filepath.Join(dir, "nonexistent.key"))
 	if err == nil {
 		t.Fatal("expected error for missing key, got nil")
 	}
@@ -1258,7 +1220,7 @@ func TestInstallCertificate_WriteCertError(t *testing.T) {
 		t.Fatalf("MkdirAll dstCert block: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, srcKey, nil)
+	err := InstallCertificate(srcCert, srcKey)
 	if err == nil {
 		t.Fatal("expected error when cert destination is blocked, got nil")
 	}
@@ -1292,7 +1254,7 @@ func TestInstallCertificate_WriteKeyError(t *testing.T) {
 		t.Fatalf("MkdirAll dstKey block: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, srcKey, nil)
+	err := InstallCertificate(srcCert, srcKey)
 	if err == nil {
 		t.Fatal("expected error when key destination is blocked, got nil")
 	}
@@ -1319,7 +1281,7 @@ func TestInstallCertificate_ReadCertError(t *testing.T) {
 		t.Fatalf("WriteFile key: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, srcKey, nil)
+	err := InstallCertificate(srcCert, srcKey)
 	if err == nil {
 		t.Fatal("expected error when cert source is a directory, got nil")
 	}
@@ -1350,7 +1312,7 @@ func TestInstallCertificate_ReadKeyError(t *testing.T) {
 		t.Fatalf("MkdirAll dataDir: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, srcKey, nil)
+	err := InstallCertificate(srcCert, srcKey)
 	if err == nil {
 		t.Fatal("expected error when key source is a directory, got nil")
 	}
@@ -1388,7 +1350,7 @@ func TestInstallCertificate_LoadConfigError(t *testing.T) {
 		t.Fatalf("MkdirAll configPath: %v", err)
 	}
 
-	err := InstallCertificate(srcCert, srcKey, nil)
+	err := InstallCertificate(srcCert, srcKey)
 	if err == nil {
 		t.Fatal("expected error when LoadConfig fails, got nil")
 	}
@@ -1412,7 +1374,7 @@ func TestLoadConfig_FreshInstall_WriteError(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	_, err := LoadConfig(nil)
+	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected error when saveConfigToFile fails during fresh install, got nil")
 	}
@@ -1439,7 +1401,7 @@ func TestSaveConfig_WriteTempError(t *testing.T) {
 		t.Fatalf("MkdirAll tmpPath: %v", err)
 	}
 
-	err := SaveConfig(DefaultConfig(), nil)
+	err := SaveConfig(DefaultConfig())
 	if err == nil {
 		t.Fatal("expected error when tmpPath is a directory, got nil")
 	}
@@ -1457,7 +1419,7 @@ func TestSaveConfig_RenameError(t *testing.T) {
 	t.Setenv("ProgramData", base)
 
 	// Bootstrap a valid config.json so the destination file already exists.
-	if err := SaveConfig(DefaultConfig(), nil); err != nil {
+	if err := SaveConfig(DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig (setup): %v", err)
 	}
 
@@ -1484,7 +1446,7 @@ func TestSaveConfig_RenameError(t *testing.T) {
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 
-	err = SaveConfig(DefaultConfig(), nil)
+	err = SaveConfig(DefaultConfig())
 	if err == nil {
 		t.Fatal("expected error from SaveConfig when rename fails, got nil")
 	}

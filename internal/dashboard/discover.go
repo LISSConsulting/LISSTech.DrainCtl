@@ -4,10 +4,10 @@ package dashboard
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"golang.org/x/sys/windows"
 )
 
@@ -18,17 +18,17 @@ const SRVService = "drainctl"
 // lookup on _drainctl._tcp.<domain>. Returns the URL (e.g.
 // "https://dashboard.contoso.com:49470") or an empty string if no SRV
 // record is found.
-func DiscoverDashboardURL(log dc.LogFunc) string {
+func DiscoverDashboardURL() string {
 	domain := machineDomain()
 	if domain == "" {
-		dc.LogMsg(log, dc.LvlINF, "dashboard discovery: machine is not domain-joined, skipping SRV lookup", "")
+		slog.Info("dashboard discovery: machine is not domain-joined, skipping SRV lookup")
 		return ""
 	}
 
 	_, addrs, err := net.LookupSRV(SRVService, "tcp", domain)
 	if err != nil || len(addrs) == 0 {
-		dc.LogMsg(log, dc.LvlINF, "dashboard discovery: no SRV record found",
-			fmt.Sprintf("query=_drainctl._tcp.%s error=%v", domain, err))
+		slog.Info("dashboard discovery: no SRV record found",
+			"query", fmt.Sprintf("_drainctl._tcp.%s", domain), "error", err)
 		return ""
 	}
 
@@ -40,7 +40,8 @@ func DiscoverDashboardURL(log dc.LogFunc) string {
 	}
 
 	url := fmt.Sprintf("https://%s:%d", target, best.Port)
-	log(dc.LvlINF, fmt.Sprintf("dashboard discovery: found SRV record _drainctl._tcp.%s → %s", domain, url))
+	slog.Info("dashboard discovery: found SRV record",
+		"query", fmt.Sprintf("_drainctl._tcp.%s", domain), "url", url)
 	return url
 }
 

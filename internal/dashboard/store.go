@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,20 +33,15 @@ type ServerState struct {
 	servers map[string]*ServerInfo
 	history map[string][]dc.CheckResult
 	path    string
-	log     dc.LogFunc
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.
 // If the file exists it is loaded; otherwise the state starts empty.
-func NewServerState(dataDir string, log dc.LogFunc) *ServerState {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
+func NewServerState(dataDir string) *ServerState {
 	s := &ServerState{
 		servers: make(map[string]*ServerInfo),
 		history: make(map[string][]dc.CheckResult),
 		path:    filepath.Join(dataDir, "servers.json"),
-		log:     log,
 	}
 	s.load()
 	return s
@@ -164,8 +160,8 @@ func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult) bool 
 
 // GetNotifyConfig reads notification configuration from config.json.
 // This is the in-process equivalent of GET /api/v1/notify-config.
-func GetNotifyConfig(log dc.LogFunc) (*RemoteNotifyConfig, error) {
-	cfg, err := dc.LoadConfig(log)
+func GetNotifyConfig() (*RemoteNotifyConfig, error) {
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -202,19 +198,19 @@ func (s *ServerState) save() {
 	}
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
-		dc.LogMsg(s.log, dc.LvlERR, "dashboard: marshal servers failed", fmt.Sprintf("error=%q", err))
+		slog.Error("dashboard: marshal servers failed", "error", err)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		dc.LogMsg(s.log, dc.LvlERR, "dashboard: create data dir failed", fmt.Sprintf("error=%q", err))
+		slog.Error("dashboard: create data dir failed", "error", err)
 		return
 	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		dc.LogMsg(s.log, dc.LvlERR, "dashboard: write tmp file failed", fmt.Sprintf("error=%q", err))
+		slog.Error("dashboard: write tmp file failed", "error", err)
 		return
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
-		dc.LogMsg(s.log, dc.LvlERR, "dashboard: rename tmp file failed", fmt.Sprintf("error=%q", err))
+		slog.Error("dashboard: rename tmp file failed", "error", err)
 	}
 }
