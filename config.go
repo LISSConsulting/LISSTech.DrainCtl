@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -125,6 +126,9 @@ type Config struct {
 	RetentionDays int    `json:"retention_days"`
 	PollInterval  int    `json:"poll_interval"` // seconds
 	AuditPath     string `json:"audit_path"`
+
+	LogFileLevel  string `json:"log_file_level,omitempty"`  // min level for file sink: debug|info|warn|error (default: debug)
+	LogEventLevel string `json:"log_event_level,omitempty"` // min level for event log sink: debug|info|warn|error (default: info)
 
 	Notifications []NotificationTarget `json:"notifications"`
 
@@ -243,9 +247,26 @@ func (c *Config) HasTargets() bool {
 
 // ── Validation ──────────────────────────────────────────────────────────
 
+// validateLogLevel returns the canonical lowercase level string if valid, or the
+// provided fallback if the input is missing/empty/invalid. A warning is logged
+// for invalid (non-empty) values.
+func validateLogLevel(val, fieldName, fallback string) string {
+	if val == "" {
+		return fallback
+	}
+	if _, err := logging.ParseLevel(val); err != nil {
+		slog.Default().Warn("invalid log level in config, using default", "field", fieldName, "value", val, "default", fallback)
+		return fallback
+	}
+	return strings.ToLower(val)
+}
+
 // Validate clamps and corrects config values in place.
 func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
+
+	c.LogFileLevel = validateLogLevel(c.LogFileLevel, "log_file_level", "debug")
+	c.LogEventLevel = validateLogLevel(c.LogEventLevel, "log_event_level", "info")
 
 	if c.GracePeriod < 1 || c.GracePeriod > 1440 {
 		c.GracePeriod = DefaultGracePeriod
