@@ -91,7 +91,9 @@ func dashboardCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			dc.PrintResult(os.Stdout, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
+			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+				dc.PrintResult(os.Stdout, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
+			}
 
 			// Restart the service so the dashboard listener starts.
 			if err := svc.RestartService(); err != nil {
@@ -116,7 +118,9 @@ func dashboardCmd() *cobra.Command {
 			if err := dc.SaveConfig(fileCfg); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
-			dc.PrintResult(os.Stdout, "dashboard=disabled")
+			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+				dc.PrintResult(os.Stdout, "dashboard=disabled")
+			}
 
 			// Restart the service to stop the dashboard listener.
 			if err := svc.RestartService(); err != nil {
@@ -157,7 +161,9 @@ Restart the service after installing a new certificate.`,
 			if err := dc.InstallCertificate(args[0], args[1]); err != nil {
 				return err
 			}
-			dc.PrintResult(os.Stdout, "certificate installed")
+			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
+				dc.PrintResult(os.Stdout, "certificate installed")
+			}
 			slog.Info("restart the DrainCtl service to use the new certificate")
 			return nil
 		},
