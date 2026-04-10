@@ -24,7 +24,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/eventlog"
 )
 
 // configFetchBase is the baseline interval between dashboard notification-config
@@ -57,7 +56,8 @@ func backoffDuration(base time.Duration, failures int) time.Duration {
 	return d
 }
 
-// Event IDs matching assets/drainctl.mc message file.
+// Event IDs matching assets/drainctl.man ETW manifest.
+// Pass as slog.Int("event_id", EvtXxx) to route to the specific manifest event.
 const (
 	EvtServiceStarted = 1000
 	EvtServiceStopped = 1001
@@ -73,53 +73,11 @@ const (
 	EvtGenericError   = 3099
 )
 
-// elogHandler implements slog.Handler, routing slog records to the Windows
-// Event Log using the generic message event IDs (1099/2099/3099).
-type elogHandler struct {
-	elog  *eventlog.Log
-	level *slog.LevelVar
-}
-
-func newElogHandler(elog *eventlog.Log, level *slog.LevelVar) *elogHandler {
-	return &elogHandler{elog: elog, level: level}
-}
-
-func (h *elogHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level.Level()
-}
-
-func (h *elogHandler) Handle(_ context.Context, r slog.Record) error {
-	var buf strings.Builder
-	if r.Message != "" {
-		buf.WriteString(r.Message)
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		buf.WriteString(" ")
-		buf.WriteString(a.Key)
-		buf.WriteString("=")
-		fmt.Fprintf(&buf, "%v", a.Value.Any())
-		return true
-	})
-	msg := buf.String()
-	switch {
-	case r.Level >= slog.LevelError:
-		_ = h.elog.Error(EvtGenericError, msg)
-	case r.Level >= slog.LevelWarn:
-		_ = h.elog.Warning(EvtGenericWarning, msg)
-	default:
-		_ = h.elog.Info(EvtGenericInfo, msg)
-	}
-	return nil
-}
-
-func (h *elogHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *elogHandler) WithGroup(_ string) slog.Handler      { return h }
-
 // drainService implements svc.Handler.
 type drainService struct {
-	elog      *eventlog.Log
+	etw       *logging.ETWHandler
 	fileLevel *slog.LevelVar // min level for the file sink
-	elogLevel *slog.LevelVar // min level for the event-log sink
+	etwLevel  *slog.LevelVar // min level for the ETW sink
 }
 
 // serviceHandler is the pipe handler bridge between the service state
@@ -231,8 +189,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer func() {
 		if r := recover(); r != nil {
 			stack := string(debug.Stack())
-			slog.Error("PANIC", "panic", fmt.Sprintf("%v", r), "stack", stack)
-			_ = s.elog.Error(EvtServiceError, fmt.Sprintf("Service panicked: %v\n%s", r, stack))
+			slog.Error("PANIC", "panic", fmt.Sprintf("%v", r), "stack", stack, slog.Int("event_id", EvtServiceError))
 			panic(r) // re-panic so the SCM sees the crash
 		}
 	}()
@@ -397,17 +354,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer flushTicker.Stop()
 
 	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.elog)
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 
 	// Report running.
 	statusCh <- svc.Status{
 		State:   svc.Running,
 		Accepts: svc.AcceptStop | svc.AcceptShutdown,
 	}
-	slog.Info("service=running")
-	_ = s.elog.Info(EvtServiceStarted, fmt.Sprintf(
-		"Service started.\nVersion: %s\nPoll interval: %s\nGrace period: %s\nRetention: %d days",
-		dc.Version, cfg.PollInterval, cfg.GracePeriod, cfg.RetentionDays))
+	slog.Info("service=running",
+		slog.Int("event_id", EvtServiceStarted),
+		"version", dc.Version,
+		"poll", cfg.PollInterval,
+		"grace", cfg.GracePeriod,
+		"retention_days", cfg.RetentionDays)
 
 	for {
 		select {
@@ -418,8 +377,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
 				_ = st.Flush()
-				_ = s.elog.Info(EvtServiceStopped, "Service stopped.")
-				slog.Info("service=stopped")
+				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
 				statusCh <- c.CurrentStatus
@@ -427,7 +385,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 		case <-regCh:
 			slog.Info("trigger=registry_change")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			_ = st.Flush() // immediate flush on change
 
 		case <-pollTicker.C:
@@ -475,7 +433,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 			slog.Debug("diag: step=svc_run_check")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.elog)
+			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 
 		case <-configCh:
 			newFullCfg, err := dc.LoadConfig()
@@ -488,7 +446,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				s.fileLevel.Set(fl)
 			}
 			if el, err := logging.ParseLevel(newFullCfg.LogEventLevel); err == nil {
-				s.elogLevel.Set(el)
+				s.etwLevel.Set(el)
 			}
 			newCfg := newFullCfg.ToServiceConfig()
 			if newCfg.PollInterval != cfg.PollInterval {
@@ -548,9 +506,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
 			if syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
-				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions, s.elog)
+				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			}
-			_ = s.elog.Info(EvtConfigReloaded, "Configuration reloaded from config.json.")
+			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 
 		case <-flushTicker.C:
 			_ = st.FlushIfDirty()
@@ -632,43 +590,40 @@ func registerWithDashboard(dashCfg *dc.DashboardConfig) bool {
 // RunService starts the Windows service. Called by the CLI's hidden
 // "service run" subcommand.
 func RunService() error {
-	elog, err := eventlog.Open(dc.ServiceName)
-	if err != nil {
-		return fmt.Errorf("open event log: %w", err)
-	}
-	defer func() { _ = elog.Close() }()
-
 	// Initialise log level vars from config (fall back to defaults if config
 	// is unavailable — Execute() will re-load config and apply correct values).
 	fileLevel := &slog.LevelVar{}
 	fileLevel.Set(slog.LevelDebug)
-	elogLevel := &slog.LevelVar{}
-	elogLevel.Set(slog.LevelInfo)
+	etwLevel := &slog.LevelVar{}
+	etwLevel.Set(slog.LevelInfo)
 
 	if startCfg, err := dc.LoadConfig(); err == nil {
 		if fl, err := logging.ParseLevel(startCfg.LogFileLevel); err == nil {
 			fileLevel.Set(fl)
 		}
 		if el, err := logging.ParseLevel(startCfg.LogEventLevel); err == nil {
-			elogLevel.Set(el)
+			etwLevel.Set(el)
 		}
 	}
 
+	// Create the ETW handler.  If the manifest has not been installed yet
+	// (e.g. first-run before the MSI registers the provider), ETWHandler
+	// starts in degraded mode and writes are silently dropped until the
+	// provider is registered and the service is restarted.
+	etwH := logging.NewETWHandler(etwLevel)
+
 	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 10<<20, 7) // 10 MB, 7 old files
 	if err != nil {
-		// File log unavailable — fall back to event log only.
-		slog.Warn("file log unavailable, using event log only", "error", err)
-		elogH := newElogHandler(elog, elogLevel)
-		slog.SetDefault(slog.New(elogH))
-		_ = elog.Warning(EvtGenericWarning, fmt.Sprintf("File log unavailable: %v", err))
-		return svc.Run(dc.ServiceName, &drainService{elog: elog, fileLevel: fileLevel, elogLevel: elogLevel})
+		// File log unavailable — fall back to ETW only.
+		slog.Warn("file log unavailable, using ETW only", "error", err)
+		slog.SetDefault(slog.New(etwH))
+		return svc.Run(dc.ServiceName, &drainService{etw: etwH, fileLevel: fileLevel, etwLevel: etwLevel})
 	}
 	defer func() { _ = fw.Close() }()
 
 	fileH := logging.NewFileHandler(fw, fileLevel)
-	elogH := newElogHandler(elog, elogLevel)
-	slog.SetDefault(slog.New(logging.NewMultiHandler(fileH, elogH)))
-	return svc.Run(dc.ServiceName, &drainService{elog: elog, fileLevel: fileLevel, elogLevel: elogLevel})
+	slog.SetDefault(slog.New(logging.NewMultiHandler(fileH, etwH)))
+	return svc.Run(dc.ServiceName, &drainService{etw: etwH, fileLevel: fileLevel, etwLevel: etwLevel})
 }
 
 // isLocalDashboard returns true if the dashboard URL points to this machine.

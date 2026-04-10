@@ -42,6 +42,7 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Landing page: zero inline styles, mobile nav, a11y (ARIA roles/labels, focus management, keyboard nav)
 - Replaced custom `LogFunc`/`Level` logging API with `log/slog` across entire codebase (~173 call sites); added `internal/logging` package with `CLIHandler`, `FileHandler`, `MultiHandler`, `ParseLevel`, `PrintResult`; service composes dual-sink via `MultiHandler`; `--quiet` replaced with `--log-level debug|info|warn|error`; DLL discard via `slog.DiscardHandler` in `init()`
 - Per-sink log levels in `config.json` (`log_file_level`, `log_event_level`): `Validate()` normalises via `ParseLevel` with fallback to defaults; `RunService()` applies levels on startup; `Execute()` config-reload path updates `slog.LevelVar` at runtime without service restart
+- Modern ETW manifest provider `LISS Technologies-DrainCtl` replaces legacy `eventlog` sink: `assets/drainctl.man` defines Operational (INFO+, enabled by default) and Debug (DBG, disabled by default) channels with event IDs 1000–3099/4000; `internal/logging.ETWHandler` implements `slog.Handler` via `advapi32.dll` `EventRegister`/`EventEnabled`/`EventWrite`; known event IDs set via `slog.Int("event_id", Evt*)` attribute for precise manifest routing; `internal/svc/handler.go` composes `FileHandler` + `ETWHandler` via `MultiHandler`; `drainctl.mc` retired; installer WXS registers/unregisters provider via `wevtutil im/um`; `just man` recipe added for recompiling `drainctl-msg.dll` from manifest
 
 ## Performance
 
