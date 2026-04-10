@@ -13,19 +13,16 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
-
-	"golang.org/x/sys/windows/svc/eventlog"
 )
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary], elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary]) {
 	checkStart := time.Now()
 	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
 	if err != nil {
-		slog.Error("registry read failed", "error", err)
-		_ = elog.Error(EvtRegistryFailed, fmt.Sprintf("Failed to read drain mode registry value: %s", err))
+		slog.Error("registry read failed", "error", err, slog.Int("event_id", EvtRegistryFailed))
 		return
 	}
 
@@ -128,15 +125,15 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		slog.Warn("drain_mode", "mode", state.Mode, "exit", exitCode)
 	}
 
-	// Write state-specific event log entries.
+	// Emit state-specific ETW events via slog with event_id attribute.
 	if transition {
 		cb := changedBy
 		if cb == "" {
 			cb = "unknown"
 		}
-		_ = elog.Info(EvtTransition, fmt.Sprintf(
-			"State transition detected on %s: %s -> %s. Changed by: %s.",
-			state.Host, transitionFrom, state.Mode, cb))
+		slog.Info(fmt.Sprintf("State transition detected on %s: %s -> %s. Changed by: %s.",
+			state.Host, transitionFrom, state.Mode, cb),
+			slog.Int("event_id", EvtTransition))
 	}
 
 	switch status {
@@ -145,18 +142,18 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		if cb == "" {
 			cb = "unknown"
 		}
-		_ = elog.Error(EvtCheckAlert, fmt.Sprintf(
-			"ALERT: Drain mode active on %s for %s, exceeding grace period of %s. Mode: %s. Changed by: %s.",
-			state.Host, stateDur, cfg.GracePeriod, state.Mode, cb))
+		slog.Error(fmt.Sprintf("ALERT: Drain mode active on %s for %s, exceeding grace period of %s. Mode: %s. Changed by: %s.",
+			state.Host, stateDur, cfg.GracePeriod, state.Mode, cb),
+			slog.Int("event_id", EvtCheckAlert))
 	case "Grace":
 		remaining := cfg.GracePeriod - stateDur
-		_ = elog.Warning(EvtCheckGrace, fmt.Sprintf(
-			"Drain mode active on %s, within grace period (%s remaining). Mode: %s.",
-			state.Host, remaining.Truncate(time.Second), state.Mode))
+		slog.Warn(fmt.Sprintf("Drain mode active on %s, within grace period (%s remaining). Mode: %s.",
+			state.Host, remaining.Truncate(time.Second), state.Mode),
+			slog.Int("event_id", EvtCheckGrace))
 	default:
-		_ = elog.Info(EvtCheckHealthy, fmt.Sprintf(
-			"Drain mode check: %s on %s. All connections allowed. State duration: %s.",
-			state.Mode, state.Host, stateDur))
+		slog.Info(fmt.Sprintf("Drain mode check: %s on %s. All connections allowed. State duration: %s.",
+			state.Mode, state.Host, stateDur),
+			slog.Int("event_id", EvtCheckHealthy))
 	}
 
 	// Build CheckResult for notifications and dashboard reporting.

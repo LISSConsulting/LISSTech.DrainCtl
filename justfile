@@ -107,6 +107,23 @@ dev: (header "dev")
     Write-Host "   drainctl.exe ($size) — SSPI auth DISABLED" -ForegroundColor Yellow
 
 
+# Compile ETW manifest → resource DLL (assets/drainctl-msg.dll)
+# Requires Windows SDK mc.exe and rc.exe on PATH.
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+man:
+    Write-Host "`n🔨 Compiling ETW manifest" -ForegroundColor Cyan
+    Push-Location assets
+    & mc -um drainctl.man
+    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+    & rc drainctl.rc
+    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+    & link /DLL /NOENTRY /MACHINE:X64 /OUT:drainctl-msg.dll drainctl.res
+    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+    Remove-Item -ErrorAction SilentlyContinue drainctl.rc, drainctl.h, drainctlTEMP.BIN, MSG00409.bin, drainctl.res
+    Pop-Location
+    Write-Host "   drainctl-msg.dll" -ForegroundColor DarkGray
+
 # Compile Windows resource file (icon + version info)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
