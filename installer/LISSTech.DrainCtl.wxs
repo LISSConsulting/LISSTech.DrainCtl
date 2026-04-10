@@ -12,13 +12,6 @@
         <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
 
-        <!--
-            Prevent Restart Manager from cascading service shutdowns during uninstall.
-            The Event Log service holds drainctl-msg.dll loaded (via EventMessageFile),
-            so RM tries to stop EventLog + all its dependents just to release a file lock.
-            Our own ServiceControl handles DrainCtl; if the msg DLL is still locked,
-            Windows Installer schedules it for deletion on reboot automatically.
-        -->
         <SetProperty Id="MSIRMSHUTDOWN" Value="2" Before="InstallValidate"
             Sequence="execute" Condition="REMOVE=&quot;ALL&quot;" />
 
@@ -77,6 +70,25 @@
             Return="check"
             BinaryRef="Wix4UtilCA_X64" />
 
+        <!-- ETW provider registration: wevtutil im on install, wevtutil um on uninstall -->
+        <SetProperty Id="RegisterETWProvider" Before="RegisterETWProvider" Sequence="execute"
+            Value="wevtutil im &quot;[BinFolder]drainctl.man&quot;" />
+        <CustomAction Id="RegisterETWProvider"
+            DllEntry="WixQuietExec"
+            Execute="commit"
+            Impersonate="no"
+            Return="ignore"
+            BinaryRef="Wix4UtilCA_X64" />
+
+        <SetProperty Id="UnregisterETWProvider" Before="UnregisterETWProvider" Sequence="execute"
+            Value="wevtutil um &quot;[BinFolder]drainctl.man&quot;" />
+        <CustomAction Id="UnregisterETWProvider"
+            DllEntry="WixQuietExec"
+            Execute="deferred"
+            Impersonate="no"
+            Return="ignore"
+            BinaryRef="Wix4UtilCA_X64" />
+
         <SetProperty Id="AddEventLogReaders" Before="AddEventLogReaders" Sequence="execute"
             Value="&quot;[BinFolder]drainctl.exe&quot; service grant-eventlog" />
         <CustomAction Id="AddEventLogReaders"
@@ -102,8 +114,14 @@
             <Custom Action="ConfigureNotifyAction"
                 After="ConfigureAction"
                 Condition="NOT REMOVE" />
-            <Custom Action="AddEventLogReaders"
+            <Custom Action="RegisterETWProvider"
                 After="ConfigureNotifyAction"
+                Condition="NOT REMOVE" />
+            <Custom Action="UnregisterETWProvider"
+                After="InstallInitialize"
+                Condition="REMOVE" />
+            <Custom Action="AddEventLogReaders"
+                After="RegisterETWProvider"
                 Condition="NOT REMOVE" />
             <Custom Action="RestartService"
                 After="AddEventLogReaders"
@@ -163,19 +181,22 @@
                 KeyPath="yes" />
         </Component>
 
-        <!-- Event Log message file + source registration (custom "DrainCtl" log) -->
-        <Component Id="EventLogSource" Directory="BinFolder"
+        <!-- ETW provider: manifest + resource DLL for manifest-based ETW -->
+        <Component Id="ETWProvider" Directory="BinFolder"
             Guid="6d88631f-f074-4125-9399-28a349a45bea">
+            <!-- Resource DLL referenced by the manifest (messageFileName / resourceFileName) -->
             <File Id="drainctl_msg.dll"
                 Source="..\assets\drainctl-msg.dll"
                 Name="drainctl-msg.dll"
                 KeyPath="yes" />
-            <RegistryKey Root="HKLM"
-                Key="SYSTEM\CurrentControlSet\Services\EventLog\DrainCtl\DrainCtl">
-                <RegistryValue Name="EventMessageFile" Type="string"
-                    Value="[BinFolder]drainctl-msg.dll" />
-                <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
-            </RegistryKey>
+            <!-- ETW instrumentation manifest — registered via wevtutil im/um -->
+            <File Id="drainctl_man"
+                Source="..\assets\drainctl.man"
+                Name="drainctl.man" />
+            <!-- Remove legacy custom "DrainCtl" event log source on upgrade -->
+            <RemoveRegistryKey Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\EventLog\DrainCtl\DrainCtl"
+                Action="removeOnInstall" />
             <!-- Remove legacy Application log source on upgrade -->
             <RemoveRegistryKey Root="HKLM"
                 Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\DrainCtl"
@@ -271,7 +292,7 @@
         <ComponentGroup Id="AllComponents">
             <ComponentRef Id="MainExe" />
             <ComponentRef Id="MainDll" />
-            <ComponentRef Id="EventLogSource" />
+            <ComponentRef Id="ETWProvider" />
             <ComponentRef Id="DefaultConfig" />
             <ComponentRef Id="DataDirectory" />
             <ComponentRef Id="PSModule" />
