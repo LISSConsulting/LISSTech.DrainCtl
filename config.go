@@ -115,6 +115,7 @@ type PerformanceConfig struct {
 	InputDelayCritMS  int  `json:"input_delay_crit_ms"` // default: 100, -1=disabled
 	CollectRemoteFX   bool `json:"collect_remotefx"`    // default: false
 	CollectPerSession bool `json:"collect_per_session"` // default: true
+	SampleIntervalSec int  `json:"sample_interval_sec"` // default: 30, range 10–300
 }
 
 // Config is the top-level config file structure (config.json).
