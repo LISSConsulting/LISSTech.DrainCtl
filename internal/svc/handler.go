@@ -117,7 +117,9 @@ func (h *elogHandler) WithGroup(_ string) slog.Handler      { return h }
 
 // drainService implements svc.Handler.
 type drainService struct {
-	elog *eventlog.Log
+	elog      *eventlog.Log
+	fileLevel *slog.LevelVar // min level for the file sink
+	elogLevel *slog.LevelVar // min level for the event-log sink
 }
 
 // serviceHandler is the pipe handler bridge between the service state
@@ -481,6 +483,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Warn("config reload failed", "error", err)
 				continue
 			}
+			// Apply log levels before emitting any log messages about the reload.
+			if fl, err := logging.ParseLevel(newFullCfg.LogFileLevel); err == nil {
+				s.fileLevel.Set(fl)
+			}
+			if el, err := logging.ParseLevel(newFullCfg.LogEventLevel); err == nil {
+				s.elogLevel.Set(el)
+			}
 			newCfg := newFullCfg.ToServiceConfig()
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
@@ -629,25 +638,37 @@ func RunService() error {
 	}
 	defer func() { _ = elog.Close() }()
 
-	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 10<<20, 7) // 10 MB, 7 old files
+	// Initialise log level vars from config (fall back to defaults if config
+	// is unavailable — Execute() will re-load config and apply correct values).
 	fileLevel := &slog.LevelVar{}
 	fileLevel.Set(slog.LevelDebug)
 	elogLevel := &slog.LevelVar{}
 	elogLevel.Set(slog.LevelInfo)
+
+	if startCfg, err := dc.LoadConfig(); err == nil {
+		if fl, err := logging.ParseLevel(startCfg.LogFileLevel); err == nil {
+			fileLevel.Set(fl)
+		}
+		if el, err := logging.ParseLevel(startCfg.LogEventLevel); err == nil {
+			elogLevel.Set(el)
+		}
+	}
+
+	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 10<<20, 7) // 10 MB, 7 old files
 	if err != nil {
 		// File log unavailable — fall back to event log only.
 		slog.Warn("file log unavailable, using event log only", "error", err)
 		elogH := newElogHandler(elog, elogLevel)
 		slog.SetDefault(slog.New(elogH))
 		_ = elog.Warning(EvtGenericWarning, fmt.Sprintf("File log unavailable: %v", err))
-		return svc.Run(dc.ServiceName, &drainService{elog: elog})
+		return svc.Run(dc.ServiceName, &drainService{elog: elog, fileLevel: fileLevel, elogLevel: elogLevel})
 	}
 	defer func() { _ = fw.Close() }()
 
 	fileH := logging.NewFileHandler(fw, fileLevel)
 	elogH := newElogHandler(elog, elogLevel)
 	slog.SetDefault(slog.New(logging.NewMultiHandler(fileH, elogH)))
-	return svc.Run(dc.ServiceName, &drainService{elog: elog})
+	return svc.Run(dc.ServiceName, &drainService{elog: elog, fileLevel: fileLevel, elogLevel: elogLevel})
 }
 
 // isLocalDashboard returns true if the dashboard URL points to this machine.

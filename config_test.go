@@ -128,6 +128,68 @@ func TestParseFormat_Invalid(t *testing.T) {
 	}
 }
 
+// ── Validate: LogFileLevel / LogEventLevel ────────────────────────────────────
+
+func TestValidate_LogFileLevelEmpty_UsesDefault(t *testing.T) {
+	c := &Config{LogFileLevel: ""}
+	c.Validate()
+	if c.LogFileLevel != "debug" {
+		t.Errorf("LogFileLevel = %q, want \"debug\"", c.LogFileLevel)
+	}
+}
+
+func TestValidate_LogEventLevelEmpty_UsesDefault(t *testing.T) {
+	c := &Config{LogEventLevel: ""}
+	c.Validate()
+	if c.LogEventLevel != "info" {
+		t.Errorf("LogEventLevel = %q, want \"info\"", c.LogEventLevel)
+	}
+}
+
+func TestValidate_LogFileLevelValid_Preserved(t *testing.T) {
+	for _, lvl := range []string{"debug", "info", "warn", "error"} {
+		c := &Config{LogFileLevel: lvl}
+		c.Validate()
+		if c.LogFileLevel != lvl {
+			t.Errorf("LogFileLevel %q: got %q, want %q", lvl, c.LogFileLevel, lvl)
+		}
+	}
+}
+
+func TestValidate_LogEventLevelValid_Preserved(t *testing.T) {
+	for _, lvl := range []string{"debug", "info", "warn", "error"} {
+		c := &Config{LogEventLevel: lvl}
+		c.Validate()
+		if c.LogEventLevel != lvl {
+			t.Errorf("LogEventLevel %q: got %q, want %q", lvl, c.LogEventLevel, lvl)
+		}
+	}
+}
+
+func TestValidate_LogFileLevelCaseInsensitive(t *testing.T) {
+	c := &Config{LogFileLevel: "WARN"}
+	c.Validate()
+	if c.LogFileLevel != "warn" {
+		t.Errorf("LogFileLevel = %q, want \"warn\"", c.LogFileLevel)
+	}
+}
+
+func TestValidate_LogFileLevelInvalid_UsesDefault(t *testing.T) {
+	c := &Config{LogFileLevel: "verbose"}
+	c.Validate()
+	if c.LogFileLevel != "debug" {
+		t.Errorf("LogFileLevel = %q, want \"debug\" (default after invalid)", c.LogFileLevel)
+	}
+}
+
+func TestValidate_LogEventLevelInvalid_UsesDefault(t *testing.T) {
+	c := &Config{LogEventLevel: "trace"}
+	c.Validate()
+	if c.LogEventLevel != "info" {
+		t.Errorf("LogEventLevel = %q, want \"info\" (default after invalid)", c.LogEventLevel)
+	}
+}
+
 // ── Validate — URL scheme filtering ─────────────────────────────────────────
 
 func TestValidate_StripsInvalidURLSchemes(t *testing.T) {
