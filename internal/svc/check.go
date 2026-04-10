@@ -4,6 +4,7 @@ package svc
 
 import (
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -18,12 +19,12 @@ import (
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary], log dc.LogFunc, elog *eventlog.Log) {
+func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary], elog *eventlog.Log) {
 	checkStart := time.Now()
-	log(dc.LvlDBG, "diag: check=read_drain_mode")
+	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
 	if err != nil {
-		dc.LogMsg(log, dc.LvlERR, "registry read failed", fmt.Sprintf("error=%q", err))
+		slog.Error("registry read failed", "error", err)
 		_ = elog.Error(EvtRegistryFailed, fmt.Sprintf("Failed to read drain mode registry value: %s", err))
 		return
 	}
@@ -35,11 +36,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	if last := st.LastObservation(); last != nil && last.DrainMode != state.Mode {
 		transition = true
 		transitionFrom = last.DrainMode.String()
-		log(dc.LvlWRN,
-			"transition=true",
-			fmt.Sprintf("from=%s", last.DrainMode),
-			fmt.Sprintf("to=%s", state.Mode),
-		)
+		slog.Warn("transition=true", "from", last.DrainMode, "to", state.Mode)
 
 		beforeTransition := time.Now().Add(-5 * time.Second)
 
@@ -55,7 +52,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 			}
 		}
 		if changedBy != "" {
-			log(dc.LvlINF, fmt.Sprintf("changed_by=%s", changedBy))
+			slog.Info("changed_by", "user", changedBy)
 		}
 	}
 
@@ -74,22 +71,22 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	status, message, exitCode = dc.ClassifyState(drainActive, stateDur, cfg.GracePeriod)
 
 	// Session tracking.
-	log(dc.LvlDBG, "diag: check=get_sessions")
+	slog.Debug("diag: check=get_sessions")
 	sess := dc.GetSessionSummary()
 	if sess == nil {
-		dc.LogMsg(log, dc.LvlWRN, "session enumeration failed", "hint=\"verify service runs as LocalSystem\"")
+		slog.Warn("session enumeration failed", "hint", "verify service runs as LocalSystem")
 	}
 	if lastSessions != nil {
 		lastSessions.Store(sess)
 	}
 
 	// Performance counters (service-mode only).
-	log(dc.LvlDBG, fmt.Sprintf("diag: check=perfmon collector_nil=%v", perfCollector == nil))
+	slog.Debug("diag: check=perfmon", "collector_nil", perfCollector == nil)
 	var perfSnap *dc.PerfSnapshot
 	if perfCollector != nil {
 		snap, err := perfCollector.Collect()
 		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "perfmon collect failed", fmt.Sprintf("error=%q", err))
+			slog.Warn("perfmon collect failed", "error", err)
 		} else {
 			perfSnap = snap
 			if lastPerf != nil {
@@ -123,12 +120,12 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		rec.TCPRetransSec = perfSnap.TCPRetrans
 	}
 	st.Append(rec)
-	log(dc.LvlDBG, "diag: check=audit_appended")
+	slog.Debug("diag: check=audit_appended")
 
 	if state.Mode == dc.AllowAll {
-		log(dc.LvlINF, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
+		slog.Info("drain_mode", "mode", state.Mode, "exit", exitCode)
 	} else {
-		log(dc.LvlWRN, fmt.Sprintf("drain_mode=%s", state.Mode), fmt.Sprintf("exit=%d", exitCode))
+		slog.Warn("drain_mode", "mode", state.Mode, "exit", exitCode)
 	}
 
 	// Write state-specific event log entries.
@@ -187,7 +184,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 
 	// Determine triggers and send notifications.
-	log(dc.LvlDBG, fmt.Sprintf("diag: check=notifications targets=%d", len(targets)))
+	slog.Debug("diag: check=notifications", "targets", len(targets))
 	if len(targets) > 0 {
 		var triggers []dc.Trigger
 
@@ -234,31 +231,26 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		}
 
 		for _, trigger := range triggers {
-			dc.SendNotification(targets, notifyState, result, trigger, changedBy, log)
+			dc.SendNotification(targets, notifyState, result, trigger, changedBy)
 		}
 	}
 
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
-		log(dc.LvlDBG, fmt.Sprintf("diag: check=dashboard_report url=%s", dashCfg.URL))
+		slog.Debug("diag: check=dashboard_report", "url", dashCfg.URL)
 		if dashState != nil {
 			if dashState.ReportLocal(result.Host, result) {
-				log(dc.LvlDBG, "msg=\"dashboard heartbeat (local)\"", fmt.Sprintf("host=%s", result.Host))
+				slog.Debug("dashboard heartbeat (local)", "host", result.Host)
 			} else {
-				log(dc.LvlWRN, "msg=\"dashboard heartbeat (local): host not registered\"", fmt.Sprintf("host=%s", result.Host))
+				slog.Warn("dashboard heartbeat (local): host not registered", "host", result.Host)
 			}
 		} else {
-			log(dc.LvlDBG, "msg=\"dashboard heartbeat sending\"", fmt.Sprintf("url=%s", dashCfg.URL))
-			dashboard.ReportState(dashCfg.URL, result, log)
+			slog.Debug("dashboard heartbeat sending", "url", dashCfg.URL)
+			dashboard.ReportState(dashCfg.URL, result)
 		}
 	}
 
-	log(dc.LvlDBG,
-		"msg=\"poll tick\"",
-		fmt.Sprintf("mode=%s", state.Mode),
-		fmt.Sprintf("status=%s", status),
-		fmt.Sprintf("elapsed=%s", time.Since(checkStart).Truncate(time.Microsecond)),
-	)
+	slog.Debug("poll tick", "mode", state.Mode, "status", status, "elapsed", time.Since(checkStart).Truncate(time.Microsecond))
 }
 
 // pruneNotifyState removes per-URL entries from state that no longer correspond

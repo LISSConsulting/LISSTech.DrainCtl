@@ -18,7 +18,7 @@ import (
 func newHandlerStore(t *testing.T) (*serviceHandler, *store.MemAuditStore) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	st, err := store.OpenMemAuditStore(path, dc.DiscardLogger())
+	st, err := store.OpenMemAuditStore(path)
 	if err != nil {
 		t.Fatalf("OpenMemAuditStore: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSyncPerfCollector_NoChangeIsNoop(t *testing.T) {
 	snap := &dc.PerfSnapshot{CPUPct: 42}
 	lastPerf.Store(snap)
 
-	changed := syncPerfCollector(cfg, cfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	changed := syncPerfCollector(cfg, cfg, &collector, &triggerState, &lastPerf)
 	if changed {
 		t.Error("syncPerfCollector returned changed=true for identical configs")
 	}
@@ -101,7 +101,7 @@ func TestSyncPerfCollector_DisableClearsLastPerf(t *testing.T) {
 	// Simulate cached snapshot from when perfmon was enabled.
 	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
 
-	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf)
 	if !changed {
 		t.Error("syncPerfCollector returned changed=false when disabling perfmon")
 	}
@@ -119,7 +119,7 @@ func TestSyncPerfCollector_ThresholdChangeClearsLastPerf(t *testing.T) {
 
 	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
 
-	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf, dc.DiscardLogger())
+	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf)
 	if !changed {
 		t.Error("syncPerfCollector returned changed=false when thresholds changed")
 	}

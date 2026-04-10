@@ -5,14 +5,13 @@ package dashboard
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/negotiate"
 	"golang.org/x/sys/windows"
@@ -48,7 +47,7 @@ type pendingCtx struct {
 // authentication. Supports multi-leg NTLM by keying pending contexts on the
 // TCP connection's remote address (preserved across HTTP/1.1 keep-alive).
 // The ctx parameter controls the lifetime of the background reaper goroutine.
-func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc) http.Handler {
+func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 	var pending sync.Map // remoteAddr → *pendingCtx
 
 	// Reap stale contexts; exits when ctx is cancelled.
@@ -93,7 +92,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc)
 		tokenB64 := strings.TrimPrefix(authHeader, "Negotiate ")
 		token, err := base64.StdEncoding.DecodeString(tokenB64)
 		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "sspi: bad base64 token", fmt.Sprintf("error=%q", err))
+			slog.Warn("sspi: bad base64 token", "error", err)
 			http.Error(w, "invalid token", http.StatusBadRequest)
 			return
 		}
@@ -115,7 +114,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc)
 			if err != nil {
 				_ = sc.Release()
 				_ = cred.Release()
-				dc.LogMsg(log, dc.LvlWRN, "sspi: negotiate leg2 failed", fmt.Sprintf("error=%q", err))
+				slog.Warn("sspi: negotiate leg2 failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
 				return
@@ -124,14 +123,14 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc)
 			// First leg: create new context.
 			cred, err = negotiate.AcquireServerCredentials("")
 			if err != nil {
-				dc.LogMsg(log, dc.LvlERR, "sspi: acquire credentials failed", fmt.Sprintf("error=%q", err))
+				slog.Error("sspi: acquire credentials failed", "error", err)
 				http.Error(w, "server auth error", http.StatusInternalServerError)
 				return
 			}
 			sc, authDone, responseToken, err = negotiate.NewServerContext(cred, token)
 			if err != nil {
 				_ = cred.Release()
-				dc.LogMsg(log, dc.LvlWRN, "sspi: negotiate failed", fmt.Sprintf("error=%q", err))
+				slog.Warn("sspi: negotiate failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
 				return
@@ -162,12 +161,12 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc)
 
 		// Extract username and groups by impersonating. GetUsername() doesn't
 		// work for NTLM contexts, so we always use the impersonation path.
-		username, groups := extractIdentity(sc, log)
+		username, groups := extractIdentity(sc)
 		if username == "" {
 			http.Error(w, "auth error", http.StatusUnauthorized)
 			return
 		}
-		dc.LogMsg(log, dc.LvlDBG, "sspi: negotiate complete", fmt.Sprintf("user=%s", username))
+		slog.Debug("sspi: negotiate complete", "user", username)
 
 		info := &AuthInfo{Username: username, Groups: groups}
 		ctx := context.WithValue(r.Context(), authInfoKey, info)
@@ -178,12 +177,12 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler, log dc.LogFunc)
 // extractIdentity impersonates the SSPI client on the current OS thread,
 // reads the username and group memberships from the thread token, then reverts.
 // Works for both Kerberos and NTLM contexts.
-func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []string) {
+func extractIdentity(sc *negotiate.ServerContext) (string, []string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	if err := sc.ImpersonateUser(); err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: impersonate failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("sspi: impersonate failed", "error", err)
 		return "", nil
 	}
 	defer func() { _ = sc.RevertToSelf() }()
@@ -196,7 +195,7 @@ func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []str
 		&token,
 	)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: open thread token failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("sspi: open thread token failed", "error", err)
 		return "", nil
 	}
 	defer func() { _ = token.Close() }()
@@ -204,12 +203,12 @@ func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []str
 	// Get username from the token's user SID.
 	tokenUser, err := token.GetTokenUser()
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: get token user failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("sspi: get token user failed", "error", err)
 		return "", nil
 	}
 	userName, domainName, _, err := tokenUser.User.Sid.LookupAccount("")
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: lookup account failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("sspi: lookup account failed", "error", err)
 		return "", nil
 	}
 	username := userName
@@ -220,7 +219,7 @@ func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []str
 	// Get groups from the token.
 	tokenGroups, err := token.GetTokenGroups()
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "sspi: get token groups failed", fmt.Sprintf("user=%s error=%q", username, err))
+		slog.Warn("sspi: get token groups failed", "user", username, "error", err)
 		return username, nil
 	}
 
@@ -241,7 +240,7 @@ func extractIdentity(sc *negotiate.ServerContext, log dc.LogFunc) (string, []str
 
 // RequireGroup wraps an http.Handler and rejects requests where the
 // authenticated user is not a member of the specified Windows group.
-func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler {
+func RequireGroup(group string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := GetAuthInfo(r)
 		if auth == nil {
@@ -263,8 +262,7 @@ func RequireGroup(group string, next http.Handler, log dc.LogFunc) http.Handler 
 		}
 
 		if !found {
-			dc.LogMsg(log, dc.LvlWRN, "sspi: access denied",
-				fmt.Sprintf("user=%s group=%s", auth.Username, group))
+			slog.Warn("sspi: access denied", "user", auth.Username, "group", group)
 			http.Error(w, "access denied: not a member of "+group, http.StatusForbidden)
 			return
 		}

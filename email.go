@@ -77,7 +77,7 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 }
 
 // sendEmail sends an HTML notification email via SMTP.
-func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, changedBy string, log LogFunc) error {
+func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, changedBy string) error {
 	subject := NotificationSubject(result, trigger, changedBy)
 
 	html, err := renderEmailHTML(result, subject, trigger, changedBy)

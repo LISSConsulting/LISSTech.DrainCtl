@@ -5,6 +5,7 @@ package drainctl
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -243,8 +244,8 @@ func (c *Config) HasTargets() bool {
 // ── Validation ──────────────────────────────────────────────────────────
 
 // Validate clamps and corrects config values in place.
-func (c *Config) Validate(log LogFunc) {
-	c.RetentionDays = ClampRetention(c.RetentionDays, log)
+func (c *Config) Validate() {
+	c.RetentionDays = ClampRetention(c.RetentionDays)
 
 	if c.GracePeriod < 1 || c.GracePeriod > 1440 {
 		c.GracePeriod = DefaultGracePeriod
@@ -273,10 +274,7 @@ func (c *Config) Validate(log LogFunc) {
 	// A target with an unrecognised type would silently never fire — reject it early.
 	c.Notifications = slices.DeleteFunc(c.Notifications, func(t NotificationTarget) bool {
 		if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
-			if log != nil {
-				LogMsg(log, LvlWRN, "notification target has unknown type, ignored",
-					fmt.Sprintf("type=%q url=%s", t.Type, t.URL))
-			}
+			slog.Default().Warn("notification target has unknown type, ignored", "type", t.Type, "url", t.URL)
 			return true
 		}
 		return false
@@ -291,10 +289,7 @@ func (c *Config) Validate(log LogFunc) {
 		validScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
 			strings.HasPrefix(lower, "smtp://") || strings.HasPrefix(lower, "smtps://")
 		if !validScheme {
-			if log != nil {
-				LogMsg(log, LvlWRN, "notification target has invalid URL scheme, ignored",
-					fmt.Sprintf("url=%s", t.URL))
-			}
+			slog.Default().Warn("notification target has invalid URL scheme, ignored", "url", t.URL)
 			return true
 		}
 		return false
@@ -308,9 +303,7 @@ func (c *Config) Validate(log LogFunc) {
 		} else {
 			c.Notifications[i].Triggers = slices.DeleteFunc(c.Notifications[i].Triggers, func(tr Trigger) bool {
 				if !ValidTriggers[tr] {
-					if log != nil {
-						LogMsg(log, LvlWRN, "unknown trigger ignored", fmt.Sprintf("trigger=%s url=%s", tr, c.Notifications[i].URL))
-					}
+					slog.Default().Warn("unknown trigger ignored", "trigger", tr, "url", c.Notifications[i].URL)
 					return true
 				}
 				return false
@@ -332,45 +325,29 @@ func (c *Config) Validate(log LogFunc) {
 		}
 		lower := strings.ToLower(t.URL)
 		if !strings.HasPrefix(lower, "smtp://") && !strings.HasPrefix(lower, "smtps://") {
-			if log != nil {
-				LogMsg(log, LvlWRN, "email target requires smtp:// or smtps:// URL, ignored",
-					fmt.Sprintf("url=%s", t.URL))
-			}
+			slog.Default().Warn("email target requires smtp:// or smtps:// URL, ignored", "url", t.URL)
 			t.URL = ""
 		}
 		if t.From == "" {
-			if log != nil {
-				LogMsg(log, LvlWRN, "email target missing 'from' address, ignored",
-					fmt.Sprintf("url=%s", t.URL))
-			}
+			slog.Default().Warn("email target missing 'from' address, ignored", "url", t.URL)
 			t.URL = ""
 		}
 		if len(t.To) == 0 {
-			if log != nil {
-				LogMsg(log, LvlWRN, "email target missing 'to' addresses, ignored",
-					fmt.Sprintf("url=%s", t.URL))
-			}
+			slog.Default().Warn("email target missing 'to' addresses, ignored", "url", t.URL)
 			t.URL = ""
 		}
 	}
 }
 
 // ClampRetention enforces the retention boundary (1-365 days). Values
-// outside the range are clamped and a warning is logged. Pass nil for log
-// to clamp silently.
-func ClampRetention(days int, log LogFunc) int {
+// outside the range are clamped and a warning is logged.
+func ClampRetention(days int) int {
 	if days < MinRetentionDays {
-		if log != nil {
-			LogMsg(log, LvlWRN, "retention below minimum, clamping",
-				fmt.Sprintf("requested=%d min=%d", days, MinRetentionDays))
-		}
+		slog.Default().Warn("retention below minimum, clamping", "requested", days, "min", MinRetentionDays)
 		return MinRetentionDays
 	}
 	if days > MaxRetentionDays {
-		if log != nil {
-			LogMsg(log, LvlWRN, "retention exceeds maximum, clamping",
-				fmt.Sprintf("requested=%d max=%d", days, MaxRetentionDays))
-		}
+		slog.Default().Warn("retention exceeds maximum, clamping", "requested", days, "max", MaxRetentionDays)
 		return MaxRetentionDays
 	}
 	return days
@@ -381,7 +358,7 @@ func ClampRetention(days int, log LogFunc) int {
 // LoadConfig reads config.json from the default path. If the file does not
 // exist it attempts a one-time migration from registry values. If the
 // registry has no config either, a default config is written and returned.
-func LoadConfig(log LogFunc) (*Config, error) {
+func LoadConfig() (*Config, error) {
 	path := DefaultConfigPath()
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -389,7 +366,7 @@ func LoadConfig(log LogFunc) (*Config, error) {
 		if err := json.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
-		cfg.Validate(log)
+		cfg.Validate()
 		return cfg, nil
 	}
 
@@ -398,29 +375,29 @@ func LoadConfig(log LogFunc) (*Config, error) {
 	}
 
 	// File does not exist — try migration from registry.
-	if cfg, migErr := MigrateFromRegistry(log); migErr == nil {
+	if cfg, migErr := MigrateFromRegistry(); migErr == nil {
 		return cfg, nil
 	}
 
 	// No registry config either — fresh install.
 	cfg := DefaultConfig()
-	if err := saveConfigToFile(cfg, log); err != nil {
+	if err := saveConfigToFile(cfg); err != nil {
 		return nil, fmt.Errorf("write default config: %w", err)
 	}
-	LogMsg(log, LvlINF, "default config written", "path="+path)
+	slog.Default().Info("default config written", "path", path)
 	return cfg, nil
 }
 
 // SaveConfig writes the full config to disk. Only admin/CLI/service callers
 // should use this. Dashboard API should use scoped updaters instead.
-func SaveConfig(cfg *Config, log LogFunc) error {
-	cfg.Validate(log)
-	return saveConfigToFile(cfg, log)
+func SaveConfig(cfg *Config) error {
+	cfg.Validate()
+	return saveConfigToFile(cfg)
 }
 
 // saveConfigToFile atomically writes config.json using a named mutex for
 // cross-process serialization.
-func saveConfigToFile(cfg *Config, log LogFunc) error {
+func saveConfigToFile(cfg *Config) error {
 	path := DefaultConfigPath()
 	tmpPath := path + ".tmp"
 
@@ -522,60 +499,60 @@ func isElevated() bool {
 
 // UpdateNotifications replaces the notification targets in config.json.
 // This is the only way the dashboard API should modify notifications.
-func UpdateNotifications(targets []NotificationTarget, log LogFunc) error {
-	cfg, err := LoadConfig(log)
+func UpdateNotifications(targets []NotificationTarget) error {
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.Notifications = targets
-	cfg.Validate(log)
-	return saveConfigToFile(cfg, log)
+	cfg.Validate()
+	return saveConfigToFile(cfg)
 }
 
 // UpdateSessionThreshold sets the session warning threshold in config.json.
 // This is the only way the dashboard API should modify the threshold.
-func UpdateSessionThreshold(pct int, log LogFunc) error {
+func UpdateSessionThreshold(pct int) error {
 	if pct < 0 || pct > 100 {
 		return fmt.Errorf("threshold must be 0-100, got %d", pct)
 	}
-	cfg, err := LoadConfig(log)
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.SessionWarningThreshold = pct
-	return saveConfigToFile(cfg, log)
+	return saveConfigToFile(cfg)
 }
 
 // UpdateGracePeriod sets the grace period (minutes) in config.json.
-func UpdateGracePeriod(minutes int, log LogFunc) error {
+func UpdateGracePeriod(minutes int) error {
 	if minutes < 1 || minutes > 1440 {
 		return fmt.Errorf("grace period must be 1-1440 minutes, got %d", minutes)
 	}
-	cfg, err := LoadConfig(log)
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.GracePeriod = minutes
-	return saveConfigToFile(cfg, log)
+	return saveConfigToFile(cfg)
 }
 
 // UpdatePerformanceConfig replaces the performance monitoring settings in config.json.
-func UpdatePerformanceConfig(perf PerformanceConfig, log LogFunc) error {
-	cfg, err := LoadConfig(log)
+func UpdatePerformanceConfig(perf PerformanceConfig) error {
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.Performance = perf
-	cfg.Validate(log)
-	return saveConfigToFile(cfg, log)
+	cfg.Validate()
+	return saveConfigToFile(cfg)
 }
 
 // UpdateNotifySettings atomically updates notification targets, session warning
 // threshold, and/or grace period in a single config load+save cycle.
 // Any nil argument is left unchanged. This is the preferred API for the
 // dashboard PUT /api/v1/notify-config handler.
-func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, log LogFunc) error {
-	cfg, err := LoadConfig(log)
+func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int) error {
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -594,14 +571,14 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 		}
 		cfg.GracePeriod = *gracePeriod
 	}
-	cfg.Validate(log)
-	return saveConfigToFile(cfg, log)
+	cfg.Validate()
+	return saveConfigToFile(cfg)
 }
 
 // InstallCertificate copies a PEM cert and key into the data directory and
 // updates config.json so the dashboard uses them. The key file is written
 // with restrictive permissions (0600).
-func InstallCertificate(certPath, keyPath string, log LogFunc) error {
+func InstallCertificate(certPath, keyPath string) error {
 	// Verify source files.
 	for _, f := range []string{certPath, keyPath} {
 		if _, err := os.Stat(f); err != nil {
@@ -629,13 +606,13 @@ func InstallCertificate(certPath, keyPath string, log LogFunc) error {
 		return fmt.Errorf("write key: %w", err)
 	}
 
-	cfg, err := LoadConfig(log)
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	cfg.Dashboard.TLSCert = dstCert
 	cfg.Dashboard.TLSKey = dstKey
-	return saveConfigToFile(cfg, log)
+	return saveConfigToFile(cfg)
 }
 
 // ── Registry migration ──────────────────────────────────────────────────
@@ -643,7 +620,7 @@ func InstallCertificate(certPath, keyPath string, log LogFunc) error {
 // MigrateFromRegistry reads the old registry-based config and writes it to
 // config.json. Returns the migrated config. Called automatically by
 // LoadConfig when config.json does not exist.
-func MigrateFromRegistry(log LogFunc) (*Config, error) {
+func MigrateFromRegistry() (*Config, error) {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, ParametersKeyPath, registry.QUERY_VALUE)
 	if err != nil {
 		return nil, fmt.Errorf("open registry: %w", err)
@@ -726,13 +703,13 @@ func MigrateFromRegistry(log LogFunc) (*Config, error) {
 		cfg.Dashboard.URL = v
 	}
 
-	cfg.Validate(log)
+	cfg.Validate()
 
-	if err := saveConfigToFile(cfg, log); err != nil {
+	if err := saveConfigToFile(cfg); err != nil {
 		return nil, fmt.Errorf("write migrated config: %w", err)
 	}
 
-	LogMsg(log, LvlINF, "config migrated from registry to config.json", "path="+DefaultConfigPath())
+	slog.Default().Info("config migrated from registry to config.json", "path", DefaultConfigPath())
 	return cfg, nil
 }
 
@@ -741,7 +718,7 @@ func MigrateFromRegistry(log LogFunc) (*Config, error) {
 // WriteDefaultParameters creates the Parameters registry key with default
 // values if it doesn't already exist. Kept for backwards compatibility
 // during the transition period — new installs use config.json instead.
-func WriteDefaultParameters(log LogFunc) error {
+func WriteDefaultParameters() error {
 	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, ParametersKeyPath, registry.SET_VALUE)
 	if err != nil {
 		return err
@@ -790,6 +767,6 @@ func WriteDefaultParameters(log LogFunc) error {
 		_ = key.SetStringValue("DashboardURL", "")
 	}
 
-	log(LvlINF, "parameters=defaults_written", "path="+ParametersKeyPath)
+	slog.Info("", "parameters", "defaults_written", "path", ParametersKeyPath)
 	return nil
 }

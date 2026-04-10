@@ -13,14 +13,13 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
-
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // loadOrGenerateTLS returns a tls.Config for the dashboard.
@@ -28,14 +27,14 @@ import (
 // If certFile and keyFile are both set, it loads the user-provided PEM files.
 // Otherwise, it auto-generates a self-signed certificate and stores it in
 // dataDir for reuse across restarts.
-func loadOrGenerateTLS(certFile, keyFile, dataDir string, log dc.LogFunc) (*tls.Config, error) {
+func loadOrGenerateTLS(certFile, keyFile, dataDir string) (*tls.Config, error) {
 	// Option B: user-provided certificate.
 	if certFile != "" && keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("load TLS cert/key: %w", err)
 		}
-		log(dc.LvlINF, fmt.Sprintf("dashboard=tls cert=%s key=%s", certFile, keyFile))
+		slog.Info("dashboard=tls", "cert", certFile, "key", keyFile)
 		return &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
@@ -51,7 +50,8 @@ func loadOrGenerateTLS(certFile, keyFile, dataDir string, log dc.LogFunc) (*tls.
 		if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
 			if time.Now().Before(leaf.NotAfter.Add(-24 * time.Hour)) {
 				fp := certFingerprint(leaf)
-				log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert reused (expires %s fingerprint=%s)", leaf.NotAfter.Format("2006-01-02"), fp))
+				slog.Info("dashboard=tls auto-cert reused",
+					"expires", leaf.NotAfter.Format("2006-01-02"), "fingerprint", fp)
 				return &tls.Config{
 					Certificates: []tls.Certificate{cert},
 					MinVersion:   tls.VersionTLS12,
@@ -61,7 +61,7 @@ func loadOrGenerateTLS(certFile, keyFile, dataDir string, log dc.LogFunc) (*tls.
 	}
 
 	// Generate new self-signed cert.
-	cert, err := generateSelfSigned(autoCert, autoKey, log)
+	cert, err := generateSelfSigned(autoCert, autoKey)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func CertFingerprint(dataDir string) (string, error) {
 	return certFingerprint(cert), nil
 }
 
-func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certificate, error) {
+func generateSelfSigned(certPath, keyPath string) (tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate TLS key: %w", err)
@@ -161,7 +161,7 @@ func generateSelfSigned(certPath, keyPath string, log dc.LogFunc) (tls.Certifica
 	if leaf != nil {
 		fp = certFingerprint(leaf)
 	}
-	log(dc.LvlINF, fmt.Sprintf("dashboard=tls auto-cert generated host=%s fingerprint=%s cert=%s", hostname, fp, certPath))
+	slog.Info("dashboard=tls auto-cert generated", "host", hostname, "fingerprint", fp, "cert", certPath)
 
 	return tls.LoadX509KeyPair(certPath, keyPath)
 }

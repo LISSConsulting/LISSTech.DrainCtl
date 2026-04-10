@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,17 +27,12 @@ type MemAuditStore struct {
 	file    *os.File
 	handle  windows.Handle
 	path    string
-	log     dc.LogFunc
 }
 
 // OpenMemAuditStore opens the JSONL file with an exclusive lock, loads all
 // records into memory, and returns the store. If the file doesn't exist it
 // is created. Returns an error if another process holds the lock.
-func OpenMemAuditStore(path string, log dc.LogFunc) (*MemAuditStore, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
+func OpenMemAuditStore(path string) (*MemAuditStore, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create audit directory: %w", err)
@@ -68,7 +64,6 @@ func OpenMemAuditStore(path string, log dc.LogFunc) (*MemAuditStore, error) {
 		file:   f,
 		handle: h,
 		path:   path,
-		log:    log,
 	}
 
 	// Load existing records.
@@ -77,7 +72,7 @@ func OpenMemAuditStore(path string, log dc.LogFunc) (*MemAuditStore, error) {
 		return nil, fmt.Errorf("load audit file: %w", err)
 	}
 
-	log(dc.LvlINF, fmt.Sprintf("memstore=open records=%d path=%s", len(m.records), path))
+	slog.Info("memstore=open", "records", len(m.records), "path", path)
 	return m, nil
 }
 
@@ -228,7 +223,7 @@ func (m *MemAuditStore) flushLocked() error {
 	}
 
 	m.dirty = 0
-	m.log(dc.LvlINF, fmt.Sprintf("memstore=flushed records=%d", len(m.records)-start))
+	slog.Info("memstore=flushed", "records", len(m.records)-start)
 	return nil
 }
 
@@ -275,7 +270,7 @@ func (m *MemAuditStore) Prune(retention time.Duration) (int64, error) {
 
 	m.records = kept
 	m.dirty = 0
-	m.log(dc.LvlINF, fmt.Sprintf("memstore=pruned removed=%d remaining=%d", pruned, len(kept)))
+	slog.Info("memstore=pruned", "removed", pruned, "remaining", len(kept))
 	return pruned, nil
 }
 

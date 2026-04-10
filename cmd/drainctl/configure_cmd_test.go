@@ -41,15 +41,11 @@ func TestRunConfigureFlags_GracePeriodChanged(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--grace-period=30"})
-	var lc logCapture
-	if err := runConfigureFlags(cmd, cfg, lc.logFunc); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.GracePeriod != 30 {
 		t.Errorf("GracePeriod = %d, want 30", cfg.GracePeriod)
-	}
-	if !lc.contains("configure=done") {
-		t.Errorf("expected 'configure=done' in log, got %v", lc.lines)
 	}
 }
 
@@ -61,7 +57,7 @@ func TestRunConfigureFlags_GracePeriodUnchanged(t *testing.T) {
 	cfg := dc.DefaultConfig()
 	cfg.GracePeriod = 45
 	cmd := flagsCmd(t, []string{}) // no flags changed
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.GracePeriod != 45 {
@@ -77,7 +73,7 @@ func TestRunConfigureFlags_DashboardMode_EnablesDashboard(t *testing.T) {
 	cfg := dc.DefaultConfig()
 	cfg.Dashboard.Enabled = false
 	cmd := flagsCmd(t, []string{"--mode=dashboard"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if !cfg.Dashboard.Enabled {
@@ -92,7 +88,7 @@ func TestRunConfigureFlags_DashboardMode_SetsPort(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--mode=dashboard", "--dashboard-port=8443"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.Dashboard.Port != 8443 {
@@ -107,7 +103,7 @@ func TestRunConfigureFlags_DashboardMode_SetsGroup(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--mode=dashboard", "--dashboard-group=IT Admins"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.Dashboard.Group != "IT Admins" {
@@ -122,7 +118,7 @@ func TestRunConfigureFlags_RegistrationMode_SetsDashboardURL(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--mode=registration", "--dashboard-url=https://dash.example.com:49470"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.Dashboard.URL != "https://dash.example.com:49470" {
@@ -137,7 +133,7 @@ func TestRunConfigureFlags_WebhookURL_UpsertTarget(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--webhook-url=https://hook.example.com/"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if len(cfg.Notifications) == 0 {
@@ -155,7 +151,7 @@ func TestRunConfigureFlags_NtfyURL_UpsertTarget(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--ntfy-url=https://ntfy.sh/alerts"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if len(cfg.Notifications) == 0 {
@@ -173,7 +169,7 @@ func TestRunConfigureFlags_AutoPin_SetsPointer(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--auto-pin=true"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.Dashboard.AutoPin == nil {
@@ -195,7 +191,7 @@ func TestRunConfigureFlags_ServiceSettings(t *testing.T) {
 		"--retention-days=180",
 		"--session-warning-threshold=90",
 	})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err != nil {
+	if err := runConfigureFlags(cmd, cfg); err != nil {
 		t.Fatalf("runConfigureFlags: %v", err)
 	}
 	if cfg.PollInterval != 600 {
@@ -225,7 +221,7 @@ func TestRunConfigureFlags_SaveError_ReturnsError(t *testing.T) {
 
 	cfg := dc.DefaultConfig()
 	cmd := flagsCmd(t, []string{"--grace-period=30"})
-	if err := runConfigureFlags(cmd, cfg, dc.DiscardLogger()); err == nil {
+	if err := runConfigureFlags(cmd, cfg); err == nil {
 		t.Fatal("expected SaveConfig error, got nil")
 	}
 }

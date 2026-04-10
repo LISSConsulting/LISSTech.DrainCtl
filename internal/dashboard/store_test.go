@@ -3,7 +3,9 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,10 +16,40 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
+// captureErrLog installs a temporary slog handler that records whether any
+// ERROR-level records were emitted. Returns a cleanup func and a pointer to
+// the captured flag. The previous default logger is restored on cleanup.
+func captureErrLog(t *testing.T) *bool {
+	t.Helper()
+	prev := slog.Default()
+	var got bool
+	slog.SetDefault(slog.New(&errCapHandler{flag: &got}))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &got
+}
+
+// errCapHandler is a minimal slog.Handler that sets *flag when an ERROR-level
+// record is received. It does NOT forward to any other handler to avoid the
+// log.Logger mutex re-entrancy deadlock that occurs when the default slog
+// handler routes back through log.Logger while that mutex is already held.
+type errCapHandler struct {
+	flag *bool
+}
+
+func (h *errCapHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *errCapHandler) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError {
+		*h.flag = true
+	}
+	return nil
+}
+func (h *errCapHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *errCapHandler) WithGroup(_ string) slog.Handler      { return h }
+
 // ── NewServerState ────────────────────────────────────────────────────────────
 
 func TestNewServerState_EmptyDir(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	if got := s.All(); len(got) != 0 {
 		t.Errorf("All() = %d servers, want 0 for empty dir", len(got))
 	}
@@ -25,12 +57,12 @@ func TestNewServerState_EmptyDir(t *testing.T) {
 
 func TestNewServerState_LoadsExistingFile(t *testing.T) {
 	dir := t.TempDir()
-	s1 := NewServerState(dir, nil)
+	s1 := NewServerState(dir)
 	s1.Register("SRV01")
 	s1.Register("SRV02")
 
 	// Second instance reads the same file.
-	s2 := NewServerState(dir, nil)
+	s2 := NewServerState(dir)
 	all := s2.All()
 	if len(all) != 2 {
 		t.Fatalf("loaded state has %d servers, want 2", len(all))
@@ -42,7 +74,7 @@ func TestNewServerState_IgnoresMissingFile(t *testing.T) {
 	// Remove any file that might exist.
 	_ = os.Remove(filepath.Join(dir, "servers.json"))
 
-	s := NewServerState(dir, nil)
+	s := NewServerState(dir)
 	if len(s.All()) != 0 {
 		t.Error("expected empty state when servers.json is absent")
 	}
@@ -53,7 +85,7 @@ func TestNewServerState_IgnoresCorruptFile(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "servers.json"), []byte("not json {{{"), 0o644)
 
 	// Must not panic or return an error — simply starts empty.
-	s := NewServerState(dir, nil)
+	s := NewServerState(dir)
 	if len(s.All()) != 0 {
 		t.Error("expected empty state when servers.json is corrupt")
 	}
@@ -62,7 +94,7 @@ func TestNewServerState_IgnoresCorruptFile(t *testing.T) {
 // ── Register ──────────────────────────────────────────────────────────────────
 
 func TestRegister_AddsServer(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	if !s.IsRegistered("SRV01") {
@@ -72,7 +104,7 @@ func TestRegister_AddsServer(t *testing.T) {
 
 func TestRegister_SetsRegisteredAt(t *testing.T) {
 	before := time.Now()
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	all := s.All()
@@ -85,7 +117,7 @@ func TestRegister_SetsRegisteredAt(t *testing.T) {
 }
 
 func TestRegister_Idempotent(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	original := s.All()[0].RegisteredAt
 
@@ -105,7 +137,7 @@ func TestRegister_Idempotent(t *testing.T) {
 // ── Remove ────────────────────────────────────────────────────────────────────
 
 func TestRemove_KnownHostReturnsTrue(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	if !s.Remove("SRV01") {
@@ -117,7 +149,7 @@ func TestRemove_KnownHostReturnsTrue(t *testing.T) {
 }
 
 func TestRemove_UnknownHostReturnsFalse(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 
 	if s.Remove("GHOST") {
 		t.Error("Remove() should return false for an unknown host")
@@ -125,7 +157,7 @@ func TestRemove_UnknownHostReturnsFalse(t *testing.T) {
 }
 
 func TestRemove_OnlyRemovesTargetServer(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	s.Register("SRV02")
 
@@ -140,7 +172,7 @@ func TestRemove_OnlyRemovesTargetServer(t *testing.T) {
 }
 
 func TestRemove_ClearsHistoryRing(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
@@ -158,7 +190,7 @@ func TestRemove_ClearsHistoryRing(t *testing.T) {
 // ── IsRegistered ──────────────────────────────────────────────────────────────
 
 func TestIsRegistered_TrueForRegistered(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	if !s.IsRegistered("SRV01") {
 		t.Error("IsRegistered() should return true for a registered host")
@@ -166,7 +198,7 @@ func TestIsRegistered_TrueForRegistered(t *testing.T) {
 }
 
 func TestIsRegistered_FalseForUnknown(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	if s.IsRegistered("NOBODY") {
 		t.Error("IsRegistered() should return false for an unknown host")
 	}
@@ -175,7 +207,7 @@ func TestIsRegistered_FalseForUnknown(t *testing.T) {
 // ── Update ────────────────────────────────────────────────────────────────────
 
 func TestUpdate_SetsLastResult(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	result := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
@@ -191,7 +223,7 @@ func TestUpdate_SetsLastResult(t *testing.T) {
 }
 
 func TestUpdate_SetsLastSeen(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	before := time.Now()
 
@@ -204,7 +236,7 @@ func TestUpdate_SetsLastSeen(t *testing.T) {
 }
 
 func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	// Update a host that was never registered → no panic, All() still empty.
 	s.Update("GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
 
@@ -216,14 +248,14 @@ func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
 // ── HostHistory ───────────────────────────────────────────────────────────────
 
 func TestHostHistory_EmptyForUnknownHost(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	if h := s.HostHistory("GHOST", 10); h != nil {
 		t.Errorf("HostHistory for unknown host = %v, want nil", h)
 	}
 }
 
 func TestHostHistory_EmptyForNoReports(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 	if h := s.HostHistory("SRV01", 10); h != nil {
 		t.Errorf("HostHistory with no reports = %v, want nil", h)
@@ -231,7 +263,7 @@ func TestHostHistory_EmptyForNoReports(t *testing.T) {
 }
 
 func TestHostHistory_NewestFirst(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	statuses := []string{"Healthy", "Grace", "Alert"}
@@ -260,7 +292,7 @@ func TestHostHistory_NewestFirst(t *testing.T) {
 }
 
 func TestHostHistory_NLimitsResults(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	for i := range 10 {
@@ -278,7 +310,7 @@ func TestHostHistory_NLimitsResults(t *testing.T) {
 }
 
 func TestHostHistory_NZeroReturnsAll(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	for i := range 5 {
@@ -296,7 +328,7 @@ func TestHostHistory_NZeroReturnsAll(t *testing.T) {
 }
 
 func TestHostHistory_RingCapAtHistoryMax(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	// Insert more than historyMax records.
@@ -315,7 +347,7 @@ func TestHostHistory_RingCapAtHistoryMax(t *testing.T) {
 }
 
 func TestHostHistory_RingRetainsNewest(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	// Insert historyMax Healthy records, then one Alert.
@@ -345,7 +377,7 @@ func TestHostHistory_RingRetainsNewest(t *testing.T) {
 // ── All ───────────────────────────────────────────────────────────────────────
 
 func TestAll_EmptyStateReturnsEmptySlice(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	all := s.All()
 	if all == nil {
 		t.Error("All() should return a non-nil empty slice, got nil")
@@ -356,7 +388,7 @@ func TestAll_EmptyStateReturnsEmptySlice(t *testing.T) {
 }
 
 func TestAll_SortedByHostname(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("ZETA")
 	s.Register("ALPHA")
 	s.Register("MANGO")
@@ -371,7 +403,7 @@ func TestAll_SortedByHostname(t *testing.T) {
 }
 
 func TestAll_ReturnsSnapshot(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 	s.Register("SRV01")
 
 	snapshot := s.All()
@@ -388,11 +420,11 @@ func TestAll_ReturnsSnapshot(t *testing.T) {
 
 func TestPersistence_RegisterSurvivesReload(t *testing.T) {
 	dir := t.TempDir()
-	s1 := NewServerState(dir, nil)
+	s1 := NewServerState(dir)
 	s1.Register("SRV01")
 	s1.Register("SRV02")
 
-	s2 := NewServerState(dir, nil)
+	s2 := NewServerState(dir)
 	if !s2.IsRegistered("SRV01") {
 		t.Error("SRV01 should persist across reload")
 	}
@@ -403,12 +435,12 @@ func TestPersistence_RegisterSurvivesReload(t *testing.T) {
 
 func TestPersistence_RemoveSurvivesReload(t *testing.T) {
 	dir := t.TempDir()
-	s1 := NewServerState(dir, nil)
+	s1 := NewServerState(dir)
 	s1.Register("SRV01")
 	s1.Register("SRV02")
 	s1.Remove("SRV01")
 
-	s2 := NewServerState(dir, nil)
+	s2 := NewServerState(dir)
 	if s2.IsRegistered("SRV01") {
 		t.Error("removed SRV01 should not persist across reload")
 	}
@@ -419,11 +451,11 @@ func TestPersistence_RemoveSurvivesReload(t *testing.T) {
 
 func TestPersistence_LastResultSurvivesReload(t *testing.T) {
 	dir := t.TempDir()
-	s1 := NewServerState(dir, nil)
+	s1 := NewServerState(dir)
 	s1.Register("SRV01")
 	s1.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 
-	s2 := NewServerState(dir, nil)
+	s2 := NewServerState(dir)
 	all := s2.All()
 	if len(all) != 1 {
 		t.Fatalf("All() = %d, want 1", len(all))
@@ -438,7 +470,7 @@ func TestPersistence_LastResultSurvivesReload(t *testing.T) {
 
 func TestPersistence_WritesTmpThenRenames(t *testing.T) {
 	dir := t.TempDir()
-	s := NewServerState(dir, nil)
+	s := NewServerState(dir)
 	s.Register("SRV01")
 
 	// After save, .tmp file must not exist (it was renamed).
@@ -454,7 +486,7 @@ func TestPersistence_WritesTmpThenRenames(t *testing.T) {
 
 func TestPersistence_FileIsValidJSON(t *testing.T) {
 	dir := t.TempDir()
-	s := NewServerState(dir, nil)
+	s := NewServerState(dir)
 	s.Register("SRV01")
 	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
@@ -471,7 +503,7 @@ func TestPersistence_FileIsValidJSON(t *testing.T) {
 // ── Concurrent access ─────────────────────────────────────────────────────────
 
 func TestServerState_ConcurrentAccess(t *testing.T) {
-	s := NewServerState(t.TempDir(), nil)
+	s := NewServerState(t.TempDir())
 
 	// Pre-register hosts so Update() can write LastResult.
 	for i := range 5 {
@@ -520,17 +552,12 @@ func TestSave_WriteFileError(t *testing.T) {
 		t.Fatalf("setup: mkdir %s: %v", tmpPath, err)
 	}
 
-	var errLogged bool
-	log := dc.LogFunc(func(l dc.Level, _ ...string) {
-		if l == dc.LvlERR {
-			errLogged = true
-		}
-	})
+	errLogged := captureErrLog(t)
 
-	s := NewServerState(dir, log)
+	s := NewServerState(dir)
 	s.Register("SRV01") // triggers save() → WriteFile should fail
 
-	if !errLogged {
+	if !*errLogged {
 		t.Error("expected ERR log from save() WriteFile failure, got none")
 	}
 	// servers.json must not exist (Rename was never reached).
@@ -552,17 +579,12 @@ func TestSave_RenameError(t *testing.T) {
 		t.Fatalf("setup: mkdir %s: %v", jsonPath, err)
 	}
 
-	var errLogged bool
-	log := dc.LogFunc(func(l dc.Level, _ ...string) {
-		if l == dc.LvlERR {
-			errLogged = true
-		}
-	})
+	errLogged := captureErrLog(t)
 
-	s := NewServerState(dir, log)
+	s := NewServerState(dir)
 	s.Register("SRV01") // triggers save() → WriteFile OK, Rename fails
 
-	if !errLogged {
+	if !*errLogged {
 		t.Error("expected ERR log from save() Rename failure, got none")
 	}
 }
@@ -577,12 +599,7 @@ func TestSave_MkdirAllError(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	var errLogged bool
-	log := dc.LogFunc(func(l dc.Level, _ ...string) {
-		if l == dc.LvlERR {
-			errLogged = true
-		}
-	})
+	errLogged := captureErrLog(t)
 
 	// Bypass NewServerState to avoid triggering load(); set path directly so
 	// filepath.Dir(s.path) == blocker (a file, not a directory).
@@ -590,12 +607,11 @@ func TestSave_MkdirAllError(t *testing.T) {
 		servers: make(map[string]*ServerInfo),
 		history: make(map[string][]dc.CheckResult),
 		path:    filepath.Join(blocker, "servers.json"),
-		log:     log,
 	}
 	s.servers["SRV01"] = &ServerInfo{Hostname: "SRV01", RegisteredAt: time.Now()}
 	s.save()
 
-	if !errLogged {
+	if !*errLogged {
 		t.Error("expected ERR log from save() MkdirAll failure, got none")
 	}
 }
@@ -605,14 +621,9 @@ func TestSave_MkdirAllError(t *testing.T) {
 func TestSave_MarshalError(t *testing.T) {
 	dir := t.TempDir()
 
-	var errLogged bool
-	log := dc.LogFunc(func(l dc.Level, _ ...string) {
-		if l == dc.LvlERR {
-			errLogged = true
-		}
-	})
+	errLogged := captureErrLog(t)
 
-	s := NewServerState(dir, log)
+	s := NewServerState(dir)
 	s.Register("SRV01")
 
 	// Inject a NaN float64 into the server's last result — json.MarshalIndent
@@ -624,7 +635,7 @@ func TestSave_MarshalError(t *testing.T) {
 
 	s.save()
 
-	if !errLogged {
+	if !*errLogged {
 		t.Error("expected ERR log from save() marshal failure, got none")
 	}
 }

@@ -23,9 +23,8 @@ import (
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
 	return &DashboardServer{
-		state: NewServerState(t.TempDir(), nil),
+		state: NewServerState(t.TempDir()),
 		cfg:   dc.DashboardConfig{Group: "Domain Admins"},
-		log:   dc.DiscardLogger(),
 	}
 }
 
@@ -1119,7 +1118,7 @@ func TestHandleNotifyTest_MockWebhookReceivesRequest(t *testing.T) {
 		Triggers: dc.DefaultTriggers,
 	}
 	ds.testNotifyFunc = func() error {
-		return dc.SendTestNotification([]dc.NotificationTarget{target}, nil)
+		return dc.SendTestNotification([]dc.NotificationTarget{target})
 	}
 
 	w := httptest.NewRecorder()
@@ -1154,7 +1153,7 @@ func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testin
 		Triggers: dc.DefaultTriggers,
 	}
 	ds.testNotifyFunc = func() error {
-		return dc.SendTestNotification([]dc.NotificationTarget{target}, nil)
+		return dc.SendTestNotification([]dc.NotificationTarget{target})
 	}
 
 	w := httptest.NewRecorder()

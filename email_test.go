@@ -98,7 +98,7 @@ func TestSendEmailSMTP(t *testing.T) {
 		Message:        "Test alert.",
 	}
 
-	err = sendEmail(target, result, TriggerAlert, "", DiscardLogger())
+	err = sendEmail(target, result, TriggerAlert, "")
 	if err != nil {
 		t.Fatalf("sendEmail: %v", err)
 	}

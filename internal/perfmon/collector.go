@@ -5,6 +5,7 @@ package perfmon
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"syscall"
 	"time"
@@ -83,7 +84,6 @@ type Collector struct {
 	sampleInterval time.Duration     // how often the sampler collects (default 30s)
 	accum          []dc.PerfSnapshot // samples accumulated between Collect() calls
 
-	log          dc.LogFunc
 	loggedErrors map[string]bool
 	reqCh        chan request
 	stopCh       chan struct{} // closed by Close() to stop sampler
@@ -109,10 +109,7 @@ func startWorker() chan request {
 }
 
 // Open creates the PDH queries and adds counters.
-func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
+func Open(cfg dc.PerformanceConfig) (*Collector, error) {
 	sampleInterval := time.Duration(cfg.SampleIntervalSec) * time.Second
 	if sampleInterval < 10*time.Second || sampleInterval > 300*time.Second {
 		sampleInterval = 30 * time.Second
@@ -122,13 +119,12 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 		collectRemoteFX:   cfg.CollectRemoteFX,
 		memTotalMB:        totalPhysicalMemoryMB(),
 		sampleInterval:    sampleInterval,
-		log:               log,
 		loggedErrors:      make(map[string]bool),
 		reqCh:             startWorker(),
 		stopCh:            make(chan struct{}),
 	}
 	var err error
-	c.do(func() { err = c.open(log) })
+	c.do(func() { err = c.open() })
 	if err != nil {
 		close(c.reqCh)
 		return nil, err
@@ -136,15 +132,15 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	return c, nil
 }
 
-func (c *Collector) open(log dc.LogFunc) error {
-	dc.LogMsg(log, dc.LvlDBG, fmt.Sprintf("perfmon: open tid=%d", getThreadID()))
+func (c *Collector) open() error {
+	slog.Debug("perfmon: open", "tid", getThreadID())
 	// --- V1 host query ---
 	hq, err := pdhOpenQuery()
 	if err != nil {
 		return err
 	}
 	c.hostQuery = hq
-	dc.LogMsg(log, dc.LvlDBG, fmt.Sprintf("perfmon: host_query_opened handle=0x%X", hq))
+	slog.Debug(fmt.Sprintf("perfmon: host_query_opened handle=0x%X", hq))
 
 	add := func(path string) (syscall.Handle, error) { return pdhAddCounter(hq, path) }
 
@@ -165,18 +161,18 @@ func (c *Collector) open(log dc.LogFunc) error {
 		return fmt.Errorf("required counter %s: %w", counterDiskQueue, err)
 	}
 	if h, err := add(counterTCPRetrans); err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "perfmon: TCPv4 retransmit counter unavailable", fmt.Sprintf("error=%q", err))
+		slog.Warn("perfmon: TCPv4 retransmit counter unavailable", "error", err)
 	} else {
 		c.retransH = h
 	}
 
-	dc.LogMsg(log, dc.LvlINF, "perfmon: host counters added (V1 query)")
+	slog.Info("perfmon: host counters added (V1 query)")
 
 	// --- V2 session/RFX query ---
 	if c.collectPerSession || c.collectRemoteFX {
 		sq, err := pdhOpenQuery()
 		if err != nil {
-			dc.LogMsg(log, dc.LvlWRN, "perfmon: session query open failed", fmt.Sprintf("error=%q", err))
+			slog.Warn("perfmon: session query open failed", "error", err)
 		} else {
 			c.sessionQuery = sq
 			addS := func(path string) (syscall.Handle, error) { return pdhAddCounter(sq, path) }
@@ -185,9 +181,9 @@ func (c *Collector) open(log dc.LogFunc) error {
 				if h, err := addS(counterInputDelay); err == nil {
 					c.inputDelayH = h
 					c.inputDelayAvail = true
-					dc.LogMsg(log, dc.LvlDBG, "perfmon: input_delay counter added OK")
+					slog.Debug("perfmon: input_delay counter added OK")
 				} else {
-					dc.LogMsg(log, dc.LvlWRN, "perfmon: input_delay counter add failed", fmt.Sprintf("error=%q", err))
+					slog.Warn("perfmon: input_delay counter add failed", "error", err)
 				}
 				if h, err := addS(counterSessCPU); err == nil {
 					c.sessCPUH = h
@@ -213,7 +209,7 @@ func (c *Collector) open(log dc.LogFunc) error {
 				rfx(counterRFXRTT, &c.rfxRTTH)
 				rfx(counterRFXLoss, &c.rfxLossH)
 			}
-			dc.LogMsg(log, dc.LvlINF, "perfmon: session counters added (V2 query)")
+			slog.Info("perfmon: session counters added (V2 query)")
 		}
 	}
 	return nil
@@ -227,9 +223,8 @@ func (c *Collector) Prime() error {
 }
 
 func (c *Collector) prime() error {
-	dc.LogMsg(c.log, dc.LvlDBG,
-		fmt.Sprintf("perfmon: prime host_handle=0x%X session_handle=0x%X tid=%d",
-			c.hostQuery, c.sessionQuery, getThreadID()))
+	slog.Debug(fmt.Sprintf("perfmon: prime host_handle=0x%X session_handle=0x%X tid=%d",
+		c.hostQuery, c.sessionQuery, getThreadID()))
 	if err := pdhCollectQueryData(c.hostQuery); err != nil {
 		return err
 	}
@@ -250,7 +245,7 @@ func (c *Collector) prime() error {
 	// thread, accumulating snapshots. Collect() aggregates and drains them.
 	// Also keeps the V1 PerfLib provider warm — on memory-constrained DCs,
 	// idle gaps between PdhCollectQueryData calls cause access violations.
-	dc.LogMsg(c.log, dc.LvlINF, fmt.Sprintf("perfmon: sampler interval=%s", c.sampleInterval))
+	slog.Info("perfmon: sampler started", "interval", c.sampleInterval)
 	go c.sampler()
 	return nil
 }
@@ -268,8 +263,7 @@ func (c *Collector) sampler() {
 			c.do(func() {
 				snap, err := c.collect()
 				if err != nil {
-					dc.LogMsg(c.log, dc.LvlWRN,
-						fmt.Sprintf("perfmon: sampler collect failed: %v", err))
+					slog.Warn("perfmon: sampler collect failed", "error", err)
 					return
 				}
 				c.accum = append(c.accum, *snap)
@@ -289,8 +283,7 @@ func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 			agg := aggregate(c.accum)
 			c.accum = c.accum[:0]
 			snap = &agg
-			dc.LogMsg(c.log, dc.LvlDBG,
-				fmt.Sprintf("perfmon: aggregated %d samples", n))
+			slog.Debug("perfmon: aggregated samples", "count", n)
 		} else {
 			snap, err = c.collect()
 		}
@@ -308,7 +301,7 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 		}
 		if c.sessionQuery != 0 {
 			if err := pdhCollectQueryData(c.sessionQuery); err != nil {
-				dc.LogMsg(c.log, dc.LvlWRN, "perfmon: session query collect failed", fmt.Sprintf("error=%q", err))
+				slog.Warn("perfmon: session query collect failed", "error", err)
 				sessionCollectOK = false
 			}
 		}
@@ -384,9 +377,8 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 		}
 	}
 
-	dc.LogMsg(c.log, dc.LvlDBG,
-		fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
-			snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans, snap.InputDelayMax))
+	slog.Debug(fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
+		snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans, snap.InputDelayMax))
 
 	return snap, nil
 }
@@ -469,7 +461,7 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	if !errors.Is(err, errCounterNotReady) {
 		if !c.loggedErrors[name] {
 			c.loggedErrors[name] = true
-			dc.LogMsg(c.log, dc.LvlWRN, fmt.Sprintf("perfmon: %s read failed", name), fmt.Sprintf("error=%q", err))
+			slog.Warn("perfmon: counter read failed", "name", name, "error", err)
 		}
 	}
 	return 0, false

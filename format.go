@@ -381,11 +381,11 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			fields = append(fields, fmt.Sprintf("exit=%d", r.ExitCode))
 
 			ts := r.Timestamp.Local().Format(time.RFC3339)
-			lvl := LvlINF
+			tag := "INF"
 			if r.ExitCode > 0 {
-				lvl = LvlERR
+				tag = "ERR"
 			}
-			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, lvl, strings.Join(fields, " "))
+			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, tag, strings.Join(fields, " "))
 		}
 	}
 }
@@ -499,11 +499,11 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 				fields = append(fields, fmt.Sprintf("input_delay=%.0fms", *hr.InputDelayMax))
 			}
 			fields = append(fields, fmt.Sprintf("exit=%d", hr.ExitCode))
-			lvl := LvlINF
+			tag := "INF"
 			if hr.ExitCode > 0 {
-				lvl = LvlERR
+				tag = "ERR"
 			}
-			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", hr.Timestamp, lvl, strings.Join(fields, " "))
+			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", hr.Timestamp, tag, strings.Join(fields, " "))
 		}
 	}
 }
@@ -572,10 +572,10 @@ func WriteSessions(w io.Writer, sessions []SessionInfo, summary *SessionSummary,
 			if s.UserName != "" {
 				fields = append([]string{fmt.Sprintf("user=%s", s.UserName)}, fields...)
 			}
-			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, strings.Join(fields, " "))
+			_, _ = fmt.Fprintf(w, "[INF] %s\n", strings.Join(fields, " "))
 		}
 		if summary != nil {
-			_, _ = fmt.Fprintf(w, "[%s] %s\n", LvlINF, formatSessionSummaryLine(summary))
+			_, _ = fmt.Fprintf(w, "[INF] %s\n", formatSessionSummaryLine(summary))
 		}
 	}
 }
