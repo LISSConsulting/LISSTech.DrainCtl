@@ -19,12 +19,19 @@ psgallery_key := env("PSGALLERY_API_KEY", "")
 default:
     @just --list
 
+# Print build header with timestamp
+[private]
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+header recipe:
+    Write-Host "`n--- just {{recipe}} --- $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')" -ForegroundColor DarkGray
+
 # ── Version ──────────────────────────────────────────────────────────────────
 
 # Bump patch version (CalVer YY.DOY.patch) across all 8 files + recompile .syso
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-bump:
+bump: (header "bump")
     $exePath = "{{bin_dir}}/drainctl.exe"
 
     # Determine current version from source
@@ -86,7 +93,7 @@ bump:
 # Dev build with auth bypass (NEVER deploy to production)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-dev:
+dev: (header "dev")
     Write-Host "`n⚠️  Building DEV mode (auth bypassed)" -ForegroundColor Yellow
     & go build -tags devmode -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -220,12 +227,12 @@ sign-msi:
 # ── Aggregate ────────────────────────────────────────────────────────────────
 
 # Build everything (CLI + DLL + PS module + MSI), unsigned
-all: msi
+all: (header "all") msi
 
 # Build and sign everything: binaries → sign → MSI → sign MSI
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: gotest psmodule sign-binaries msi sign-msi
+release: (header "release") gotest psmodule sign-binaries msi sign-msi
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
@@ -241,7 +248,7 @@ release: gotest psmodule sign-binaries msi sign-msi
 # Tag, create GH release, and upload signed MSI (run after `just release`)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-publish:
+publish: (header "publish")
     $msiPath = "{{dist_dir}}/LISSTech.DrainCtl.msi"
     $cliPath = "{{bin_dir}}/drainctl.exe"
 
@@ -312,7 +319,7 @@ publish-psgallery:
 # Run all Go linters
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-lint:
+lint: (header "lint")
     Write-Host "`n🔍 Linting" -ForegroundColor Cyan
     & go vet ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -341,7 +348,7 @@ vulncheck:
     Write-Host "   ✅ No vulnerabilities" -ForegroundColor Green
 
 # Run all quality checks: lint + test + vulncheck
-check: lint gotest vulncheck
+check: (header "check") lint gotest vulncheck
 
 # Format all Go source files
 fmt:
@@ -373,7 +380,7 @@ test:
 # Remove all build artifacts
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-clean:
+clean: (header "clean")
     Write-Host "`n🧹 Cleaning" -ForegroundColor Cyan
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "{{dist_dir}}"
     Write-Host "   dist/ removed" -ForegroundColor DarkGray
