@@ -94,24 +94,29 @@
                            template="StringTemplate" message="$(string.Event.4000)" />
                 </events>
 
-                <stringTable>
-                    <string id="Provider.Name" value="LISS Technologies-DrainCtl" />
-                    <string id="Event.1000" value="%1" />
-                    <string id="Event.1001" value="%1" />
-                    <string id="Event.1002" value="%1" />
-                    <string id="Event.1003" value="%1" />
-                    <string id="Event.1004" value="%1" />
-                    <string id="Event.1099" value="%1" />
-                    <string id="Event.2000" value="%1" />
-                    <string id="Event.2099" value="%1" />
-                    <string id="Event.3000" value="%1" />
-                    <string id="Event.3001" value="%1" />
-                    <string id="Event.3002" value="%1" />
-                    <string id="Event.3099" value="%1" />
-                    <string id="Event.4000" value="%1" />
-                </stringTable>
             </provider>
         </events>
     </instrumentation>
+
+    <localization>
+        <resources culture="en-US">
+            <stringTable>
+                <string id="Provider.Name" value="LISS Technologies-DrainCtl" />
+                <string id="Event.1000" value="%1" />
+                <string id="Event.1001" value="%1" />
+                <string id="Event.1002" value="%1" />
+                <string id="Event.1003" value="%1" />
+                <string id="Event.1004" value="%1" />
+                <string id="Event.1099" value="%1" />
+                <string id="Event.2000" value="%1" />
+                <string id="Event.2099" value="%1" />
+                <string id="Event.3000" value="%1" />
+                <string id="Event.3001" value="%1" />
+                <string id="Event.3002" value="%1" />
+                <string id="Event.3099" value="%1" />
+                <string id="Event.4000" value="%1" />
+            </stringTable>
+        </resources>
+    </localization>
 
 </instrumentationManifest>

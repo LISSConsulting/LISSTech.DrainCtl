@@ -105,18 +105,26 @@ dev: (header "dev")
 
 
 # Compile ETW manifest → resource DLL (assets/drainctl-msg.dll)
-# Requires Windows SDK mc.exe and rc.exe on PATH.
+# Requires Windows SDK mc.exe/rc.exe and MSVC link.exe.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 man:
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Compiling ETW manifest  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+
+    # Locate MSVC link.exe (not MinGW's hardlink utility).
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $vsPath = & $vswhere -latest -property installationPath 2>$null
+    if (-not $vsPath) { Write-Error "Visual Studio not found (vswhere failed)"; exit 1 }
+    $msvcLink = Get-ChildItem "$vsPath\VC\Tools\MSVC\*\bin\Hostx64\x64\link.exe" | Sort-Object FullName | Select-Object -Last 1
+    if (-not $msvcLink) { Write-Error "MSVC link.exe not found under $vsPath"; exit 1 }
+
     Push-Location assets
     & mc -um drainctl.man
     if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
     & rc drainctl.rc
     if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
-    & link /DLL /NOENTRY /MACHINE:X64 /OUT:drainctl-msg.dll drainctl.res
+    & $msvcLink /DLL /NOENTRY /MACHINE:X64 /OUT:drainctl-msg.dll drainctl.res
     if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
     Remove-Item -ErrorAction SilentlyContinue drainctl.rc, drainctl.h, drainctlTEMP.BIN, MSG00409.bin, drainctl.res
     Pop-Location
