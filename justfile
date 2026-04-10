@@ -24,7 +24,13 @@ default:
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 header recipe:
-    Write-Host "`n--- just {{recipe}} --- $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')" -ForegroundColor DarkGray
+    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'
+    Write-Host ""
+    Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkRed
+    Write-Host "  🔧  " -NoNewline -ForegroundColor White
+    Write-Host "just {{recipe}}" -NoNewline -ForegroundColor Red
+    Write-Host "  ·  $ts" -ForegroundColor DarkGray
+    Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkRed
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
