@@ -10,7 +10,13 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"golang.org/x/sys/windows"
 )
+
+// getThreadID returns the current OS thread ID for diagnostic logging.
+func getThreadID() uint32 {
+	return windows.GetCurrentThreadId()
+}
 
 // Counter paths. V1 (PerfLib) and V2 (PCW/ETW) counters must live in
 // separate PDH queries — on Server 2022+, mixing them in one query
@@ -74,9 +80,13 @@ type Collector struct {
 	primed          bool
 	skipNextCollect bool
 
+	sampleInterval time.Duration     // how often the sampler collects (default 30s)
+	accum          []dc.PerfSnapshot // samples accumulated between Collect() calls
+
 	log          dc.LogFunc
 	loggedErrors map[string]bool
 	reqCh        chan request
+	stopCh       chan struct{} // closed by Close() to stop sampler
 }
 
 // do dispatches fn to the dedicated PDH thread and blocks until completion.
@@ -103,13 +113,19 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 	if log == nil {
 		log = dc.DiscardLogger()
 	}
+	sampleInterval := time.Duration(cfg.SampleIntervalSec) * time.Second
+	if sampleInterval < 10*time.Second || sampleInterval > 300*time.Second {
+		sampleInterval = 30 * time.Second
+	}
 	c := &Collector{
 		collectPerSession: cfg.CollectPerSession,
 		collectRemoteFX:   cfg.CollectRemoteFX,
 		memTotalMB:        totalPhysicalMemoryMB(),
+		sampleInterval:    sampleInterval,
 		log:               log,
 		loggedErrors:      make(map[string]bool),
 		reqCh:             startWorker(),
+		stopCh:            make(chan struct{}),
 	}
 	var err error
 	c.do(func() { err = c.open(log) })
@@ -121,12 +137,14 @@ func Open(cfg dc.PerformanceConfig, log dc.LogFunc) (*Collector, error) {
 }
 
 func (c *Collector) open(log dc.LogFunc) error {
+	dc.LogMsg(log, dc.LvlDBG, fmt.Sprintf("perfmon: open tid=%d", getThreadID()))
 	// --- V1 host query ---
 	hq, err := pdhOpenQuery()
 	if err != nil {
 		return err
 	}
 	c.hostQuery = hq
+	dc.LogMsg(log, dc.LvlDBG, fmt.Sprintf("perfmon: host_query_opened handle=0x%X", hq))
 
 	add := func(path string) (syscall.Handle, error) { return pdhAddCounter(hq, path) }
 
@@ -209,6 +227,9 @@ func (c *Collector) Prime() error {
 }
 
 func (c *Collector) prime() error {
+	dc.LogMsg(c.log, dc.LvlDBG,
+		fmt.Sprintf("perfmon: prime host_handle=0x%X session_handle=0x%X tid=%d",
+			c.hostQuery, c.sessionQuery, getThreadID()))
 	if err := pdhCollectQueryData(c.hostQuery); err != nil {
 		return err
 	}
@@ -224,14 +245,56 @@ func (c *Collector) prime() error {
 	}
 	c.primed = true
 	c.skipNextCollect = true
+
+	// Start background sampler: collects every sampleInterval on the PDH
+	// thread, accumulating snapshots. Collect() aggregates and drains them.
+	// Also keeps the V1 PerfLib provider warm — on memory-constrained DCs,
+	// idle gaps between PdhCollectQueryData calls cause access violations.
+	dc.LogMsg(c.log, dc.LvlINF, fmt.Sprintf("perfmon: sampler interval=%s", c.sampleInterval))
+	go c.sampler()
 	return nil
 }
 
-// Collect samples all counters and returns a snapshot.
+// sampler periodically collects a full perfmon sample on the PDH worker
+// thread and appends it to the accumulator. Collect() drains and aggregates.
+func (c *Collector) sampler() {
+	ticker := time.NewTicker(c.sampleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.do(func() {
+				snap, err := c.collect()
+				if err != nil {
+					dc.LogMsg(c.log, dc.LvlWRN,
+						fmt.Sprintf("perfmon: sampler collect failed: %v", err))
+					return
+				}
+				c.accum = append(c.accum, *snap)
+			})
+		}
+	}
+}
+
+// Collect returns an aggregated snapshot from all samples accumulated since
+// the last Collect call. If no samples have been accumulated yet (e.g. first
+// call before the sampler has ticked), it falls back to a direct collect.
 func (c *Collector) Collect() (*dc.PerfSnapshot, error) {
 	var snap *dc.PerfSnapshot
 	var err error
-	c.do(func() { snap, err = c.collect() })
+	c.do(func() {
+		if n := len(c.accum); n > 0 {
+			agg := aggregate(c.accum)
+			c.accum = c.accum[:0]
+			snap = &agg
+			dc.LogMsg(c.log, dc.LvlDBG,
+				fmt.Sprintf("perfmon: aggregated %d samples", n))
+		} else {
+			snap, err = c.collect()
+		}
+	})
 	return snap, err
 }
 
@@ -240,14 +303,12 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	if c.skipNextCollect {
 		c.skipNextCollect = false
 	} else {
-		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=host_query_collect")
 		if err := pdhCollectQueryData(c.hostQuery); err != nil {
 			return nil, fmt.Errorf("host query collect: %w", err)
 		}
 		if c.sessionQuery != 0 {
-			dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=session_query_collect")
 			if err := pdhCollectQueryData(c.sessionQuery); err != nil {
-				dc.LogMsg(c.log, dc.LvlWRN, "perfmon: session query collect failed (skipping session counters)", fmt.Sprintf("error=%q", err))
+				dc.LogMsg(c.log, dc.LvlWRN, "perfmon: session query collect failed", fmt.Sprintf("error=%q", err))
 				sessionCollectOK = false
 			}
 		}
@@ -256,7 +317,6 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	snap := &dc.PerfSnapshot{MemTotalMB: c.memTotalMB}
 
 	// Host-level (V1).
-	dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_host_counters")
 	if v, ok := c.scalar(c.cpuH, "cpu"); ok {
 		snap.CPUPct = RoundTo(v, 1)
 	}
@@ -275,22 +335,14 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 
 	// Per-session (V2).
 	if c.collectPerSession && sessionCollectOK {
-		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_input_delay")
 		if c.inputDelayAvail && c.inputDelayH != 0 {
-			vals, err := pdhGetDoubleArray(c.inputDelayH)
-			dc.LogMsg(c.log, dc.LvlDBG,
-				fmt.Sprintf("perfmon: input_delay read: err=%v len=%d vals=%v", err, len(vals), vals))
-			if err == nil && len(vals) > 0 {
+			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil && len(vals) > 0 {
 				snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
 				snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
 				snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
 				snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
 			}
-		} else {
-			dc.LogMsg(c.log, dc.LvlDBG,
-				fmt.Sprintf("perfmon: input_delay skipped: avail=%t handle=%d", c.inputDelayAvail, c.inputDelayH))
 		}
-		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_session_cpu_mem")
 		if c.sessCPUH != 0 {
 			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil && len(vals) > 0 {
 				_, p95, _ := AggregateValues(vals)
@@ -307,7 +359,6 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 
 	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
-		dc.LogMsg(c.log, dc.LvlDBG, "perfmon: collect step=read_rfx")
 		snap.RFXAvailable = true
 		c.rfxScalar(c.rfxEncH, &snap.RFXEncodeMS, 1)
 		c.rfxScalar(c.rfxQualH, &snap.RFXQuality, 1)
@@ -338,6 +389,72 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 			snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans, snap.InputDelayMax))
 
 	return snap, nil
+}
+
+// aggregate combines multiple PerfSnapshot samples into one.
+// Averages rate/gauge counters, takes max for latency/worst-case metrics.
+func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
+	n := float64(len(samples))
+	var agg dc.PerfSnapshot
+	for i := range samples {
+		s := &samples[i]
+		agg.CPUPct += s.CPUPct
+		agg.MemAvailMB += s.MemAvailMB
+		agg.PagesSec += s.PagesSec
+		agg.DiskQueue += s.DiskQueue
+		agg.TCPRetrans += s.TCPRetrans
+		agg.RFXEncodeMS += s.RFXEncodeMS
+		agg.RFXRTT += s.RFXRTT
+
+		// Worst-case metrics: keep the max across samples.
+		if s.InputDelayP50 > agg.InputDelayP50 {
+			agg.InputDelayP50 = s.InputDelayP50
+		}
+		if s.InputDelayP95 > agg.InputDelayP95 {
+			agg.InputDelayP95 = s.InputDelayP95
+		}
+		if s.InputDelayMax > agg.InputDelayMax {
+			agg.InputDelayMax = s.InputDelayMax
+		}
+		if s.SessionCPUP95 > agg.SessionCPUP95 {
+			agg.SessionCPUP95 = s.SessionCPUP95
+		}
+		if s.SessionMemP95 > agg.SessionMemP95 {
+			agg.SessionMemP95 = s.SessionMemP95
+		}
+		if s.RFXFPSOut > agg.RFXFPSOut {
+			agg.RFXFPSOut = s.RFXFPSOut
+		}
+		if s.RFXSkipServer > agg.RFXSkipServer {
+			agg.RFXSkipServer = s.RFXSkipServer
+		}
+		if s.RFXSkipNet > agg.RFXSkipNet {
+			agg.RFXSkipNet = s.RFXSkipNet
+		}
+		if s.RFXLoss > agg.RFXLoss {
+			agg.RFXLoss = s.RFXLoss
+		}
+		if s.RFXQuality > agg.RFXQuality {
+			agg.RFXQuality = s.RFXQuality
+		}
+		if s.RFXAvailable {
+			agg.RFXAvailable = true
+		}
+	}
+
+	// Average the rate/gauge counters.
+	agg.CPUPct = RoundTo(agg.CPUPct/n, 1)
+	agg.MemAvailMB = RoundTo(agg.MemAvailMB/n, 0)
+	agg.PagesSec = RoundTo(agg.PagesSec/n, 1)
+	agg.DiskQueue = RoundTo(agg.DiskQueue/n, 2)
+	agg.TCPRetrans = RoundTo(agg.TCPRetrans/n, 1)
+	agg.RFXEncodeMS = RoundTo(agg.RFXEncodeMS/n, 1)
+	agg.RFXRTT = RoundTo(agg.RFXRTT/n, 1)
+
+	// MemTotalMB is constant — take from last sample.
+	agg.MemTotalMB = samples[len(samples)-1].MemTotalMB
+
+	return agg
 }
 
 // scalar reads a single counter value, logging permanent errors once.
@@ -371,6 +488,13 @@ func (c *Collector) rfxScalar(h syscall.Handle, dst *float64, places int) {
 func (c *Collector) Close() {
 	if c == nil || c.reqCh == nil {
 		return
+	}
+	// Stop sampler goroutine before closing queries.
+	select {
+	case <-c.stopCh:
+		// already closed
+	default:
+		close(c.stopCh)
 	}
 	c.do(func() {
 		pdhCloseQuery(c.hostQuery)
