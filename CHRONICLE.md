@@ -45,6 +45,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Modern ETW manifest provider `LISS Technologies-DrainCtl` replaces legacy `eventlog` sink: `assets/drainctl.man` defines Operational (INFO+, enabled by default) and Debug (DBG, disabled by default) channels with event IDs 1000–3099/4000; `internal/logging.ETWHandler` implements `slog.Handler` via `advapi32.dll` `EventRegister`/`EventEnabled`/`EventWrite`; known event IDs set via `slog.Int("event_id", Evt*)` attribute for precise manifest routing; `internal/svc/handler.go` composes `FileHandler` + `ETWHandler` via `MultiHandler`; `drainctl.mc` retired; installer WXS registers/unregisters provider via `wevtutil im/um`; `just man` recipe added for recompiling `drainctl-msg.dll` from manifest
 - US5/US6 polish: `FileHandler` timestamps use local time with offset (`2006-01-02T15:04:05.000-07:00`); `PrintResult()` writes `--- <msg> [fields]\n` to stdout with no timestamp or level tag, suppressed when `--format json/csv/table` is set (verified across all CLI commands: `check_cmd`, `dashboard_cmd`, `notify_cmd`, `register_cmd`, `service_cmd`); CLAUDE.md Architecture updated to reflect slog/ETW logging architecture
 
+- Spec 001 tiered-logging complete (T001-T063): `just lint` 0 issues, `just gotest` all pass, `just all` succeeds; zero references to `LogFunc`/`LvlOK`/`DefaultLogger`/`DiscardLogger`/`MultiLogger`/`EventLogLogger`/`FileLogger`/`LogMsg` remain in non-test `.go` files
+
 ## Performance
 
 - uPlot `setData()` reuse; HTTP keep-alive body drain on all response paths
