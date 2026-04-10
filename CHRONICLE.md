@@ -41,6 +41,7 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Dashboard: all inline styles extracted to CSS classes; `mock.js` relocated with build tags
 - Landing page: zero inline styles, mobile nav, a11y (ARIA roles/labels, focus management, keyboard nav)
 - Replaced custom `LogFunc`/`Level` logging API with `log/slog` across entire codebase (~173 call sites); added `internal/logging` package with `CLIHandler`, `FileHandler`, `MultiHandler`, `ParseLevel`, `PrintResult`; service composes dual-sink via `MultiHandler`; `--quiet` replaced with `--log-level debug|info|warn|error`; DLL discard via `slog.DiscardHandler` in `init()`
+- Per-sink log levels in `config.json` (`log_file_level`, `log_event_level`): `Validate()` normalises via `ParseLevel` with fallback to defaults; `RunService()` applies levels on startup; `Execute()` config-reload path updates `slog.LevelVar` at runtime without service restart
 
 ## Performance
 
