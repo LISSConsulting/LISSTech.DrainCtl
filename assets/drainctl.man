@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<instrumentationManifest
+    xmlns="http://schemas.microsoft.com/win/2004/08/events"
+    xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://schemas.microsoft.com/win/2004/08/events eventman.xsd">
+
+    <instrumentation>
+        <events>
+            <provider
+                name="LISS Technologies-DrainCtl"
+                guid="{7A2C9D5E-4B1F-4E8D-9C3A-F6B0D2E7A1C5}"
+                resourceFileName="%ProgramFiles%\LISS Technologies\LISSTech DrainCtl\bin\drainctl-msg.dll"
+                messageFileName="%ProgramFiles%\LISS Technologies\LISSTech DrainCtl\bin\drainctl-msg.dll"
+                symbol="DrainCtlProvider"
+                message="$(string.Provider.Name)">
+
+                <channels>
+                    <!-- Operational channel: INFO, WARN, ERROR events (enabled by default) -->
+                    <channel
+                        name="LISS Technologies-DrainCtl/Operational"
+                        chid="DrainCtlOperational"
+                        value="0x10"
+                        symbol="CHANNEL_OPERATIONAL"
+                        type="Operational"
+                        enabled="true"
+                        isolation="Application" />
+
+                    <!-- Debug channel: DEBUG events (disabled by default, admin opt-in via wevtutil sl) -->
+                    <channel
+                        name="LISS Technologies-DrainCtl/Debug"
+                        chid="DrainCtlDebug"
+                        value="0x11"
+                        symbol="CHANNEL_DEBUG"
+                        type="Debug"
+                        enabled="false"
+                        isolation="Application" />
+                </channels>
+
+                <templates>
+                    <!-- Single string data field (%1) for the formatted message. -->
+                    <template tid="StringTemplate">
+                        <data name="Message" inType="win:UnicodeString" outType="xs:string" />
+                    </template>
+                </templates>
+
+                <events>
+                    <!-- ── Operational: Informational (1xxx) ─────────────────────── -->
+                    <event symbol="ServiceStarted"     value="1000" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1000)" />
+                    <event symbol="ServiceStopped"     value="1001" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1001)" />
+                    <event symbol="CheckHealthy"       value="1002" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1002)" />
+                    <event symbol="ConfigReloaded"     value="1003" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1003)" />
+                    <event symbol="TransitionDetected" value="1004" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1004)" />
+                    <event symbol="GenericInfo"        value="1099" version="0"
+                           channel="DrainCtlOperational" level="win:Informational"
+                           template="StringTemplate" message="$(string.Event.1099)" />
+
+                    <!-- ── Operational: Warning (2xxx) ────────────────────────────── -->
+                    <event symbol="CheckGrace"     value="2000" version="0"
+                           channel="DrainCtlOperational" level="win:Warning"
+                           template="StringTemplate" message="$(string.Event.2000)" />
+                    <event symbol="GenericWarning" value="2099" version="0"
+                           channel="DrainCtlOperational" level="win:Warning"
+                           template="StringTemplate" message="$(string.Event.2099)" />
+
+                    <!-- ── Operational: Error (3xxx) ──────────────────────────────── -->
+                    <event symbol="CheckAlert"         value="3000" version="0"
+                           channel="DrainCtlOperational" level="win:Error"
+                           template="StringTemplate" message="$(string.Event.3000)" />
+                    <event symbol="RegistryReadFailed" value="3001" version="0"
+                           channel="DrainCtlOperational" level="win:Error"
+                           template="StringTemplate" message="$(string.Event.3001)" />
+                    <event symbol="ServiceError"       value="3002" version="0"
+                           channel="DrainCtlOperational" level="win:Error"
+                           template="StringTemplate" message="$(string.Event.3002)" />
+                    <event symbol="GenericError"       value="3099" version="0"
+                           channel="DrainCtlOperational" level="win:Error"
+                           template="StringTemplate" message="$(string.Event.3099)" />
+
+                    <!-- ── Debug: Verbose (4xxx) ──────────────────────────────────── -->
+                    <event symbol="GenericDebug" value="4000" version="0"
+                           channel="DrainCtlDebug" level="win:Verbose"
+                           template="StringTemplate" message="$(string.Event.4000)" />
+                </events>
+
+                <stringTable>
+                    <string id="Provider.Name" value="LISS Technologies-DrainCtl" />
+                    <string id="Event.1000" value="%1" />
+                    <string id="Event.1001" value="%1" />
+                    <string id="Event.1002" value="%1" />
+                    <string id="Event.1003" value="%1" />
+                    <string id="Event.1004" value="%1" />
+                    <string id="Event.1099" value="%1" />
+                    <string id="Event.2000" value="%1" />
+                    <string id="Event.2099" value="%1" />
+                    <string id="Event.3000" value="%1" />
+                    <string id="Event.3001" value="%1" />
+                    <string id="Event.3002" value="%1" />
+                    <string id="Event.3099" value="%1" />
+                    <string id="Event.4000" value="%1" />
+                </stringTable>
+            </provider>
+        </events>
+    </instrumentation>
+
+</instrumentationManifest>
