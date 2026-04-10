@@ -232,14 +232,14 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 		user = auth.Username
 		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) {
 			slog.Warn("dashboard: register rejected: identity mismatch",
-				"user", user, "claimed_host", req.Hostname)
+				slog.Int("event_id", dc.EvtAccessDenied), "user", user, "claimed_host", req.Hostname)
 			http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 			return
 		}
 	}
 
 	ds.state.Register(req.Hostname)
-	slog.Info("dashboard=register", "host", req.Hostname, "user", user)
+	slog.Info("dashboard=register", slog.Int("event_id", dc.EvtServerRegistered), "host", req.Hostname, "user", user)
 
 	resp := struct {
 		OK             bool   `json:"ok"`
@@ -279,7 +279,7 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	auth := GetAuthInfo(r)
 	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) {
 		slog.Warn("dashboard: report rejected: identity mismatch",
-			"user", auth.Username, "claimed_host", result.Host)
+			slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "claimed_host", result.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
 	}
@@ -339,7 +339,7 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	if auth != nil {
 		user = auth.Username
 	}
-	slog.Info("dashboard=removed", "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
+	slog.Info("dashboard=removed", slog.Int("event_id", dc.EvtServerRemoved), "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -473,7 +473,7 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	if auth != nil {
 		user = auth.Username
 	}
-	slog.Info("dashboard=notify-config-updated", "user", user)
+	slog.Info("dashboard=notify-config-updated", slog.Int("event_id", dc.EvtDashboardConfigChange), "user", user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

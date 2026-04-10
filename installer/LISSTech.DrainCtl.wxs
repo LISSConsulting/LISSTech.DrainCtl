@@ -70,9 +70,19 @@
             Return="check"
             BinaryRef="Wix4UtilCA_X64" />
 
-        <!-- ETW provider registration: wevtutil im on install, wevtutil um on uninstall -->
+        <!-- ETW provider: um before im on install (clears stale registration from
+             previous installs or major upgrades), um on uninstall. -->
+        <SetProperty Id="CleanETWProvider" Before="CleanETWProvider" Sequence="execute"
+            Value="&quot;[SystemFolder]wevtutil.exe&quot; um &quot;[BinFolder]drainctl.man&quot;" />
+        <CustomAction Id="CleanETWProvider"
+            DllEntry="WixQuietExec"
+            Execute="commit"
+            Impersonate="no"
+            Return="ignore"
+            BinaryRef="Wix4UtilCA_X64" />
+
         <SetProperty Id="RegisterETWProvider" Before="RegisterETWProvider" Sequence="execute"
-            Value="wevtutil im &quot;[BinFolder]drainctl.man&quot;" />
+            Value="&quot;[SystemFolder]wevtutil.exe&quot; im &quot;[BinFolder]drainctl.man&quot;" />
         <CustomAction Id="RegisterETWProvider"
             DllEntry="WixQuietExec"
             Execute="commit"
@@ -81,7 +91,7 @@
             BinaryRef="Wix4UtilCA_X64" />
 
         <SetProperty Id="UnregisterETWProvider" Before="UnregisterETWProvider" Sequence="execute"
-            Value="wevtutil um &quot;[BinFolder]drainctl.man&quot;" />
+            Value="&quot;[SystemFolder]wevtutil.exe&quot; um &quot;[BinFolder]drainctl.man&quot;" />
         <CustomAction Id="UnregisterETWProvider"
             DllEntry="WixQuietExec"
             Execute="deferred"
@@ -114,8 +124,11 @@
             <Custom Action="ConfigureNotifyAction"
                 After="ConfigureAction"
                 Condition="NOT REMOVE" />
-            <Custom Action="RegisterETWProvider"
+            <Custom Action="CleanETWProvider"
                 After="ConfigureNotifyAction"
+                Condition="NOT REMOVE" />
+            <Custom Action="RegisterETWProvider"
+                After="CleanETWProvider"
                 Condition="NOT REMOVE" />
             <Custom Action="UnregisterETWProvider"
                 After="InstallInitialize"
