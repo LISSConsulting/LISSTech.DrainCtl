@@ -206,13 +206,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	cfg := fullCfg.ToServiceConfig()
 	dashCfg := fullCfg.ToDashboardConfig()
+
+	// Apply Go runtime soft memory limit. Makes the GC more aggressive about
+	// returning pages to the OS, which matters on memory-constrained RDS hosts.
+	memLimitMB := fullCfg.MemoryLimitMB
+	debug.SetMemoryLimit(int64(memLimitMB) << 20)
+
 	notifyTargets := fullCfg.Notifications
 	notifyState := &dc.NotifyState{
 		LastAlertNotify:       make(map[string]time.Time),
 		LastSessionWarnNotify: make(map[string]time.Time),
 	}
 
-	slog.Info("service=starting", "version", dc.Version, "grace", cfg.GracePeriod, "poll", cfg.PollInterval, "retention_days", cfg.RetentionDays, "fetch_interval", dashCfg.FetchInterval)
+	slog.Info("service=starting", "version", dc.Version, "grace", cfg.GracePeriod, "poll", cfg.PollInterval, "retention_days", cfg.RetentionDays, "fetch_interval", dashCfg.FetchInterval, "memory_limit_mb", memLimitMB)
 
 	// Open in-memory audit store.
 	st, err := store.OpenMemAuditStore(cfg.AuditPath)
@@ -301,7 +307,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
-	// Auto-register with dashboard if URL is configured (or discovered).
+	// Prepare dashboard client and state; actual registration and config
+	// fetch are deferred to the first poll tick so the service reports
+	// Running to the SCM without waiting on network I/O.
 	var useRemoteConfig bool
 	var lastConfigFetch time.Time
 	dashConfigFailures := 0
@@ -310,7 +318,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	if dashCfg.URL != "" {
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
 
-		// If the dashboard runs in this process, register directly (no HTTP/SSPI).
+		// Local self-registration is instant (no network) — safe to do here.
 		if dashState != nil && isLocalDashboard(dashCfg.URL) {
 			hostname, _ := os.Hostname()
 			if hostname != "" {
@@ -319,31 +327,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("dashboard=self-registered", "host", hostname)
 			}
 		}
-		if !dashRegistered {
-			dashRegistered = registerWithDashboard(&dashCfg)
-		}
-
-		// Fetch notification config from dashboard (replaces local targets).
-		var remote *dashboard.RemoteNotifyConfig
-		var fetchErr error
-		if dashState != nil {
-			slog.Debug("dashboard config fetch (local)")
-			remote, fetchErr = dashboard.GetNotifyConfig()
-		} else {
-			slog.Debug("dashboard config fetch (remote)", "url", dashCfg.URL)
-			remote, fetchErr = dashboard.FetchNotifyConfig(dashCfg.URL)
-		}
-		if fetchErr != nil {
-			slog.Warn("dashboard: failed to fetch notify config, using local targets", "error", fetchErr)
-		} else {
-			dashConfigFailures = 0
-			useRemoteConfig = true
-			oldPerfCfg := cfg.Performance
-			applyRemoteConfig(remote, &cfg, &notifyTargets)
-			handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
-			syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf)
-			slog.Info("dashboard=notify-config-fetched", "targets", len(remote.Notifications), "threshold", remote.SessionWarningThreshold, "grace", remote.GracePeriod)
-		}
+		// Remote registration + config fetch happen on the first poll tick
+		// (lastConfigFetch is zero, dashRegistered is false).
 	}
 
 	// Timers.
@@ -353,20 +338,29 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	flushTicker := time.NewTicker(30 * time.Second)
 	defer flushTicker.Stop()
 
-	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
-
-	// Report running.
+	// Report running immediately so the SCM doesn't wait on network I/O.
+	// Dashboard registration + config fetch happen asynchronously on the
+	// first poll tick (fired immediately below).
 	statusCh <- svc.Status{
 		State:   svc.Running,
 		Accepts: svc.AcceptStop | svc.AcceptShutdown,
 	}
+
+	// Run initial check.
+	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
 		"version", dc.Version,
 		"poll", cfg.PollInterval,
 		"grace", cfg.GracePeriod,
 		"retention_days", cfg.RetentionDays)
+
+	// Fire dashboard registration + config fetch shortly after startup
+	// instead of waiting for the first full poll interval.
+	var dashBootstrap <-chan time.Time
+	if dashCfg.URL != "" && !dashRegistered {
+		dashBootstrap = time.After(5 * time.Second)
+	}
 
 	for {
 		select {
@@ -388,11 +382,20 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			_ = st.Flush() // immediate flush on change
 
+		case <-dashBootstrap:
+			// First async dashboard registration attempt after startup.
+			dashBootstrap = nil // one-shot
+			if dashCfg.URL != "" && !dashRegistered {
+				if registerWithDashboard(&dashCfg) {
+					dashRegistered = true
+					lastConfigFetch = time.Time{} // trigger config fetch on next poll
+					dashConfigFailures = 0
+				}
+			}
+
 		case <-pollTicker.C:
-			// Retry registration if the startup attempt failed (e.g. dashboard was
-			// not yet available). Once registered, dashRegistered stays true and
-			// this branch is skipped for the lifetime of the service. Forcing
-			// lastConfigFetch to zero ensures a config fetch follows immediately.
+			// Retry registration if a previous attempt failed. Once registered,
+			// dashRegistered stays true and this branch is skipped.
 			if dashCfg.URL != "" && !dashRegistered {
 				if registerWithDashboard(&dashCfg) {
 					dashRegistered = true
@@ -447,6 +450,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			if el, err := logging.ParseLevel(newFullCfg.LogEventLevel); err == nil {
 				s.etwLevel.Set(el)
+			}
+			if newFullCfg.MemoryLimitMB != memLimitMB {
+				memLimitMB = newFullCfg.MemoryLimitMB
+				debug.SetMemoryLimit(int64(memLimitMB) << 20)
+				slog.Info("memory limit updated", "mb", memLimitMB)
 			}
 			newCfg := newFullCfg.ToServiceConfig()
 			if newCfg.PollInterval != cfg.PollInterval {

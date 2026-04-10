@@ -36,6 +36,11 @@ const (
 
 	DefaultSessionWarningThreshold = 80 // percent
 
+	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
+	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server
+	MinMemoryLimitMB              = 32   // MiB — floor
+	MaxMemoryLimitMB              = 4096 // MiB — ceiling (4 GiB)
+
 	// MaxRepeatMinutes caps notification repeat intervals. Values above this
 	// would overflow time.Duration when multiplied by time.Minute.
 	MaxRepeatMinutes = 10080 // 1 week
@@ -126,6 +131,7 @@ type Config struct {
 	RetentionDays int    `json:"retention_days"`
 	PollInterval  int    `json:"poll_interval"` // seconds
 	AuditPath     string `json:"audit_path"`
+	MemoryLimitMB int    `json:"memory_limit_mb"` // Go runtime soft memory limit (MiB); 0 → default
 
 	LogFileLevel  string `json:"log_file_level,omitempty"`  // min level for file sink: debug|info|warn|error (default: debug)
 	LogEventLevel string `json:"log_event_level,omitempty"` // min level for event log sink: debug|info|warn|error (default: info)
@@ -194,6 +200,7 @@ func DefaultConfig() *Config {
 		Notifications:           []NotificationTarget{},
 		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup, FetchInterval: DefaultDashboardFetchInterval},
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
+		MemoryLimitMB:           DefaultMemoryLimitMB,
 		Performance:             PerformanceConfig{CollectPerSession: true},
 	}
 }
@@ -289,6 +296,13 @@ func (c *Config) Validate() {
 	}
 	if c.SessionWarningThreshold > 100 {
 		c.SessionWarningThreshold = 100
+	}
+	if c.MemoryLimitMB < MinMemoryLimitMB {
+		c.MemoryLimitMB = DefaultMemoryLimitMB
+	}
+	if c.MemoryLimitMB > MaxMemoryLimitMB {
+		slog.Default().Warn("memory limit exceeds maximum, clamping", "requested", c.MemoryLimitMB, "max", MaxMemoryLimitMB)
+		c.MemoryLimitMB = MaxMemoryLimitMB
 	}
 
 	// Strip notification targets with unknown types (must be "webhook" or "ntfy").

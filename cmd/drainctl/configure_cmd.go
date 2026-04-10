@@ -53,6 +53,7 @@ and saves config.json without prompting.`,
 				"grace_period_m", fileCfg.GracePeriod,
 				"poll_interval_s", fileCfg.PollInterval,
 				"retention_days", fileCfg.RetentionDays,
+				"memory_limit_mb", fileCfg.MemoryLimitMB,
 			)
 			if fileCfg.SessionWarningThreshold > 0 {
 				slog.Info("session warning threshold", "pct", fileCfg.SessionWarningThreshold)
@@ -124,6 +125,7 @@ and saves config.json without prompting.`,
 	cmd.Flags().Bool("perf-enabled", false, "Enable performance monitoring (PDH counters)")
 	cmd.Flags().Bool("perf-disabled", false, "Force-disable performance monitoring (blocks dashboard override)")
 	cmd.Flags().Bool("perf-rfx", false, "Enable RemoteFX counter collection")
+	cmd.Flags().Int("memory-limit", dc.DefaultMemoryLimitMB, "Go runtime memory limit in MiB (32–4096)")
 
 	return cmd
 }
@@ -276,10 +278,19 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 		if cmd.Flags().Changed("dashboard-group") {
 			fileCfg.Dashboard.Group = dashGroup
 		}
+		// Dashboard servers need more headroom for HTTP/TLS and multi-server state.
+		if !cmd.Flags().Changed("memory-limit") && fileCfg.MemoryLimitMB < dc.DefaultDashboardMemoryLimitMB {
+			fileCfg.MemoryLimitMB = dc.DefaultDashboardMemoryLimitMB
+		}
 	case "registration":
 		if dashURL != "" {
 			fileCfg.Dashboard.URL = dashURL
 		}
+	}
+
+	if cmd.Flags().Changed("memory-limit") {
+		memLimit, _ := cmd.Flags().GetInt("memory-limit")
+		fileCfg.MemoryLimitMB = memLimit
 	}
 
 	if cmd.Flags().Changed("auto-pin") {
