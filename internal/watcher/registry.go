@@ -5,6 +5,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -16,18 +17,14 @@ import (
 // WatchDrainModeKey monitors the Terminal Server registry key for value
 // changes using RegNotifyChangeKeyValue. It sends on the returned channel
 // each time a change is detected. The goroutine exits when ctx is cancelled.
-func WatchDrainModeKey(ctx context.Context, log dc.LogFunc) (<-chan struct{}, error) {
-	return watchRegistryKey(ctx, dc.RegPath, log)
+func WatchDrainModeKey(ctx context.Context) (<-chan struct{}, error) {
+	return watchRegistryKey(ctx, dc.RegPath)
 }
 
 // watchRegistryKey is the shared implementation for registry key watchers.
 // It opens the key with KEY_NOTIFY, creates an event, and loops:
 // register notification -> wait -> send on channel -> re-register.
-func watchRegistryKey(ctx context.Context, keyPath string, log dc.LogFunc) (<-chan struct{}, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
+func watchRegistryKey(ctx context.Context, keyPath string) (<-chan struct{}, error) {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath,
 		registry.QUERY_VALUE|registry.NOTIFY)
 	if err != nil {
@@ -78,7 +75,7 @@ func watchRegistryKey(ctx context.Context, keyPath string, log dc.LogFunc) (<-ch
 				true, // async
 			)
 			if err != nil {
-				dc.LogMsg(log, dc.LvlERR, "RegNotifyChangeKeyValue failed", fmt.Sprintf("error=%q key=%s", err, keyPath))
+				slog.Error("RegNotifyChangeKeyValue failed", "error", err, "key", keyPath)
 				// Back off and retry unless cancelled.
 				select {
 				case <-ctx.Done():
@@ -91,7 +88,7 @@ func watchRegistryKey(ctx context.Context, keyPath string, log dc.LogFunc) (<-ch
 			// Wait for either the notification or cancellation.
 			idx, err := windows.WaitForMultipleObjects(handles, false, windows.INFINITE)
 			if err != nil {
-				dc.LogMsg(log, dc.LvlERR, "WaitForMultipleObjects failed", fmt.Sprintf("error=%q", err))
+				slog.Error("WaitForMultipleObjects failed", "error", err)
 				select {
 				case <-ctx.Done():
 					return
@@ -114,6 +111,6 @@ func watchRegistryKey(ctx context.Context, keyPath string, log dc.LogFunc) (<-ch
 		}
 	}()
 
-	log(dc.LvlINF, fmt.Sprintf("registry_watcher=started key=%s", keyPath))
+	slog.Info("registry_watcher=started", "key", keyPath)
 	return ch, nil
 }

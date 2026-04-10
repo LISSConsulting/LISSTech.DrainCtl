@@ -4,7 +4,7 @@ package watcher
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -18,23 +18,19 @@ import (
 // to a 5-second mtime poll if the directory watch cannot be established.
 // Sends on the returned channel when the file is modified. Exits when ctx
 // is cancelled.
-func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan struct{}, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
+func WatchConfigFile(ctx context.Context, path string) (<-chan struct{}, error) {
 	dir := filepath.Dir(path)
 
 	handle, err := windows.FindFirstChangeNotification(dir, false, windows.FILE_NOTIFY_CHANGE_LAST_WRITE)
 	if err != nil || handle == windows.InvalidHandle {
-		dc.LogMsg(log, dc.LvlWRN, "config watcher: FindFirstChangeNotification failed, falling back to poll", fmt.Sprintf("dir=%s error=%q", dir, err))
-		return watchConfigFilePoll(ctx, path, log)
+		slog.Warn("config watcher: FindFirstChangeNotification failed, falling back to poll", "dir", dir, "error", err)
+		return watchConfigFilePoll(ctx, path)
 	}
 
 	cancelEvent, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
 		_ = windows.FindCloseChangeNotification(handle)
-		return watchConfigFilePoll(ctx, path, log)
+		return watchConfigFilePoll(ctx, path)
 	}
 
 	ch := make(chan struct{}, 1)
@@ -63,7 +59,7 @@ func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan s
 		for {
 			idx, err := windows.WaitForMultipleObjects(handles, false, windows.INFINITE)
 			if err != nil {
-				dc.LogMsg(log, dc.LvlERR, "config watcher: WaitForMultipleObjects failed", fmt.Sprintf("error=%q", err))
+				slog.Error("config watcher: WaitForMultipleObjects failed", "error", err)
 				select {
 				case <-ctx.Done():
 					return
@@ -84,7 +80,7 @@ func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan s
 				}
 				// Re-arm the notification.
 				if err := windows.FindNextChangeNotification(handle); err != nil {
-					dc.LogMsg(log, dc.LvlERR, "config watcher: FindNextChangeNotification failed", fmt.Sprintf("error=%q", err))
+					slog.Error("config watcher: FindNextChangeNotification failed", "error", err)
 					return
 				}
 			default:
@@ -94,12 +90,12 @@ func WatchConfigFile(ctx context.Context, path string, log dc.LogFunc) (<-chan s
 		}
 	}()
 
-	log(dc.LvlINF, fmt.Sprintf("config_watcher=started dir=%s (event-based)", dir))
+	slog.Info("config_watcher=started", "dir", dir, "mode", "event-based")
 	return ch, nil
 }
 
 // watchConfigFilePoll is the fallback 5-second mtime polling watcher.
-func watchConfigFilePoll(ctx context.Context, path string, log dc.LogFunc) (<-chan struct{}, error) {
+func watchConfigFilePoll(ctx context.Context, path string) (<-chan struct{}, error) {
 	ch := make(chan struct{}, 1)
 
 	var initialMtime time.Time
@@ -132,7 +128,7 @@ func watchConfigFilePoll(ctx context.Context, path string, log dc.LogFunc) (<-ch
 		}
 	}()
 
-	log(dc.LvlINF, fmt.Sprintf("config_watcher=started path=%s (poll fallback)", path))
+	slog.Info("config_watcher=started", "path", path, "mode", "poll fallback")
 	return ch, nil
 }
 
@@ -154,6 +150,6 @@ func statFile(path string) (time.Time, error) {
 // WatchParametersKey monitors the service's Parameters registry key for
 // changes. Kept for backwards compatibility — new code should use
 // WatchConfigFile instead.
-func WatchParametersKey(ctx context.Context, log dc.LogFunc) (<-chan struct{}, error) {
-	return watchRegistryKey(ctx, dc.ParametersKeyPath, log)
+func WatchParametersKey(ctx context.Context) (<-chan struct{}, error) {
+	return watchRegistryKey(ctx, dc.ParametersKeyPath)
 }

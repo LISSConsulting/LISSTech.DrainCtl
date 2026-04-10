@@ -8,6 +8,7 @@ package main
 import "C"
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 	"unsafe"
 
@@ -58,8 +59,7 @@ func DrainCtl_Check(dbPath *C.char, graceMinutes C.int, retentionDays C.int) *C.
 	out, err := dc.Check(dc.CheckOptions{
 		DBPath:        db,
 		GracePeriod:   time.Duration(graceMinutes) * time.Minute,
-		RetentionDays: dc.ClampRetention(int(retentionDays), dc.DiscardLogger()),
-		Log:           dc.DiscardLogger(),
+		RetentionDays: dc.ClampRetention(int(retentionDays)),
 	})
 	if err != nil {
 		return marshalError(err)
@@ -104,7 +104,7 @@ func DrainCtl_History(dbPath *C.char, limit C.int, changesOnly C.int) *C.char {
 
 //export DrainCtl_AuditSetup
 func DrainCtl_AuditSetup() *C.char {
-	err := dc.RunAuditSetup(dc.DiscardLogger())
+	err := dc.RunAuditSetup()
 	if err != nil {
 		return marshalError(err)
 	}
@@ -113,7 +113,7 @@ func DrainCtl_AuditSetup() *C.char {
 
 //export DrainCtl_GetNotifyConfig
 func DrainCtl_GetNotifyConfig() *C.char {
-	cfg, err := dc.LoadConfig(dc.DiscardLogger())
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
@@ -166,7 +166,7 @@ func DrainCtl_SetNotifyConfig(jsonStr *C.char) *C.char {
 		return marshalError(err)
 	}
 
-	cfg, err := dc.LoadConfig(dc.DiscardLogger())
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
@@ -266,7 +266,7 @@ func DrainCtl_SetNotifyConfig(jsonStr *C.char) *C.char {
 		}
 	}
 
-	if err := dc.SaveConfig(cfg, dc.DiscardLogger()); err != nil {
+	if err := dc.SaveConfig(cfg); err != nil {
 		return marshalError(err)
 	}
 	return C.CString(`{"ok":true}`)
@@ -302,11 +302,11 @@ func buildLegacyTriggers(onTransition, onGraceExceeded *bool) []dc.Trigger {
 
 //export DrainCtl_TestNotify
 func DrainCtl_TestNotify() *C.char {
-	cfg, err := dc.LoadConfig(dc.DiscardLogger())
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
-	if err := dc.SendTestNotification(cfg.Notifications, dc.DiscardLogger()); err != nil {
+	if err := dc.SendTestNotification(cfg.Notifications); err != nil {
 		return marshalError(err)
 	}
 	return C.CString(`{"ok":true}`)
@@ -323,7 +323,7 @@ func DrainCtl_EnableDashboard(port C.int, group *C.char) *C.char {
 		p = dc.DefaultDashboardPort
 	}
 
-	cfg, err := dc.LoadConfig(dc.DiscardLogger())
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
@@ -332,7 +332,7 @@ func DrainCtl_EnableDashboard(port C.int, group *C.char) *C.char {
 	cfg.Dashboard.Port = p
 	cfg.Dashboard.Group = g
 
-	if err := dc.SaveConfig(cfg, dc.DiscardLogger()); err != nil {
+	if err := dc.SaveConfig(cfg); err != nil {
 		return marshalError(err)
 	}
 	return marshalJSON(map[string]any{"ok": true, "port": p, "group": g})
@@ -340,14 +340,14 @@ func DrainCtl_EnableDashboard(port C.int, group *C.char) *C.char {
 
 //export DrainCtl_DisableDashboard
 func DrainCtl_DisableDashboard() *C.char {
-	cfg, err := dc.LoadConfig(dc.DiscardLogger())
+	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
 
 	cfg.Dashboard.Enabled = false
 
-	if err := dc.SaveConfig(cfg, dc.DiscardLogger()); err != nil {
+	if err := dc.SaveConfig(cfg); err != nil {
 		return marshalError(err)
 	}
 	return C.CString(`{"ok":true}`)
@@ -357,7 +357,7 @@ func DrainCtl_DisableDashboard() *C.char {
 func DrainCtl_InstallCertificate(certPath *C.char, keyPath *C.char) *C.char {
 	cert := C.GoString(certPath)
 	key := C.GoString(keyPath)
-	if err := dc.InstallCertificate(cert, key, dc.DiscardLogger()); err != nil {
+	if err := dc.InstallCertificate(cert, key); err != nil {
 		return marshalError(err)
 	}
 	return C.CString(`{"ok":true}`)
@@ -366,6 +366,10 @@ func DrainCtl_InstallCertificate(certPath *C.char, keyPath *C.char) *C.char {
 //export DrainCtl_Free
 func DrainCtl_Free(p *C.char) {
 	C.free(unsafe.Pointer(p))
+}
+
+func init() {
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 }
 
 func main() {}

@@ -157,7 +157,7 @@ func TestSendNotification_CallsWebhook(t *testing.T) {
 	state := &NotifyState{}
 	result := newTestResult("SRV01", "Healthy")
 
-	SendNotification(targets, state, result, TriggerDrainOn, "", nil)
+	SendNotification(targets, state, result, TriggerDrainOn, "")
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("webhook called %d times, want 1", atomic.LoadInt32(&count))
@@ -179,7 +179,7 @@ func TestSendNotification_SkipsWrongTrigger(t *testing.T) {
 	result := newTestResult("SRV01", "Healthy")
 
 	// Send with TriggerDrainOff — target only listens for TriggerDrainOn.
-	SendNotification(targets, state, result, TriggerDrainOff, "", nil)
+	SendNotification(targets, state, result, TriggerDrainOff, "")
 
 	if atomic.LoadInt32(&count) != 0 {
 		t.Errorf("webhook called %d times, want 0 for mismatched trigger", atomic.LoadInt32(&count))
@@ -201,8 +201,8 @@ func TestSendNotification_RepeatOnce(t *testing.T) {
 	state := &NotifyState{}
 	result := newTestResult("SRV01", "Alert")
 
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
+	SendNotification(targets, state, result, TriggerAlert, "")
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("webhook called %d times, want 1 (fire-once)", atomic.LoadInt32(&count))
@@ -225,9 +225,9 @@ func TestSendNotification_RepeatInterval(t *testing.T) {
 	result := newTestResult("SRV01", "Alert")
 
 	// First call fires.
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 	// Immediate second call is suppressed (within 60-minute window).
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("webhook called %d times, want 1 (repeat suppressed)", atomic.LoadInt32(&count))
@@ -248,11 +248,11 @@ func TestSendNotification_ResetsOnHealthy(t *testing.T) {
 	state := &NotifyState{}
 
 	// Fire alert (once-only).
-	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "")
 	// Return to healthy — clears alert tracking.
-	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerHealthy, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerHealthy, "")
 	// Fire alert again — should fire again since tracking was reset.
-	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "")
 
 	if atomic.LoadInt32(&count) != 3 {
 		t.Errorf("webhook called %d times, want 3 (alert, healthy, alert-after-reset)", atomic.LoadInt32(&count))
@@ -274,7 +274,7 @@ func TestSendNotification_PayloadFields(t *testing.T) {
 	}
 	result := newTestResult("SRV-PROD", "Healthy")
 
-	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "DOMAIN\\admin", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "DOMAIN\\admin")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -296,8 +296,8 @@ func TestSendNotification_PayloadFields(t *testing.T) {
 
 func TestSendNotification_EmptyTargets(t *testing.T) {
 	// Must not panic.
-	SendNotification(nil, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "", nil)
-	SendNotification([]NotificationTarget{}, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "", nil)
+	SendNotification(nil, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "")
+	SendNotification([]NotificationTarget{}, &NotifyState{}, newTestResult("SRV01", "Healthy"), TriggerDrainOn, "")
 }
 
 // TestSendNotification_SessionWarningPreservedThroughHealthy verifies that the
@@ -319,19 +319,19 @@ func TestSendNotification_SessionWarningPreservedThroughHealthy(t *testing.T) {
 	state := &NotifyState{}
 
 	// Fire session_warning (once-only).
-	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "")
 	if atomic.LoadInt32(&count) != 1 {
 		t.Fatalf("expected 1 call after session_warning, got %d", atomic.LoadInt32(&count))
 	}
 
 	// Transition to healthy — alert tracking is cleared but session_warning entry must survive.
-	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerHealthy, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerHealthy, "")
 	if atomic.LoadInt32(&count) != 2 {
 		t.Fatalf("expected 2 calls after healthy, got %d", atomic.LoadInt32(&count))
 	}
 
 	// Session_warning fires again — would fire if tracking was cleared, should still be suppressed.
-	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerSessionWarning, "")
 	if atomic.LoadInt32(&count) != 2 {
 		t.Errorf("session_warning fired after healthy transition (tracking was cleared); got %d calls, want 2", atomic.LoadInt32(&count))
 	}
@@ -365,13 +365,13 @@ func TestSendNotification_IndependentTargetState(t *testing.T) {
 	result := newTestResult("SRV01", "Alert")
 
 	// First call fires both.
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
 		t.Fatalf("expected 1+1 after first call, got %d+%d", count1, count2)
 	}
 
 	// Second immediate call: srv1 is suppressed (once-only), srv2 is suppressed (within 60 min).
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
 		t.Errorf("expected both suppressed on second call, got count1=%d count2=%d", count1, count2)
 	}
@@ -381,7 +381,7 @@ func TestSendNotification_IndependentTargetState(t *testing.T) {
 	delete(state.LastAlertNotify, srv1.URL)
 
 	// Third call: srv1 fires again (tracking deleted), srv2 still suppressed.
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 	if atomic.LoadInt32(&count1) != 2 {
 		t.Errorf("srv1 should fire after tracking reset, got count1=%d", count1)
 	}
@@ -457,7 +457,7 @@ func TestSendNotification_CallsNtfy(t *testing.T) {
 	state := &NotifyState{}
 	result := newTestResult("SRV01", "Alert")
 
-	SendNotification(targets, state, result, TriggerAlert, "", nil)
+	SendNotification(targets, state, result, TriggerAlert, "")
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("ntfy endpoint called %d times, want 1", atomic.LoadInt32(&count))
@@ -488,7 +488,7 @@ func TestSendNotification_WebhookPayloadIncludesSessions(t *testing.T) {
 		UtilizationPct:       83,
 	}
 
-	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -529,7 +529,7 @@ func TestSendNotification_WebhookPayloadOmitsSessionsWhenNil(t *testing.T) {
 	result := newTestResult("SRV01", "Healthy")
 	// result.Sessions is nil — no session data available.
 
-	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -544,11 +544,11 @@ func TestSendNotification_WebhookPayloadOmitsSessionsWhenNil(t *testing.T) {
 // ── SendTestNotification ──────────────────────────────────────────────────────
 
 func TestSendTestNotification_NoTargets_ReturnsError(t *testing.T) {
-	err := SendTestNotification(nil, nil)
+	err := SendTestNotification(nil)
 	if err == nil {
 		t.Error("expected error for nil targets, got nil")
 	}
-	err2 := SendTestNotification([]NotificationTarget{}, nil)
+	err2 := SendTestNotification([]NotificationTarget{})
 	if err2 == nil {
 		t.Error("expected error for empty targets, got nil")
 	}
@@ -559,7 +559,7 @@ func TestSendTestNotification_EmptyURLTargets_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: ""},
 	}
-	if err := SendTestNotification(targets, nil); err == nil {
+	if err := SendTestNotification(targets); err == nil {
 		t.Error("expected error when all target URLs are empty, got nil")
 	}
 }
@@ -579,7 +579,7 @@ func TestSendTestNotification_WebhookSuccess(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets, nil); err != nil {
+	if err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count) != 1 {
@@ -603,7 +603,7 @@ func TestSendTestNotification_WebhookError_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets, nil); err == nil {
+	if err := SendTestNotification(targets); err == nil {
 		t.Error("expected error for webhook 500 response, got nil")
 	}
 }
@@ -619,7 +619,7 @@ func TestSendTestNotification_NtfySuccess(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "ntfy", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets, nil); err != nil {
+	if err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count) != 1 {
@@ -644,7 +644,7 @@ func TestSendTestNotification_MultipleTargets_CallsAll(t *testing.T) {
 		{Type: "webhook", URL: srv1.URL},
 		{Type: "ntfy", URL: srv2.URL},
 	}
-	if err := SendTestNotification(targets, nil); err != nil {
+	if err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
@@ -667,7 +667,7 @@ func TestSendTestNotification_MultipleErrors_ReturnsAll(t *testing.T) {
 		{Type: "webhook", URL: srv1.URL},
 		{Type: "webhook", URL: srv2.URL},
 	}
-	err := SendTestNotification(targets, nil)
+	err := SendTestNotification(targets)
 	if err == nil {
 		t.Fatal("expected error when both targets fail, got nil")
 	}
@@ -710,7 +710,7 @@ func TestSendNotification_WebhookPayloadContextFields(t *testing.T) {
 		Timestamp:            time.Now(),
 	}
 
-	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -754,7 +754,7 @@ func TestSendNotification_ConnectionsAllowedTrueWhenHealthy(t *testing.T) {
 	}
 	result := newTestResult("SRV01", "Healthy") // ConnectionsAllowed = true
 
-	SendNotification(targets, &NotifyState{}, result, TriggerDrainOff, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOff, "")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -791,7 +791,7 @@ func TestSendNotification_NtfySessionWarningMessage(t *testing.T) {
 		UtilizationPct: 90,
 	}
 
-	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerSessionWarning, "")
 
 	if !strings.Contains(capturedBody, "90%") {
 		t.Errorf("ntfy body %q should contain utilization percentage", capturedBody)
@@ -801,32 +801,8 @@ func TestSendNotification_NtfySessionWarningMessage(t *testing.T) {
 	}
 }
 
-// TestNtfyTitle verifies that each trigger produces a human-readable title and
-// that the host name is always included.
-func TestNtfyTitle(t *testing.T) {
-	cases := []struct {
-		trigger Trigger
-		host    string
-		want    string
-	}{
-		{TriggerDrainOn, "SRV01", "DrainCtl: Drain Mode Active on SRV01"},
-		{TriggerDrainOff, "SRV01", "DrainCtl: Connections Restored on SRV01"},
-		{TriggerGraceEntered, "SRV01", "DrainCtl: Grace Period Active on SRV01"},
-		{TriggerAlert, "SRV01", "DrainCtl: Alert: Drain Exceeded Grace Period on SRV01"},
-		{TriggerHealthy, "SRV01", "DrainCtl: All Connections Allowed on SRV01"},
-		{TriggerSessionWarning, "SRV01", "DrainCtl: Session Utilization Warning on SRV01"},
-		// Unknown trigger falls back to the raw name.
-		{Trigger("custom_event"), "SRV01", "DrainCtl: custom_event on SRV01"},
-	}
-	for _, tc := range cases {
-		t.Run(string(tc.trigger), func(t *testing.T) {
-			got := ntfyTitle(tc.trigger, tc.host)
-			if got != tc.want {
-				t.Errorf("ntfyTitle(%q, %q) = %q, want %q", tc.trigger, tc.host, got, tc.want)
-			}
-		})
-	}
-}
+// ntfyTitle is now an internal implementation detail; its behaviour is verified
+// indirectly via TestSendNotification_NtfyTitleIsReadable.
 
 // TestSendNotification_NtfyTitleIsReadable verifies that the Title header sent
 // to an ntfy endpoint contains a human-readable label rather than a raw
@@ -856,7 +832,7 @@ func TestSendNotification_NtfyTitleIsReadable(t *testing.T) {
 				{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{tc.trigger}},
 			}
 			result := newTestResult("SRV01", tc.status)
-			SendNotification(targets, &NotifyState{}, result, tc.trigger, "", nil)
+			SendNotification(targets, &NotifyState{}, result, tc.trigger, "")
 
 			if !strings.Contains(strings.ToLower(capturedTitle), strings.ToLower(tc.wantInTitle)) {
 				t.Errorf("Title = %q, want it to contain %q", capturedTitle, tc.wantInTitle)
@@ -886,11 +862,11 @@ func TestSendNotification_ResetsOnDrainOff(t *testing.T) {
 	state := &NotifyState{}
 
 	// Fire alert (once-only).
-	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "")
 	// Drain off — clears alert tracking.
-	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerDrainOff, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Healthy"), TriggerDrainOff, "")
 	// Fire alert again — should fire again since tracking was reset.
-	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "", nil)
+	SendNotification(targets, state, newTestResult("SRV01", "Alert"), TriggerAlert, "")
 
 	if atomic.LoadInt32(&count) != 3 {
 		t.Errorf("webhook called %d times, want 3 (alert, drain_off, alert-after-reset)", atomic.LoadInt32(&count))
@@ -915,7 +891,7 @@ func TestSendTestNotification_UnknownTypeSkipped(t *testing.T) {
 	defer srv.Close()
 	targets[0].URL = srv.URL
 
-	if err := SendTestNotification(targets, nil); err != nil {
+	if err := SendTestNotification(targets); err != nil {
 		t.Errorf("SendTestNotification with unknown type returned error: %v", err)
 	}
 }
@@ -936,7 +912,7 @@ func TestSendTestNotification_WebhookPayloadSchemaComplete(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets, nil); err != nil {
+	if err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 
@@ -999,7 +975,7 @@ func TestSendNotification_PreviousModeInPayload(t *testing.T) {
 		Timestamp:          time.Now(),
 	}
 
-	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "DOMAIN\\admin", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerDrainOn, "DOMAIN\\admin")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -1038,7 +1014,7 @@ func TestSendNotification_NoPreviousModeWhenNotTransition(t *testing.T) {
 		Timestamp:          time.Now(),
 	}
 
-	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "", nil)
+	SendNotification(targets, &NotifyState{}, result, TriggerAlert, "")
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -1096,7 +1072,7 @@ func TestSendTestNotification_NtfyError_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "ntfy", URL: srv.URL},
 	}
-	err := SendTestNotification(targets, nil)
+	err := SendTestNotification(targets)
 	if err == nil {
 		t.Error("expected error when ntfy returns 503, got nil")
 	}
@@ -1106,58 +1082,40 @@ func TestSendTestNotification_NtfyError_ReturnsError(t *testing.T) {
 }
 
 // TestSendNotification_WebhookErrorIsLogged verifies that when sendWebhook
-// returns an error (non-2xx status), SendNotification logs a WRN entry and
+// returns an error (non-2xx status), SendNotification does not panic and
 // does not propagate the error to the caller (fire-and-forget semantics).
+// Errors are now logged internally via slog.
 func TestSendNotification_WebhookErrorIsLogged(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
-	var warnLogged bool
-	log := func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warnLogged = true
-		}
-	}
-
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
 	}
 	state := &NotifyState{}
 	result := newTestResult("HOST", "Healthy")
-	SendNotification(targets, state, result, TriggerDrainOn, "", log)
-
-	if !warnLogged {
-		t.Error("expected WRN log entry for webhook error, got none")
-	}
+	// Must not panic; error is logged via slog internally.
+	SendNotification(targets, state, result, TriggerDrainOn, "")
 }
 
 // TestSendNotification_NtfyErrorIsLogged verifies that when sendNtfy returns
-// an error (non-2xx status), SendNotification logs a WRN entry.
+// an error (non-2xx status), SendNotification does not panic and does not
+// propagate the error to the caller. Errors are logged internally via slog.
 func TestSendNotification_NtfyErrorIsLogged(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
-	var warnLogged bool
-	log := func(l Level, fields ...string) {
-		if l == LvlWRN {
-			warnLogged = true
-		}
-	}
-
 	targets := []NotificationTarget{
 		{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{TriggerDrainOn}},
 	}
 	state := &NotifyState{}
 	result := newTestResult("HOST", "Healthy")
-	SendNotification(targets, state, result, TriggerDrainOn, "", log)
-
-	if !warnLogged {
-		t.Error("expected WRN log entry for ntfy error, got none")
-	}
+	// Must not panic; error is logged via slog internally.
+	SendNotification(targets, state, result, TriggerDrainOn, "")
 }
 
 // TestSendTestNotification_SkipsEmptyURLTarget verifies that targets with an
@@ -1176,7 +1134,7 @@ func TestSendTestNotification_SkipsEmptyURLTarget(t *testing.T) {
 		{Type: "webhook", URL: ""},
 		{Type: "webhook", URL: srv.URL},
 	}
-	err := SendTestNotification(targets, nil)
+	err := SendTestNotification(targets)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

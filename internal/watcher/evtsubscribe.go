@@ -6,14 +6,13 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // ── wevtapi.dll bindings ───────────────────────────────────────────────────
@@ -80,7 +79,6 @@ type RegistryChangeAttribution struct {
 type EventSubscriber struct {
 	mu     sync.RWMutex
 	latest *RegistryChangeAttribution
-	log    dc.LogFunc
 
 	subscription evtHandle
 	signalEvent  windows.Handle
@@ -91,11 +89,7 @@ type EventSubscriber struct {
 // NewEventSubscriber creates a subscription to Security log Event ID 4657.
 // Attribution events matching TSServerDrainMode are stored and retrievable
 // via LatestAttribution. The subscriber runs until ctx is cancelled.
-func NewEventSubscriber(ctx context.Context, log dc.LogFunc) (*EventSubscriber, error) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
+func NewEventSubscriber(ctx context.Context) (*EventSubscriber, error) {
 	signalEvent, err := windows.CreateEvent(nil, 0, 0, nil) // auto-reset
 	if err != nil {
 		return nil, fmt.Errorf("create signal event: %w", err)
@@ -143,7 +137,6 @@ func NewEventSubscriber(ctx context.Context, log dc.LogFunc) (*EventSubscriber, 
 	}
 
 	sub := &EventSubscriber{
-		log:          log,
 		subscription: evtHandle(r),
 		signalEvent:  signalEvent,
 		cancelEvent:  cancelEvent,
@@ -151,7 +144,7 @@ func NewEventSubscriber(ctx context.Context, log dc.LogFunc) (*EventSubscriber, 
 	}
 
 	go sub.run(ctx)
-	log(dc.LvlINF, "evt_subscriber=started", "event_id=4657")
+	slog.Info("evt_subscriber=started", "event_id", 4657)
 	return sub, nil
 }
 
@@ -275,7 +268,7 @@ func (s *EventSubscriber) processEvent(h evtHandle) {
 	s.latest = attr
 	s.mu.Unlock()
 
-	s.log(dc.LvlINF, fmt.Sprintf("evt4657=received user=%s", user))
+	slog.Info("evt4657=received", "user", user)
 }
 
 func (s *EventSubscriber) renderEventXML(h evtHandle) string {

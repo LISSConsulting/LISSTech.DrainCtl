@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
-
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // isElevated returns true when the current process token has the Administrators
@@ -97,7 +95,7 @@ func TestGenerateSelfSigned_CreatesValidCert(t *testing.T) {
 	certPath := filepath.Join(dir, "test.crt")
 	keyPath := filepath.Join(dir, "test.key")
 
-	cert, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	cert, err := generateSelfSigned(certPath, keyPath)
 	if err != nil {
 		t.Fatalf("generateSelfSigned: %v", err)
 	}
@@ -124,7 +122,7 @@ func TestGenerateSelfSigned_CertContainsDNSNames(t *testing.T) {
 	certPath := filepath.Join(dir, "test.crt")
 	keyPath := filepath.Join(dir, "test.key")
 
-	cert, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	cert, err := generateSelfSigned(certPath, keyPath)
 	if err != nil {
 		t.Fatalf("generateSelfSigned: %v", err)
 	}
@@ -158,7 +156,7 @@ func TestGenerateSelfSigned_CertWriteError(t *testing.T) {
 	}
 	keyPath := filepath.Join(dir, "test.key")
 
-	_, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	_, err := generateSelfSigned(certPath, keyPath)
 	if err == nil {
 		t.Fatal("expected error when cert path is a directory, got nil")
 	}
@@ -178,7 +176,7 @@ func TestCertFingerprint_MatchesGeneratedCert(t *testing.T) {
 	certPath := filepath.Join(dir, "dashboard-tls.crt")
 	keyPath := filepath.Join(dir, "dashboard-tls.key")
 
-	cert, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	cert, err := generateSelfSigned(certPath, keyPath)
 	if err != nil {
 		t.Fatalf("generateSelfSigned: %v", err)
 	}
@@ -253,7 +251,7 @@ func TestLoadOrGenerateTLS_GeneratesWhenNoCert(t *testing.T) {
 	requireElevatedOrSkip(t)
 
 	dir := t.TempDir()
-	cfg, err := loadOrGenerateTLS("", "", dir, dc.DiscardLogger())
+	cfg, err := loadOrGenerateTLS("", "", dir)
 	if err != nil {
 		t.Fatalf("loadOrGenerateTLS: %v", err)
 	}
@@ -268,11 +266,11 @@ func TestLoadOrGenerateTLS_ReusesExistingCert(t *testing.T) {
 	requireElevatedOrSkip(t)
 
 	dir := t.TempDir()
-	cfg1, err := loadOrGenerateTLS("", "", dir, dc.DiscardLogger())
+	cfg1, err := loadOrGenerateTLS("", "", dir)
 	if err != nil {
 		t.Fatalf("first loadOrGenerateTLS: %v", err)
 	}
-	cfg2, err := loadOrGenerateTLS("", "", dir, dc.DiscardLogger())
+	cfg2, err := loadOrGenerateTLS("", "", dir)
 	if err != nil {
 		t.Fatalf("second loadOrGenerateTLS: %v", err)
 	}
@@ -391,7 +389,7 @@ func TestGenerateSelfSigned_KeyWriteError(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	_, err := generateSelfSigned(certPath, keyPath, dc.DiscardLogger())
+	_, err := generateSelfSigned(certPath, keyPath)
 	if err == nil {
 		t.Fatal("expected error when key path is a directory, got nil")
 	}

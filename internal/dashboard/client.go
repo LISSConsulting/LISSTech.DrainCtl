@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,25 +87,24 @@ type RegisterResult struct {
 // Register notifies the dashboard server that this host exists.
 // On success it returns the dashboard's TLS certificate fingerprint
 // (if the dashboard is running HTTPS) so the caller can enable pinning.
-func Register(dashboardURL string, log dc.LogFunc) (*RegisterResult, error) {
+func Register(dashboardURL string) (*RegisterResult, error) {
 	hostname, err := hostName()
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: cannot get hostname", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard: cannot get hostname", "error", err)
 		return nil, err
 	}
 
 	payload, _ := json.Marshal(map[string]string{"hostname": hostname})
 	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/register", payload)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: register failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard: register failed", "error", err)
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: register rejected",
-			fmt.Sprintf("status=%d", resp.StatusCode))
+		slog.Warn("dashboard: register rejected", "status", resp.StatusCode)
 		return nil, fmt.Errorf("register: status %d", resp.StatusCode)
 	}
 
@@ -116,63 +116,52 @@ func Register(dashboardURL string, log dc.LogFunc) (*RegisterResult, error) {
 		// Non-fatal: registration succeeded even if we can't parse the fingerprint.
 		// Drain the body so the HTTP transport can reuse the connection.
 		_, _ = io.Copy(io.Discard, resp.Body)
-		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s (fingerprint unavailable)", dashboardURL))
+		slog.Info("dashboard=registered", "url", dashboardURL)
 		return &RegisterResult{}, nil
 	}
 
 	if result.TLSFingerprint != "" {
-		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s fingerprint=%s", dashboardURL, result.TLSFingerprint))
+		slog.Info("dashboard=registered", "url", dashboardURL, "fingerprint", result.TLSFingerprint)
 	} else {
-		log(dc.LvlINF, "dashboard=registered", fmt.Sprintf("url=%s", dashboardURL))
+		slog.Info("dashboard=registered", "url", dashboardURL)
 	}
 	return &RegisterResult{TLSFingerprint: result.TLSFingerprint}, nil
 }
 
 // ReportState sends the latest CheckResult to the dashboard server.
 // Errors are logged but never crash the service.
-func ReportState(dashboardURL string, result *dc.CheckResult, log dc.LogFunc) {
+func ReportState(dashboardURL string, result *dc.CheckResult) {
 	payload, err := json.Marshal(result)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: marshal failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard: marshal failed", "error", err)
 		return
 	}
 
 	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/report", payload)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: report failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard: report failed", "error", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: report rejected",
-			fmt.Sprintf("status=%d host=%s", resp.StatusCode, result.Host))
+		slog.Warn("dashboard: report rejected", "status", resp.StatusCode, "host", result.Host)
 		return
 	}
-	log(dc.LvlINF, "dashboard=reported", fmt.Sprintf("host=%s status=%s", result.Host, result.Status))
+	slog.Info("dashboard=reported", "host", result.Host, "status", result.Status)
 }
-
-// negotiateLog is set during service startup to enable step-by-step diagnostic
-// logging of SSPI negotiate requests.  Nil outside the service (CLI paths).
-var negotiateLog atomic.Pointer[dc.LogFunc]
-
-// SetNegotiateLog sets the log function for SSPI negotiate diagnostics.
-func SetNegotiateLog(log dc.LogFunc) { negotiateLog.Store(&log) }
 
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
 // Makes an initial request, and if a 401 is returned, acquires an SSPI client
 // token and retries with the Authorization header.
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
-	logp := negotiateLog.Load()
-	log := func(msg string) {
-		if logp != nil {
-			(*logp)(dc.LvlDBG, "negotiate: "+msg)
-		}
+	logDebug := func(msg string) {
+		slog.Debug("negotiate: " + msg)
 	}
 
 	rawURL = rewriteLoopback(rawURL)
-	log(fmt.Sprintf("step=create_request method=%s url=%s", method, rawURL))
+	logDebug(fmt.Sprintf("step=create_request method=%s url=%s", method, rawURL))
 	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -180,40 +169,40 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 
-	log("step=initial_request")
+	logDebug("step=initial_request")
 	resp, err := dashClientPtr.Load().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	log(fmt.Sprintf("step=initial_response status=%d", resp.StatusCode))
+	logDebug(fmt.Sprintf("step=initial_response status=%d", resp.StatusCode))
 	if resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
-	log("step=sspi_acquire_credentials")
+	logDebug("step=sspi_acquire_credentials")
 	cred, err := negotiate.AcquireCurrentUserCredentials()
 	if err != nil {
 		return nil, fmt.Errorf("sspi acquire credentials: %w", err)
 	}
 	defer func() {
-		log("step=sspi_release_credentials")
+		logDebug("step=sspi_release_credentials")
 		_ = cred.Release()
 	}()
 
 	spn := targetSPN(rawURL)
-	log(fmt.Sprintf("step=sspi_new_client_context spn=%s", spn))
+	logDebug(fmt.Sprintf("step=sspi_new_client_context spn=%s", spn))
 	secCtx, token, err := negotiate.NewClientContext(cred, spn)
 	if err != nil {
 		return nil, fmt.Errorf("sspi client context: %w", err)
 	}
 	defer func() {
-		log("step=sspi_release_context")
+		logDebug("step=sspi_release_context")
 		_ = secCtx.Release()
 	}()
 
-	log(fmt.Sprintf("step=retry_request token_len=%d", len(token)))
+	logDebug(fmt.Sprintf("step=retry_request token_len=%d", len(token)))
 	req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create retry request: %w", err)
@@ -222,12 +211,12 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
 	req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
 
-	log("step=retry_do")
+	logDebug("step=retry_do")
 	resp2, err := dashClientPtr.Load().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http retry request: %w", err)
 	}
-	log(fmt.Sprintf("step=retry_response status=%d", resp2.StatusCode))
+	logDebug(fmt.Sprintf("step=retry_response status=%d", resp2.StatusCode))
 	return resp2, nil
 }
 
@@ -279,18 +268,17 @@ type RemoteNotifyConfig struct {
 
 // FetchNotifyConfig retrieves the notification configuration from the dashboard.
 // Uses SSPI Negotiate auth and TLS pinning (same as Register/Report).
-func FetchNotifyConfig(dashboardURL string, log dc.LogFunc) (*RemoteNotifyConfig, error) {
+func FetchNotifyConfig(dashboardURL string) (*RemoteNotifyConfig, error) {
 	resp, err := negotiateRequest(http.MethodGet, dashboardURL+"/api/v1/notify-config", nil)
 	if err != nil {
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: fetch notify config failed", fmt.Sprintf("error=%q", err))
+		slog.Warn("dashboard: fetch notify config failed", "error", err)
 		return nil, fmt.Errorf("fetch notify config: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		dc.LogMsg(log, dc.LvlWRN, "dashboard: fetch notify config rejected",
-			fmt.Sprintf("status=%d", resp.StatusCode))
+		slog.Warn("dashboard: fetch notify config rejected", "status", resp.StatusCode)
 		return nil, fmt.Errorf("fetch notify config: status %d", resp.StatusCode)
 	}
 

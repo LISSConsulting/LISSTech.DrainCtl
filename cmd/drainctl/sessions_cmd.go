@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -31,9 +32,8 @@ func runSessions(_ *cobra.Command, _ []string) error {
 	summary := dc.ComputeSessionSummary(sessions, dc.ReadMaxSessions())
 
 	if format == dc.FormatPlain {
-		log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
 		if len(sessions) == 0 {
-			log(dc.LvlINF, "sessions=none")
+			slog.Info("sessions=none")
 			return nil
 		}
 		for _, s := range sessions {
@@ -43,25 +43,24 @@ func runSessions(_ *cobra.Command, _ []string) error {
 				fmt.Sprintf("state=%s", s.State),
 			}
 			if s.UserName != "" {
-				// prepend user field
 				fields = append([]string{fmt.Sprintf("user=%s", s.UserName)}, fields...)
 			}
-			log(dc.LvlINF, fields...)
+			slog.Info(joinFields(fields...))
 		}
 		if summary != nil {
 			if summary.MaxSessions > 0 {
-				log(dc.LvlINF,
-					fmt.Sprintf("active=%d", summary.ActiveSessions),
-					fmt.Sprintf("disconnected=%d", summary.DisconnectedSessions),
-					fmt.Sprintf("total=%d/%d", summary.TotalSessions, summary.MaxSessions),
-					fmt.Sprintf("utilization=%d%%", summary.UtilizationPct),
+				slog.Info("",
+					"active", summary.ActiveSessions,
+					"disconnected", summary.DisconnectedSessions,
+					"total", fmt.Sprintf("%d/%d", summary.TotalSessions, summary.MaxSessions),
+					"utilization", fmt.Sprintf("%d%%", summary.UtilizationPct),
 				)
 			} else {
 				sessStr := fmt.Sprintf("active=%d", summary.ActiveSessions)
 				if summary.DisconnectedSessions > 0 {
 					sessStr += fmt.Sprintf(" disconnected=%d", summary.DisconnectedSessions)
 				}
-				log(dc.LvlINF, "sessions="+sessStr)
+				slog.Info("sessions=" + sessStr)
 			}
 		}
 		return nil
@@ -74,4 +73,16 @@ func runSessions(_ *cobra.Command, _ []string) error {
 
 	dc.WriteSessions(os.Stdout, sessions, summary, format)
 	return nil
+}
+
+// joinFields joins key=value fields into a single string for use as a slog message.
+func joinFields(fields ...string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	result := fields[0]
+	for _, f := range fields[1:] {
+		result += " " + f
+	}
+	return result
 }

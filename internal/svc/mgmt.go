@@ -4,6 +4,7 @@ package svc
 
 import (
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"time"
 
@@ -16,16 +17,16 @@ import (
 )
 
 // InstallService registers the service with SCM.
-func InstallService(exePath string, log dc.LogFunc) error {
-	return installServiceImpl(exePath, log)
+func InstallService(exePath string) error {
+	return installServiceImpl(exePath)
 }
 
 // UninstallService removes the service from SCM.
-func UninstallService(log dc.LogFunc) error {
-	return uninstallServiceImpl(log)
+func UninstallService() error {
+	return uninstallServiceImpl()
 }
 
-func installServiceImpl(exePath string, log dc.LogFunc) error {
+func installServiceImpl(exePath string) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
@@ -51,19 +52,19 @@ func installServiceImpl(exePath string, log dc.LogFunc) error {
 		{Type: mgr.ServiceRestart, Delay: 5 * 1e9},
 		{Type: mgr.NoAction, Delay: 0},
 	}, 86400); err != nil { // reset failure count after 24 hours
-		log(dc.LvlWRN, fmt.Sprintf("set_recovery_actions_failed=%q (service will not auto-restart on crash)", err))
+		slog.Warn("set_recovery_actions_failed", "error", err)
 	}
 
 	// Write default parameters.
-	if err := dc.WriteDefaultParameters(log); err != nil {
-		log(dc.LvlWRN, fmt.Sprintf("write_defaults_failed=%q", err))
+	if err := dc.WriteDefaultParameters(); err != nil {
+		slog.Warn("write_defaults_failed", "error", err)
 	}
 
-	log(dc.LvlOK, "service=installed", fmt.Sprintf("name=%s", dc.ServiceName))
+	slog.Info("service=installed", "name", dc.ServiceName)
 	return nil
 }
 
-func uninstallServiceImpl(log dc.LogFunc) error {
+func uninstallServiceImpl() error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
@@ -81,13 +82,13 @@ func uninstallServiceImpl(log dc.LogFunc) error {
 	}
 
 	_ = eventlog.Remove(dc.ServiceName)
-	log(dc.LvlOK, "service=uninstalled", fmt.Sprintf("name=%s", dc.ServiceName))
+	slog.Info("service=uninstalled", "name", dc.ServiceName)
 	return nil
 }
 
 // StartService sends a start request to SCM and waits up to 30 s for the
 // service to reach the Running state.
-func StartService(log dc.LogFunc) error {
+func StartService() error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
@@ -105,14 +106,14 @@ func StartService(log dc.LogFunc) error {
 		return fmt.Errorf("query service: %w", err)
 	}
 	if status.State == svc.Running {
-		log(dc.LvlOK, "service=already_running")
+		slog.Info("service=already_running")
 		return nil
 	}
 
 	if err := s.Start(); err != nil {
 		return fmt.Errorf("start service: %w", err)
 	}
-	log(dc.LvlINF, "service=start_pending")
+	slog.Info("service=start_pending")
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -122,7 +123,7 @@ func StartService(log dc.LogFunc) error {
 			return fmt.Errorf("query service: %w", err)
 		}
 		if status.State == svc.Running {
-			log(dc.LvlOK, "service=started")
+			slog.Info("service=started")
 			return nil
 		}
 		if status.State == svc.Stopped {
@@ -134,7 +135,7 @@ func StartService(log dc.LogFunc) error {
 
 // StopService sends a stop control to the service and waits up to 30 s for it
 // to reach the Stopped state.
-func StopService(log dc.LogFunc) error {
+func StopService() error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
@@ -152,7 +153,7 @@ func StopService(log dc.LogFunc) error {
 		return fmt.Errorf("query service: %w", err)
 	}
 	if status.State == svc.Stopped {
-		log(dc.LvlOK, "service=already_stopped")
+		slog.Info("service=already_stopped")
 		return nil
 	}
 
@@ -160,12 +161,12 @@ func StopService(log dc.LogFunc) error {
 	if err != nil {
 		return fmt.Errorf("stop service: %w", err)
 	}
-	log(dc.LvlINF, "service=stop_pending")
+	slog.Info("service=stop_pending")
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if status.State == svc.Stopped {
-			log(dc.LvlOK, "service=stopped")
+			slog.Info("service=stopped")
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -176,34 +177,34 @@ func StopService(log dc.LogFunc) error {
 	}
 	// Check one last time after the loop.
 	if status.State == svc.Stopped {
-		log(dc.LvlOK, "service=stopped")
+		slog.Info("service=stopped")
 		return nil
 	}
 	return fmt.Errorf("timed out waiting for service to stop")
 }
 
 // RestartService stops the service (if running) and starts it again.
-func RestartService(log dc.LogFunc) error {
-	if err := StopService(log); err != nil {
+func RestartService() error {
+	if err := StopService(); err != nil {
 		return err
 	}
-	return StartService(log)
+	return StartService()
 }
 
 // GrantEventLogAccess adds the virtual service account to the Event Log Readers
 // local group so the service can subscribe to Security log events.
-func GrantEventLogAccess(log dc.LogFunc) error {
+func GrantEventLogAccess() error {
 	account := `NT SERVICE\` + dc.ServiceName
 	out, err := exec.Command("net", "localgroup", "Event Log Readers", account, "/add").CombinedOutput()
 	if err != nil {
 		// Error 1378 = "already a member" — not a real failure.
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
-			log(dc.LvlINF, fmt.Sprintf("eventlog_readers=%s (already a member)", account))
+			slog.Info("eventlog_readers", "account", account, "note", "already a member")
 			return nil
 		}
 		return fmt.Errorf("net localgroup: %w (%s)", err, string(out))
 	}
-	log(dc.LvlOK, fmt.Sprintf("eventlog_readers=%s added", account))
+	slog.Info("eventlog_readers", "account", account, "note", "added")
 	return nil
 }
 

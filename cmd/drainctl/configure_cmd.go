@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -22,19 +23,17 @@ func configureCmd() *cobra.Command {
 When flags are provided (e.g. by the MSI installer), applies them directly
 and saves config.json without prompting.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
-				log(dc.LvlWRN, fmt.Sprintf("config unreadable (%s); starting from defaults", err))
+				slog.Warn("config unreadable; starting from defaults", "error", err)
 				fileCfg = dc.DefaultConfig()
 			}
 
 			// No flags explicitly set → interactive wizard for operators.
 			if cmd.Flags().NFlag() == 0 {
-				return runConfigureInteractive(fileCfg, log)
+				return runConfigureInteractive(fileCfg)
 			}
-			return runConfigureFlags(cmd, fileCfg, log)
+			return runConfigureFlags(cmd, fileCfg)
 		},
 	}
 
@@ -42,63 +41,71 @@ and saves config.json without prompting.`,
 		Use:   "show",
 		Short: "Show current configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := dc.DefaultLogger(os.Stdout, cfg.Quiet)
-			fileCfg, err := dc.LoadConfig(log)
+			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
 
-			log(dc.LvlINF, fmt.Sprintf("version=%s", dc.Version), fmt.Sprintf("config_path=%s", dc.DefaultConfigPath()))
+			slog.Info("version and config path", "version", dc.Version, "config_path", dc.DefaultConfigPath())
 
 			// Service settings
-			log(dc.LvlINF,
-				fmt.Sprintf("grace_period=%dm", fileCfg.GracePeriod),
-				fmt.Sprintf("poll_interval=%ds", fileCfg.PollInterval),
-				fmt.Sprintf("retention_days=%d", fileCfg.RetentionDays),
+			slog.Info("service settings",
+				"grace_period_m", fileCfg.GracePeriod,
+				"poll_interval_s", fileCfg.PollInterval,
+				"retention_days", fileCfg.RetentionDays,
 			)
 			if fileCfg.SessionWarningThreshold > 0 {
-				log(dc.LvlINF, fmt.Sprintf("session_warning_threshold=%d%%", fileCfg.SessionWarningThreshold))
+				slog.Info("session warning threshold", "pct", fileCfg.SessionWarningThreshold)
 			} else {
-				log(dc.LvlINF, "session_warning_threshold=disabled")
+				slog.Info("session_warning_threshold=disabled")
 			}
 
 			// Dashboard server (this machine serves the dashboard)
 			if fileCfg.Dashboard.Enabled {
-				log(dc.LvlINF, fmt.Sprintf("dashboard_server=enabled port=%d group=%q", fileCfg.Dashboard.Port, fileCfg.Dashboard.Group))
+				slog.Info("dashboard_server=enabled", "port", fileCfg.Dashboard.Port, "group", fileCfg.Dashboard.Group)
 			} else {
-				log(dc.LvlINF, "dashboard_server=disabled")
+				slog.Info("dashboard_server=disabled")
 			}
 
 			// Dashboard agent registration (this machine reports to a dashboard)
 			if fileCfg.Dashboard.URL != "" {
-				certNote := "cert=not_pinned"
+				certNote := "not_pinned"
 				if fileCfg.Dashboard.TLSFingerprint != "" {
-					certNote = fmt.Sprintf("cert=pinned fingerprint=%s", fileCfg.Dashboard.TLSFingerprint)
+					certNote = "pinned"
 				}
-				autoPinNote := ""
+				autoPin := false
 				if fileCfg.Dashboard.AutoPin != nil && *fileCfg.Dashboard.AutoPin {
-					autoPinNote = " auto_pin=true"
+					autoPin = true
 				}
-				log(dc.LvlINF, fmt.Sprintf("dashboard_url=%q %s%s", fileCfg.Dashboard.URL, certNote, autoPinNote))
+				slog.Info("dashboard agent registration",
+					"url", fileCfg.Dashboard.URL,
+					"cert", certNote,
+					"fingerprint", fileCfg.Dashboard.TLSFingerprint,
+					"auto_pin", autoPin,
+				)
 			}
 
 			// Performance monitoring
 			perf := fileCfg.Performance
 			if perf.ForceDisabled {
-				log(dc.LvlINF, "performance=force_disabled")
+				slog.Info("performance=force_disabled")
 			} else if perf.Enabled {
-				log(dc.LvlINF, "performance=enabled",
-					fmt.Sprintf("cpu_warn=%d%% cpu_crit=%d%%", perf.CPUWarnPct, perf.CPUCritPct),
-					fmt.Sprintf("mem_warn=%d%% mem_crit=%d%%", perf.MemWarnPct, perf.MemCritPct),
-					fmt.Sprintf("input_delay_warn=%dms input_delay_crit=%dms", perf.InputDelayWarnMS, perf.InputDelayCritMS),
-					fmt.Sprintf("remotefx=%t per_session=%t", perf.CollectRemoteFX, perf.CollectPerSession),
+				slog.Info("performance=enabled",
+					"cpu_warn_pct", perf.CPUWarnPct,
+					"cpu_crit_pct", perf.CPUCritPct,
+					"mem_warn_pct", perf.MemWarnPct,
+					"mem_crit_pct", perf.MemCritPct,
+					"input_delay_warn_ms", perf.InputDelayWarnMS,
+					"input_delay_crit_ms", perf.InputDelayCritMS,
+					"remotefx", perf.CollectRemoteFX,
+					"per_session", perf.CollectPerSession,
 				)
 			} else {
-				log(dc.LvlINF, "performance=disabled")
+				slog.Info("performance=disabled")
 			}
 
 			// Notification targets
-			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets(), log)
+			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets())
 			return nil
 		},
 	})
@@ -123,7 +130,7 @@ and saves config.json without prompting.`,
 
 // runConfigureInteractive prompts the operator for each setting, showing the
 // current value as the default.  Press Enter to keep a value unchanged.
-func runConfigureInteractive(fileCfg *dc.Config, log dc.LogFunc) error {
+func runConfigureInteractive(fileCfg *dc.Config) error {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	// prompt prints a labelled prompt with the current default and reads one
@@ -226,15 +233,15 @@ func runConfigureInteractive(fileCfg *dc.Config, log dc.LogFunc) error {
 	fileCfg.Notifications = updated
 
 	fmt.Println()
-	if err := dc.SaveConfig(fileCfg, log); err != nil {
+	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
-	log(dc.LvlOK, "configure=done mode=interactive")
+	dc.PrintResult(os.Stdout, "configure=done", "mode", "interactive")
 	return nil
 }
 
 // runConfigureFlags applies flag-based configuration (MSI installer / scripted use).
-func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config, log dc.LogFunc) error {
+func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	mode, _ := cmd.Flags().GetString("mode")
 	webhookURL, _ := cmd.Flags().GetString("webhook-url")
 	ntfyURL, _ := cmd.Flags().GetString("ntfy-url")
@@ -310,11 +317,11 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config, log dc.LogFunc) e
 		fileCfg.Notifications = upsertNotifyTarget(fileCfg.Notifications, "ntfy", ntfyURL)
 	}
 
-	fileCfg.Validate(log)
+	fileCfg.Validate()
 
-	if err := dc.SaveConfig(fileCfg, log); err != nil {
+	if err := dc.SaveConfig(fileCfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	log(dc.LvlOK, fmt.Sprintf("configure=done mode=%s", mode))
+	dc.PrintResult(os.Stdout, "configure=done", fmt.Sprintf("mode=%s", mode))
 	return nil
 }

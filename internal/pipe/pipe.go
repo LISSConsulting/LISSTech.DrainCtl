@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -40,18 +41,14 @@ type PipeHandler interface {
 
 // ServePipe runs the named pipe server using a simple goroutine-per-connection
 // model with the Windows named pipe API.
-func ServePipe(ctx context.Context, handler PipeHandler, log dc.LogFunc) {
-	if log == nil {
-		log = dc.DiscardLogger()
-	}
-
-	log(dc.LvlINF, "pipe_server=starting", "pipe="+PipeName)
+func ServePipe(ctx context.Context, handler PipeHandler) {
+	slog.Info("pipe_server=starting", "pipe", PipeName)
 
 	for {
 		// Check for cancellation before creating a new pipe instance.
 		select {
 		case <-ctx.Done():
-			log(dc.LvlINF, "pipe_server=stopped")
+			slog.Info("pipe_server=stopped")
 			return
 		default:
 		}
@@ -61,19 +58,19 @@ func ServePipe(ctx context.Context, handler PipeHandler, log dc.LogFunc) {
 		conn, err := acceptPipeConn(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log(dc.LvlINF, "pipe_server=stopped")
+				slog.Info("pipe_server=stopped")
 				return
 			}
-			dc.LogMsg(log, dc.LvlERR, "pipe accept failed", fmt.Sprintf("error=%q", err))
+			slog.Error("pipe accept failed", "error", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		go handlePipeConn(conn, handler, log)
+		go handlePipeConn(conn, handler)
 	}
 }
 
-func handlePipeConn(conn net.Conn, handler PipeHandler, log dc.LogFunc) {
+func handlePipeConn(conn net.Conn, handler PipeHandler) {
 	defer func() { _ = conn.Close() }()
 
 	// Set a deadline to prevent slow clients from blocking.
