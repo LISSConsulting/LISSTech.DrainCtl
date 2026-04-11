@@ -2,6 +2,12 @@
   let { target, onconfirm, oncancel } = $props();
 
   let dest = $derived(target?.type === 'email' ? (target?.to || []).join(', ') : (target?.url || ''));
+
+  $effect(() => {
+    function onKey(e) { if (e.key === 'Escape') oncancel?.(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->

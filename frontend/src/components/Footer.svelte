@@ -3,7 +3,7 @@
 
   const lastUpdatedStr = $derived(
     appState.lastUpdated
-      ? `Updated ${appState.lastUpdated.toLocaleTimeString()}`
+      ? `Updated ${appState.lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`
       : 'Not yet updated'
   );
 </script>

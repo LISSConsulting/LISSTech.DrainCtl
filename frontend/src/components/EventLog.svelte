@@ -7,6 +7,13 @@
   /** @type {HTMLDivElement|null} */
   let logEl = $state(null);
 
+  // Collapse the expanded overlay when Escape is pressed.
+  $effect(() => {
+    function onKey(e) { if (e.key === 'Escape' && expanded) expanded = false; }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
   /**
    * Parse a raw event string into a display-friendly object.
    * Strings are produced by App.svelte as:
