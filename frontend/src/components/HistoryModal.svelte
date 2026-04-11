@@ -27,12 +27,17 @@
     if (loading) return;
     loading = true;
     error = '';
+    // Snapshot the filter at fetch time so we can detect if it changed while
+    // the request was in flight (e.g. rapid toggle of "Transitions Only").
+    const fetchedChangesOnly = changesOnly;
     try {
-      entries = await fetchHistory(host, 100, changesOnly) || [];
+      entries = await fetchHistory(host, 100, fetchedChangesOnly) || [];
     } catch(e) {
       error = e?.message ?? String(e);
     } finally {
       loading = false;
+      // If the filter toggled while we were fetching, re-fetch with the new value.
+      if (changesOnly !== fetchedChangesOnly) loadHistory();
     }
   }
 

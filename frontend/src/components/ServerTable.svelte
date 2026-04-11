@@ -55,8 +55,8 @@
     const d = new Date(iso);
     if (isNaN(d)) return null;
     const ms = d - _now;
-    if (ms <= 0) return 'expired';
     const s = Math.floor(ms / 1000);
+    if (s <= 0) return 'expired';
     if (s < 60) return s + 's left';
     const m = Math.floor(s / 60);
     if (m < 60) return m + 'm left';

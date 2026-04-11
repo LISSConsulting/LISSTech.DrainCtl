@@ -91,8 +91,8 @@
       <button class="log-restore" onclick={() => { expanded = false; }}>
         Click to collapse · {filtered.length} events
       </button>
+      <div class="log-title">EVENT LOG</div>
     {/if}
-    <div class="log-title">EVENT LOG</div>
     {#if !filtered.length}
       <div class="evt-empty">
         {search ? 'No matching events.' : 'Waiting for data...'}

@@ -90,11 +90,11 @@
         }
       }
 
-      addEvent(`[${new Date().toLocaleTimeString()}] Refreshed — ${s.length} server(s), ${sessions} session(s)`);
+      addEvent(`[${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}] Refreshed — ${s.length} server(s), ${sessions} session(s)`);
     } catch (e) {
       appState.connected = false;
       console.error('refresh:', e);
-      addEvent(`[${new Date().toLocaleTimeString()}] Refresh failed: ${e?.message ?? e}`);
+      addEvent(`[${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}] Refresh failed: ${e?.message ?? e}`);
     } finally {
       refreshing = false;
     }
