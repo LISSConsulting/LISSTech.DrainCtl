@@ -49,6 +49,26 @@ export function formatTs(iso) {
 }
 
 /**
+ * Convert a drain mode identifier to a human-readable label.
+ *
+ * Accepts both the Windows Registry API constant strings produced by
+ * DrainMode.String() in the Go backend and legacy short-form labels.
+ * Falls back to returning the raw value (or '—' when empty/null).
+ *
+ * @param {string|null|undefined} m
+ * @returns {string}
+ */
+export function modeLabel(m) {
+  const ML = {
+    ALLOW_ALL_CONNECTIONS:                              'Open',
+    ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS:             'Drain',
+    ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART: 'Drain (Restart)',
+    none: 'Open', graceful: 'Graceful', immediate: 'Immediate',
+  };
+  return ML[m] || m || '—';
+}
+
+/**
  * Format a duration in seconds to a human-readable string.
  * Examples: "45s", "3m 12s", "2h 5m"
  * @param {number|null|undefined} sec

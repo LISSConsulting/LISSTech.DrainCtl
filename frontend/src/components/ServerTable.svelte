@@ -2,7 +2,7 @@
   import { appState, removeServerMetrics } from '../lib/state.svelte.js';
   import { deleteServer } from '../lib/api.js';
   import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
-  import { rel } from '../lib/utils.js';
+  import { rel, modeLabel } from '../lib/utils.js';
   import ServerDetail from './ServerDetail.svelte';
 
   let { onhistoryclick } = $props();
@@ -44,16 +44,6 @@
     const h = Math.floor(m / 60);
     const rem = m % 60;
     return h + 'h ' + (rem > 0 ? rem + 'm ' : '') + 'left';
-  }
-
-  function modeLabel(m) {
-    const ML = {
-      ALLOW_ALL_CONNECTIONS: 'Open',
-      ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: 'Drain',
-      ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART: 'Drain (Restart)',
-      none: 'Open', graceful: 'Graceful', immediate: 'Immediate'
-    };
-    return ML[m] || m || '—';
   }
 
   function statusLabel(s) {

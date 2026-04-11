@@ -1,6 +1,6 @@
 <script>
   import { fetchHistory } from '../lib/api.js';
-  import { formatTs, dur } from '../lib/utils.js';
+  import { formatTs, dur, modeLabel } from '../lib/utils.js';
 
   let { host, onclose } = $props();
 
@@ -84,9 +84,9 @@
               <div class="hist-ts">{formatTs(e.timestamp)}</div>
               <div class="hist-badge {sc}">{statusLabel(sc)}</div>
               <div class="hist-detail">
-                {#if e.drain_mode && e.drain_mode !== 'none'}mode={e.drain_mode}{/if}
-                {#if e.state_duration_seconds != null} dur={dur(e.state_duration_seconds)}{/if}
-                {#if e.changed_by} by={e.changed_by}{/if}
+                {#if e.drain_mode && e.drain_mode !== 'none' && e.drain_mode !== 'ALLOW_ALL_CONNECTIONS'}{modeLabel(e.drain_mode)}{/if}
+                {#if e.state_duration_seconds != null} · {dur(e.state_duration_seconds)}{/if}
+                {#if e.changed_by} · {e.changed_by}{/if}
               </div>
             </div>
           {/each}

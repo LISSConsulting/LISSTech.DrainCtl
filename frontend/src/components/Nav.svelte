@@ -19,7 +19,8 @@
       <span class="mono">
         <span class="g">{counters.ok}</span> ok ·
         <span class="w">{counters.grace}</span> grace ·
-        <span class="a">{counters.alert}</span> alert
+        <span class="a">{counters.alert}</span> alert ·
+        <span class="o">{counters.off}</span> off
       </span>
       <button class="btn-gear btn-brutal" onclick={onconfigopen}>CONFIG</button>
       <button class="btn-theme btn-brutal" onclick={toggleTheme}>{isDark ? '☀' : '☽'}</button>
@@ -84,6 +85,7 @@
   .g { color: var(--color-green); }
   .a { color: var(--color-red); }
   .w { color: var(--color-amber); }
+  .o { color: var(--color-subtle); }
 
   .btn-gear {
     font-family: 'JetBrains Mono', monospace;
