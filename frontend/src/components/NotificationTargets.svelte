@@ -127,7 +127,7 @@
   .col-dest { width: 24%; }
   .col-trig { width: 120px; }
   .col-rep { width: 52px; }
-  .col-act { width: 120px; }
+  .col-act { width: 1%; white-space: nowrap; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
   .empty-row td { height: 42px; border-bottom: 1px solid var(--color-surface) !important; }
