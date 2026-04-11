@@ -45,6 +45,12 @@
   function handleOverlayClick(e) {
     if (e.target === e.currentTarget) onclose?.();
   }
+
+  $effect(() => {
+    function onKey(e) { if (e.key === 'Escape') onclose?.(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->

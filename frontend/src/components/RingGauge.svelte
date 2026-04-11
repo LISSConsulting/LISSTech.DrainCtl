@@ -10,6 +10,7 @@
     critThreshold,
     direction = 'higher-worse',
     size = 56,
+    centerLabel = undefined, // optional override for the center text (e.g. "10/25")
   } = $props();
 
   let pct = $derived(max > 0 ? Math.min(Math.max(((value ?? 0) / max) * 100, 0), 100) : 0);
@@ -60,8 +61,8 @@
       />
     </svg>
     <div class="ring-val">
-      <span class="ring-pct">{displayValue}</span>
-      {#if unit && unit !== '%'}<span class="ring-unit">{unit}</span>{/if}
+      <span class="ring-pct">{centerLabel ?? displayValue}</span>
+      {#if !centerLabel && unit && unit !== '%'}<span class="ring-unit">{unit}</span>{/if}
     </div>
   </div>
   {#if label}<div class="ring-lbl">{label}</div>{/if}

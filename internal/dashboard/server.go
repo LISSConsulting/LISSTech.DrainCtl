@@ -34,7 +34,8 @@ type ServerView struct {
 	Host          string           `json:"host"`
 	Status        string           `json:"status"` // "ok"/"grace"/"alert"/"off"
 	DrainMode     string           `json:"drain_mode"`
-	Sessions      int              `json:"sessions"` // TotalSessions; 0 when unknown
+	Sessions      int              `json:"sessions"`     // TotalSessions; 0 when unknown
+	MaxSessions   int              `json:"max_sessions"` // server capacity; 0 when unknown
 	Version       string           `json:"version"`
 	RegisteredAt  time.Time        `json:"registered_at"`
 	LastSeen      time.Time        `json:"last_seen,omitempty"`
@@ -99,6 +100,7 @@ func toServerView(info ServerInfo) ServerView {
 	v.Perf = r.Performance
 	if r.Sessions != nil {
 		v.Sessions = r.Sessions.TotalSessions
+		v.MaxSessions = r.Sessions.MaxSessions
 	}
 	// GraceDeadline: the moment when the grace window expires.
 	// Computed from StateSince + GracePeriodSeconds so the frontend can display

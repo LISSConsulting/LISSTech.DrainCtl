@@ -29,7 +29,7 @@
     try {
       entries = await fetchHistory(host, 100, changesOnly) || [];
     } catch(e) {
-      error = e.message;
+      error = e?.message ?? String(e);
     } finally {
       loading = false;
     }

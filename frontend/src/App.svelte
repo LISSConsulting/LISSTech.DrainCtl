@@ -1,5 +1,5 @@
 <script>
-  import { initTheme } from './lib/theme.js';
+  import { initTheme } from './lib/theme.svelte.js';
   import { appState, addEvent, appendMetricsSample, appendServerMetricsSample } from './lib/state.svelte.js';
   import { fetchServers, fetchHealth, fetchNotifyConfig } from './lib/api.js';
 
@@ -29,10 +29,16 @@
   // Refresh logic
   // ---------------------------------------------------------------------------
 
+  let refreshing = false;
+
   /**
    * Pull fresh data from the API and update global state.
+   * Guard prevents concurrent calls — if the previous fetch hasn't resolved
+   * before the 30-second tick fires, the tick is skipped.
    */
   async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
     try {
       // Fetch config once on the first successful refresh (lazy load).
       const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
@@ -89,6 +95,8 @@
       appState.connected = false;
       console.error('refresh:', e);
       addEvent(`[${new Date().toLocaleTimeString()}] Refresh failed: ${e?.message ?? e}`);
+    } finally {
+      refreshing = false;
     }
   }
 

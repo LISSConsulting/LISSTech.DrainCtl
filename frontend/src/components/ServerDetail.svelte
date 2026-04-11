@@ -23,6 +23,18 @@
   let perf = $derived(server.perf || {});
   let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_avail_mb / perf.mem_total_mb) * 100 : 0);
 
+  // Sessions ring: when max_sessions is known, show utilisation % (0–100) so
+  // the warn/crit thresholds (session_warning_threshold from config) map directly
+  // to the fill position.  When max_sessions is unknown, show the raw count on a
+  // fixed 100-unit scale with neutral color until real capacity data arrives.
+  let sessionWarnThresh = $derived(appState.config?.session_warning_threshold ?? 80);
+  let sessionCritThresh = $derived(Math.min(sessionWarnThresh + 15, 100));
+  let sessionsPct = $derived(
+    server.max_sessions > 0
+      ? Math.min((server.sessions / server.max_sessions) * 100, 100)
+      : null
+  );
+
   // Per-server ring buffer; fall back to fleet aggregate when no server-specific
   // data is available yet (e.g., first render before any refresh cycle completes).
   let serverHistory = $derived(
@@ -51,7 +63,15 @@
         <RingGauge value={memPct} label="Memory" unit="%" warnThreshold={memThresh.warn} critThreshold={memThresh.crit} />
       </div>
       <div class="d-ring-cell">
-        <RingGauge value={server.sessions} max={server.sessions > 0 ? server.sessions * 1.5 : 100} label="Sessions" unit=" " warnThreshold={DEFAULTS.sessions.warn} critThreshold={DEFAULTS.sessions.crit} />
+        <RingGauge
+          value={sessionsPct}
+          max={100}
+          label="Sessions"
+          unit=" "
+          warnThreshold={sessionWarnThresh}
+          critThreshold={sessionCritThresh}
+          centerLabel={String(server.sessions)}
+        />
       </div>
     </div>
     <div class="d-spark-row">

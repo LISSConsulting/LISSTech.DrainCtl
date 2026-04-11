@@ -19,6 +19,11 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `ServerDetail.svelte` sessions ring gauge used an arbitrary `max = sessions * 1.5` heuristic, making the ring always fill to ~67% and the amber/red thresholds meaningless; `ServerView` in `internal/dashboard/server.go` now exposes `max_sessions` from `SessionSummary.MaxSessions`; `ServerDetail` derives `sessionsPct` (0–100 utilisation % when capacity is known, `null` when unknown) and uses `session_warning_threshold` from config as the amber threshold; `RingGauge.svelte` gains an optional `centerLabel` prop so the sessions ring can display the raw count ("10") rather than the %-based `displayValue`; ring color is correctly neutral when max is unknown
+- `App.svelte` refresh loop had no guard against concurrent execution — if an API call took longer than 30 s the next tick would start a parallel fetch, potentially interleaving stale state; added `refreshing` boolean flag with `finally` reset so at most one refresh is in flight at a time
+- `TargetEditModal.svelte` had no keyboard shortcut to dismiss: `Escape` now closes the modal (consistent with `ConfigModal.svelte` and `HistoryModal.svelte`)
+- `HistoryModal.svelte` caught errors with `e.message` which is `undefined` when the thrown value is not an `Error` instance (e.g. a string or non-Error object); fixed to `e?.message ?? String(e)`
+
 - `ServerTable.svelte` grace-period deadline never surfaced: `grace_deadline` existed in the `Server` typedef but was not rendered; added inline countdown badge (e.g., "14m left", "expired") next to the Grace pill so operators immediately see how much drain time remains
 - `ConfigModal.svelte` "Custom" grace-period pill always appeared inactive even when a non-preset value was typed into the numeric input; pill now activates (amber fill) whenever `grace_period_minutes` is not in `GRACE_PRESETS`
 - `ConfigModal.svelte` / `HistoryModal.svelte` had no keyboard shortcut to dismiss: `Escape` now closes both modals (respecting ConfigModal's dirty-state guard)

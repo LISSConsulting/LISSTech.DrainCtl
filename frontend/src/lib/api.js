@@ -35,6 +35,7 @@ const BASE = '/api/v1';
  * @property {'ok'|'grace'|'alert'|'off'} status
  * @property {string} drain_mode
  * @property {number} sessions             - TotalSessions (integer)
+ * @property {number} max_sessions         - Server session capacity (0 when unknown)
  * @property {string} version
  * @property {string} registered_at
  * @property {string} last_seen
