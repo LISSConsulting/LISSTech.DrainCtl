@@ -14,8 +14,9 @@
     "vite": "^6.3.2"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.1.4",
     "layercake": "^10.0.2",
-    "tailwindcss": "^4.1.4",
-    "@tailwindcss/vite": "^4.1.4"
+    "lucide-svelte": "^1.0.1",
+    "tailwindcss": "^4.1.4"
   }
 }

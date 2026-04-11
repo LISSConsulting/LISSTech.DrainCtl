@@ -2,6 +2,7 @@
   import TargetEditModal from './TargetEditModal.svelte';
   import TargetDeleteModal from './TargetDeleteModal.svelte';
   import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
+  import { Pencil, Trash2, Plus } from 'lucide-svelte';
 
   let { targets = $bindable([]) } = $props();
 
@@ -66,8 +67,8 @@
               <td class="mono">{repeatLabel(t.repeat_minutes || 0)}</td>
               <td>
                 <div class="btn-row">
-                  <button class="btn-tbl" onclick={() => openEdit(i)}>Edit</button>
-                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = i}>Delete</button>
+                  <button class="btn-tbl" onclick={() => openEdit(i)}><Pencil size={12} /> Edit</button>
+                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = i}><Trash2 size={12} /> Delete</button>
                 </div>
               </td>
             </tr>
@@ -77,7 +78,7 @@
     {/if}
   </div>
 
-  <button class="btn-add-target" onclick={() => openEdit(-1)}>+ Add Target</button>
+  <button class="btn-add-target" onclick={() => openEdit(-1)}><Plus size={14} /> Add Target</button>
 </div>
 
 {#if editTarget !== null}
@@ -113,8 +114,8 @@
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
-  .btn-row { display: flex; gap: 6px; }
-  .btn-tbl { font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 700; padding: 5px 12px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; }
+  .btn-row { display: flex; gap: 10px; }
+  .btn-tbl { display: inline-flex; align-items: center; gap: 4px; font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 700; padding: 5px 12px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; }
   .btn-tbl:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); }
   .btn-tbl:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-tbl-danger { color: var(--color-red); border-color: var(--color-red); }
