@@ -117,17 +117,16 @@
   .tgt-search:focus { box-shadow: 0 0 0 2px var(--color-accent); }
   .tgt-search::placeholder { color: var(--color-subtle); }
 
-  .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .target-tbl-wrap { border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); margin-bottom: 12px; overflow: hidden; }
   .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .target-tbl th, .target-tbl td { padding: 11px 14px; white-space: nowrap; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
-  .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
+  .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 52px; box-sizing: border-box; }
   .col-dest { width: 99%; }
   .td-dest { overflow: hidden; text-overflow: ellipsis; max-width: 0; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
-  .empty-row td { height: 42px; border-bottom: 1px solid var(--color-surface) !important; }
-  .target-tbl tbody { min-height: 210px; }
+  .empty-row td { height: 52px; box-sizing: border-box; }
   .target-tbl-empty { text-align: center; color: var(--color-subtle); font-size: 13px; }
   .tgt-triggers { display: flex; flex-wrap: nowrap; gap: 2px; overflow: hidden; }
   .pill-type { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.8px; border: 2px solid var(--color-border); box-shadow: 2px 2px 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
