@@ -215,7 +215,7 @@
               onclick={() => applyFirePreset(preset)}
             >
               {#if activeFireLevel === preset.level}
-                <span class="fire-seal"><Award size={20} strokeWidth={2.5} /></span>
+                <span class="fire-seal fire-seal-{preset.level}"><Award size={20} strokeWidth={2.5} /></span>
               {/if}
               <span class="fire-icon-wrap">{#each { length: preset.beans } as _}<svg class="bean" viewBox="0 0 20 24" width="16" height="19"><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor"/><path d="M10 3 C8 8, 8 16, 10 21" stroke="var(--color-surface)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>{/each}</span>
               <span class="fire-label">{preset.label}</span>
@@ -435,12 +435,15 @@
     position: absolute; top: -10px; right: -10px;
     display: flex; align-items: center; justify-content: center;
     width: 32px; height: 32px;
-    background: #d4a017; color: #fff;
+    color: #fff;
     border: 3px solid var(--color-border);
     border-radius: 50%;
     box-shadow: 2px 2px 0 var(--color-shadow);
     animation: seal-pop 0.25s ease-out;
   }
+  .fire-seal-1 { background: var(--color-green); }
+  .fire-seal-2 { background: var(--color-amber); }
+  .fire-seal-3 { background: var(--color-accent); }
   @keyframes seal-pop { from { transform: scale(0); } to { transform: scale(1); } }
   .fire-icon-wrap { display: flex; gap: 2px; line-height: 1; margin-bottom: 4px; }
   .fire-level-1 .fire-icon-wrap { color: var(--color-amber); }
