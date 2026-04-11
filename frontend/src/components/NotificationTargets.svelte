@@ -123,11 +123,11 @@
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
   .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; overflow: hidden; text-overflow: ellipsis; }
   .col-dot { width: 22px; }
-  .col-type { width: 82px; }
-  .col-dest { width: 30%; }
-  .col-trig { width: 100px; }
-  .col-rep { width: 40px; }
-  .col-act { width: 140px; }
+  .col-type { width: 80px; }
+  .col-dest { width: 24%; }
+  .col-trig { width: 120px; }
+  .col-rep { width: 52px; }
+  .col-act { width: 120px; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
   .empty-row td { height: 42px; border-bottom: 1px solid var(--color-surface) !important; }
@@ -162,7 +162,7 @@
   .btn-page:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-page:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important; }
 
-  .mono { font-family: 'JetBrains Mono', monospace; font-size: 10px; white-space: nowrap; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
   .settings-group { margin-bottom: 18px; }
   .settings-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent); margin-bottom: 6px; }
 </style>
