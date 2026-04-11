@@ -34,6 +34,9 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Features
 
+- `App.svelte` now detects server state transitions between 30-second refresh cycles and emits structured events to the event log: host label, a `Before → After` description (e.g. "Healthy → Alert"), severity colour (red for alert/offline, amber for grace, green for healthy/new), and bold `is-transition` formatting — so the event log is a real-time change feed instead of a heartbeat-only display; `state.svelte.js` `addEvent` type broadened from `string` to `string|Record<string,unknown>` to carry the structured fields; newly appearing hosts are logged as "registered (…)" on the second and subsequent refreshes; hosts deleted server-side log "removed from dashboard" with alert severity
+- `CounterGrid.svelte` now shows six counter cards — Total, Healthy, Grace, Alert, **Offline**, Sessions — matching the four-state summary already shown in the Nav; offline card uses `--color-subtle` consistent with the dot/pill convention used elsewhere
+
 - `ServerTable.svelte` status filter pills now display live counts (e.g. "Grace (2)", "Alert (1)") so operators immediately see how many servers are in each state without expanding the table
 - `api.js` `apiFetch` now wraps every request in an `AbortController` with a 20-second timeout; network hangs no longer freeze the dashboard indefinitely — a timed-out request throws an `ApiError(0, 'Timeout', ...)` that surfaces as a normal refresh-failed event in the event log
 - `ServerTable.svelte` expandable rows are now keyboard-accessible: each `<tr>` receives `tabindex="0"` and responds to `Enter`/`Space` to toggle the detail accordion, with a `:focus-visible` ring using `--color-accent`; `aria-expanded` reflects the open/closed state

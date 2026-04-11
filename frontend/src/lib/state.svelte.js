@@ -54,7 +54,7 @@ let health = $state(null);
 /** @type {NotifyConfig|null} */
 let config = $state(null);
 
-/** @type {string[]} */
+/** @type {(string|Record<string,unknown>)[]} */
 let events = $state([]);
 
 /** @type {MetricsSample[]} */
@@ -186,8 +186,10 @@ export const appState = {
 // ---------------------------------------------------------------------------
 
 /**
- * Prepend a log event string, capping the array at MAX_EVENTS.
- * @param {string} msg
+ * Prepend a log event (string or structured object), capping the array at MAX_EVENTS.
+ * Pass a string for simple text events; pass an object with { time, host, text, sev,
+ * transition } fields to produce a colour-coded, host-tagged entry in EventLog.
+ * @param {string|Record<string,unknown>} msg
  */
 export function addEvent(msg) {
   events = [msg, ...events].slice(0, MAX_EVENTS);

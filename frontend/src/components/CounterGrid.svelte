@@ -21,6 +21,10 @@
     <div class="ctr-v">{counters.alert}</div>
     <div class="ctr-l">Alert</div>
   </div>
+  <div class="card ctr off">
+    <div class="ctr-v">{counters.off}</div>
+    <div class="ctr-l">Offline</div>
+  </div>
   <div class="card ctr sessions">
     <div class="ctr-v mono">{counters.sessions}</div>
     <div class="ctr-l">Sessions</div>
@@ -30,7 +34,7 @@
 <style>
   .counters {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 14px;
     margin-bottom: 20px;
   }
@@ -70,6 +74,9 @@
 
   .ctr.alert { border-left-color: var(--color-red); }
   .ctr.alert .ctr-v { color: var(--color-red); }
+
+  .ctr.off { border-left-color: var(--color-subtle); }
+  .ctr.off .ctr-v { color: var(--color-subtle); }
 
   .ctr.sessions { border-left-color: var(--color-muted); }
 </style>

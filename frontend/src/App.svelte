@@ -26,6 +26,27 @@
   let historyHost = $state(null);
 
   // ---------------------------------------------------------------------------
+  // State transition tracking — detect status changes between refresh cycles
+  // ---------------------------------------------------------------------------
+
+  /** Previous server statuses keyed by hostname. Populated after first refresh. */
+  const prevStates = /** @type {Map<string, string>} */ (new Map());
+  /** True after the first successful refresh completes. */
+  let hasRefreshed = false;
+
+  /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
+  function statusLabel(s) {
+    return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
+  }
+
+  /** Map a server status to the event severity used by EventLog for colouring. */
+  function statusSev(s) {
+    if (s === 'alert' || s === 'off') return 'alert';
+    if (s === 'grace') return 'grace';
+    return 'ok';
+  }
+
+  // ---------------------------------------------------------------------------
   // Refresh logic
   // ---------------------------------------------------------------------------
 
@@ -53,6 +74,30 @@
       if (needsConfig) appState.config = results[2] ?? null;
       appState.connected = true;
       appState.lastUpdated = new Date();
+
+      // Detect and log server state transitions (skipped on first refresh so we
+      // don't flood the log with N "registered" lines when the page loads).
+      const evtTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      if (hasRefreshed) {
+        const seenHosts = new Set((servers || []).map(sv => sv.host));
+        for (const sv of (servers || [])) {
+          const prev = prevStates.get(sv.host);
+          if (prev === undefined) {
+            addEvent({ time: evtTime, host: sv.host.split('.')[0], text: `registered (${statusLabel(sv.status)})`, sev: 'ok', transition: true });
+          } else if (prev !== sv.status) {
+            addEvent({ time: evtTime, host: sv.host.split('.')[0], text: `${statusLabel(prev)} → ${statusLabel(sv.status)}`, sev: statusSev(sv.status), transition: true });
+          }
+        }
+        for (const host of prevStates.keys()) {
+          if (!seenHosts.has(host)) {
+            addEvent({ time: evtTime, host: host.split('.')[0], text: 'removed from dashboard', sev: 'alert', transition: true });
+          }
+        }
+      }
+      // Snapshot for next cycle.
+      prevStates.clear();
+      for (const sv of (servers || [])) prevStates.set(sv.host, sv.status);
+      hasRefreshed = true;
 
       // Compute average metrics across all servers that have perf data.
       // Divide by the count of servers with perf data, not total server count —
