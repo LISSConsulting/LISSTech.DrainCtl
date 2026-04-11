@@ -316,10 +316,10 @@
   .settings-num:focus { box-shadow: 0 0 0 2px var(--color-accent); }
   .settings-num-label { font-size: 0.75rem; color: var(--color-muted); }
   .settings-divider { height: 1px; background: var(--color-border); margin: 18px 0; opacity: 0.4; }
-  .settings-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 12px; }
-  .threshold-row { display: grid; grid-template-columns: auto 80px auto auto 80px auto; gap: 8px; align-items: center; margin-bottom: 6px; }
-  .threshold-lbl { justify-self: end; }
-  .threshold-unit { justify-self: start; }
+  .settings-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 12px; }
+  .threshold-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .threshold-lbl { min-width: 28px; }
+  .threshold-unit { min-width: 16px; }
 
   /* Fire preset cards */
   .fire-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
