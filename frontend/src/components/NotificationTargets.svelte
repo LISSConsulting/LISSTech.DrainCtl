@@ -7,7 +7,7 @@
         editIdx = $bindable(-1),
         deleteIdx = $bindable(-1) } = $props();
 
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 5;
   let page = $state(0);
 
   let totalPages = $derived(Math.max(1, Math.ceil((targets?.length || 0) / PAGE_SIZE)));
