@@ -119,7 +119,7 @@
 
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
   .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .target-tbl th, .target-tbl td { padding: 8px 6px; white-space: nowrap; }
+  .target-tbl th, .target-tbl td { padding: 10px 12px; white-space: nowrap; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
   .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
   .col-dest { width: 99%; }
