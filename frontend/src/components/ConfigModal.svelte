@@ -208,7 +208,7 @@
         <div class="fire-row">
           {#each FIRE_PRESETS as preset}
             <button
-              class="fire-card {activeFireLevel === preset.level ? 'active' : ''}"
+              class="fire-card fire-level-{preset.level} {activeFireLevel === preset.level ? 'active' : ''}"
               onclick={() => applyFirePreset(preset)}
             >
               <span class="fire-icon-wrap"><svelte:component this={preset.icon} size={24} /></span>
@@ -411,17 +411,24 @@
   .fire-card {
     display: flex; flex-direction: column; align-items: center; gap: 3px;
     padding: 14px 10px 10px;
-    background: var(--color-surface);
     border: 2px solid var(--color-border);
     border-radius: var(--radius-default);
     cursor: pointer;
     transition: all 0.15s;
     box-shadow: 3px 3px 0 var(--color-shadow);
   }
+  .fire-level-1 { background: linear-gradient(135deg, color-mix(in srgb, var(--color-green) 8%, var(--color-surface)), var(--color-surface)); }
+  .fire-level-2 { background: linear-gradient(135deg, color-mix(in srgb, var(--color-amber) 8%, var(--color-surface)), var(--color-surface)); }
+  .fire-level-3 { background: linear-gradient(135deg, color-mix(in srgb, var(--color-red) 8%, var(--color-surface)), var(--color-surface)); }
   .fire-card:hover { border-color: var(--color-accent); transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--color-shadow); }
-  .fire-card.active { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, var(--color-card)); box-shadow: 0 0 0 2px var(--color-accent), 3px 3px 0 var(--color-shadow); }
-  .fire-icon-wrap { color: var(--color-accent); line-height: 1; margin-bottom: 2px; }
-  .fire-card.active .fire-icon-wrap { color: var(--color-red); }
+  .fire-card.active { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent), 3px 3px 0 var(--color-shadow); }
+  .fire-level-1.active { background: linear-gradient(135deg, color-mix(in srgb, var(--color-green) 18%, var(--color-card)), var(--color-card)); }
+  .fire-level-2.active { background: linear-gradient(135deg, color-mix(in srgb, var(--color-amber) 18%, var(--color-card)), var(--color-card)); }
+  .fire-level-3.active { background: linear-gradient(135deg, color-mix(in srgb, var(--color-red) 18%, var(--color-card)), var(--color-card)); }
+  .fire-icon-wrap { line-height: 1; margin-bottom: 2px; }
+  .fire-level-1 .fire-icon-wrap { color: var(--color-green); }
+  .fire-level-2 .fire-icon-wrap { color: var(--color-amber); }
+  .fire-level-3 .fire-icon-wrap { color: var(--color-red); }
   .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
   .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.58rem; color: var(--color-muted); text-align: center; line-height: 1.4; }
   .fire-custom-toggle {
