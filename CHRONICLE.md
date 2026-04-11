@@ -41,6 +41,10 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `App.svelte` fleet metrics averages (CPU / Memory / Input Delay) in the performance chart were divided by the total server count including servers with `perf=null`; servers without performance monitoring contributed 0 to the sum and inflated the denominator, making chart values artificially low; fixed by dividing by the count of servers with perf data (`perfSvs` for CPU/delay, `memSvs` for memory)
+- `RingGauge.svelte` non-% numeric ring values used `String(value)` which renders JavaScript floats at full precision (e.g. `disk_queue=0.346789` → `"0.346789"`, `input_delay_p95_ms=24.789` → `"24.789012"`) — unreadable inside the 56px ring; fixed to `toFixed(1)` for non-integer floats; whole numbers display without a decimal point
+- `app.css` / `CounterGrid.svelte`: the `.card:hover` translate-lift applied globally to all `.card` elements, so hovering anywhere over the full-width server table or the metrics chart card caused the entire element to shift 2px — jarring and unexpected; removed hover effect from the global `.card` rule and scoped it to `.ctr` (counter grid cards) in `CounterGrid.svelte`, where the small-card lift is intentional
+
 - `ServerTable.svelte` `removeServer()` did not clear `expandedHost` after deletion — the detail accordion pane for the removed server stayed open, displaying stale data for a host that no longer existed in the list; fixed by adding `if (expandedHost === host) expandedHost = null` immediately after the server is removed from `appState.servers`
 - `ServerTable.svelte` "Mem Free" and "Input Delay" column headers were not sortable, inconsistent with CPU %, Sessions, and Last Seen which all had click-to-sort; both columns are now sortable (memory sorts by % used derived from `mem_avail_mb/mem_total_mb`; delay sorts by `input_delay_p95_ms`)
 - `ConfigModal.svelte` "Custom" grace-period pill `onclick` was a no-op comment — clicking it had no effect and the user had to manually click the number input to enter a custom value; pill now calls `gracePeriodInput.focus()` via a `bind:this` element reference
