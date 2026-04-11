@@ -3,23 +3,31 @@
 
   let { title = 'Are you sure?', message, confirmLabel = 'Discard', cancelLabel = 'Cancel', onconfirm, oncancel } = $props();
 
+  let closing = $state(false);
+  const CLOSE_MS = 150;
+
+  function animateClose(cb) {
+    closing = true;
+    setTimeout(() => cb?.(), CLOSE_MS);
+  }
+
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') oncancel?.(); }
+    function onKey(e) { if (e.key === 'Escape') animateClose(oncancel); }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
-<div class="confirm-overlay" onclick={(e) => e.target === e.currentTarget && oncancel?.()} role="dialog" aria-modal="true" tabindex="-1">
+<div class="confirm-overlay {closing ? 'closing' : ''}" onclick={(e) => e.target === e.currentTarget && animateClose(oncancel)} role="dialog" aria-modal="true" tabindex="-1">
   <div class="modal-wrap">
     <span class="confirm-badge"><OctagonAlert size={20} strokeWidth={2.5} /></span>
     <div class="confirm-modal">
     <h3 class="confirm-title serif">{title}</h3>
     <p class="confirm-msg">{message}</p>
     <div class="confirm-actions">
-      <button class="btn-brutal confirm-cancel" onclick={oncancel}>{cancelLabel}</button>
-      <button class="btn-brutal confirm-yes" onclick={onconfirm}>{confirmLabel}</button>
+      <button class="btn-brutal confirm-cancel" onclick={() => animateClose(oncancel)}>{cancelLabel}</button>
+      <button class="btn-brutal confirm-yes" onclick={() => animateClose(onconfirm)}>{confirmLabel}</button>
     </div>
     </div>
   </div>
@@ -27,6 +35,8 @@
 
 <style>
   .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: flex; align-items: center; justify-content: center; animation: modal-fade-in 0.15s ease-out; }
+  .confirm-overlay.closing { animation: modal-fade-out 0.15s ease-in forwards; }
+  .confirm-overlay.closing > .modal-wrap { animation: modal-card-out 0.15s ease-in forwards; }
   .modal-wrap { position: relative; max-width: 420px; width: 94vw; }
   .confirm-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); padding: 28px 28px 24px; text-align: center; animation: modal-card-in 0.15s ease-out; }
   .confirm-badge {

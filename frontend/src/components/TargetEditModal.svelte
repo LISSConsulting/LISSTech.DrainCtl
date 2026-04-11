@@ -65,19 +65,27 @@
     }
   }
 
+  let closing = $state(false);
+  const CLOSE_MS = 150;
+
+  function animateClose() {
+    closing = true;
+    setTimeout(() => onclose?.(), CLOSE_MS);
+  }
+
   function handleOverlayClick(e) {
-    if (e.target === e.currentTarget) onclose?.();
+    if (e.target === e.currentTarget) animateClose();
   }
 
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') onclose?.(); }
+    function onKey(e) { if (e.key === 'Escape') animateClose(); }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
-<div class="tgt-edit-overlay" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
+<div class="tgt-edit-overlay {closing ? 'closing' : ''}" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
   <div class="modal-wrap">
     <span class="modal-badge"><Bell size={20} /></span>
     <div class="tgt-edit-modal scrollbar-styled">
@@ -173,7 +181,7 @@
         {testing ? 'Sending...' : '▶ Test'}
       </button>
       <div class="tgt-form-actions-right">
-        <button class="btn-brutal btn-secondary-sm" onclick={onclose}>Cancel</button>
+        <button class="btn-brutal btn-secondary-sm" onclick={animateClose}>Cancel</button>
         <button class="btn-brutal btn-save-sm" onclick={handleSave}>
           {isNew ? 'Add Target' : 'Save'}
         </button>
@@ -185,6 +193,8 @@
 
 <style>
   .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; animation: modal-fade-in 0.2s ease-out; }
+  .tgt-edit-overlay.closing { animation: modal-fade-out 0.15s ease-in forwards; }
+  .tgt-edit-overlay.closing > .modal-wrap { animation: modal-card-out 0.15s ease-in forwards; }
   .modal-wrap { position: relative; max-width: 560px; width: 94vw; }
   .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
   .tgt-edit-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-height: 90vh; overflow-y: auto; padding: 24px; animation: modal-card-in 0.2s ease-out; }

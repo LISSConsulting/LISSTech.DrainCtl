@@ -217,9 +217,17 @@ body {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+@keyframes modal-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
 @keyframes modal-card-in {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes modal-card-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(12px); }
 }
 
 /* ─── Event log severity classes ──────────────────────────────────────────── */

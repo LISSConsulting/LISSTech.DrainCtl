@@ -5,15 +5,23 @@
 
   let dest = $derived(target?.type === 'email' ? (target?.to || []).join(', ') : (target?.url || ''));
 
+  let closing = $state(false);
+  const CLOSE_MS = 150;
+
+  function animateClose(cb) {
+    closing = true;
+    setTimeout(() => cb?.(), CLOSE_MS);
+  }
+
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') oncancel?.(); }
+    function onKey(e) { if (e.key === 'Escape') animateClose(oncancel); }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
-<div class="tgt-del-overlay" onclick={(e) => e.target === e.currentTarget && oncancel?.()} role="dialog" aria-modal="true" tabindex="-1">
+<div class="tgt-del-overlay {closing ? 'closing' : ''}" onclick={(e) => e.target === e.currentTarget && animateClose(oncancel)} role="dialog" aria-modal="true" tabindex="-1">
   <div class="modal-wrap">
     <span class="modal-badge"><Trash2 size={20} /></span>
     <div class="tgt-del-modal">
@@ -21,8 +29,8 @@
     <p>Are you sure you want to delete this notification target?</p>
     <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--color-muted);margin-top:8px">{dest}</p>
     <div class="btn-row">
-      <button class="btn-brutal btn-cancel" onclick={oncancel}>Cancel</button>
-      <button class="btn-brutal btn-danger" onclick={onconfirm}>Delete</button>
+      <button class="btn-brutal btn-cancel" onclick={() => animateClose(oncancel)}>Cancel</button>
+      <button class="btn-brutal btn-danger" onclick={() => animateClose(onconfirm)}>Delete</button>
     </div>
     </div>
   </div>
@@ -30,6 +38,8 @@
 
 <style>
   .tgt-del-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 210; display: flex; align-items: center; justify-content: center; animation: modal-fade-in 0.2s ease-out; }
+  .tgt-del-overlay.closing { animation: modal-fade-out 0.15s ease-in forwards; }
+  .tgt-del-overlay.closing > .modal-wrap { animation: modal-card-out 0.15s ease-in forwards; }
   .modal-wrap { position: relative; max-width: 400px; width: 94vw; }
   .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-red); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
   .tgt-del-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); padding: 28px 24px 24px; text-align: center; animation: modal-card-in 0.2s ease-out; }

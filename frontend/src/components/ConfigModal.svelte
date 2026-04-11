@@ -16,6 +16,13 @@
   let saving = $state(false);
   let testing = $state(false);
   let showConfirmClose = $state(false);
+  let closing = $state(false);
+  const CLOSE_MS = 150;
+
+  function animateClose() {
+    closing = true;
+    setTimeout(() => onclose?.(), CLOSE_MS);
+  }
 
   // Sub-modal state (owned here so modals render outside .settings-modal)
   let editTarget = $state(null);
@@ -161,7 +168,7 @@
 
   function requestClose() {
     if (dirty) { showConfirmClose = true; return; }
-    onclose?.();
+    animateClose();
   }
 
   function handleOverlayClick(e) {
@@ -182,7 +189,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
-<div class="settings-overlay {subModalOpen ? 'sub-open' : ''}" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
+<div class="settings-overlay {subModalOpen ? 'sub-open' : ''} {closing ? 'closing' : ''}" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
   <div class="modal-wrap">
     <span class="modal-badge"><Settings size={20} /></span>
     <div class="settings-modal scrollbar-styled" style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}>
@@ -369,13 +376,15 @@
     message="You have unsaved changes that will be lost if you close now."
     confirmLabel="Discard Changes"
     cancelLabel="Keep Editing"
-    onconfirm={() => { showConfirmClose = false; onclose?.(); }}
+    onconfirm={() => { showConfirmClose = false; animateClose(); }}
     oncancel={() => showConfirmClose = false}
   />
 {/if}
 
 <style>
   .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 150; display: flex; justify-content: center; align-items: center; animation: modal-fade-in 0.2s ease-out; }
+  .settings-overlay.closing { animation: modal-fade-out 0.15s ease-in forwards; }
+  .settings-overlay.closing > .modal-wrap { animation: modal-card-out 0.15s ease-in forwards; }
   .settings-overlay.sub-open > .modal-wrap { opacity: 0; pointer-events: none; transition: opacity 0.15s ease-out; }
   .modal-wrap { position: relative; width: 860px; max-width: 94vw; transition: opacity 0.15s ease-out; }
   .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
