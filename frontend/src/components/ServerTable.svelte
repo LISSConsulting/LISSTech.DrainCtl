@@ -42,8 +42,13 @@
     const m = Math.floor(s / 60);
     if (m < 60) return m + 'm left';
     const h = Math.floor(m / 60);
-    const rem = m % 60;
-    return h + 'h ' + (rem > 0 ? rem + 'm ' : '') + 'left';
+    if (h < 24) {
+      const rem = m % 60;
+      return h + 'h ' + (rem > 0 ? rem + 'm ' : '') + 'left';
+    }
+    const days = Math.floor(h / 24);
+    const remH = h % 24;
+    return days + 'd ' + (remH > 0 ? remH + 'h ' : '') + 'left';
   }
 
   function statusLabel(s) {

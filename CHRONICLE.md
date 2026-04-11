@@ -4,6 +4,10 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Features
 
+- `ConfigModal.svelte` / `TargetEditModal.svelte` status banners now carry `role="alert" aria-live="polite"` so screen readers announce save/test feedback without requiring the user to find the message visually; all error messages now auto-dismiss after 5 seconds (previously only success messages timed out, leaving errors permanently on screen until the user closed the modal or triggered another action); validation errors from `validateThresholds()` now also auto-dismiss
+- `ServerTable.svelte` `graceCountdown()` now formats durations ≥ 24 hours as `Xd Yh left` instead of `Nh left` (e.g. "2d 3h left" instead of "51h left") for easier reading during long planned maintenance windows
+- `EventLog.svelte` search input gains `aria-label="Filter event log"` so screen-reader users know the input's purpose without relying solely on the placeholder text (which is not read by all assistive technologies)
+
 - `MetricsChart.svelte` series toggle buttons now carry `aria-pressed` so screen readers announce whether each series (CPU, Memory, Input Delay, Sessions) is currently displayed; the `200ms` input-delay chart-scale ceiling is extracted to a named constant `MAX_DELAY_CHART_MS` with an explanatory comment
 - `ServerTable.svelte` sortable column headers now carry `aria-sort="ascending"` / `aria-sort="descending"` / `aria-sort="none"` so screen readers can announce the current sort column and direction without relying on the `↑`/`↓` Unicode arrows
 - `RingGauge.svelte` SVG element now has `role="img"` and `aria-label="{label}: {displayValue}"` so screen readers describe the gauge's metric and current value instead of silently skipping the visual

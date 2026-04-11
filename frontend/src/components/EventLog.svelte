@@ -86,6 +86,7 @@
       class="log-search"
       type="search"
       placeholder="Filter events..."
+      aria-label="Filter event log"
       bind:value={search}
     />
     <button class="btn-expand btn-brutal" onclick={() => { expanded = !expanded; }}>

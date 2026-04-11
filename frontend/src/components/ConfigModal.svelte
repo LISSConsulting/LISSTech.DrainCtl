@@ -63,6 +63,7 @@
     if (validationErr) {
       saveStatus = 'err';
       saveMsg = validationErr;
+      setTimeout(() => { saveStatus = ''; saveMsg = ''; }, 5000);
       return;
     }
     saving = true;
@@ -79,6 +80,7 @@
     } catch(e) {
       saveStatus = 'err';
       saveMsg = 'Save failed: ' + e.message;
+      setTimeout(() => { saveStatus = ''; saveMsg = ''; }, 5000);
     } finally {
       saving = false;
     }
@@ -96,6 +98,7 @@
     } catch(e) {
       testStatus = 'err';
       testMsg = 'Test failed: ' + e.message;
+      setTimeout(() => { testStatus = ''; testMsg = ''; }, 5000);
     } finally {
       testing = false;
     }
@@ -231,10 +234,10 @@
 
       <!-- Status messages -->
       {#if saveMsg}
-        <div class="settings-status {saveStatus}">{saveMsg}</div>
+        <div class="settings-status {saveStatus}" role="alert" aria-live="polite">{saveMsg}</div>
       {/if}
       {#if testMsg}
-        <div class="settings-status {testStatus}" style="margin-top:4px">{testMsg}</div>
+        <div class="settings-status {testStatus}" role="alert" aria-live="polite" style="margin-top:4px">{testMsg}</div>
       {/if}
 
       <!-- Actions bar -->

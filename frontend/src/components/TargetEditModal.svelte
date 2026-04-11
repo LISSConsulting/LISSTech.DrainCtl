@@ -35,6 +35,7 @@
       testResult = e.message;
     } finally {
       testing = false;
+      setTimeout(() => { testStatus = ''; testResult = ''; }, 5000);
     }
   }
 
@@ -136,7 +137,7 @@
 
     <!-- Test result -->
     {#if testResult}
-      <div class="tgt-test-result {testStatus}">{testResult}</div>
+      <div class="tgt-test-result {testStatus}" role="alert" aria-live="polite">{testResult}</div>
     {/if}
 
     <!-- Actions -->
