@@ -1,14 +1,11 @@
 <script>
-  import TargetEditModal from './TargetEditModal.svelte';
-  import TargetDeleteModal from './TargetDeleteModal.svelte';
   import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
   import { Pencil, Trash2, Plus } from 'lucide-svelte';
 
-  let { targets = $bindable([]) } = $props();
-
-  let editTarget = $state(null);   // null = closed, {} = new, or existing target
-  let editIdx = $state(-1);        // -1 = new
-  let deleteIdx = $state(-1);      // -1 = closed
+  let { targets = $bindable([]),
+        editTarget = $bindable(null),
+        editIdx = $bindable(-1),
+        deleteIdx = $bindable(-1) } = $props();
 
   function openEdit(idx) {
     editIdx = idx;
@@ -81,22 +78,6 @@
   <button class="btn-add-target" onclick={() => openEdit(-1)}><Plus size={14} /> Add Target</button>
 </div>
 
-{#if editTarget !== null}
-  <TargetEditModal
-    target={editTarget}
-    isNew={editIdx < 0}
-    onsave={saveTarget}
-    onclose={() => { editTarget = null; }}
-  />
-{/if}
-
-{#if deleteIdx >= 0}
-  <TargetDeleteModal
-    target={targets[deleteIdx]}
-    onconfirm={confirmDelete}
-    oncancel={() => deleteIdx = -1}
-  />
-{/if}
 
 <style>
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }

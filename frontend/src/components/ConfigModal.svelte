@@ -3,6 +3,8 @@
   import { appState } from '../lib/state.svelte.js';
   import { toast } from '../lib/toast.svelte.js';
   import NotificationTargets from './NotificationTargets.svelte';
+  import TargetEditModal from './TargetEditModal.svelte';
+  import TargetDeleteModal from './TargetDeleteModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { Shield, Gauge, Siren, Save, X, Play, ChevronDown, ChevronRight } from 'lucide-svelte';
 
@@ -14,6 +16,29 @@
   let saving = $state(false);
   let testing = $state(false);
   let showConfirmClose = $state(false);
+
+  // Sub-modal state (owned here so modals render outside .settings-modal)
+  let editTarget = $state(null);
+  let editIdx = $state(-1);
+  let deleteIdx = $state(-1);
+  let subModalOpen = $derived(editTarget !== null || deleteIdx >= 0);
+
+  function saveTarget(t) {
+    if (!config) return;
+    if (editIdx >= 0) {
+      config.notifications = config.notifications.map((x, i) => i === editIdx ? t : x);
+    } else {
+      config.notifications = [...config.notifications, { ...t, id: crypto.randomUUID() }];
+    }
+    editTarget = null;
+  }
+
+  function confirmDelete() {
+    if (deleteIdx >= 0 && config) {
+      config.notifications = config.notifications.filter((_, i) => i !== deleteIdx);
+    }
+    deleteIdx = -1;
+  }
 
   let dirty = $derived.by(() => {
     if (!config || !original) return false;
@@ -157,7 +182,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
-<div class="settings-overlay" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
+<div class="settings-overlay {subModalOpen ? 'sub-open' : ''}" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
   <div class="settings-modal scrollbar-styled" style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}>
     <div class="settings-title">
       <span class="serif">Dashboard Configuration</span>
@@ -298,7 +323,7 @@
       <div class="settings-divider"></div>
 
       <!-- Notification Targets -->
-      <NotificationTargets bind:targets={config.notifications} />
+      <NotificationTargets bind:targets={config.notifications} bind:editTarget bind:editIdx bind:deleteIdx />
 
       <!-- Actions bar -->
       <div class="settings-actions-wrap">
@@ -318,6 +343,23 @@
   </div>
 </div>
 
+{#if editTarget !== null}
+  <TargetEditModal
+    target={editTarget}
+    isNew={editIdx < 0}
+    onsave={saveTarget}
+    onclose={() => { editTarget = null; }}
+  />
+{/if}
+
+{#if deleteIdx >= 0 && config}
+  <TargetDeleteModal
+    target={config.notifications[deleteIdx]}
+    onconfirm={confirmDelete}
+    oncancel={() => deleteIdx = -1}
+  />
+{/if}
+
 {#if showConfirmClose}
   <ConfirmDialog
     title="Unsaved Changes"
@@ -330,7 +372,9 @@
 {/if}
 
 <style>
-  .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 150; display: flex; justify-content: center; align-items: center; }
+  .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 150; display: flex; justify-content: center; align-items: center; }
+  .settings-overlay.sub-open { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .settings-overlay.sub-open > .settings-modal { opacity: 0; pointer-events: none; }
   .settings-modal { width: 860px; max-width: 94vw; max-height: 90vh; background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 8px 8px 0 var(--color-shadow); overflow-y: auto; padding: 32px 36px; transition: background 0.3s; }
   .settings-title { font-family: 'Fraunces', serif; font-size: 1.3rem; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; }
   .settings-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--color-muted); padding: 4px 8px; display: flex; align-items: center; }

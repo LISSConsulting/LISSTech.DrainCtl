@@ -180,7 +180,7 @@
 </div>
 
 <style>
-  .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(45,26,26,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 200; display: flex; align-items: center; justify-content: center; }
   .tgt-edit-modal { background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 8px 8px 0 var(--color-shadow); max-width: 560px; width: 94vw; max-height: 90vh; overflow-y: auto; padding: 24px; }
   .tgt-modal-title { font-family: 'Fraunces', serif; font-size: 18px; margin-bottom: 16px; text-align: center; }
   .tgt-form-row { margin-bottom: 14px; }
