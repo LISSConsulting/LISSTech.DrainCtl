@@ -25,11 +25,19 @@
    * Validate the target before saving.
    * @returns {string|null} error message or null if valid
    */
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const SMTP_RE = /^smtps?:\/\/.+/;
+
   function validate() {
     if (t.type === 'email') {
       if (!t.url?.trim()) return 'SMTP server URL is required.';
+      if (!SMTP_RE.test(t.url.trim())) return 'SMTP URL must start with smtp:// or smtps://';
       if (!t.from?.trim()) return 'From address is required.';
-      if (!t.to?.length || t.to.every(a => !a.trim())) return 'At least one To address is required.';
+      if (!EMAIL_RE.test(t.from.trim())) return 'From address is not a valid email.';
+      const addrs = (t.to || []).filter(a => a.trim());
+      if (!addrs.length) return 'At least one To address is required.';
+      const bad = addrs.find(a => !EMAIL_RE.test(a));
+      if (bad) return `Invalid To address: ${bad}`;
     } else {
       if (!t.url?.trim()) return 'URL is required.';
       try { new URL(t.url); } catch { return 'URL is not valid.'; }
