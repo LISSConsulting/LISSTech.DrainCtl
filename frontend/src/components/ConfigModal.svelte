@@ -44,10 +44,10 @@
     saveStatus = '';
     saveMsg = '';
     try {
-      const saved = await saveNotifyConfig(config);
-      config = JSON.parse(JSON.stringify(saved));
-      original = JSON.parse(JSON.stringify(saved));
-      appState.config = saved;
+      await saveNotifyConfig(config);
+      // Backend returns {ok:true} only — treat local config as authoritative.
+      original = JSON.parse(JSON.stringify(config));
+      appState.config = JSON.parse(JSON.stringify(config));
       saveStatus = 'ok';
       saveMsg = 'Settings saved successfully';
       setTimeout(() => { saveStatus = ''; saveMsg = ''; }, 3000);
@@ -114,17 +114,17 @@
         <div class="repeat-pills">
           {#each GRACE_PRESETS as p}
             <button
-              class="repeat-pill {config.grace_period_minutes === p ? 'active' : ''}"
-              onclick={() => config.grace_period_minutes = p}
+              class="repeat-pill {config.grace_period === p ? 'active' : ''}"
+              onclick={() => config.grace_period = p}
             >{p < 60 ? p+'m' : (p/60)+'h'}</button>
           {/each}
           <button
-            class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period_minutes) ? 'active' : ''}"
+            class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period) ? 'active' : ''}"
             onclick={() => { /* numeric input below is the entry point */ }}
           >Custom</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <input type="number" class="settings-num" bind:value={config.grace_period_minutes} min="1" max="1440" />
+          <input type="number" class="settings-num" bind:value={config.grace_period} min="1" max="1440" />
           <span class="settings-num-label">minutes</span>
         </div>
       </div>
@@ -143,32 +143,32 @@
       <div class="settings-divider"></div>
 
       <!-- Performance Monitoring -->
-      {#if config.perf_monitoring}
+      {#if config.performance}
         <div class="settings-group">
           <div class="settings-label">Performance Monitoring</div>
           <label class="settings-check">
-            <input type="checkbox" bind:checked={config.perf_monitoring.enabled} />
-            Enable performance monitoring
+            <input type="checkbox" bind:checked={config.performance.enabled} disabled={config.performance.force_disabled} />
+            Enable performance monitoring{config.performance.force_disabled ? ' (disabled by server policy)' : ''}
           </label>
-          {#if config.perf_monitoring.enabled}
+          {#if config.performance.enabled && !config.performance.force_disabled}
             <div class="settings-cfg-grid" style="margin-top:12px">
               <div>
                 <div class="settings-label">CPU Thresholds</div>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
                   <span class="settings-num-label">Warn</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.cpu_warn_pct} min="0" max="100"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.cpu_warn_pct} min="0" max="100"/>
                   <span class="settings-num-label">%</span>
                   <span class="settings-num-label">Crit</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.cpu_crit_pct} min="0" max="100"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.cpu_crit_pct} min="0" max="100"/>
                   <span class="settings-num-label">%</span>
                 </div>
                 <div class="settings-label">Memory Thresholds</div>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
                   <span class="settings-num-label">Warn</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.mem_warn_pct} min="0" max="100"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.mem_warn_pct} min="0" max="100"/>
                   <span class="settings-num-label">%</span>
                   <span class="settings-num-label">Crit</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.mem_crit_pct} min="0" max="100"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.mem_crit_pct} min="0" max="100"/>
                   <span class="settings-num-label">%</span>
                 </div>
               </div>
@@ -176,19 +176,19 @@
                 <div class="settings-label">Input Delay Thresholds</div>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
                   <span class="settings-num-label">Warn</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.input_delay_warn_ms} min="0"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.input_delay_warn_ms} min="0"/>
                   <span class="settings-num-label">ms</span>
                   <span class="settings-num-label">Crit</span>
-                  <input type="number" class="settings-num" bind:value={config.perf_monitoring.input_delay_crit_ms} min="0"/>
+                  <input type="number" class="settings-num" bind:value={config.performance.input_delay_crit_ms} min="0"/>
                   <span class="settings-num-label">ms</span>
                 </div>
                 <div class="settings-label" style="margin-top:8px">Options</div>
                 <label class="settings-check">
-                  <input type="checkbox" bind:checked={config.perf_monitoring.per_session_accounting} />
+                  <input type="checkbox" bind:checked={config.performance.collect_per_session} />
                   Per-session CPU accounting
                 </label>
                 <label class="settings-check">
-                  <input type="checkbox" bind:checked={config.perf_monitoring.remotefx_enabled} />
+                  <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
                   RemoteFX monitoring
                 </label>
               </div>
@@ -199,7 +199,7 @@
       {/if}
 
       <!-- Notification Targets -->
-      <NotificationTargets bind:targets={config.targets} />
+      <NotificationTargets bind:targets={config.notifications} />
 
       <!-- Status messages -->
       {#if saveMsg}

@@ -33,7 +33,7 @@
   let delayHistory   = $derived(serverHistory.map(h => h.inputDelay));
 
   // Config-aware thresholds — prefer user-configured values over static defaults.
-  let perfCfg = $derived(appState.config?.perf_monitoring ?? null);
+  let perfCfg = $derived(appState.config?.performance ?? null);
   let cpuThresh   = $derived(resolveThresholds('cpu',        perfCfg));
   let memThresh   = $derived(resolveThresholds('mem',        perfCfg));
   let delayThresh = $derived(resolveThresholds('inputDelay', perfCfg));

@@ -29,7 +29,9 @@
     testResult = '';
     testStatus = '';
     try {
-      const r = await sendNotifyTest(t.id || null);
+      // Send the full target object so the backend tests this specific
+      // configuration (even before it has been saved).
+      const r = await sendNotifyTest(t);
       testStatus = 'ok';
       testResult = r.message || 'Test sent';
     } catch(e) {

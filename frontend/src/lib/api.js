@@ -51,20 +51,21 @@ const BASE = '/api/v1';
 /**
  * @typedef {Object} PerfMonitoringConfig
  * @property {boolean} enabled
- * @property {number} poll_interval_s
+ * @property {boolean} force_disabled
+ * @property {number} sample_interval_sec
  * @property {number} cpu_warn_pct
  * @property {number} cpu_crit_pct
  * @property {number} mem_warn_pct
  * @property {number} mem_crit_pct
  * @property {number} input_delay_warn_ms
  * @property {number} input_delay_crit_ms
- * @property {boolean} per_session_accounting
- * @property {boolean} remotefx_enabled
+ * @property {boolean} collect_per_session
+ * @property {boolean} collect_remotefx
  */
 
 /**
  * @typedef {Object} NotifyTarget
- * @property {string} id
+ * @property {string} [id]             - frontend-only UUID for keying list items; not persisted
  * @property {'webhook'|'ntfy'|'email'} type
  * @property {string} url              - webhook or ntfy URL (empty for email)
  * @property {string} [from]           - email from address (email type only)
@@ -72,15 +73,14 @@ const BASE = '/api/v1';
  * @property {string} [secret]         - HMAC secret for webhook signing
  * @property {string[]} triggers
  * @property {number} repeat_minutes   - 0 = once only
- * @property {boolean} [enabled]       - defaults to true if absent
  */
 
 /**
  * @typedef {Object} NotifyConfig
- * @property {number} grace_period_minutes
+ * @property {number} grace_period              - grace period in minutes
  * @property {number} session_warning_threshold
- * @property {PerfMonitoringConfig} perf_monitoring
- * @property {NotifyTarget[]} targets
+ * @property {PerfMonitoringConfig} performance
+ * @property {NotifyTarget[]} notifications
  */
 
 /**
@@ -223,16 +223,17 @@ export async function fetchNotifyConfig() {
 
 /**
  * PUT /api/v1/notify-config
+ * Returns {ok: true} on success — does NOT return the saved config.
+ * Callers should treat the local config as authoritative after a successful save.
  * @param {NotifyConfig} config
- * @returns {Promise<NotifyConfig>}
+ * @returns {Promise<void>}
  */
 export async function saveNotifyConfig(config) {
-  const res = await apiFetch('/notify-config', {
+  await apiFetch('/notify-config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
-  return /** @type {NotifyConfig} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -241,15 +242,19 @@ export async function saveNotifyConfig(config) {
 
 /**
  * POST /api/v1/notify-test
- * @param {string|null} [targetId=null] - Specific target ID to test, or null for all.
- * @returns {Promise<{ok: boolean, message: string}>}
+ *
+ * Pass a full NotifyTarget object to test a specific target (the backend
+ * decodes it directly from the request body and sends to that target only).
+ * Pass null to test all currently saved targets.
+ *
+ * @param {NotifyTarget|null} [target=null]
+ * @returns {Promise<{ok: boolean, message?: string}>}
  */
-export async function sendNotifyTest(targetId = null) {
-  const body = targetId != null ? { target: targetId } : {};
+export async function sendNotifyTest(target = null) {
   const res = await apiFetch('/notify-test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: target != null ? JSON.stringify(target) : '{}',
   });
-  return /** @type {{ok: boolean, message: string}} */ (await res.json());
+  return /** @type {{ok: boolean, message?: string}} */ (await res.json());
 }
