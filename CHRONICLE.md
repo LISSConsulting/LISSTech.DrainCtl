@@ -4,6 +4,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Features
 
+- `EventLog.svelte` expanded overlay now uses `color-mix(in srgb, var(--color-code-fg) …%, transparent)` for all text and border colors instead of hard-coded hex values (`#c0a0a0`, `#efe0e0`, `#d4baba`, `#f0b8c8`); the log panel will adapt correctly if `--color-code-bg`/`--color-code-fg` ever diverge between themes; `Nav.svelte` theme toggle, `ConfigModal.svelte` close button, and `HistoryModal.svelte` close button gain `aria-label` attributes so screen readers announce "Switch to dark mode", "Close settings", and "Close history" instead of reading bare Unicode glyphs; `ServerTable.svelte` remove button adds a `removingHosts` Set guard — the button is disabled (shows "…") while the DELETE request is in flight, preventing duplicate API calls from rapid double-clicks
+
 - `ConfigModal.svelte` / `TargetEditModal.svelte` status banners now carry `role="alert" aria-live="polite"` so screen readers announce save/test feedback without requiring the user to find the message visually; all error messages now auto-dismiss after 5 seconds (previously only success messages timed out, leaving errors permanently on screen until the user closed the modal or triggered another action); validation errors from `validateThresholds()` now also auto-dismiss
 - `ServerTable.svelte` `graceCountdown()` now formats durations ≥ 24 hours as `Xd Yh left` instead of `Nh left` (e.g. "2d 3h left" instead of "51h left") for easier reading during long planned maintenance windows
 - `EventLog.svelte` search input gains `aria-label="Filter event log"` so screen-reader users know the input's purpose without relying solely on the placeholder text (which is not read by all assistive technologies)
