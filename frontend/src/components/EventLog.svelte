@@ -4,6 +4,9 @@
   let search   = $state('');
   let expanded = $state(false);
 
+  /** @type {HTMLDivElement|null} */
+  let logEl = $state(null);
+
   /**
    * Parse a raw event string into a display-friendly object.
    * Strings are produced by App.svelte as:
@@ -55,6 +58,18 @@
         )
       : parsed
   );
+
+  // Auto-scroll to top when new events arrive (newest is prepended = top of list).
+  // Only scroll if the user hasn't manually scrolled down to read older entries
+  // (threshold: within 80px of the top).
+  $effect(() => {
+    // Access events to create a reactive dependency on the event list length.
+    void appState.events.length;
+    if (!logEl) return;
+    if (logEl.scrollTop < 80) {
+      logEl.scrollTop = 0;
+    }
+  });
 </script>
 
 <div class="log-section">
@@ -71,7 +86,7 @@
     </button>
   </div>
 
-  <div class="log scrollbar-styled" class:expanded>
+  <div class="log scrollbar-styled" class:expanded bind:this={logEl}>
     {#if expanded}
       <button class="log-restore" onclick={() => { expanded = false; }}>
         Click to collapse · {filtered.length} events

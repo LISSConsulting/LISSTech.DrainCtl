@@ -152,7 +152,7 @@ export class ApiError extends Error {
  */
 export async function fetchHealth() {
   const res = await apiFetch('/health');
-  return /** @type {HealthResponse} */ (res.json());
+  return /** @type {HealthResponse} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ export async function fetchHealth() {
  */
 export async function fetchServers() {
   const res = await apiFetch('/servers');
-  return /** @type {Server[]} */ (res.json());
+  return /** @type {Server[]} */ (await res.json());
 }
 
 /**
@@ -175,7 +175,7 @@ export async function fetchServers() {
  */
 export async function fetchServer(host) {
   const res = await apiFetch(`/servers/${encodeURIComponent(host)}`);
-  return /** @type {Server} */ (res.json());
+  return /** @type {Server} */ (await res.json());
 }
 
 /**
@@ -205,7 +205,7 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
     changes_only: String(changesOnly),
   });
   const res = await apiFetch(`/history/${encodeURIComponent(host)}?${params}`);
-  return /** @type {HistoryEntry[]} */ (res.json());
+  return /** @type {HistoryEntry[]} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
  */
 export async function fetchNotifyConfig() {
   const res = await apiFetch('/notify-config');
-  return /** @type {NotifyConfig} */ (res.json());
+  return /** @type {NotifyConfig} */ (await res.json());
 }
 
 /**
@@ -232,7 +232,7 @@ export async function saveNotifyConfig(config) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
-  return /** @type {NotifyConfig} */ (res.json());
+  return /** @type {NotifyConfig} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -251,5 +251,5 @@ export async function sendNotifyTest(targetId = null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return /** @type {{ok: boolean, message: string}} */ (res.json());
+  return /** @type {{ok: boolean, message: string}} */ (await res.json());
 }

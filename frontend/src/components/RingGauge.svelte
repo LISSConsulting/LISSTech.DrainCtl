@@ -34,9 +34,12 @@
         : 'var(--color-green)'
   );
 
+  // When unit is '%', value is already the raw percentage (e.g. 85 for 85% CPU).
+  // Show the raw value directly — not the normalised ring position (pct), which
+  // differs from value whenever max !== 100 (e.g. TCP Retransmits uses max=20).
   let displayValue = $derived(
     unit === '%'
-      ? `${Math.round(pct)}%`
+      ? value != null ? `${Math.round(/** @type {number} */ (value))}%` : '—'
       : value != null
         ? String(value)
         : '—'

@@ -1,7 +1,7 @@
 <script>
   import RingGauge from './RingGauge.svelte';
   import Sparkline from './Sparkline.svelte';
-  import { DEFAULTS } from '../lib/thresholds.js';
+  import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
   import { appState } from '../lib/state.svelte.js';
 
   let { server } = $props();
@@ -27,6 +27,12 @@
   let cpuHistory = $derived(appState.metricsHistory.map(h => h.cpu));
   let memHistory = $derived(appState.metricsHistory.map(h => h.mem));
   let delayHistory = $derived(appState.metricsHistory.map(h => h.inputDelay));
+
+  // Config-aware thresholds — prefer user-configured values over static defaults.
+  let perfCfg = $derived(appState.config?.perf_monitoring ?? null);
+  let cpuThresh   = $derived(resolveThresholds('cpu',        perfCfg));
+  let memThresh   = $derived(resolveThresholds('mem',        perfCfg));
+  let delayThresh = $derived(resolveThresholds('inputDelay', perfCfg));
 </script>
 
 <div class="d-inner">
@@ -35,10 +41,10 @@
     <div class="d-tile-label">Resource Utilization</div>
     <div class="d-ring-row">
       <div class="d-ring-cell">
-        <RingGauge value={perf.cpu_pct} label="CPU" unit="%" warnThreshold={DEFAULTS.cpu.warn} critThreshold={DEFAULTS.cpu.crit} />
+        <RingGauge value={perf.cpu_pct} label="CPU" unit="%" warnThreshold={cpuThresh.warn} critThreshold={cpuThresh.crit} />
       </div>
       <div class="d-ring-cell">
-        <RingGauge value={memPct} label="Memory" unit="%" warnThreshold={DEFAULTS.mem.warn} critThreshold={DEFAULTS.mem.crit} />
+        <RingGauge value={memPct} label="Memory" unit="%" warnThreshold={memThresh.warn} critThreshold={memThresh.crit} />
       </div>
       <div class="d-ring-cell">
         <RingGauge value={server.sessions} max={server.sessions > 0 ? server.sessions * 1.5 : 100} label="Sessions" unit=" " warnThreshold={DEFAULTS.sessions.warn} critThreshold={DEFAULTS.sessions.crit} />
@@ -77,11 +83,11 @@
       <div class="d-ring-cell">
         <RingGauge
           value={perf.input_delay_ms}
-          max={DEFAULTS.inputDelay.crit * 2}
+          max={delayThresh.crit * 2}
           label="Input Delay"
           unit="ms"
-          warnThreshold={DEFAULTS.inputDelay.warn}
-          critThreshold={DEFAULTS.inputDelay.crit}
+          warnThreshold={delayThresh.warn}
+          critThreshold={delayThresh.crit}
         />
       </div>
       <div class="d-ring-cell">

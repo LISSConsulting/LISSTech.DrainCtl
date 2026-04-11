@@ -1,7 +1,7 @@
 <script>
   import { initTheme } from './lib/theme.js';
   import { appState, addEvent, appendMetricsSample } from './lib/state.svelte.js';
-  import { fetchServers, fetchHealth } from './lib/api.js';
+  import { fetchServers, fetchHealth, fetchNotifyConfig } from './lib/api.js';
 
   import Nav from './components/Nav.svelte';
   import Footer from './components/Footer.svelte';
@@ -34,9 +34,17 @@
    */
   async function refresh() {
     try {
-      const [servers, health] = await Promise.all([fetchServers(), fetchHealth()]);
+      // Fetch config once on the first successful refresh (lazy load).
+      const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
+      const needsConfig = appState.config === null;
+      if (needsConfig) calls.push(fetchNotifyConfig());
+
+      const results = await Promise.all(calls);
+      const [servers, health] = results;
+
       appState.servers = servers || [];
       appState.health = health;
+      if (needsConfig) appState.config = results[2] ?? null;
       appState.connected = true;
       appState.lastUpdated = new Date();
 

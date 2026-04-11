@@ -1,5 +1,6 @@
 <script>
   import { fetchNotifyConfig, saveNotifyConfig, sendNotifyTest } from '../lib/api.js';
+  import { appState } from '../lib/state.svelte.js';
   import NotificationTargets from './NotificationTargets.svelte';
 
   let { onclose } = $props();
@@ -46,6 +47,7 @@
       const saved = await saveNotifyConfig(config);
       config = JSON.parse(JSON.stringify(saved));
       original = JSON.parse(JSON.stringify(saved));
+      appState.config = saved;
       saveStatus = 'ok';
       saveMsg = 'Settings saved successfully';
       setTimeout(() => { saveStatus = ''; saveMsg = ''; }, 3000);
