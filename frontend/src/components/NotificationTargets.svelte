@@ -1,6 +1,6 @@
 <script>
   import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
-  import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight } from 'lucide-svelte';
+  import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight, Search } from 'lucide-svelte';
 
   let { targets = $bindable([]),
         editTarget = $bindable(null),
@@ -9,17 +9,29 @@
 
   const PAGE_SIZE = 5;
   let page = $state(0);
+  let search = $state('');
 
-  let totalPages = $derived(Math.max(1, Math.ceil((targets?.length || 0) / PAGE_SIZE)));
-  let pagedTargets = $derived.by(() => {
-    const start = page * PAGE_SIZE;
-    return (targets || []).slice(start, start + PAGE_SIZE);
+  /** Filtered targets with their original indices preserved. */
+  let filtered = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return (targets || []).map((t, i) => ({ t, idx: i }));
+    return (targets || []).map((t, i) => ({ t, idx: i })).filter(({ t }) => {
+      const dest = t.type === 'email' ? (t.to || []).join(' ') : (t.url || '');
+      const triggers = (t.triggers || []).map(tr => TRIGGER_LABELS[tr] || tr).join(' ');
+      const haystack = `${t.type} ${dest} ${triggers} ${repeatLabel(t.repeat_minutes || 0)}`.toLowerCase();
+      return haystack.includes(q);
+    });
   });
-  // The real index offset for this page (so Edit/Delete reference the right target).
-  let pageOffset = $derived(page * PAGE_SIZE);
 
-  // Clamp page if targets shrink (e.g. after delete).
-  $effect(() => { if (page >= totalPages) page = Math.max(0, totalPages - 1); });
+  let totalPages = $derived(Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+  let pagedItems = $derived.by(() => {
+    const start = page * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  });
+  let emptyRows = $derived(PAGE_SIZE - pagedItems.length);
+
+  // Reset page when search changes or targets shrink.
+  $effect(() => { search; if (page >= totalPages) page = Math.max(0, totalPages - 1); });
 
   function openEdit(idx) {
     editIdx = idx;
@@ -30,11 +42,21 @@
 </script>
 
 <div class="settings-group">
-  <div class="settings-label">Notification Targets</div>
+  <div class="tgt-header">
+    <div class="settings-label" style="margin-bottom:0">Notification Targets</div>
+    {#if targets?.length > PAGE_SIZE}
+      <div class="tgt-search-wrap">
+        <Search size={13} />
+        <input class="tgt-search" type="search" placeholder="Filter targets..." bind:value={search} />
+      </div>
+    {/if}
+  </div>
 
   <div class="target-tbl-wrap">
     {#if !targets || targets.length === 0}
       <div class="target-tbl-empty">No notification targets configured.</div>
+    {:else if filtered.length === 0}
+      <div class="target-tbl-empty">No targets match "{search}"</div>
     {:else}
       <table class="target-tbl">
         <thead>
@@ -48,8 +70,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each pagedTargets as t, i}
-            {@const realIdx = pageOffset + i}
+          {#each pagedItems as { t, idx }}
             <tr>
               <td><span class="status-dot {t.enabled !== false ? 'on' : 'off'}"></span></td>
               <td><span class="pill-type {t.type === 'ntfy' ? 'pill-type-ntfy' : t.type === 'email' ? 'pill-type-email' : ''}">{t.type === 'ntfy' ? 'Ntfy' : t.type === 'email' ? 'Email' : 'Webhook'}</span></td>
@@ -62,11 +83,14 @@
               <td class="mono">{repeatLabel(t.repeat_minutes || 0)}</td>
               <td>
                 <div class="btn-row">
-                  <button class="btn-tbl" onclick={() => openEdit(realIdx)}><Pencil size={12} /> Edit</button>
-                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = realIdx}><Trash2 size={12} /> Delete</button>
+                  <button class="btn-tbl" onclick={() => openEdit(idx)}><Pencil size={12} /> Edit</button>
+                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = idx}><Trash2 size={12} /> Delete</button>
                 </div>
               </td>
             </tr>
+          {/each}
+          {#each { length: emptyRows } as _}
+            <tr class="empty-row"><td colspan="6">&nbsp;</td></tr>
           {/each}
         </tbody>
       </table>
@@ -86,12 +110,19 @@
 </div>
 
 <style>
+  .tgt-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .tgt-search-wrap { display: flex; align-items: center; gap: 6px; color: var(--color-muted); }
+  .tgt-search { width: 160px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; padding: 5px 8px; background: var(--color-surface); color: var(--color-fg); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); outline: none; }
+  .tgt-search:focus { box-shadow: 0 0 0 2px var(--color-accent); }
+  .tgt-search::placeholder { color: var(--color-subtle); }
+
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
   .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
   .target-tbl td { padding: 10px 12px; border-bottom: 1px solid var(--color-surface); vertical-align: middle; }
-  .target-tbl tr:last-child td { border-bottom: none; }
-  .target-tbl tr:hover td { background: var(--color-surface); }
+  .target-tbl tbody tr:last-child td { border-bottom: none; }
+  .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
+  .empty-row td { padding: 10px 12px !important; }
   .target-tbl-empty { text-align: center; padding: 32px; color: var(--color-subtle); font-size: 13px; }
   .pill-type { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.8px; border: 2px solid var(--color-border); box-shadow: 2px 2px 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
   .pill-type-ntfy { background: var(--color-green); }
