@@ -5,7 +5,7 @@
 
   // Local working copy — snapshot taken at open time; later mutations only touch `t`
   // svelte-ignore state_referenced_locally
-  let t = $state(JSON.parse(JSON.stringify(/** @type {any} */ (target))));
+  let t = $state(structuredClone(/** @type {any} */ (target)));
 
   const ALL_TRIGGERS = ['drain_on','drain_off','grace_entered','alert','healthy','session_warning','cpu_warning','cpu_critical','memory_warning','memory_critical','input_delay_warning','input_delay_critical'];
   const TRIGGER_LABELS = { drain_on:'Drain On', drain_off:'Drain Off', grace_entered:'Grace', alert:'Alert', healthy:'Healthy', session_warning:'Sessions', cpu_warning:'CPU Warn', cpu_critical:'CPU Crit', memory_warning:'Mem Warn', memory_critical:'Mem Crit', input_delay_warning:'Delay Warn', input_delay_critical:'Delay Crit' };

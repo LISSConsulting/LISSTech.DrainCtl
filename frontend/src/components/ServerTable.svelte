@@ -92,6 +92,11 @@
       else if (sortCol === 'host') { va = a.host; vb = b.host; }
       else if (sortCol === 'sessions') { va = a.sessions || 0; vb = b.sessions || 0; }
       else if (sortCol === 'cpu') { va = a.perf?.cpu_pct || 0; vb = b.perf?.cpu_pct || 0; }
+      else if (sortCol === 'mem') {
+        va = (a.perf?.mem_total_mb > 0) ? (1 - a.perf.mem_avail_mb / a.perf.mem_total_mb) * 100 : 0;
+        vb = (b.perf?.mem_total_mb > 0) ? (1 - b.perf.mem_avail_mb / b.perf.mem_total_mb) * 100 : 0;
+      }
+      else if (sortCol === 'delay') { va = a.perf?.input_delay_p95_ms || 0; vb = b.perf?.input_delay_p95_ms || 0; }
       else if (sortCol === 'last_seen') { va = new Date(a.last_seen || 0); vb = new Date(b.last_seen || 0); }
       else { va = a[sortCol]; vb = b[sortCol]; }
       if (va < vb) return -sortDir;
@@ -115,6 +120,7 @@
       await deleteServer(host);
       appState.servers = appState.servers.filter(s => s.host !== host);
       removeServerMetrics(host);
+      if (expandedHost === host) expandedHost = null;
     } catch(e) {
       removeError = 'Remove failed: ' + e.message;
       setTimeout(() => removeError = '', 5000);
@@ -184,8 +190,8 @@
             <th>Since</th>
             <th onclick={() => sort('sessions')} class="sortable">Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th onclick={() => sort('cpu')} class="sortable">CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th>Mem Free</th>
-            <th>Input Delay</th>
+            <th onclick={() => sort('mem')} class="sortable">Mem Free {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('delay')} class="sortable">Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th onclick={() => sort('last_seen')} class="sortable">Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th></th>
           </tr>

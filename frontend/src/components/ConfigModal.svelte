@@ -28,8 +28,8 @@
     loading = true;
     try {
       const c = await fetchNotifyConfig();
-      config = JSON.parse(JSON.stringify(c));  // deep clone
-      original = JSON.parse(JSON.stringify(c));
+      config = structuredClone(c);
+      original = structuredClone(c);
     } catch(e) {
       saveMsg = 'Failed to load config: ' + e.message;
       saveStatus = 'err';
@@ -46,8 +46,8 @@
     try {
       await saveNotifyConfig(config);
       // Backend returns {ok:true} only — treat local config as authoritative.
-      original = JSON.parse(JSON.stringify(config));
-      appState.config = JSON.parse(JSON.stringify(config));
+      original = structuredClone(config);
+      appState.config = structuredClone(config);
       saveStatus = 'ok';
       saveMsg = 'Settings saved successfully';
       setTimeout(() => { saveStatus = ''; saveMsg = ''; }, 3000);
@@ -94,6 +94,9 @@
   });
 
   const GRACE_PRESETS = [5, 10, 15, 30, 60, 120, 240];
+
+  /** @type {HTMLInputElement|null} */
+  let gracePeriodInput = $state(null);
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
@@ -120,11 +123,11 @@
           {/each}
           <button
             class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period) ? 'active' : ''}"
-            onclick={() => { /* numeric input below is the entry point */ }}
+            onclick={() => gracePeriodInput?.focus()}
           >Custom</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <input type="number" class="settings-num" bind:value={config.grace_period} min="1" max="1440" />
+          <input type="number" class="settings-num" bind:value={config.grace_period} bind:this={gracePeriodInput} min="1" max="1440" />
           <span class="settings-num-label">minutes</span>
         </div>
       </div>
