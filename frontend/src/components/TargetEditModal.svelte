@@ -13,6 +13,10 @@
 
   let testing = $state(false);
 
+  /** @type {HTMLInputElement|undefined} */
+  let urlInput = $state();
+  $effect(() => { if (urlInput) urlInput.focus(); });
+
   function toggleTrigger(tr) {
     if (t.triggers.includes(tr)) {
       t.triggers = t.triggers.filter(x => x !== tr);
@@ -134,8 +138,7 @@
     {:else}
       <div class="tgt-form-row">
         <div class="tgt-form-label">URL</div>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input class="tgt-form-input" type="url" bind:value={t.url} placeholder={t.type === 'ntfy' ? 'https://ntfy.sh/topic' : 'https://example.com/webhook'} autofocus />
+        <input class="tgt-form-input" type="url" bind:value={t.url} placeholder={t.type === 'ntfy' ? 'https://ntfy.sh/topic' : 'https://example.com/webhook'} bind:this={urlInput} />
       </div>
     {/if}
 
