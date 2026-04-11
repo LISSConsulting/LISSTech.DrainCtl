@@ -117,11 +117,6 @@ body {
   border: var(--spacing-bw) solid var(--color-border);
   border-radius: var(--radius-default);
   box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
-  transition: transform 0.12s, box-shadow 0.12s;
-}
-.card:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow);
 }
 
 .shadow-brutal {

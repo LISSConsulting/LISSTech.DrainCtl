@@ -54,20 +54,20 @@
       appState.connected = true;
       appState.lastUpdated = new Date();
 
-      // Compute average metrics across all servers that have perf data
+      // Compute average metrics across all servers that have perf data.
+      // Divide by the count of servers with perf data, not total server count —
+      // servers with perf=null would otherwise pull averages toward 0.
       const s = appState.servers;
-      const cpu = s.length
-        ? s.reduce((a, sv) => a + (sv.perf?.cpu_pct || 0), 0) / s.length
+      const perfSvs = s.filter(sv => sv.perf);
+      const cpu = perfSvs.length
+        ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length
         : 0;
-      const memPct = s.length
-        ? s.reduce((a, sv) => {
-            const total = sv.perf?.mem_total_mb || 0;
-            const avail = sv.perf?.mem_avail_mb || 0;
-            return a + (total > 0 ? (1 - avail / total) * 100 : 0);
-          }, 0) / s.length
+      const memSvs = s.filter(sv => sv.perf?.mem_total_mb > 0);
+      const memPct = memSvs.length
+        ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) / memSvs.length
         : 0;
-      const inputDelay = s.length
-        ? s.reduce((a, sv) => a + (sv.perf?.input_delay_p95_ms || 0), 0) / s.length
+      const inputDelay = perfSvs.length
+        ? perfSvs.reduce((a, sv) => a + (sv.perf.input_delay_p95_ms || 0), 0) / perfSvs.length
         : 0;
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 

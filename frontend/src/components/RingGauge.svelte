@@ -38,11 +38,16 @@
   // When unit is '%', value is already the raw percentage (e.g. 85 for 85% CPU).
   // Show the raw value directly — not the normalised ring position (pct), which
   // differs from value whenever max !== 100 (e.g. TCP Retransmits uses max=20).
+  // For non-% numeric values (disk queue, input delay, TCP retransmits), round to
+  // 1 decimal place for integers show as whole numbers — the ring is too small for
+  // full float precision like "0.346789" or "24.789012".
   let displayValue = $derived(
     unit === '%'
       ? value != null ? `${Math.round(/** @type {number} */ (value))}%` : '—'
       : value != null
-        ? String(value)
+        ? typeof value === 'number'
+          ? Number.isInteger(value) ? String(value) : value.toFixed(1)
+          : String(value)
         : '—'
   );
 </script>

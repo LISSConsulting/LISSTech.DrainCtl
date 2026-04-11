@@ -38,6 +38,11 @@
   .ctr {
     padding: 16px 18px;
     border-left: 5px solid var(--color-border);
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .ctr:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow);
   }
 
   .ctr-v {
