@@ -86,7 +86,10 @@
   }
 
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') animateClose(); }
+    function onKey(e) {
+      if (e.key === 'Escape') animateClose();
+      if (e.key === 'Enter' && !e.target?.closest('textarea')) { e.preventDefault(); handleSave(); }
+    }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });

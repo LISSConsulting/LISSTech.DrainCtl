@@ -177,7 +177,10 @@
   }
 
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') requestClose(); }
+    function onKey(e) {
+      if (e.key === 'Escape') requestClose();
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (dirty && !saving) save(); }
+    }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });

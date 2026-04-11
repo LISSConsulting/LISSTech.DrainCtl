@@ -14,7 +14,10 @@
   }
 
   $effect(() => {
-    function onKey(e) { if (e.key === 'Escape') animateClose(oncancel); }
+    function onKey(e) {
+      if (e.key === 'Escape') animateClose(oncancel);
+      if (e.key === 'Enter') { e.preventDefault(); animateClose(onconfirm); }
+    }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
