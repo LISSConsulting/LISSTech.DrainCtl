@@ -122,12 +122,12 @@
   .target-tbl th, .target-tbl td { padding: 8px 6px; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
   .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; overflow: hidden; text-overflow: ellipsis; }
-  .col-dot { width: 24px; }
-  .col-type { width: 76px; }
-  .col-dest { }
-  .col-trig { width: 110px; }
-  .col-rep { width: 44px; }
-  .col-act { width: 170px; overflow: visible !important; }
+  .col-dot { width: 22px; }
+  .col-type { width: 82px; }
+  .col-dest { width: 30%; }
+  .col-trig { width: 100px; }
+  .col-rep { width: 40px; }
+  .col-act { width: 140px; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
   .empty-row td { height: 42px; border-bottom: 1px solid var(--color-surface) !important; }
@@ -143,9 +143,9 @@
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
-  .btn-row { display: flex; gap: 6px; }
-  .btn-tbl { display: inline-flex; align-items: center; gap: 3px; font-family: 'Work Sans', sans-serif; font-size: 10px; font-weight: 700; padding: 4px 8px; border: 2px solid var(--color-border); border-radius: 6px; box-shadow: 3px 3px 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; }
-  .btn-tbl:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--color-shadow); }
+  .btn-row { display: flex; gap: 4px; }
+  .btn-tbl { display: inline-flex; align-items: center; gap: 3px; font-family: 'Work Sans', sans-serif; font-size: 10px; font-weight: 700; padding: 3px 7px; border: 2px solid var(--color-border); border-radius: 5px; box-shadow: 2px 2px 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; white-space: nowrap; }
+  .btn-tbl:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--color-shadow); }
   .btn-tbl:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-tbl-danger { color: var(--color-red); border-color: var(--color-red); }
   .btn-tbl-danger:hover { background: color-mix(in srgb, var(--color-red) 8%, var(--color-card)); }
