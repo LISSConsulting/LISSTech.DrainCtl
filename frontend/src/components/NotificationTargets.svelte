@@ -28,7 +28,9 @@
     const start = page * PAGE_SIZE;
     return filtered.slice(start, start + PAGE_SIZE);
   });
-  let emptyRows = $derived(PAGE_SIZE - pagedItems.length);
+  // Lock table height to min(PAGE_SIZE, total targets) so filtering doesn't shrink it.
+  let tableRows = $derived(Math.min(PAGE_SIZE, targets?.length || 0));
+  let emptyRows = $derived(Math.max(0, tableRows - pagedItems.length));
 
   // Reset page when search changes or targets shrink.
   $effect(() => { search; if (page >= totalPages) page = Math.max(0, totalPages - 1); });
