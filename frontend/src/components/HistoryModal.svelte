@@ -12,24 +12,20 @@
 
   $effect(() => {
     if (!host) return;
-    loadHistory();
+    // Read changesOnly inside the effect so toggling it triggers a re-fetch.
+    const _co = changesOnly;
+    loadHistory(_co);
   });
 
-  async function loadHistory() {
-    if (loading) return;
+  async function loadHistory(co = false) {
     loading = true;
     error = '';
-    // Snapshot the filter at fetch time so we can detect if it changed while
-    // the request was in flight (e.g. rapid toggle of "Transitions Only").
-    const fetchedChangesOnly = changesOnly;
     try {
-      entries = await fetchHistory(host, 100, fetchedChangesOnly) || [];
+      entries = await fetchHistory(host, 100, co) || [];
     } catch(e) {
       error = e?.message ?? String(e);
     } finally {
       loading = false;
-      // If the filter toggled while we were fetching, re-fetch with the new value.
-      if (changesOnly !== fetchedChangesOnly) loadHistory();
     }
   }
 
@@ -68,7 +64,7 @@
         <div class="hist-head-actions">
           <button
             class="filter-pill {changesOnly ? 'active' : ''}"
-            onclick={() => { changesOnly = !changesOnly; loadHistory(); }}
+            onclick={() => changesOnly = !changesOnly}
           >Transitions Only</button>
           <button class="settings-close" onclick={onclose} aria-label="Close history"><X size={18} /></button>
         </div>
