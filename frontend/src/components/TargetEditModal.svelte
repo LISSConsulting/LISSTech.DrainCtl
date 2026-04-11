@@ -134,7 +134,8 @@
     {:else}
       <div class="tgt-form-row">
         <div class="tgt-form-label">URL</div>
-        <input class="tgt-form-input" type="url" bind:value={t.url} placeholder={t.type === 'ntfy' ? 'https://ntfy.sh/topic' : 'https://example.com/webhook'} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="tgt-form-input" type="url" bind:value={t.url} placeholder={t.type === 'ntfy' ? 'https://ntfy.sh/topic' : 'https://example.com/webhook'} autofocus />
       </div>
     {/if}
 
