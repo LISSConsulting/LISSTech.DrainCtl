@@ -136,7 +136,8 @@ select:focus {
   box-shadow: 4px 4px 0 var(--color-accent) !important;
 }
 button:focus-visible {
-  border-color: var(--color-accent) !important;
+  border-color: var(--color-fg) !important;
+  box-shadow: 0 0 0 2px var(--color-fg), 4px 4px 0 var(--color-shadow) !important;
 }
 input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--color-accent);
