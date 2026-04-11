@@ -54,12 +54,12 @@
     <table class="target-tbl">
       <thead>
         <tr>
-          <th></th>
-          <th>Type</th>
-          <th>Destination</th>
-          <th>Triggers</th>
-          <th>Repeat</th>
-          <th></th>
+          <th class="col-dot"></th>
+          <th class="col-type">Type</th>
+          <th class="col-dest">Destination</th>
+          <th class="col-trig">Triggers</th>
+          <th class="col-rep">Repeat</th>
+          <th class="col-act"></th>
         </tr>
       </thead>
       <tbody>
@@ -71,11 +71,18 @@
           {#each { length: PAGE_SIZE - 1 } as _}<tr class="empty-row"><td colspan="6">&nbsp;</td></tr>{/each}
         {:else}
           {#each pagedItems as { t, idx }}
+            {@const trigs = t.triggers || []}
             <tr>
               <td><span class="status-dot {t.enabled !== false ? 'on' : 'off'}"></span></td>
               <td><span class="pill-type {t.type === 'ntfy' ? 'pill-type-ntfy' : t.type === 'email' ? 'pill-type-email' : ''}">{t.type === 'ntfy' ? 'Ntfy' : t.type === 'email' ? 'Email' : 'Webhook'}</span></td>
               <td><span class="tgt-truncate" title={t.type === 'email' ? (t.to||[]).join(', ') : t.url}>{t.type === 'email' ? (t.to||[]).join(', ') : t.url}</span></td>
-              <td><span class="tgt-triggers">{#each (t.triggers || []) as tr}<span class="tgt-pill">{TRIGGER_LABELS[tr] || tr}</span>{/each}</span></td>
+              <td>
+                {#if trigs.length <= 2}
+                  <span class="tgt-triggers">{#each trigs as tr}<span class="tgt-pill">{TRIGGER_LABELS[tr] || tr}</span>{/each}</span>
+                {:else}
+                  <span class="tgt-triggers"><span class="tgt-pill">{TRIGGER_LABELS[trigs[0]] || trigs[0]}</span><span class="tgt-pill tgt-pill-more" title={trigs.map(tr => TRIGGER_LABELS[tr] || tr).join(', ')}>+{trigs.length - 1}</span></span>
+                {/if}
+              </td>
               <td class="mono">{repeatLabel(t.repeat_minutes || 0)}</td>
               <td>
                 <div class="btn-row">
@@ -111,19 +118,27 @@
   .tgt-search::placeholder { color: var(--color-subtle); }
 
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
-  .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
-  .target-tbl td { padding: 10px 12px; border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
+  .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+  .target-tbl th, .target-tbl td { padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; }
+  .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
+  .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
+  .col-dot { width: 28px; }
+  .col-type { width: 80px; }
+  .col-dest { }
+  .col-trig { width: 140px; }
+  .col-rep { width: 50px; }
+  .col-act { width: 150px; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
   .empty-row td { height: 42px; }
   .target-tbl-empty { text-align: center; color: var(--color-subtle); font-size: 13px; }
-  .tgt-triggers { display: inline-flex; flex-wrap: nowrap; gap: 2px; max-width: 180px; overflow: hidden; }
+  .tgt-triggers { display: flex; flex-wrap: nowrap; gap: 2px; overflow: hidden; }
   .pill-type { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.8px; border: 2px solid var(--color-border); box-shadow: 2px 2px 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
   .pill-type-ntfy { background: var(--color-green); }
   .pill-type-email { background: var(--color-amber); }
-  .tgt-pill { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--color-surface); color: var(--color-muted); margin: 1px 2px; }
-  .tgt-truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .tgt-pill { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--color-surface); color: var(--color-muted); white-space: nowrap; }
+  .tgt-pill-more { background: var(--color-accent); color: #fff; cursor: help; }
+  .tgt-truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
