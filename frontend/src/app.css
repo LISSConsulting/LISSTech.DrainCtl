@@ -107,6 +107,23 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ─── Global selection highlight ─────────────────────────────────────────── */
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-fg);
+}
+
+/* ─── Global scrollbar styling ───────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-subtle) transparent;
+}
+*::-webkit-scrollbar         { width: 7px; height: 7px; }
+*::-webkit-scrollbar-track   { background: transparent; }
+*::-webkit-scrollbar-thumb   { background: var(--color-subtle); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
+*::-webkit-scrollbar-corner  { background: transparent; }
+
 .mono    { font-family: 'JetBrains Mono', monospace; }
 .serif   { font-family: 'Fraunces', serif; }
 
