@@ -19,6 +19,11 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `ServerTable.svelte` grace-period deadline never surfaced: `grace_deadline` existed in the `Server` typedef but was not rendered; added inline countdown badge (e.g., "14m left", "expired") next to the Grace pill so operators immediately see how much drain time remains
+- `ConfigModal.svelte` "Custom" grace-period pill always appeared inactive even when a non-preset value was typed into the numeric input; pill now activates (amber fill) whenever `grace_period_minutes` is not in `GRACE_PRESETS`
+- `ConfigModal.svelte` / `HistoryModal.svelte` had no keyboard shortcut to dismiss: `Escape` now closes both modals (respecting ConfigModal's dirty-state guard)
+- `HistoryModal.svelte` fetch limit was hardcoded to 20, too low for active servers; raised to 100 (matches `api.js` default)
+
 - `RingGauge.svelte` `displayValue` when `unit === '%'` showed the normalised ring position (`value/max*100`) instead of the raw value; for TCP Retransmits (`value=5%`, `max=20`) this rendered "25%" instead of "5%"; fixed to display `Math.round(value)%` directly
 - `api.js` all six `res.json()` calls were missing `await`; JSON parse errors escaped the async function error boundary; all call sites now properly await the body parse
 - `EventLog.svelte` auto-scroll to latest (T027) was absent; added a `$effect` that scrolls to `scrollTop=0` when the event list changes unless the user has scrolled down >80px to read older entries

@@ -28,6 +28,26 @@
     return Math.floor(h / 24) + 'd ago';
   }
 
+  /**
+   * Returns a human-readable countdown string for a grace deadline ISO timestamp.
+   * @param {string|null|undefined} iso
+   * @returns {string|null}
+   */
+  function graceCountdown(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    const ms = d - Date.now();
+    if (ms <= 0) return 'expired';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's left';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm left';
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return h + 'h ' + (rem > 0 ? rem + 'm ' : '') + 'left';
+  }
+
   function modeLabel(m) {
     const ML = {
       ALLOW_ALL_CONNECTIONS: 'Open',
@@ -139,7 +159,15 @@
                 onclick={() => toggleRow(srv.host)}>
               <td><span class="dot {srv.status}"></span></td>
               <td class="mono fw7">{srv.host.split('.')[0]}</td>
-              <td><span class="pill {srv.status}">{statusLabel(srv.status)}</span></td>
+              <td>
+                <span class="pill {srv.status}">{statusLabel(srv.status)}</span>
+                {#if srv.status === 'grace'}
+                  {@const cd = graceCountdown(srv.grace_deadline)}
+                  {#if cd}
+                    <span class="grace-cd {cd === 'expired' ? 'grace-cd--expired' : ''}">{cd}</span>
+                  {/if}
+                {/if}
+              </td>
               <td class="mono">{modeLabel(srv.drain_mode)}</td>
               <td class="mono muted">{rel(srv.registered_at)}</td>
               <td class="mono">{srv.sessions ?? '—'}</td>
@@ -209,4 +237,6 @@
   .pill.alert { background: var(--color-red); }
   .pill.off { background: var(--color-subtle); }
   .section-label { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-muted); margin-bottom: 10px; }
+  .grace-cd { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 700; color: var(--color-amber); margin-left: 6px; white-space: nowrap; }
+  .grace-cd--expired { color: var(--color-red); }
 </style>

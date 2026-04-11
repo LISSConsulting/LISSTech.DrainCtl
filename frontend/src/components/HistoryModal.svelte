@@ -27,7 +27,7 @@
     loading = true;
     error = '';
     try {
-      entries = await fetchHistory(host, 20, changesOnly) || [];
+      entries = await fetchHistory(host, 100, changesOnly) || [];
     } catch(e) {
       error = e.message;
     } finally {
@@ -38,6 +38,12 @@
   function handleOverlayClick(e) {
     if (e.target === e.currentTarget) onclose?.();
   }
+
+  $effect(() => {
+    function onKey(e) { if (e.key === 'Escape') onclose?.(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
 
   function formatTs(iso) {
     const d = new Date(iso);

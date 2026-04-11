@@ -87,6 +87,12 @@
     onclose?.();
   }
 
+  $effect(() => {
+    function onKey(e) { if (e.key === 'Escape') handleClose(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
   const GRACE_PRESETS = [5, 10, 15, 30, 60, 120, 240];
 </script>
 
@@ -112,7 +118,10 @@
               onclick={() => config.grace_period_minutes = p}
             >{p < 60 ? p+'m' : (p/60)+'h'}</button>
           {/each}
-          <button class="repeat-pill repeat-pill--dashed">Custom</button>
+          <button
+            class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period_minutes) ? 'active' : ''}"
+            onclick={() => { /* numeric input below is the entry point */ }}
+          >Custom</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <input type="number" class="settings-num" bind:value={config.grace_period_minutes} min="1" max="1440" />
