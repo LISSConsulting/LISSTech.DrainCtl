@@ -12,20 +12,23 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
 <div class="confirm-overlay" onclick={(e) => e.target === e.currentTarget && oncancel?.()} role="dialog" aria-modal="true" tabindex="-1">
-  <div class="confirm-modal">
+  <div class="modal-wrap">
     <span class="confirm-badge"><OctagonAlert size={20} strokeWidth={2.5} /></span>
+    <div class="confirm-modal">
     <h3 class="confirm-title serif">{title}</h3>
     <p class="confirm-msg">{message}</p>
     <div class="confirm-actions">
       <button class="btn-brutal confirm-cancel" onclick={oncancel}>{cancelLabel}</button>
       <button class="btn-brutal confirm-yes" onclick={onconfirm}>{confirmLabel}</button>
     </div>
+    </div>
   </div>
 </div>
 
 <style>
   .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: flex; align-items: center; justify-content: center; }
-  .confirm-modal { position: relative; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-width: 420px; width: 94vw; padding: 28px 28px 24px; text-align: center; }
+  .modal-wrap { position: relative; max-width: 420px; width: 94vw; }
+  .confirm-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); padding: 28px 28px 24px; text-align: center; }
   .confirm-badge {
     position: absolute;
     top: -16px; left: 50%; transform: translateX(-50%);

@@ -2,6 +2,7 @@
   import { sendNotifyTest } from '../lib/api.js';
   import { toast } from '../lib/toast.svelte.js';
   import { ALL_TRIGGERS, TRIGGER_LABELS, REPEAT_OPTIONS, REPEAT_MAP } from '../lib/notify.js';
+  import { Bell } from 'lucide-svelte';
 
   let { target, isNew, onsave, onclose } = $props();
 
@@ -77,7 +78,9 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
 <div class="tgt-edit-overlay" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
-  <div class="tgt-edit-modal scrollbar-styled">
+  <div class="modal-wrap">
+    <span class="modal-badge"><Bell size={20} /></span>
+    <div class="tgt-edit-modal scrollbar-styled">
     <h3 class="tgt-modal-title serif">{isNew ? 'Add Notification Target' : 'Edit Notification Target'}</h3>
 
     <!-- Type selection -->
@@ -177,12 +180,15 @@
       </div>
     </div>
   </div>
+  </div>
 </div>
 
 <style>
   .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; }
-  .tgt-edit-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-width: 560px; width: 94vw; max-height: 90vh; overflow-y: auto; padding: 24px; }
-  .tgt-modal-title { font-family: 'Fraunces', serif; font-size: 18px; margin-bottom: 16px; text-align: center; }
+  .modal-wrap { position: relative; max-width: 560px; width: 94vw; }
+  .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
+  .tgt-edit-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-height: 90vh; overflow-y: auto; padding: 24px; }
+  .tgt-modal-title { font-family: 'Fraunces', serif; font-size: 1.25rem; font-weight: 700; margin: 8px 0 16px; text-align: center; }
   .tgt-form-row { margin-bottom: 14px; }
   .tgt-form-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); margin-bottom: 4px; }
   .tgt-form-input { width: 100%; padding: 8px 10px; border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--color-bg); color: var(--color-fg); box-sizing: border-box; }

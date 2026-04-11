@@ -6,7 +6,7 @@
   import TargetEditModal from './TargetEditModal.svelte';
   import TargetDeleteModal from './TargetDeleteModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { Shield, Gauge, Siren, Save, X, Play, ChevronDown, ChevronRight } from 'lucide-svelte';
+  import { Shield, Gauge, Siren, Save, X, Play, ChevronDown, ChevronRight, Settings } from 'lucide-svelte';
 
   let { onclose } = $props();
 
@@ -183,9 +183,11 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
 <div class="settings-overlay {subModalOpen ? 'sub-open' : ''}" onclick={handleOverlayClick} role="dialog" aria-modal="true" tabindex="-1">
-  <div class="settings-modal scrollbar-styled" style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}>
+  <div class="modal-wrap">
+    <span class="modal-badge"><Settings size={20} /></span>
+    <div class="settings-modal scrollbar-styled" style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}>
     <div class="settings-title">
-      <span class="serif">Dashboard Configuration</span>
+      <h2 class="modal-title serif">Dashboard Configuration</h2>
       <button class="settings-close" onclick={requestClose} aria-label="Close settings"><X size={20} /></button>
     </div>
 
@@ -341,6 +343,7 @@
       </div>
     {/if}
   </div>
+  </div>
 </div>
 
 {#if editTarget !== null}
@@ -374,9 +377,12 @@
 <style>
   .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 150; display: flex; justify-content: center; align-items: center; }
   .settings-overlay.sub-open { background: transparent; }
-  .settings-overlay.sub-open > .settings-modal { opacity: 0; pointer-events: none; }
-  .settings-modal { width: 860px; max-width: 94vw; max-height: 90vh; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); overflow-y: auto; padding: 32px 36px; transition: background 0.3s; }
-  .settings-title { font-family: 'Fraunces', serif; font-size: 1.3rem; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; }
+  .settings-overlay.sub-open > .modal-wrap { opacity: 0; pointer-events: none; }
+  .modal-wrap { position: relative; width: 860px; max-width: 94vw; }
+  .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
+  .settings-modal { max-height: 90vh; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); overflow-y: auto; padding: 32px 36px; transition: background 0.3s; }
+  .modal-title { font-family: 'Fraunces', serif; font-size: 1.25rem; font-weight: 700; margin: 0; text-align: center; flex: 1; }
+  .settings-title { margin-bottom: 24px; display: flex; align-items: center; }
   .settings-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--color-muted); padding: 4px 8px; display: flex; align-items: center; }
   .settings-close:hover { color: var(--color-fg); }
   .settings-group { margin-bottom: 18px; }
