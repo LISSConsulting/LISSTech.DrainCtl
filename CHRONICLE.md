@@ -19,6 +19,10 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `RingGauge.svelte` `displayValue` when `unit === '%'` showed the normalised ring position (`value/max*100`) instead of the raw value; for TCP Retransmits (`value=5%`, `max=20`) this rendered "25%" instead of "5%"; fixed to display `Math.round(value)%` directly
+- `api.js` all six `res.json()` calls were missing `await`; JSON parse errors escaped the async function error boundary; all call sites now properly await the body parse
+- `EventLog.svelte` auto-scroll to latest (T027) was absent; added a `$effect` that scrolls to `scrollTop=0` when the event list changes unless the user has scrolled down >80px to read older entries
+- `ServerDetail.svelte` `resolveThresholds()` existed but was never called — CPU/Memory/Input Delay ring gauges always used static `DEFAULTS` regardless of user config; `App.svelte` now fetches `notify-config` once on first refresh and stores it in `appState.config`; `ConfigModal.svelte` writes the saved config back on success; `ServerDetail` derives per-metric thresholds via `resolveThresholds()` so the three configurable metrics respect user settings
 - `HistoryModal.svelte` `statusClass()` always returned `'off'` — function checked for capitalised labels (`'Healthy'`/`'Grace'`/`'Alert'`) but API sends lowercase values (`'ok'`/`'grace'`/`'alert'`/`'off'`); all history badges rendered as grey "Offline"; fixed to map lowercase API values directly
 - `api.js` JSDoc typedefs mismatched the actual backend wire format: `HistoryEntry.duration_s` renamed to `state_duration_seconds` (nullable), added `transition`/`transition_from` fields; `NotifyTarget.destination` renamed to `url`, added `from`/`to`/`secret`/`enabled` fields
 - `state.svelte.js` `totalSessions` used `$derived(() => fn)` which stored the arrow function itself as the derived value instead of a numeric result; corrected to `$derived.by(() => counters.sessions)`
