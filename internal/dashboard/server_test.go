@@ -575,7 +575,7 @@ func TestHandleHistory_RegisteredWithNoReportsReturnsEmptyArray(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -604,22 +604,22 @@ func TestHandleHistory_ReturnsReportsNewestFirst(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(records) != 3 {
 		t.Fatalf("len(records) = %d, want 3", len(records))
 	}
-	// Newest first: Alert, Grace, Healthy
-	if records[0].Status != "Alert" {
-		t.Errorf("records[0].Status = %q, want Alert", records[0].Status)
+	// Newest first: alert, grace, ok (status normalised to lowercase tokens).
+	if records[0].Status != "alert" {
+		t.Errorf("records[0].Status = %q, want \"alert\"", records[0].Status)
 	}
-	if records[1].Status != "Grace" {
-		t.Errorf("records[1].Status = %q, want Grace", records[1].Status)
+	if records[1].Status != "grace" {
+		t.Errorf("records[1].Status = %q, want \"grace\"", records[1].Status)
 	}
-	if records[2].Status != "Healthy" {
-		t.Errorf("records[2].Status = %q, want Healthy", records[2].Status)
+	if records[2].Status != "ok" {
+		t.Errorf("records[2].Status = %q, want \"ok\"", records[2].Status)
 	}
 }
 
@@ -643,7 +643,7 @@ func TestHandleHistory_LimitQueryParam(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -685,7 +685,7 @@ func TestHandleHistory_RingBufferCapAtHistoryMax(t *testing.T) {
 	r.SetPathValue("host", "SRV01")
 	ds.handleHistory(w, r)
 
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -844,7 +844,7 @@ func TestHandleServers_EmptyStateReturnsEmptyArray(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 
-	var servers []ServerInfo
+	var servers []ServerView
 	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -867,19 +867,19 @@ func TestHandleServers_ReturnsSortedByHostname(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var servers []ServerInfo
+	var servers []ServerView
 	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(servers) != 3 {
 		t.Fatalf("len(servers) = %d, want 3", len(servers))
 	}
-	if servers[0].Hostname != "ALPHA" || servers[1].Hostname != "MANGO" || servers[2].Hostname != "ZETA" {
-		t.Errorf("servers not sorted: got [%s, %s, %s]", servers[0].Hostname, servers[1].Hostname, servers[2].Hostname)
+	if servers[0].Host != "ALPHA" || servers[1].Host != "MANGO" || servers[2].Host != "ZETA" {
+		t.Errorf("servers not sorted: got [%s, %s, %s]", servers[0].Host, servers[1].Host, servers[2].Host)
 	}
 }
 
-func TestHandleServers_IncludesLastResult(t *testing.T) {
+func TestHandleServers_IncludesStatus(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
@@ -888,18 +888,16 @@ func TestHandleServers_IncludesLastResult(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
 	ds.handleServers(w, r)
 
-	var servers []ServerInfo
+	var servers []ServerView
 	if err := json.NewDecoder(w.Body).Decode(&servers); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(servers) != 1 {
 		t.Fatalf("len(servers) = %d, want 1", len(servers))
 	}
-	if servers[0].LastResult == nil {
-		t.Fatal("LastResult should be populated after Update")
-	}
-	if servers[0].LastResult.Status != "Alert" {
-		t.Errorf("LastResult.Status = %q, want Alert", servers[0].LastResult.Status)
+	// Status is normalised to lowercase "alert" by the ServerView mapping.
+	if servers[0].Status != "alert" {
+		t.Errorf("status = %q, want \"alert\"", servers[0].Status)
 	}
 }
 
@@ -1830,7 +1828,7 @@ func TestHandleHistory_ChangesOnly_ReturnsOnlyTransitions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -1865,7 +1863,7 @@ func TestHandleHistory_ChangesOnly_EmptyWhenNoTransitions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -1896,7 +1894,7 @@ func TestHandleHistory_ChangesOnly_RespectsLimit(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -1923,7 +1921,7 @@ func TestHandleHistory_DefaultLimitIs20(t *testing.T) {
 	r.SetPathValue("host", "SRV01")
 	ds.handleHistory(w, r)
 
-	var records []dc.CheckResult
+	var records []HistoryView
 	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -2085,7 +2083,7 @@ func TestHandlePutNotifyConfig_ReadBodyError_Returns400(t *testing.T) {
 
 // ── handleGetServer ───────────────────────────────────────────────────────────
 
-func TestHandleGetServer_ReturnsServerInfo(t *testing.T) {
+func TestHandleGetServer_ReturnsServerView(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
 	result := &dc.CheckResult{Host: "SRV01", Status: "Healthy", DrainModeLabel: "AllowAll"}
@@ -2103,15 +2101,16 @@ func TestHandleGetServer_ReturnsServerInfo(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
-	var info ServerInfo
-	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+	var view ServerView
+	if err := json.NewDecoder(w.Body).Decode(&view); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if info.Hostname != "SRV01" {
-		t.Errorf("hostname = %q, want SRV01", info.Hostname)
+	if view.Host != "SRV01" {
+		t.Errorf("host = %q, want SRV01", view.Host)
 	}
-	if info.LastResult == nil || info.LastResult.Status != "Healthy" {
-		t.Errorf("last_result.status = %v, want Healthy", info.LastResult)
+	// Status is normalised to lowercase token.
+	if view.Status != "ok" {
+		t.Errorf("status = %q, want \"ok\"", view.Status)
 	}
 }
 
@@ -2142,15 +2141,16 @@ func TestHandleGetServer_NoLastResultReturnsRegisteredHost(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	var info ServerInfo
-	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+	var view ServerView
+	if err := json.NewDecoder(w.Body).Decode(&view); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if info.Hostname != "SRV02" {
-		t.Errorf("hostname = %q, want SRV02", info.Hostname)
+	if view.Host != "SRV02" {
+		t.Errorf("host = %q, want SRV02", view.Host)
 	}
-	if info.LastResult != nil {
-		t.Errorf("last_result = %v, want nil for newly registered host", info.LastResult)
+	// Newly registered host with no report defaults to "off".
+	if view.Status != "off" {
+		t.Errorf("status = %q, want \"off\" for newly registered host", view.Status)
 	}
 }
 

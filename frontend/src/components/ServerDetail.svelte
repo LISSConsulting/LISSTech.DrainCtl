@@ -21,7 +21,7 @@
   }
 
   let perf = $derived(server.perf || {});
-  let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_free_mb / perf.mem_total_mb) * 100 : 0);
+  let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_avail_mb / perf.mem_total_mb) * 100 : 0);
 
   // Per-server ring buffer; fall back to fleet aggregate when no server-specific
   // data is available yet (e.g., first render before any refresh cycle completes).
@@ -65,7 +65,7 @@
       </div>
       <div class="d-spark-cell">
         <Sparkline data={delayHistory} color="var(--color-amber)" />
-        <div class="d-spark-labels"><span>Delay</span><span>{perf.input_delay_ms ?? '—'}ms</span></div>
+        <div class="d-spark-labels"><span>Delay</span><span>{perf.input_delay_p95_ms?.toFixed(1) ?? '—'}ms</span></div>
       </div>
     </div>
   </div>
@@ -86,7 +86,7 @@
       </div>
       <div class="d-ring-cell">
         <RingGauge
-          value={perf.input_delay_ms}
+          value={perf.input_delay_p95_ms}
           max={delayThresh.crit * 2}
           label="Input Delay"
           unit="ms"
@@ -96,10 +96,10 @@
       </div>
       <div class="d-ring-cell">
         <RingGauge
-          value={perf.tcp_retransmits_pct}
+          value={perf.tcp_retrans_sec}
           max={DEFAULTS.tcpRetransmits.crit * 2}
           label="TCP Retrans"
-          unit="%"
+          unit="/s"
           warnThreshold={DEFAULTS.tcpRetransmits.warn}
           critThreshold={DEFAULTS.tcpRetransmits.crit}
         />
@@ -115,8 +115,8 @@
       ['Last Seen', rel(server.last_seen)],
       ['Version', server.version || '—'],
       ['Changed By', server.changed_by || '—'],
-      ['Perf Samples', perf.sample_count ?? '—'],
-      ['Mem Free', perf.mem_free_mb ? (perf.mem_free_mb/1024).toFixed(1)+' GB' : '—'],
+      ['Pages/sec', perf.pages_sec != null ? perf.pages_sec.toFixed(1) : '—'],
+      ['Mem Avail', perf.mem_avail_mb ? (perf.mem_avail_mb/1024).toFixed(1)+' GB' : '—'],
       ['Mem Total', perf.mem_total_mb ? (perf.mem_total_mb/1024).toFixed(1)+' GB' : '—'],
     ] as [k, v]}
       <div class="d-kv-row">

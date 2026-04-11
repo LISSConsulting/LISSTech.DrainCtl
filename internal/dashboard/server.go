@@ -26,6 +26,108 @@ import (
 // (hyphen not at start/end), separated by dots.
 var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
 
+// ServerView is the flattened JSON shape returned to the Svelte dashboard
+// frontend from GET /api/v1/servers and GET /api/v1/servers/{host}.
+// It unwraps ServerInfo + CheckResult so the frontend never navigates nested
+// last_result fields. Status is normalised to lowercase frontend tokens.
+type ServerView struct {
+	Host          string           `json:"host"`
+	Status        string           `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode     string           `json:"drain_mode"`
+	Sessions      int              `json:"sessions"` // TotalSessions; 0 when unknown
+	Version       string           `json:"version"`
+	RegisteredAt  time.Time        `json:"registered_at"`
+	LastSeen      time.Time        `json:"last_seen,omitempty"`
+	ChangedBy     string           `json:"changed_by,omitempty"`
+	GraceDeadline *time.Time       `json:"grace_deadline"`
+	Perf          *dc.PerfSnapshot `json:"perf"`
+}
+
+// HistoryView is the per-entry shape returned by GET /api/v1/history/{host}.
+// It normalises CheckResult.Status to the lowercase frontend tokens so the
+// Svelte component can use the value directly as a CSS class name.
+type HistoryView struct {
+	Timestamp            time.Time          `json:"timestamp"`
+	Host                 string             `json:"host"`
+	Status               string             `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode            string             `json:"drain_mode"`
+	StateDurationSeconds *float64           `json:"state_duration_seconds"`
+	Transition           bool               `json:"transition"`
+	TransitionFrom       string             `json:"transition_from,omitempty"`
+	ChangedBy            string             `json:"changed_by,omitempty"`
+	Version              string             `json:"version"`
+	Message              string             `json:"message"`
+	Sessions             *dc.SessionSummary `json:"sessions,omitempty"`
+	Performance          *dc.PerfSnapshot   `json:"performance,omitempty"`
+}
+
+// statusToken converts a CheckResult.Status value ("Healthy"/"Grace"/"Alert")
+// to the lowercase frontend token ("ok"/"grace"/"alert"/"off").
+func statusToken(status string) string {
+	switch status {
+	case "Healthy":
+		return "ok"
+	case "Grace":
+		return "grace"
+	case "Alert":
+		return "alert"
+	default:
+		return "off"
+	}
+}
+
+// toServerView converts a stored ServerInfo into the flattened ServerView
+// the dashboard frontend expects.
+func toServerView(info ServerInfo) ServerView {
+	v := ServerView{
+		Host:         info.Hostname,
+		Status:       "off",
+		RegisteredAt: info.RegisteredAt,
+		LastSeen:     info.LastSeen,
+	}
+	r := info.LastResult
+	if r == nil {
+		return v
+	}
+	if r.Host != "" {
+		v.Host = r.Host
+	}
+	v.Status = statusToken(r.Status)
+	v.DrainMode = r.DrainModeLabel
+	v.Version = r.Version
+	v.ChangedBy = r.ChangedBy
+	v.Perf = r.Performance
+	if r.Sessions != nil {
+		v.Sessions = r.Sessions.TotalSessions
+	}
+	// GraceDeadline: the moment when the grace window expires.
+	// Computed from StateSince + GracePeriodSeconds so the frontend can display
+	// a live countdown without knowing the raw grace period configuration.
+	if r.Status == "Grace" && r.StateSince != nil && r.GracePeriodSeconds > 0 {
+		deadline := r.StateSince.Add(time.Duration(r.GracePeriodSeconds) * time.Second)
+		v.GraceDeadline = &deadline
+	}
+	return v
+}
+
+// toHistoryView converts a CheckResult to the HistoryView with normalised status.
+func toHistoryView(r dc.CheckResult) HistoryView {
+	return HistoryView{
+		Timestamp:            r.Timestamp,
+		Host:                 r.Host,
+		Status:               statusToken(r.Status),
+		DrainMode:            r.DrainModeLabel,
+		StateDurationSeconds: r.StateDurationSeconds,
+		Transition:           r.Transition,
+		TransitionFrom:       r.TransitionFrom,
+		ChangedBy:            r.ChangedBy,
+		Version:              r.Version,
+		Message:              r.Message,
+		Sessions:             r.Sessions,
+		Performance:          r.Performance,
+	}
+}
+
 // isAuthorizedForHost checks whether the authenticated identity is allowed to
 // register or report for the given hostname.
 //   - Machine accounts ("DOMAIN\HOST$") can only act for their own hostname.
@@ -300,16 +402,20 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleServers returns GET /api/v1/servers as a JSON array.
+// handleServers returns GET /api/v1/servers as a JSON array of ServerView.
 func (ds *DashboardServer) handleServers(w http.ResponseWriter, r *http.Request) {
-	servers := ds.state.All()
+	infos := ds.state.All()
+	views := make([]ServerView, len(infos))
+	for i, info := range infos {
+		views[i] = toServerView(info)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(servers)
+	_ = enc.Encode(views)
 }
 
-// handleGetServer returns GET /api/v1/servers/{host} as a JSON object.
+// handleGetServer returns GET /api/v1/servers/{host} as a JSON ServerView.
 // Returns 404 if the host is not registered.
 func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
@@ -327,7 +433,7 @@ func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(info)
+	_ = enc.Encode(toServerView(*info))
 }
 
 // handleDeleteServer processes DELETE /api/v1/servers/{host}.
@@ -674,10 +780,15 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	views := make([]HistoryView, len(records))
+	for i, rec := range records {
+		views[i] = toHistoryView(rec)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(records)
+	_ = enc.Encode(views)
 }
 
 // cspHeader is the Content-Security-Policy value applied to all responses.

@@ -56,12 +56,12 @@
       const memPct = s.length
         ? s.reduce((a, sv) => {
             const total = sv.perf?.mem_total_mb || 0;
-            const free = sv.perf?.mem_free_mb || 0;
-            return a + (total > 0 ? (1 - free / total) * 100 : 0);
+            const avail = sv.perf?.mem_avail_mb || 0;
+            return a + (total > 0 ? (1 - avail / total) * 100 : 0);
           }, 0) / s.length
         : 0;
       const inputDelay = s.length
-        ? s.reduce((a, sv) => a + (sv.perf?.input_delay_ms || 0), 0) / s.length
+        ? s.reduce((a, sv) => a + (sv.perf?.input_delay_p95_ms || 0), 0) / s.length
         : 0;
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
@@ -70,15 +70,15 @@
 
       // Per-server ring buffers for per-host sparklines in ServerDetail.
       for (const sv of s) {
-        if (sv.perf && sv.perf.sample_count > 0) {
+        if (sv.perf) {
           const svMemPct = sv.perf.mem_total_mb > 0
-            ? (1 - sv.perf.mem_free_mb / sv.perf.mem_total_mb) * 100
+            ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
             : 0;
           appendServerMetricsSample(sv.host, {
             time:       ts,
             cpu:        sv.perf.cpu_pct,
             mem:        svMemPct,
-            inputDelay: sv.perf.input_delay_ms,
+            inputDelay: sv.perf.input_delay_p95_ms,
             sessions:   sv.sessions ?? 0,
           });
         }

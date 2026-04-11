@@ -189,8 +189,8 @@
               <td class="mono muted">{rel(srv.registered_at, now)}</td>
               <td class="mono">{srv.sessions ?? '—'}</td>
               <td class="mono">{srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}</td>
-              <td class="mono">{srv.perf ? (srv.perf.mem_free_mb / 1024).toFixed(1) + ' GB' : '—'}</td>
-              <td class="mono">{srv.perf ? srv.perf.input_delay_ms + 'ms' : '—'}</td>
+              <td class="mono">{srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}</td>
+              <td class="mono">{srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}</td>
               <td class="mono muted">{rel(srv.last_seen, now)}</td>
               <td onclick={(e) => e.stopPropagation()}>
                 <div class="btn-row">

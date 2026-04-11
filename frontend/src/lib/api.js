@@ -10,40 +10,52 @@
 const BASE = '/api/v1';
 
 /**
+ * PerfMetrics maps the Go PerfSnapshot JSON fields that the dashboard uses.
+ * Field names match PerfSnapshot JSON tags exactly (Go struct → JSON snake_case).
+ *
  * @typedef {Object} PerfMetrics
- * @property {number} cpu_pct
- * @property {number} mem_free_mb
- * @property {number} mem_total_mb
- * @property {number} disk_queue
- * @property {number} input_delay_ms
- * @property {number} tcp_retransmits_pct
- * @property {number} sample_count
+ * @property {number} cpu_pct              - Host CPU % (0–100)
+ * @property {number} mem_avail_mb         - Available memory in MB
+ * @property {number} mem_total_mb         - Total physical memory in MB
+ * @property {number} pages_sec            - Memory pages/sec
+ * @property {number} disk_queue           - Average disk queue length
+ * @property {number} tcp_retrans_sec      - TCP retransmits/sec
+ * @property {number} input_delay_p50_ms   - Input delay P50 (ms)
+ * @property {number} input_delay_p95_ms   - Input delay P95 (ms)
+ * @property {number} input_delay_max_ms   - Input delay max (ms)
  */
 
 /**
+ * Server is the flattened view returned by GET /api/v1/servers.
+ * The Go backend wraps ServerInfo + CheckResult into this shape so the
+ * frontend never has to navigate nested last_result fields.
+ *
  * @typedef {Object} Server
  * @property {string} host
  * @property {'ok'|'grace'|'alert'|'off'} status
- * @property {'none'|'graceful'|'immediate'} drain_mode
- * @property {number} sessions
+ * @property {string} drain_mode
+ * @property {number} sessions             - TotalSessions (integer)
  * @property {string} version
  * @property {string} registered_at
  * @property {string} last_seen
  * @property {string|null} grace_deadline
  * @property {string} changed_by
- * @property {PerfMetrics} perf
+ * @property {PerfMetrics|null} perf       - null when performance monitoring is disabled
  */
 
 /**
+ * HistoryEntry is one record from GET /api/v1/history/{host}.
+ * Status is normalised to lowercase tokens by the Go backend.
+ *
  * @typedef {Object} HistoryEntry
  * @property {string} timestamp
  * @property {string} host
- * @property {string} status           - 'ok' | 'grace' | 'alert' | 'off'
- * @property {string} drain_mode       - drain mode label string from the server
- * @property {number|null} [state_duration_seconds] - seconds in this state before transition (nullable)
- * @property {boolean} transition      - true when this record represents a state change
- * @property {string} [transition_from] - previous drain mode label (only on transitions)
- * @property {string} [changed_by]    - user who caused the transition
+ * @property {'ok'|'grace'|'alert'|'off'} status  - lowercase token from the backend
+ * @property {string} drain_mode                   - drain mode label string from the server
+ * @property {number|null} [state_duration_seconds]
+ * @property {boolean} transition
+ * @property {string} [transition_from]
+ * @property {string} [changed_by]
  * @property {string} version
  * @property {string} message
  */

@@ -113,22 +113,22 @@ const stateBarSegments = $derived.by(() => {
 });
 
 const avgCpu = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null && p.sample_count > 0);
+  const perf = servers.map(s => s.perf).filter(p => p != null);
   if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + p.cpu_pct, 0) / perf.length;
+  return perf.reduce((sum, p) => sum + (p.cpu_pct || 0), 0) / perf.length;
 });
 
 const avgMem = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null && p.sample_count > 0 && p.mem_total_mb > 0);
+  const perf = servers.map(s => s.perf).filter(p => p != null && p.mem_total_mb > 0);
   if (perf.length === 0) return 0;
-  const usedPcts = perf.map(p => ((p.mem_total_mb - p.mem_free_mb) / p.mem_total_mb) * 100);
+  const usedPcts = perf.map(p => ((p.mem_total_mb - p.mem_avail_mb) / p.mem_total_mb) * 100);
   return usedPcts.reduce((sum, v) => sum + v, 0) / usedPcts.length;
 });
 
 const avgInputDelay = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null && p.sample_count > 0);
+  const perf = servers.map(s => s.perf).filter(p => p != null);
   if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + p.input_delay_ms, 0) / perf.length;
+  return perf.reduce((sum, p) => sum + (p.input_delay_p95_ms || 0), 0) / perf.length;
 });
 
 const totalSessions = $derived.by(() => counters.sessions);
