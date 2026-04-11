@@ -6,7 +6,7 @@
   import TargetEditModal from './TargetEditModal.svelte';
   import TargetDeleteModal from './TargetDeleteModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { Coffee, Scale, Siren, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
+  import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
 
   let { onclose } = $props();
 
@@ -73,17 +73,17 @@
 
   const FIRE_PRESETS = [
     {
-      level: 1, label: 'Relaxed', icon: Coffee,
+      level: 1, label: 'Chill', icon: Coffee, beans: 1,
       grace_period: 60, session_warning: 90,
       cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95, delay_warn: 50, delay_crit: 100,
     },
     {
-      level: 2, label: 'Balanced', icon: Scale,
+      level: 2, label: 'Anxious', icon: Coffee, beans: 2,
       grace_period: 45, session_warning: 80,
       cpu_warn: 70, cpu_crit: 90, mem_warn: 70, mem_crit: 90, delay_warn: 30, delay_crit: 80,
     },
     {
-      level: 3, label: 'Strict', icon: Siren,
+      level: 3, label: 'Wired', icon: Coffee, beans: 3,
       grace_period: 15, session_warning: 60,
       cpu_warn: 60, cpu_crit: 80, mem_warn: 60, mem_crit: 80, delay_warn: 15, delay_crit: 40,
     },
@@ -217,9 +217,9 @@
               {#if activeFireLevel === preset.level}
                 <span class="fire-seal"><Award size={20} strokeWidth={2.5} /></span>
               {/if}
-              <span class="fire-icon-wrap"><svelte:component this={preset.icon} size={28} strokeWidth={1.8} /></span>
+              <span class="fire-icon-wrap">{#each { length: preset.beans } as _}<svg class="bean" viewBox="0 0 20 24" width="16" height="19"><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor"/><path d="M10 3 C8 8, 8 16, 10 21" stroke="var(--color-surface)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>{/each}</span>
               <span class="fire-label">{preset.label}</span>
-              <span class="fire-tagline">{preset.level === 1 ? 'Generous headroom' : preset.level === 2 ? 'Best for most' : 'Hair-trigger alerts'}</span>
+              <span class="fire-tagline">{preset.level === 1 ? 'Easy does it' : preset.level === 2 ? 'Something is brewing' : 'Triple espresso energy'}</span>
               <span class="fire-detail">
                 Grace {preset.grace_period}m · Sessions {preset.session_warning}%
               </span>
@@ -422,15 +422,15 @@
     transition: all 0.15s;
     box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
   }
-  .fire-level-1 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-green) 8%, var(--color-surface)) 0%, var(--color-surface) 60%); }
-  .fire-level-2 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 8%, var(--color-surface)) 0%, var(--color-surface) 60%); }
-  .fire-level-3 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-red) 8%, var(--color-surface)) 0%, var(--color-surface) 60%); }
+  .fire-level-1 { background: linear-gradient(145deg, #f5e6d3 0%, var(--color-surface) 70%); }
+  .fire-level-2 { background: linear-gradient(145deg, #e8d0b3 0%, #f5e6d3 50%, var(--color-surface) 100%); }
+  .fire-level-3 { background: linear-gradient(145deg, #c8935a 0%, #dfc09a 40%, #f0dcc5 100%); }
   .fire-card:hover { border-color: var(--color-accent); transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); }
   .fire-card:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .fire-card.active { border-color: var(--color-accent); border-width: 3px; }
-  .fire-level-1.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-green) 20%, var(--color-card)) 0%, var(--color-card) 60%); }
-  .fire-level-2.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 20%, var(--color-card)) 0%, var(--color-card) 60%); }
-  .fire-level-3.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-red) 20%, var(--color-card)) 0%, var(--color-card) 60%); }
+  .fire-level-1.active { background: linear-gradient(145deg, #f0dcc5 0%, var(--color-card) 70%); }
+  .fire-level-2.active { background: linear-gradient(145deg, #dfc09a 0%, #f0dcc5 50%, var(--color-card) 100%); }
+  .fire-level-3.active { background: linear-gradient(145deg, #b8834a 0%, #d4a574 40%, #ebd5ba 100%); }
   .fire-seal {
     position: absolute; top: -10px; right: -10px;
     display: flex; align-items: center; justify-content: center;
@@ -442,13 +442,13 @@
     animation: seal-pop 0.25s ease-out;
   }
   @keyframes seal-pop { from { transform: scale(0); } to { transform: scale(1); } }
-  .fire-icon-wrap { line-height: 1; margin-bottom: 4px; }
-  .fire-level-1 .fire-icon-wrap { color: var(--color-green); }
-  .fire-level-2 .fire-icon-wrap { color: var(--color-amber); }
-  .fire-level-3 .fire-icon-wrap { color: var(--color-red); }
-  .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
-  .fire-tagline { font-family: 'Work Sans', sans-serif; font-size: 0.65rem; font-weight: 500; font-style: italic; color: var(--color-muted); margin-bottom: 4px; }
-  .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.56rem; color: var(--color-subtle); text-align: center; line-height: 1.4; }
+  .fire-icon-wrap { display: flex; gap: 2px; line-height: 1; margin-bottom: 4px; }
+  .fire-level-1 .fire-icon-wrap { color: #a07850; }
+  .fire-level-2 .fire-icon-wrap { color: #7a5530; }
+  .fire-level-3 .fire-icon-wrap { color: #5a3520; }
+  .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #3a2010; }
+  .fire-tagline { font-family: 'Work Sans', sans-serif; font-size: 0.65rem; font-weight: 500; font-style: italic; color: #6b4530; margin-bottom: 4px; }
+  .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: #7a5a40; text-align: center; line-height: 1.5; }
   .fire-custom-toggle {
     display: inline-flex; align-items: center; gap: 4px;
     background: none; border: none; cursor: pointer;
