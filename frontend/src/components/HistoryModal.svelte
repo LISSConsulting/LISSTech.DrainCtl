@@ -97,8 +97,8 @@
 {/if}
 
 <style>
-  .hist-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 160; display: flex; justify-content: center; align-items: center; }
-  .hist-modal { width: 640px; max-width: 94vw; max-height: 82vh; background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 8px 8px 0 var(--color-shadow); overflow: hidden; display: flex; flex-direction: column; }
+  .hist-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 160; display: flex; justify-content: center; align-items: center; }
+  .hist-modal { width: 640px; max-width: 94vw; max-height: 82vh; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); overflow: hidden; display: flex; flex-direction: column; }
   .hist-head { padding: 20px 24px 16px; border-bottom: 1px solid var(--color-surface); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .hist-head-actions { display: flex; align-items: center; gap: 10px; }
   .hist-title { font-family: 'Fraunces', serif; font-size: 1.2rem; margin-bottom: 2px; }
