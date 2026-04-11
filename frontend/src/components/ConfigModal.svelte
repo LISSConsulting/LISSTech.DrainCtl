@@ -422,15 +422,15 @@
     transition: all 0.15s;
     box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
   }
-  .fire-level-1 { background: linear-gradient(145deg, #f5e6d3 0%, var(--color-surface) 70%); }
-  .fire-level-2 { background: linear-gradient(145deg, #e8d0b3 0%, #f5e6d3 50%, var(--color-surface) 100%); }
-  .fire-level-3 { background: linear-gradient(145deg, #c8935a 0%, #dfc09a 40%, #f0dcc5 100%); }
+  .fire-level-1 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 10%, var(--color-surface)) 0%, var(--color-surface) 70%); }
+  .fire-level-2 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 20%, var(--color-surface)) 0%, color-mix(in srgb, var(--color-amber) 6%, var(--color-surface)) 100%); }
+  .fire-level-3 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 35%, var(--color-surface)) 0%, color-mix(in srgb, var(--color-amber) 12%, var(--color-surface)) 100%); }
   .fire-card:hover { border-color: var(--color-accent); transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); }
   .fire-card:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .fire-card.active { border-color: var(--color-accent); border-width: 3px; }
-  .fire-level-1.active { background: linear-gradient(145deg, #f0dcc5 0%, var(--color-card) 70%); }
-  .fire-level-2.active { background: linear-gradient(145deg, #dfc09a 0%, #f0dcc5 50%, var(--color-card) 100%); }
-  .fire-level-3.active { background: linear-gradient(145deg, #b8834a 0%, #d4a574 40%, #ebd5ba 100%); }
+  .fire-level-1.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 16%, var(--color-card)) 0%, var(--color-card) 70%); }
+  .fire-level-2.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 28%, var(--color-card)) 0%, color-mix(in srgb, var(--color-amber) 10%, var(--color-card)) 100%); }
+  .fire-level-3.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 42%, var(--color-card)) 0%, color-mix(in srgb, var(--color-amber) 18%, var(--color-card)) 100%); }
   .fire-seal {
     position: absolute; top: -10px; right: -10px;
     display: flex; align-items: center; justify-content: center;
@@ -443,12 +443,12 @@
   }
   @keyframes seal-pop { from { transform: scale(0); } to { transform: scale(1); } }
   .fire-icon-wrap { display: flex; gap: 2px; line-height: 1; margin-bottom: 4px; }
-  .fire-level-1 .fire-icon-wrap { color: #a07850; }
-  .fire-level-2 .fire-icon-wrap { color: #7a5530; }
-  .fire-level-3 .fire-icon-wrap { color: #5a3520; }
-  .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #3a2010; }
-  .fire-tagline { font-family: 'Work Sans', sans-serif; font-size: 0.65rem; font-weight: 500; font-style: italic; color: #6b4530; margin-bottom: 4px; }
-  .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: #7a5a40; text-align: center; line-height: 1.5; }
+  .fire-level-1 .fire-icon-wrap { color: var(--color-amber); }
+  .fire-level-2 .fire-icon-wrap { color: color-mix(in srgb, var(--color-amber) 70%, var(--color-fg)); }
+  .fire-level-3 .fire-icon-wrap { color: color-mix(in srgb, var(--color-accent) 60%, var(--color-fg)); }
+  .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.9rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-fg); }
+  .fire-tagline { font-family: 'Work Sans', sans-serif; font-size: 0.68rem; font-weight: 600; font-style: italic; color: var(--color-muted); margin-bottom: 4px; }
+  .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.64rem; color: var(--color-muted); text-align: center; line-height: 1.5; font-weight: 500; }
   .fire-custom-toggle {
     display: inline-flex; align-items: center; gap: 4px;
     background: none; border: none; cursor: pointer;
