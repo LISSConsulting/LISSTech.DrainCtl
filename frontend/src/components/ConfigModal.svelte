@@ -38,8 +38,33 @@
     }
   }
 
+  /**
+   * Validate threshold pairs: warn must be strictly less than crit.
+   * Returns an error string if invalid, or null if OK.
+   * @returns {string|null}
+   */
+  function validateThresholds() {
+    const p = config?.performance;
+    if (!p?.enabled) return null;
+    if (p.cpu_warn_pct > 0 && p.cpu_crit_pct > 0 && p.cpu_warn_pct >= p.cpu_crit_pct)
+      return 'CPU warn threshold must be less than crit threshold.';
+    // Memory thresholds are stored as % free (lower = more pressure), so warn > crit is correct.
+    // Validate that neither is zero unless both are intentionally disabled.
+    if (p.mem_warn_pct > 0 && p.mem_crit_pct > 0 && p.mem_warn_pct <= p.mem_crit_pct)
+      return 'Memory warn threshold (% free) must be greater than crit threshold — a higher "% free" value triggers a warning earlier.';
+    if (p.input_delay_warn_ms > 0 && p.input_delay_crit_ms > 0 && p.input_delay_warn_ms >= p.input_delay_crit_ms)
+      return 'Input Delay warn threshold must be less than crit threshold.';
+    return null;
+  }
+
   async function save() {
     if (!config) return;
+    const validationErr = validateThresholds();
+    if (validationErr) {
+      saveStatus = 'err';
+      saveMsg = validationErr;
+      return;
+    }
     saving = true;
     saveStatus = '';
     saveMsg = '';

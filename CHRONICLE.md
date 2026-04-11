@@ -4,6 +4,11 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Features
 
+- `MetricsChart.svelte` series toggle buttons now carry `aria-pressed` so screen readers announce whether each series (CPU, Memory, Input Delay, Sessions) is currently displayed; the `200ms` input-delay chart-scale ceiling is extracted to a named constant `MAX_DELAY_CHART_MS` with an explanatory comment
+- `ServerTable.svelte` sortable column headers now carry `aria-sort="ascending"` / `aria-sort="descending"` / `aria-sort="none"` so screen readers can announce the current sort column and direction without relying on the `↑`/`↓` Unicode arrows
+- `RingGauge.svelte` SVG element now has `role="img"` and `aria-label="{label}: {displayValue}"` so screen readers describe the gauge's metric and current value instead of silently skipping the visual
+- `ConfigModal.svelte` threshold validation: clicking Save with an invalid warn/crit pair now surfaces an inline error banner before any network call is made — CPU and Input Delay require warn < crit; Memory thresholds (stored as % free) require warn > crit with a human-readable explanation of the direction convention
+
 - `Nav.svelte` status summary now shows all four states: `ok · grace · alert · off` (the "off" count was missing, violating the spec); offline servers are coloured `--color-subtle` to match the dot/pill convention used elsewhere
 - `utils.js` gains `modeLabel()` — converts Windows Registry API drain-mode constants (`ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS`) to compact human-readable labels ("Drain"); `ServerTable.svelte` now imports it from `utils.js` instead of defining its own copy; `HistoryModal.svelte` now uses it so the history panel shows "Drain" instead of the raw constant string
 - `HistoryModal.svelte` detail line reformatted: fields are separated by `·` instead of `mode=` / `dur=` / `by=` key-value pairs for cleaner presentation; "Open" drain mode (the default / normal state) is now suppressed since it adds no information

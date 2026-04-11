@@ -164,15 +164,15 @@
         <thead>
           <tr>
             <th></th>
-            <th onclick={() => sort('host')} class="sortable">Host {sortCol === 'host' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('status')} class="sortable">Status {sortCol === 'status' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('host')} class="sortable" aria-sort={sortCol === 'host' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Host {sortCol === 'host' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('status')} class="sortable" aria-sort={sortCol === 'status' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Status {sortCol === 'status' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th>Mode</th>
             <th>Since</th>
-            <th onclick={() => sort('sessions')} class="sortable">Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('cpu')} class="sortable">CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('mem')} class="sortable">Mem Free {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('delay')} class="sortable">Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('last_seen')} class="sortable">Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('sessions')} class="sortable" aria-sort={sortCol === 'sessions' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('cpu')} class="sortable" aria-sort={sortCol === 'cpu' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('mem')} class="sortable" aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Mem Free {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('delay')} class="sortable" aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('last_seen')} class="sortable" aria-sort={sortCol === 'last_seen' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th></th>
           </tr>
         </thead>

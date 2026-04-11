@@ -49,7 +49,14 @@
 
 <div class="ring-cell">
   <div class="ring" style="width:{size}px;height:{size}px">
-    <svg viewBox="0 0 {size} {size}" width={size} height={size} style="transform:rotate(-90deg)">
+    <svg
+      viewBox="0 0 {size} {size}"
+      width={size}
+      height={size}
+      style="transform:rotate(-90deg)"
+      role="img"
+      aria-label="{label ?? 'Gauge'}: {centerLabel ?? displayValue}"
+    >
       <circle class="ring-bg" cx={c} cy={c} r={r} stroke-width="5" />
       <circle
         class="ring-fill"

@@ -31,11 +31,16 @@
    * Build normalised data: each entry has a value 0-100 for each series key.
    * @type {{ cpu: number, mem: number, inputDelay: number, sessions: number }[]}
    */
+  // Input delay chart scale: values above this are clamped to 100% on the Y-axis.
+  // Chosen to give comfortable headroom for typical RDS farms (most healthy servers
+  // stay well below 50ms, 200ms = obvious degradation).
+  const MAX_DELAY_CHART_MS = 200;
+
   let normalised = $derived(
     history.map(h => ({
       cpu:        Math.min(h.cpu ?? 0, 100),
       mem:        Math.min(h.mem ?? 0, 100),
-      inputDelay: Math.min((h.inputDelay ?? 0) / 200 * 100, 100), // 200ms = 100%
+      inputDelay: Math.min((h.inputDelay ?? 0) / MAX_DELAY_CHART_MS * 100, 100),
       sessions:   ((h.sessions ?? 0) / sessionMax) * 100,
     }))
   );
@@ -116,6 +121,7 @@
         <button
           class="chart-toggle {s.show() ? 'active' : ''}"
           style="--series-color: {s.color}"
+          aria-pressed={s.show()}
           onclick={s.toggle}
         >
           <span class="dot"></span>{s.label}
