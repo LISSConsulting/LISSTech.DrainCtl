@@ -4,9 +4,11 @@ package dashboard
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -609,10 +611,12 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Try to decode a single target from the body.
+	// Webhook/ntfy targets are identified by a non-empty URL; email targets
+	// have no URL (they use From/To instead) so we check Type == "email".
 	var singleTarget *dc.NotificationTarget
 	if r.Body != nil && r.ContentLength > 0 {
 		var t dc.NotificationTarget
-		if err := json.NewDecoder(r.Body).Decode(&t); err == nil && t.URL != "" {
+		if err := json.NewDecoder(r.Body).Decode(&t); err == nil && t.Type != "" && (t.URL != "" || t.Type == "email") {
 			singleTarget = &t
 		}
 	}
@@ -652,15 +656,35 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 }
 
 // handleUI serves the embedded SPA index.html.
+// It generates a per-request nonce and injects it into both the Content-Security-Policy
+// header and the theme flash-prevention inline <script> tag in index.html.
+// This removes the need for 'unsafe-inline' in script-src while still allowing
+// the one inline script that prevents a light-flash before the theme JS runs.
 func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	data, err := distFS.ReadFile("dist/index.html")
 	if err != nil {
 		http.Error(w, "dashboard unavailable", http.StatusInternalServerError)
 		return
 	}
+
+	// Generate a cryptographically-random per-request nonce (128 bits).
+	var nb [16]byte
+	if _, err := rand.Read(nb[:]); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	nonce := base64.StdEncoding.EncodeToString(nb[:])
+
+	// Extend the CSP with the nonce, overriding the header set by securityMiddleware.
+	w.Header().Set("Content-Security-Policy",
+		strings.Replace(cspBase, "script-src 'self'", "script-src 'self' 'nonce-"+nonce+"'", 1))
+
+	// Inject the nonce attribute into the theme inline script.
+	html := strings.Replace(string(data), "<script>", "<script nonce=\""+nonce+"\">", 1)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(data)
+	_, _ = w.Write([]byte(html))
 }
 
 // staleThreshold is the maximum time since a server's last report before it is
@@ -793,12 +817,14 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	_ = enc.Encode(views)
 }
 
-// cspHeader is the Content-Security-Policy value applied to all responses.
-// The Vite-bundled SPA uses only 'self' for scripts and styles (no unsafe-inline).
-// The theme flash-prevention inline script in index.html uses a nonce injected at
-// build time; fonts are loaded from Google Fonts CDN.
-const cspHeader = "default-src 'none'; " +
-	"script-src 'self' 'unsafe-inline'; " +
+// cspBase is the Content-Security-Policy value applied to all responses.
+// The Vite-bundled SPA uses only 'self' for scripts — no 'unsafe-inline'.
+// handleUI extends cspBase with a per-request nonce for the theme
+// flash-prevention inline script in index.html (see handleUI).
+// style-src keeps 'unsafe-inline' because Svelte components use inline style=
+// attributes for reactive styling (e.g. flex widths, dirty-state tints).
+const cspBase = "default-src 'none'; " +
+	"script-src 'self'; " +
 	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src https://fonts.gstatic.com; " +
 	"img-src 'self' data:; " +
@@ -806,6 +832,11 @@ const cspHeader = "default-src 'none'; " +
 	"frame-ancestors 'self'; " +
 	"base-uri 'self'; " +
 	"form-action 'self'"
+
+// cspHeader is the CSP applied to every response via securityMiddleware.
+// API responses and asset responses use this directly (no inline script).
+// handleUI overrides this header with a nonce-augmented version.
+const cspHeader = cspBase
 
 // securityMiddleware adds defensive HTTP security headers to all responses.
 // Cache-Control is set to no-store by default so that authenticated API

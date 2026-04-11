@@ -19,6 +19,13 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `handleNotifyTest` (server.go) could not individually test **email** notification targets from the `TargetEditModal` — the single-target routing condition checked only `t.URL != ""`, which is always empty for email targets (they use `From`/`To`); extended to also match `t.Type == "email"` so the modal's "Test" button correctly sends a test to just that email target instead of silently falling back to "test all targets" mode
+- `NotificationTarget.Enabled` field was frontend-only and non-functional — the `enabled` checkbox in `TargetEditModal` was persisted to UI state but the Go backend struct had no `Enabled` field, so the flag was silently dropped on save and all targets always fired regardless of their enabled state; added `Enabled *bool` with `json:"enabled,omitempty"` to the Go struct, updated `SendNotification` and `SendTestNotification` to skip targets where `Enabled == false`, updated `api.js` JSDoc typedef, and fixed `NotificationTargets.svelte` to normalise `null`/`undefined` → `true` when opening the edit modal so the checkbox renders correctly for targets loaded from older configs
+- `handleUI` CSP used `script-src 'self' 'unsafe-inline'` — the comment claimed nonce injection but it was never implemented; per-request 128-bit nonce is now generated in `handleUI`, injected into both the `Content-Security-Policy` header (overriding the `securityMiddleware` baseline) and the theme flash-prevention `<script>` attribute in `index.html`; `cspBase` constant now carries `script-src 'self'` (no `unsafe-inline`); `style-src 'unsafe-inline'` is intentionally kept because Svelte components use reactive inline `style=` attributes
+- `serverMetrics` Map in `state.svelte.js` retained stale ring buffers after servers were deleted, causing a minor memory leak; added `removeServerMetrics(host)` helper and called it from `ServerTable.removeServer()` immediately after the delete API call succeeds
+- `HistoryModal.svelte` `loadHistory()` had no guard against concurrent calls — rapid "Transitions Only" toggle would start a second fetch before the first resolved, risking stale-result overwrite; added `if (loading) return` guard consistent with `App.svelte`'s `refreshing` flag pattern
+- `theme.svelte.js` exported a reactive `let` binding (`export let currentTheme = $state('light')`) which does not work as a cross-module reactive value in Svelte 5 — consumers received a snapshot, not a live reference; replaced with `export const theme = $state({ current: 'light' })` so the stable object reference is shared and property access is correctly tracked; `Nav.svelte` updated to use `theme.current`
+
 - `ServerDetail.svelte` sessions ring gauge used an arbitrary `max = sessions * 1.5` heuristic, making the ring always fill to ~67% and the amber/red thresholds meaningless; `ServerView` in `internal/dashboard/server.go` now exposes `max_sessions` from `SessionSummary.MaxSessions`; `ServerDetail` derives `sessionsPct` (0–100 utilisation % when capacity is known, `null` when unknown) and uses `session_warning_threshold` from config as the amber threshold; `RingGauge.svelte` gains an optional `centerLabel` prop so the sessions ring can display the raw count ("10") rather than the %-based `displayValue`; ring color is correctly neutral when max is unknown
 - `App.svelte` refresh loop had no guard against concurrent execution — if an API call took longer than 30 s the next tick would start a parallel fetch, potentially interleaving stale state; added `refreshing` boolean flag with `finally` reset so at most one refresh is in flight at a time
 - `TargetEditModal.svelte` had no keyboard shortcut to dismiss: `Escape` now closes the modal (consistent with `ConfigModal.svelte` and `HistoryModal.svelte`)
@@ -58,6 +65,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Dashboard: delegated event handlers (no inline `onclick`), XSS escaping, client-side URL validation
 
 ## Code Quality
+
+- Removed `internal/dashboard/dashboard.html` — leftover from the pre-Svelte monolith; the Go embed now uses `//go:embed all:dist` exclusively (T048)
 
 - `cmd/drainctl/main.go` split into 8 command files; `handler.go` split into handler + check
 - `ClassifyState` promoted to root package; `audit.go` streaming refactor with `scanRecords`

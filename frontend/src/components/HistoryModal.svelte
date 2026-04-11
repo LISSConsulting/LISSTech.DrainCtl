@@ -24,6 +24,7 @@
   });
 
   async function loadHistory() {
+    if (loading) return;
     loading = true;
     error = '';
     try {

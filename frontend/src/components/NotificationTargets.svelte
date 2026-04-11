@@ -23,6 +23,8 @@
     editIdx = idx;
     editTarget = idx >= 0 ? JSON.parse(JSON.stringify(targets[idx]))
       : { type: 'webhook', url: '', to: [], from: '', secret: '', triggers: ['drain_on','drain_off','alert','healthy'], repeat_minutes: 0, enabled: true };
+    // Normalize enabled: absent/null → true so the checkbox renders correctly.
+    if (editTarget.enabled == null) editTarget.enabled = true;
   }
 
   function saveTarget(t) {

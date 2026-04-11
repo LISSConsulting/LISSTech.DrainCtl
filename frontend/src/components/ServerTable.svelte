@@ -1,5 +1,5 @@
 <script>
-  import { appState } from '../lib/state.svelte.js';
+  import { appState, removeServerMetrics } from '../lib/state.svelte.js';
   import { deleteServer } from '../lib/api.js';
   import ServerDetail from './ServerDetail.svelte';
 
@@ -113,6 +113,7 @@
     try {
       await deleteServer(host);
       appState.servers = appState.servers.filter(s => s.host !== host);
+      removeServerMetrics(host);
     } catch(e) {
       removeError = 'Remove failed: ' + e.message;
       setTimeout(() => removeError = '', 5000);

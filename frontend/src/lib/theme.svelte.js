@@ -12,8 +12,7 @@ const STORAGE_KEY = 'drainctl-theme';
 // Reactive state (Svelte 5 rune — valid in .js modules compiled by Vite/Svelte)
 // ---------------------------------------------------------------------------
 
-/** @type {'light'|'dark'} */
-export let currentTheme = $state('light');
+export const theme = $state({ current: /** @type {'light'|'dark'} */ ('light') });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,10 +33,10 @@ function systemPreference() {
  * Apply a theme to the DOM and update the reactive variable.
  * @param {'light'|'dark'} theme
  */
-function applyTheme(theme) {
-  currentTheme = theme;
+function applyTheme(value) {
+  theme.current = value;
   if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = value;
   }
 }
 
@@ -77,7 +76,7 @@ export function initTheme() {
  * Toggle between light and dark, persist to localStorage, and update the DOM.
  */
 export function toggleTheme() {
-  const next = currentTheme === 'dark' ? 'light' : 'dark';
+  const next = theme.current === 'dark' ? 'light' : 'dark';
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem(STORAGE_KEY, next);
   }

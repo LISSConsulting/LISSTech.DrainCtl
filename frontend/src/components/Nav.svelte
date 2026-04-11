@@ -1,12 +1,12 @@
 <script>
   import { appState } from '../lib/state.svelte.js';
-  import { toggleTheme, currentTheme } from '../lib/theme.js';
+  import { toggleTheme, theme } from '../lib/theme.svelte.js';
 
   /** @type {{ onconfigopen: () => void }} */
   let { onconfigopen } = $props();
 
   const counters = $derived(appState.counters);
-  const isDark = $derived(currentTheme === 'dark');
+  const isDark = $derived(theme.current === 'dark');
 </script>
 
 <nav class="nav">

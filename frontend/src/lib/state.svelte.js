@@ -213,3 +213,15 @@ export function appendServerMetricsSample(host, sample) {
   next.set(host, [...prev, sample].slice(-MAX_METRICS));
   serverMetrics = next;
 }
+
+/**
+ * Remove a server's metrics ring buffer (call after the server is deleted from the
+ * dashboard so the stale entry does not leak memory indefinitely).
+ * @param {string} host
+ */
+export function removeServerMetrics(host) {
+  if (!serverMetrics.has(host)) return;
+  const next = new Map(serverMetrics);
+  next.delete(host);
+  serverMetrics = next;
+}

@@ -86,6 +86,7 @@ const BASE = '/api/v1';
  * @property {string} [secret]         - HMAC secret for webhook signing
  * @property {string[]} triggers
  * @property {number} repeat_minutes   - 0 = once only
+ * @property {boolean} [enabled]       - false = skip this target; absent/true = send (default)
  */
 
 /**
