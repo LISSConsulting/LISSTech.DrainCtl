@@ -1,34 +1,31 @@
 <script>
   import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
-  import { Pencil, Trash2, Plus } from 'lucide-svelte';
+  import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight } from 'lucide-svelte';
 
   let { targets = $bindable([]),
         editTarget = $bindable(null),
         editIdx = $bindable(-1),
         deleteIdx = $bindable(-1) } = $props();
 
+  const PAGE_SIZE = 10;
+  let page = $state(0);
+
+  let totalPages = $derived(Math.max(1, Math.ceil((targets?.length || 0) / PAGE_SIZE)));
+  let pagedTargets = $derived.by(() => {
+    const start = page * PAGE_SIZE;
+    return (targets || []).slice(start, start + PAGE_SIZE);
+  });
+  // The real index offset for this page (so Edit/Delete reference the right target).
+  let pageOffset = $derived(page * PAGE_SIZE);
+
+  // Clamp page if targets shrink (e.g. after delete).
+  $effect(() => { if (page >= totalPages) page = Math.max(0, totalPages - 1); });
+
   function openEdit(idx) {
     editIdx = idx;
     editTarget = idx >= 0 ? JSON.parse(JSON.stringify(targets[idx]))
       : { type: 'webhook', url: '', to: [], from: '', secret: '', triggers: ['drain_on','drain_off','alert','healthy'], repeat_minutes: 0, enabled: true };
-    // Normalize enabled: absent/null → true so the checkbox renders correctly.
     if (editTarget.enabled == null) editTarget.enabled = true;
-  }
-
-  function saveTarget(t) {
-    if (editIdx >= 0) {
-      targets = targets.map((x, i) => i === editIdx ? t : x);
-    } else {
-      targets = [...targets, { ...t, id: crypto.randomUUID() }];
-    }
-    editTarget = null;
-  }
-
-  function confirmDelete() {
-    if (deleteIdx >= 0) {
-      targets = targets.filter((_, i) => i !== deleteIdx);
-    }
-    deleteIdx = -1;
   }
 </script>
 
@@ -51,7 +48,8 @@
           </tr>
         </thead>
         <tbody>
-          {#each targets as t, i}
+          {#each pagedTargets as t, i}
+            {@const realIdx = pageOffset + i}
             <tr>
               <td><span class="status-dot {t.enabled !== false ? 'on' : 'off'}"></span></td>
               <td><span class="pill-type {t.type === 'ntfy' ? 'pill-type-ntfy' : t.type === 'email' ? 'pill-type-email' : ''}">{t.type === 'ntfy' ? 'Ntfy' : t.type === 'email' ? 'Email' : 'Webhook'}</span></td>
@@ -64,8 +62,8 @@
               <td class="mono">{repeatLabel(t.repeat_minutes || 0)}</td>
               <td>
                 <div class="btn-row">
-                  <button class="btn-tbl" onclick={() => openEdit(i)}><Pencil size={12} /> Edit</button>
-                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = i}><Trash2 size={12} /> Delete</button>
+                  <button class="btn-tbl" onclick={() => openEdit(realIdx)}><Pencil size={12} /> Edit</button>
+                  <button class="btn-tbl btn-tbl-danger" onclick={() => deleteIdx = realIdx}><Trash2 size={12} /> Delete</button>
                 </div>
               </td>
             </tr>
@@ -75,9 +73,17 @@
     {/if}
   </div>
 
-  <button class="btn-add-target" onclick={() => openEdit(-1)}><Plus size={14} /> Add Target</button>
+  <div class="tgt-footer">
+    <button class="btn-add-target" onclick={() => openEdit(-1)}><Plus size={14} /> Add Target</button>
+    {#if totalPages > 1}
+      <div class="tgt-pager">
+        <button class="btn-page" disabled={page === 0} onclick={() => page--}><ChevronLeft size={14} /></button>
+        <span class="page-info">{page + 1} / {totalPages}</span>
+        <button class="btn-page" disabled={page >= totalPages - 1} onclick={() => page++}><ChevronRight size={14} /></button>
+      </div>
+    {/if}
+  </div>
 </div>
-
 
 <style>
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
@@ -101,9 +107,19 @@
   .btn-tbl:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-tbl-danger { color: var(--color-red); border-color: var(--color-red); }
   .btn-tbl-danger:hover { background: color-mix(in srgb, var(--color-red) 8%, var(--color-card)); }
-  .btn-add-target { display: flex; align-items: center; justify-content: center; gap: 6px; width: 50%; padding: 10px; font-family: 'Work Sans', sans-serif; font-size: 0.82rem; font-weight: 700; background: var(--color-card); color: var(--color-accent); border: var(--spacing-bw) solid var(--color-accent); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+
+  .tgt-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .btn-add-target { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 20px; font-family: 'Work Sans', sans-serif; font-size: 0.82rem; font-weight: 700; background: var(--color-card); color: var(--color-accent); border: var(--spacing-bw) solid var(--color-accent); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
   .btn-add-target:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
   .btn-add-target:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
+
+  .tgt-pager { display: flex; align-items: center; gap: 8px; }
+  .page-info { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600; color: var(--color-muted); }
+  .btn-page { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; }
+  .btn-page:hover { transform: translate(-1px, -1px); box-shadow: calc(var(--spacing-so) + 1px) calc(var(--spacing-so) + 1px) 0 var(--color-shadow); }
+  .btn-page:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
+  .btn-page:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important; }
+
   .mono { font-family: 'JetBrains Mono', monospace; }
   .settings-group { margin-bottom: 18px; }
   .settings-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent); margin-bottom: 6px; }
