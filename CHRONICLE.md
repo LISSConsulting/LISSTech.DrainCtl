@@ -4,6 +4,7 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Features
 
+- **Spec 002 — Vite + Svelte Dashboard (all phases)**: Migrated monolithic 6 732-line `dashboard.html` to a Vite + Svelte 5 + Tailwind CSS v4 SPA. Preserves full feature parity plus: Layercake-based performance metrics chart (CPU %, Memory %, Input Delay, Sessions); I/O ring gauge threshold colours (Disk Queue / Input Delay / TCP Retransmits now green/amber/red like CPU/Memory/Sessions); config modal UX improvements (dirty-state amber tint, save/error banners, test-on-left layout, `.btn-brutal` hover on all buttons); notification target modal scrollbar consistency; theme toggle (light/dark, localStorage persistence, flash-prevention inline script); all 15 Svelte components; `frontend/` project at repo root; `just frontend` + `just frontend-copy` recipes wire Vite build into `just cli`; Go embed changed from single `dashboard.html` to `//go:embed all:dist`; new `/assets/*` route with `Cache-Control: public, max-age=31536000, immutable`; CSP updated to remove `'unsafe-inline'` for scripts/styles (served from `'self'`). Bundle: 135 KB JS + 43 KB CSS (gzip: 48 KB + 8 KB). Zero build warnings.
 - Webhook HMAC-SHA256 signing (`X-DrainCtl-Signature`), per-target secret/triggers/repeat config
 - Dashboard REST API: `/health`, `/servers/{host}`, `/history/{host}`, `/notify-test`, `/notify-config` (GET/PUT)
 - Dashboard UI: server filter bar, history drill-down modal, dark/light mode, Grace countdown, settings modal (HMAC secret, test button), dynamic page title, filter persistence

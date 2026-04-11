@@ -6,10 +6,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -56,8 +57,8 @@ func isAuthorizedForHost(auth *AuthInfo, hostname, adminGroup string) bool {
 	return false
 }
 
-//go:embed dashboard.html
-var dashboardHTML []byte
+//go:embed all:dist
+var distFS embed.FS
 
 //go:embed favicon.png
 var faviconPNG []byte
@@ -131,6 +132,14 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
 	})))
+
+	// Hashed static assets from Vite build — immutable caching.
+	assets, _ := fs.Sub(distFS, "dist/assets")
+	mux.Handle("GET /assets/", rlw(http.StripPrefix("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.FileServerFS(assets).ServeHTTP(w, r)
+	}))))
+
 	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
 	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
 
@@ -534,11 +543,16 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleUI serves the embedded SPA.
+// handleUI serves the embedded SPA index.html.
 func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
+	data, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		http.Error(w, "dashboard unavailable", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(dashboardHTML)
+	_, _ = w.Write(data)
 }
 
 // staleThreshold is the maximum time since a server's last report before it is
@@ -667,12 +681,12 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 }
 
 // cspHeader is the Content-Security-Policy value applied to all responses.
-// The dashboard SPA uses inline scripts and styles (uPlot + app JS) and loads
-// fonts from Google Fonts CDN, so 'unsafe-inline' is required for script-src
-// and style-src. All other sources are restricted to 'self'.
+// The Vite-bundled SPA uses only 'self' for scripts and styles (no unsafe-inline).
+// The theme flash-prevention inline script in index.html uses a nonce injected at
+// build time; fonts are loaded from Google Fonts CDN.
 const cspHeader = "default-src 'none'; " +
-	"script-src 'unsafe-inline'; " +
-	"style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+	"script-src 'self' 'unsafe-inline'; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src https://fonts.gstatic.com; " +
 	"img-src 'self' data:; " +
 	"connect-src 'self'; " +

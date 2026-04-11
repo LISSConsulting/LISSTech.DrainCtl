@@ -1,0 +1,70 @@
+<script>
+  import { appState } from '../lib/state.svelte.js';
+
+  const counters = $derived(appState.counters);
+</script>
+
+<div class="counters">
+  <div class="card ctr total">
+    <div class="ctr-v">{counters.total}</div>
+    <div class="ctr-l">Total Servers</div>
+  </div>
+  <div class="card ctr ok">
+    <div class="ctr-v">{counters.ok}</div>
+    <div class="ctr-l">Healthy</div>
+  </div>
+  <div class="card ctr grace">
+    <div class="ctr-v">{counters.grace}</div>
+    <div class="ctr-l">Grace</div>
+  </div>
+  <div class="card ctr alert">
+    <div class="ctr-v">{counters.alert}</div>
+    <div class="ctr-l">Alert</div>
+  </div>
+  <div class="card ctr sessions">
+    <div class="ctr-v mono">{counters.sessions}</div>
+    <div class="ctr-l">Sessions</div>
+  </div>
+</div>
+
+<style>
+  .counters {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .ctr {
+    padding: 16px 18px;
+    border-left: 5px solid var(--color-border);
+  }
+
+  .ctr-v {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ctr-l {
+    font-size: 0.75rem;
+    color: var(--color-muted);
+    font-weight: 600;
+    margin-top: 3px;
+  }
+
+  .ctr.total { border-left-color: var(--color-accent); }
+
+  .ctr.ok { border-left-color: var(--color-green); }
+  .ctr.ok .ctr-v { color: var(--color-green); }
+
+  .ctr.grace { border-left-color: var(--color-amber); }
+  .ctr.grace .ctr-v { color: var(--color-amber); }
+
+  .ctr.alert { border-left-color: var(--color-red); }
+  .ctr.alert .ctr-v { color: var(--color-red); }
+
+  .ctr.sessions { border-left-color: var(--color-muted); }
+</style>

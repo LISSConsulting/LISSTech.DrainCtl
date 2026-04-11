@@ -140,10 +140,35 @@ resource:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   drainctl.syso" -ForegroundColor DarkGray
 
+# Build the Svelte dashboard (runs npm run build in frontend/)
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+frontend:
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🎨 Building frontend  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    Push-Location "{{justfile_directory()}}/frontend"
+    try {
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Pop-Location
+    }
+    Write-Host "   frontend/dist/" -ForegroundColor DarkGray
+
+# Copy Vite build output to internal/dashboard/dist/ for Go embedding
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+frontend-copy: frontend
+    $src  = "{{justfile_directory()}}/frontend/dist"
+    $dest = "{{justfile_directory()}}/internal/dashboard/dist"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $dest
+    Copy-Item -Recurse $src $dest
+    Write-Host "   → internal/dashboard/dist/" -ForegroundColor DarkGray
+
 # Build the CLI binary
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-cli:
+cli: frontend-copy
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & go build -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
@@ -395,7 +420,7 @@ fmt:
 
 # Format frontend HTML/CSS/JS with Prettier
 fmt-web:
-    npx --yes prettier --write "docs/**/*.html" "internal/dashboard/*.html" "internal/dashboard/testdata/*.js" --print-width 120 --no-bracket-same-line
+    npx --yes prettier --write "docs/**/*.html" "internal/dashboard/testdata/*.js" "frontend/src/**/*.svelte" "frontend/src/**/*.js" "frontend/src/**/*.css" --print-width 120 --no-bracket-same-line
 
 # ── Test ─────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,137 @@
+<script>
+  import RingGauge from './RingGauge.svelte';
+  import Sparkline from './Sparkline.svelte';
+  import { DEFAULTS } from '../lib/thresholds.js';
+  import { appState } from '../lib/state.svelte.js';
+
+  let { server } = $props();
+
+  function rel(iso) {
+    if (!iso) return 'never';
+    const d = new Date(iso);
+    if (isNaN(d)) return 'never';
+    const s = Math.floor((Date.now() - d) / 1000);
+    if (s < 0) return 'now';
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  let perf = $derived(server.perf || {});
+  let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_free_mb / perf.mem_total_mb) * 100 : 0);
+
+  // CPU/mem history from metricsHistory for this server (simplified: use aggregate)
+  let cpuHistory = $derived(appState.metricsHistory.map(h => h.cpu));
+  let memHistory = $derived(appState.metricsHistory.map(h => h.mem));
+  let delayHistory = $derived(appState.metricsHistory.map(h => h.inputDelay));
+</script>
+
+<div class="d-inner">
+  <!-- Tile 1: Resource Utilization -->
+  <div class="d-tile d-tile-util">
+    <div class="d-tile-label">Resource Utilization</div>
+    <div class="d-ring-row">
+      <div class="d-ring-cell">
+        <RingGauge value={perf.cpu_pct} label="CPU" unit="%" warnThreshold={DEFAULTS.cpu.warn} critThreshold={DEFAULTS.cpu.crit} />
+      </div>
+      <div class="d-ring-cell">
+        <RingGauge value={memPct} label="Memory" unit="%" warnThreshold={DEFAULTS.mem.warn} critThreshold={DEFAULTS.mem.crit} />
+      </div>
+      <div class="d-ring-cell">
+        <RingGauge value={server.sessions} max={server.sessions > 0 ? server.sessions * 1.5 : 100} label="Sessions" unit=" " warnThreshold={DEFAULTS.sessions.warn} critThreshold={DEFAULTS.sessions.crit} />
+      </div>
+    </div>
+    <div class="d-spark-row">
+      <div class="d-spark-cell">
+        <Sparkline data={cpuHistory} color="var(--color-accent)" />
+        <div class="d-spark-labels"><span>CPU</span><span>{perf.cpu_pct?.toFixed(1) ?? '—'}%</span></div>
+      </div>
+      <div class="d-spark-cell">
+        <Sparkline data={memHistory} color="var(--color-green)" />
+        <div class="d-spark-labels"><span>Mem</span><span>{memPct.toFixed(1)}%</span></div>
+      </div>
+      <div class="d-spark-cell">
+        <Sparkline data={delayHistory} color="var(--color-amber)" />
+        <div class="d-spark-labels"><span>Delay</span><span>{perf.input_delay_ms ?? '—'}ms</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tile 2: I/O Metrics -->
+  <div class="d-tile d-tile-io">
+    <div class="d-tile-label">I/O Metrics</div>
+    <div class="d-ring-row">
+      <div class="d-ring-cell">
+        <RingGauge
+          value={perf.disk_queue}
+          max={DEFAULTS.diskQueue.crit * 2}
+          label="Disk Queue"
+          unit=" "
+          warnThreshold={DEFAULTS.diskQueue.warn}
+          critThreshold={DEFAULTS.diskQueue.crit}
+        />
+      </div>
+      <div class="d-ring-cell">
+        <RingGauge
+          value={perf.input_delay_ms}
+          max={DEFAULTS.inputDelay.crit * 2}
+          label="Input Delay"
+          unit="ms"
+          warnThreshold={DEFAULTS.inputDelay.warn}
+          critThreshold={DEFAULTS.inputDelay.crit}
+        />
+      </div>
+      <div class="d-ring-cell">
+        <RingGauge
+          value={perf.tcp_retransmits_pct}
+          max={DEFAULTS.tcpRetransmits.crit * 2}
+          label="TCP Retrans"
+          unit="%"
+          warnThreshold={DEFAULTS.tcpRetransmits.warn}
+          critThreshold={DEFAULTS.tcpRetransmits.crit}
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- Tile 3: Server Details -->
+  <div class="d-tile d-tile-details">
+    <div class="d-tile-label">Server Details</div>
+    {#each [
+      ['Registered', rel(server.registered_at)],
+      ['Last Seen', rel(server.last_seen)],
+      ['Version', server.version || '—'],
+      ['Changed By', server.changed_by || '—'],
+      ['Perf Samples', perf.sample_count ?? '—'],
+      ['Mem Free', perf.mem_free_mb ? (perf.mem_free_mb/1024).toFixed(1)+' GB' : '—'],
+      ['Mem Total', perf.mem_total_mb ? (perf.mem_total_mb/1024).toFixed(1)+' GB' : '—'],
+    ] as [k, v]}
+      <div class="d-kv-row">
+        <span class="d-kv-k">{k}</span>
+        <span class="d-kv-v mono">{v}</span>
+      </div>
+    {/each}
+  </div>
+</div>
+
+<style>
+  .d-inner { padding: 12px 16px; background: var(--color-bg); display: flex; gap: 10px; align-items: stretch; font-family: 'JetBrains Mono', monospace; font-size: 12px; flex-wrap: wrap; }
+  .d-tile { background: var(--color-card); border: 1.5px solid color-mix(in srgb, var(--color-border) 50%, transparent); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; }
+  .d-tile-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--color-subtle); margin-bottom: 8px; }
+  .d-tile-util { flex: 1.4; min-width: 240px; }
+  .d-tile-io { flex: 1; min-width: 180px; }
+  .d-tile-details { flex: 1; min-width: 170px; }
+  .d-ring-row { display: flex; gap: 12px; margin-bottom: 8px; }
+  .d-ring-cell { flex: 1; display: flex; justify-content: center; }
+  .d-spark-row { display: flex; gap: 8px; margin-top: 6px; }
+  .d-spark-cell { flex: 1; }
+  .d-spark-labels { display: flex; justify-content: space-between; font-size: 9px; color: var(--color-subtle); margin-top: 2px; }
+  .d-kv-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 4px; border-bottom: 1px solid var(--color-surface); }
+  .d-kv-row:last-child { border-bottom: none; }
+  .d-kv-k { color: var(--color-muted); }
+  .d-kv-v { font-weight: 600; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+</style>
