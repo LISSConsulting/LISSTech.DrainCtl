@@ -6,7 +6,7 @@
   import TargetEditModal from './TargetEditModal.svelte';
   import TargetDeleteModal from './TargetDeleteModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { Shield, Gauge, Siren, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
+  import { Coffee, Scale, Siren, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
 
   let { onclose } = $props();
 
@@ -73,12 +73,12 @@
 
   const FIRE_PRESETS = [
     {
-      level: 1, label: 'Relaxed', icon: Shield,
+      level: 1, label: 'Relaxed', icon: Coffee,
       grace_period: 60, session_warning: 90,
       cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95, delay_warn: 50, delay_crit: 100,
     },
     {
-      level: 2, label: 'Balanced', icon: Gauge,
+      level: 2, label: 'Balanced', icon: Scale,
       grace_period: 45, session_warning: 80,
       cpu_warn: 70, cpu_crit: 90, mem_warn: 70, mem_crit: 90, delay_warn: 30, delay_crit: 80,
     },
