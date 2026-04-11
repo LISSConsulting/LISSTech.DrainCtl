@@ -138,6 +138,7 @@
       ['Pages/sec', perf.pages_sec != null ? perf.pages_sec.toFixed(1) : '—'],
       ['Mem Avail', perf.mem_avail_mb ? (perf.mem_avail_mb/1024).toFixed(1)+' GB' : '—'],
       ['Mem Total', perf.mem_total_mb ? (perf.mem_total_mb/1024).toFixed(1)+' GB' : '—'],
+      ['Delay Max', perf.input_delay_max_ms != null ? perf.input_delay_max_ms.toFixed(1)+'ms' : '—'],
     ] as [k, v]}
       <div class="d-kv-row">
         <span class="d-kv-k">{k}</span>

@@ -1,6 +1,7 @@
 <script>
   import { appState, removeServerMetrics } from '../lib/state.svelte.js';
   import { deleteServer } from '../lib/api.js';
+  import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
   import ServerDetail from './ServerDetail.svelte';
 
   let { onhistoryclick } = $props();
@@ -120,6 +121,25 @@
     }
   }
 
+  // Per-metric thresholds derived from config (same logic as ServerDetail).
+  let perfCfg     = $derived(appState.config?.performance ?? null);
+  let cpuThresh   = $derived(resolveThresholds('cpu',        perfCfg));
+  let memThresh   = $derived(resolveThresholds('mem',        perfCfg));
+  let delayThresh = $derived(resolveThresholds('inputDelay', perfCfg));
+
+  /**
+   * Map a getThresholdColor result to a CSS color variable string.
+   * Returns empty string when there is no data ('neutral').
+   * @param {'green'|'amber'|'red'|'neutral'} color
+   * @returns {string}
+   */
+  function thresholdStyle(color) {
+    if (color === 'green') return 'color:var(--color-green)';
+    if (color === 'amber') return 'color:var(--color-amber)';
+    if (color === 'red')   return 'color:var(--color-red)';
+    return '';
+  }
+
   // Persist search
   $effect(() => {
     localStorage.setItem('drainctl-search', search);
@@ -172,6 +192,10 @@
         </thead>
         <tbody>
           {#each sorted as srv (srv.host)}
+            {@const memPct = srv.perf?.mem_total_mb > 0 ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100 : null}
+            {@const cpuStyle  = srv.perf ? thresholdStyle(getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)) : ''}
+            {@const memStyle  = memPct != null ? thresholdStyle(getThresholdColor(memPct, memThresh.warn, memThresh.crit)) : ''}
+            {@const delayStyle = thresholdStyle(srv.perf ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit) : 'neutral')}
             <tr class="clickable {expandedHost === srv.host ? 'sel' : ''}"
                 data-host={srv.host} data-status={srv.status}
                 onclick={() => toggleRow(srv.host)}>
@@ -189,9 +213,9 @@
               <td class="mono">{modeLabel(srv.drain_mode)}</td>
               <td class="mono muted">{rel(srv.registered_at, now)}</td>
               <td class="mono">{srv.sessions ?? '—'}</td>
-              <td class="mono">{srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}</td>
-              <td class="mono">{srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}</td>
-              <td class="mono">{srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}</td>
+              <td class="mono" style={cpuStyle}>{srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}</td>
+              <td class="mono" style={memStyle}>{srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}</td>
+              <td class="mono" style={delayStyle}>{srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}</td>
               <td class="mono muted">{rel(srv.last_seen, now)}</td>
               <td onclick={(e) => e.stopPropagation()}>
                 <div class="btn-row">
