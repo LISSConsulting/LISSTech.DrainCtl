@@ -12,7 +12,9 @@
   let sortDir = $state(1); // 1 = asc, -1 = desc
   let search = $state(localStorage.getItem('drainctl-search') || '');
   let statusFilter = $state('all');
-  let removeError = $state('');
+  let removeError   = $state('');
+  /** @type {Set<string>} */
+  let removingHosts = $state(new Set());
 
   // Reactive clock — ticks every 10 s so that relative timestamps and the
   // grace-period countdown badge stay fresh between 30-second server refreshes.
@@ -99,7 +101,9 @@
   }
 
   async function removeServer(host) {
+    if (removingHosts.has(host)) return;
     if (!confirm('Remove ' + host + ' from the dashboard?')) return;
+    removingHosts = new Set([...removingHosts, host]);
     try {
       await deleteServer(host);
       appState.servers = appState.servers.filter(s => s.host !== host);
@@ -108,6 +112,10 @@
     } catch(e) {
       removeError = 'Remove failed: ' + e.message;
       setTimeout(() => removeError = '', 5000);
+    } finally {
+      const next = new Set(removingHosts);
+      next.delete(host);
+      removingHosts = next;
     }
   }
 
@@ -214,7 +222,7 @@
               <td onclick={(e) => e.stopPropagation()}>
                 <div class="btn-row">
                   <button class="btn-hist" onclick={() => onhistoryclick?.(srv.host)}>History</button>
-                  <button class="btn-rm" onclick={() => removeServer(srv.host)}>✕</button>
+                  <button class="btn-rm" onclick={() => removeServer(srv.host)} aria-label="Remove {srv.host}" disabled={removingHosts.has(srv.host)}>{removingHosts.has(srv.host) ? '…' : '✕'}</button>
                 </div>
               </td>
             </tr>

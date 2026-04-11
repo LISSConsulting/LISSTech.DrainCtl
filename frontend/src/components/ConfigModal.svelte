@@ -132,7 +132,7 @@
   <div class="settings-modal scrollbar-styled" style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}>
     <div class="settings-title">
       <span class="serif">Dashboard Configuration</span>
-      <button class="settings-close" onclick={handleClose}>✕</button>
+      <button class="settings-close" onclick={handleClose} aria-label="Close settings">✕</button>
     </div>
 
     {#if loading}

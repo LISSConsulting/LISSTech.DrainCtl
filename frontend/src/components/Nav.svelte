@@ -23,7 +23,7 @@
         <span class="o">{counters.off}</span> off
       </span>
       <button class="btn-gear btn-brutal" onclick={onconfigopen}>CONFIG</button>
-      <button class="btn-theme btn-brutal" onclick={toggleTheme}>{isDark ? '☀' : '☽'}</button>
+      <button class="btn-theme btn-brutal" onclick={toggleTheme} aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>{isDark ? '☀' : '☽'}</button>
     </div>
   </div>
 </nav>

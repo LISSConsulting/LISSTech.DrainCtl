@@ -204,16 +204,16 @@
     padding: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
-    color: #c0a0a0;
+    color: color-mix(in srgb, var(--color-code-fg) 75%, transparent);
     border: none;
-    border-bottom: 1px solid rgba(255, 200, 200, 0.12);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 12%, transparent);
     background: transparent;
     cursor: pointer;
     margin-bottom: 8px;
   }
 
   .log-restore:hover {
-    color: #f0d8d8;
+    color: var(--color-code-fg);
   }
 
   .log-title {
@@ -222,19 +222,19 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #c0a0a0;
+    color: color-mix(in srgb, var(--color-code-fg) 75%, transparent);
     margin-bottom: 10px;
     padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 200, 200, 0.12);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 12%, transparent);
   }
 
   .evt {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.74rem;
     line-height: 1.8;
-    color: #efe0e0;
+    color: var(--color-code-fg);
     padding: 4px 8px;
-    border-bottom: 1px solid rgba(255, 200, 200, 0.08);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 8%, transparent);
     border-left: 3px solid transparent;
   }
 
@@ -243,17 +243,17 @@
   .evt.is-transition { font-weight: 700; }
 
   .evt-time {
-    color: #d4baba;
+    color: color-mix(in srgb, var(--color-code-fg) 80%, transparent);
   }
 
   .evt-host {
-    color: #f0b8c8;
+    color: color-mix(in srgb, var(--color-code-fg) 85%, var(--color-accent));
     font-weight: 700;
     margin: 0 4px;
   }
 
   .evt-msg {
-    color: #efe0e0;
+    color: var(--color-code-fg);
   }
 
   .evt-msg.sev-alert { color: var(--color-red);   }

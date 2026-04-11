@@ -67,7 +67,7 @@
             class="filter-pill {changesOnly ? 'active' : ''}"
             onclick={() => { changesOnly = !changesOnly; loadHistory(); }}
           >Transitions Only</button>
-          <button class="settings-close" onclick={onclose}>✕</button>
+          <button class="settings-close" onclick={onclose} aria-label="Close history">✕</button>
         </div>
       </div>
       <div class="hist-body scrollbar-styled">
