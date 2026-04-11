@@ -401,7 +401,6 @@
   .settings-check { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
   .settings-check input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--color-accent); cursor: pointer; }
   .settings-num { width: 80px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; padding: 8px 12px; background: var(--color-surface); color: var(--color-fg); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); outline: none; }
-  .settings-num:focus { box-shadow: 0 0 0 2px var(--color-accent); }
   .settings-num-label { font-size: 0.75rem; color: var(--color-muted); }
   .settings-divider { height: 1px; background: var(--color-border); margin: 18px 0; opacity: 0.4; }
   .settings-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 12px; }

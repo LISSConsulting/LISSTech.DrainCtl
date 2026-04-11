@@ -217,7 +217,6 @@
   .tgt-form-row { margin-bottom: 14px; }
   .tgt-form-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); margin-bottom: 4px; }
   .tgt-form-input { width: 100%; padding: 8px 10px; border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--color-bg); color: var(--color-fg); box-sizing: border-box; }
-  .tgt-form-input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 15%, transparent); }
   .tgt-type-pills { display: flex; gap: 8px; }
   .tgt-type-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 7px 16px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
   .tgt-type-pill:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); border-color: var(--color-accent); color: var(--color-fg); }

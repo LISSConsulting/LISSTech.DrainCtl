@@ -114,7 +114,6 @@
   .tgt-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .tgt-search-wrap { display: flex; align-items: center; gap: 6px; color: var(--color-muted); }
   .tgt-search { width: 160px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; padding: 5px 8px; background: var(--color-surface); color: var(--color-fg); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); outline: none; }
-  .tgt-search:focus { box-shadow: 0 0 0 2px var(--color-accent); }
   .tgt-search::placeholder { color: var(--color-subtle); }
 
   .target-tbl-wrap { border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); margin-bottom: 12px; overflow: hidden; }
