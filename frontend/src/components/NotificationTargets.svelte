@@ -44,12 +44,10 @@
 <div class="settings-group">
   <div class="tgt-header">
     <div class="settings-label" style="margin-bottom:0">Notification Targets</div>
-    {#if targets?.length > PAGE_SIZE}
-      <div class="tgt-search-wrap">
-        <Search size={13} />
-        <input class="tgt-search" type="search" placeholder="Filter targets..." bind:value={search} />
-      </div>
-    {/if}
+    <div class="tgt-search-wrap" style={targets?.length > PAGE_SIZE ? '' : 'visibility:hidden'}>
+      <Search size={13} />
+      <input class="tgt-search" type="search" placeholder="Filter targets..." bind:value={search} />
+    </div>
   </div>
 
   <div class="target-tbl-wrap">
@@ -99,13 +97,11 @@
 
   <div class="tgt-footer">
     <button class="btn-add-target" onclick={() => openEdit(-1)}><Plus size={14} /> Add Target</button>
-    {#if totalPages > 1}
-      <div class="tgt-pager">
-        <button class="btn-page" disabled={page === 0} onclick={() => page--}><ChevronLeft size={14} /></button>
-        <span class="page-info">{page + 1} / {totalPages}</span>
-        <button class="btn-page" disabled={page >= totalPages - 1} onclick={() => page++}><ChevronRight size={14} /></button>
-      </div>
-    {/if}
+    <div class="tgt-pager" style={totalPages > 1 ? '' : 'visibility:hidden'}>
+      <button class="btn-page" disabled={page === 0} onclick={() => page--}><ChevronLeft size={14} /></button>
+      <span class="page-info">{page + 1} / {totalPages}</span>
+      <button class="btn-page" disabled={page >= totalPages - 1} onclick={() => page++}><ChevronRight size={14} /></button>
+    </div>
   </div>
 </div>
 
