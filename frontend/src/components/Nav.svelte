@@ -12,7 +12,7 @@
 <nav class="nav">
   <div class="nav-in">
     <div class="nav-brand">
-      <span class="mark">DC</span>
+      <img src="/logo.png" alt="" class="mark-img" width="28" height="28" />
       DrainCtl
     </div>
     <div class="nav-right">
@@ -59,19 +59,8 @@
     gap: 10px;
   }
 
-  .mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: var(--color-accent);
-    color: #fff;
-    font-weight: 900;
-    font-size: 0.85rem;
-    border: var(--spacing-bw) solid var(--color-border);
-    border-radius: 6px;
-    box-shadow: 2px 2px 0 var(--color-shadow);
+  .mark-img {
+    display: block;
   }
 
   .nav-right {

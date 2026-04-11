@@ -101,7 +101,7 @@
   .hist-modal { width: 640px; max-width: 94vw; max-height: 82vh; background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 8px 8px 0 var(--color-shadow); overflow: hidden; display: flex; flex-direction: column; }
   .hist-head { padding: 20px 24px 16px; border-bottom: 1px solid var(--color-surface); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .hist-head-actions { display: flex; align-items: center; gap: 10px; }
-  .hist-title { font-family: 'DM Serif Display', serif; font-size: 1.2rem; margin-bottom: 2px; }
+  .hist-title { font-family: 'Fraunces', serif; font-size: 1.2rem; margin-bottom: 2px; }
   .hist-hostname { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--color-accent); }
   .hist-body { overflow-y: auto; padding: 8px 24px 20px; flex: 1; }
   .hist-empty { text-align: center; padding: 32px; color: var(--color-subtle); font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }

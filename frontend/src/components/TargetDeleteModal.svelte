@@ -26,7 +26,7 @@
 <style>
   .tgt-del-overlay { position: fixed; inset: 0; background: rgba(45,26,26,0.5); z-index: 210; display: flex; align-items: center; justify-content: center; }
   .tgt-del-modal { background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 8px 8px 0 var(--color-shadow); max-width: 400px; width: 94vw; padding: 24px; text-align: center; }
-  .tgt-del-title { font-family: 'DM Serif Display', serif; font-size: 18px; margin-bottom: 16px; }
+  .tgt-del-title { font-family: 'Fraunces', serif; font-size: 18px; margin-bottom: 16px; }
   p { font-size: 14px; margin-bottom: 8px; line-height: 1.5; }
   .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
   .btn-cancel { background: var(--color-card); color: var(--color-fg); padding: 8px 20px; font-family: 'Work Sans', sans-serif; font-size: 0.85rem; font-weight: 700; }

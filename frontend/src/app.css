@@ -108,8 +108,7 @@ body {
 }
 
 .mono    { font-family: 'JetBrains Mono', monospace; }
-.serif   { font-family: 'DM Serif Display', serif; }
-.fraunces { font-family: 'Fraunces', serif; }
+.serif   { font-family: 'Fraunces', serif; }
 
 /* ─── Neobrutalist utilities ──────────────────────────────────────────────── */
 .card {

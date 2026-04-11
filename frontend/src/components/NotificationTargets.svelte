@@ -11,7 +11,7 @@
 
   function openEdit(idx) {
     editIdx = idx;
-    editTarget = idx >= 0 ? structuredClone(targets[idx])
+    editTarget = idx >= 0 ? JSON.parse(JSON.stringify(targets[idx]))
       : { type: 'webhook', url: '', to: [], from: '', secret: '', triggers: ['drain_on','drain_off','alert','healthy'], repeat_minutes: 0, enabled: true };
     // Normalize enabled: absent/null → true so the checkbox renders correctly.
     if (editTarget.enabled == null) editTarget.enabled = true;
@@ -114,12 +114,14 @@
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
   .btn-row { display: flex; gap: 6px; }
-  .btn-tbl { font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 600; padding: 4px 10px; border: 1.5px solid var(--color-border); border-radius: 6px; cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: all 0.15s; }
-  .btn-tbl:hover { background: var(--color-surface); }
+  .btn-tbl { font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 700; padding: 5px 12px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; }
+  .btn-tbl:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); }
+  .btn-tbl:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-tbl-danger { color: var(--color-red); border-color: var(--color-red); }
-  .btn-tbl-danger:hover { background: color-mix(in srgb, var(--color-red) 10%, var(--color-card)); }
-  .btn-add-target { display: flex; align-items: center; justify-content: center; gap: 6px; width: 50%; padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 700; background: var(--color-card); color: var(--color-accent); border: 2px dashed var(--color-accent); border-radius: var(--radius-default); cursor: pointer; transition: background 0.12s, color 0.12s; }
-  .btn-add-target:hover { background: var(--color-accent); color: #fff; }
+  .btn-tbl-danger:hover { background: color-mix(in srgb, var(--color-red) 8%, var(--color-card)); }
+  .btn-add-target { display: flex; align-items: center; justify-content: center; gap: 6px; width: 50%; padding: 10px; font-family: 'Work Sans', sans-serif; font-size: 0.82rem; font-weight: 700; background: var(--color-card); color: var(--color-accent); border: var(--spacing-bw) solid var(--color-accent); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+  .btn-add-target:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
+  .btn-add-target:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .mono { font-family: 'JetBrains Mono', monospace; }
   .settings-group { margin-bottom: 18px; }
   .settings-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent); margin-bottom: 6px; }

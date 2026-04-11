@@ -12,6 +12,7 @@
   import ServerTable from './components/ServerTable.svelte';
   import ConfigModal from './components/ConfigModal.svelte';
   import HistoryModal from './components/HistoryModal.svelte';
+  import Toast from './components/Toast.svelte';
 
   // ---------------------------------------------------------------------------
   // Initialise theme once on load
@@ -172,6 +173,8 @@
 {#if historyHost}
   <HistoryModal host={historyHost} onclose={() => (historyHost = null)} />
 {/if}
+
+<Toast />
 
 <style>
   .main {
