@@ -187,17 +187,21 @@
   .tgt-form-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); margin-bottom: 4px; }
   .tgt-form-input { width: 100%; padding: 8px 10px; border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--color-bg); color: var(--color-fg); box-sizing: border-box; }
   .tgt-form-input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 15%, transparent); }
-  .tgt-type-pills { display: flex; gap: 6px; }
-  .tgt-type-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; padding: 6px 14px; border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; cursor: pointer; background: var(--color-bg); color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.15s; }
-  .tgt-type-pill:hover { border-color: var(--color-accent); color: var(--color-fg); }
+  .tgt-type-pills { display: flex; gap: 8px; }
+  .tgt-type-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 7px 16px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+  .tgt-type-pill:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); border-color: var(--color-accent); color: var(--color-fg); }
+  .tgt-type-pill:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .tgt-type-pill.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
-  .tgt-trigger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .tgt-trigger-check { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 8px; background: var(--color-bg); border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-  .tgt-trigger-check.checked { background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg)); border-color: var(--color-accent); }
-  .tgt-trigger-check input { accent-color: var(--color-accent); }
-  .tgt-repeat-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-  .tgt-repeat-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; padding: 5px 12px; border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 6px; cursor: pointer; background: var(--color-bg); color: var(--color-muted); transition: all 0.15s; }
-  .tgt-repeat-pill:hover { border-color: var(--color-accent); color: var(--color-fg); }
+  .tgt-trigger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .tgt-trigger-check { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; padding: 6px 10px; background: var(--color-card); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: 2px 2px 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s; }
+  .tgt-trigger-check:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--color-shadow); }
+  .tgt-trigger-check:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
+  .tgt-trigger-check.checked { background: color-mix(in srgb, var(--color-accent) 12%, var(--color-card)); border-color: var(--color-accent); }
+  .tgt-trigger-check input { accent-color: var(--color-accent); width: 15px; height: 15px; }
+  .tgt-repeat-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tgt-repeat-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 7px 14px; border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-muted); transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+  .tgt-repeat-pill:hover { transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); border-color: var(--color-accent); color: var(--color-fg); }
+  .tgt-repeat-pill:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .tgt-repeat-pill.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
   .tgt-form-divider { border: none; border-top: 1px solid var(--color-surface); margin: 16px 0; }
   .tgt-form-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 2px solid var(--color-surface); }

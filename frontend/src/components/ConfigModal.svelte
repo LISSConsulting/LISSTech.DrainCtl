@@ -4,7 +4,7 @@
   import { toast } from '../lib/toast.svelte.js';
   import NotificationTargets from './NotificationTargets.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { Flame, CloudLightning, Radiation, Settings, Save, X, Play, ChevronDown, ChevronRight } from 'lucide-svelte';
+  import { Shield, Gauge, Siren, Save, X, Play, ChevronDown, ChevronRight } from 'lucide-svelte';
 
   let { onclose } = $props();
 
@@ -41,17 +41,17 @@
 
   const FIRE_PRESETS = [
     {
-      level: 1, label: 'Relaxed', icon: Flame,
+      level: 1, label: 'Relaxed', icon: Shield,
       grace_period: 60, session_warning: 90,
       cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95, delay_warn: 50, delay_crit: 100,
     },
     {
-      level: 2, label: 'Balanced', icon: CloudLightning,
+      level: 2, label: 'Balanced', icon: Gauge,
       grace_period: 45, session_warning: 80,
       cpu_warn: 70, cpu_crit: 90, mem_warn: 70, mem_crit: 90, delay_warn: 30, delay_crit: 80,
     },
     {
-      level: 3, label: 'Strict', icon: Radiation,
+      level: 3, label: 'Strict', icon: Siren,
       grace_period: 15, session_warning: 60,
       cpu_warn: 60, cpu_crit: 80, mem_warn: 60, mem_crit: 80, delay_warn: 15, delay_crit: 40,
     },
