@@ -54,12 +54,12 @@
     <table class="target-tbl">
       <thead>
         <tr>
-          <th class="col-dot"></th>
-          <th class="col-type">Type</th>
+          <th></th>
+          <th>Type</th>
           <th class="col-dest">Destination</th>
-          <th class="col-trig">Triggers</th>
-          <th class="col-rep">Repeat</th>
-          <th class="col-act"></th>
+          <th>Triggers</th>
+          <th>Repeat</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -75,7 +75,7 @@
             <tr>
               <td><span class="status-dot {t.enabled !== false ? 'on' : 'off'}"></span></td>
               <td><span class="pill-type {t.type === 'ntfy' ? 'pill-type-ntfy' : t.type === 'email' ? 'pill-type-email' : ''}">{t.type === 'ntfy' ? 'Ntfy' : t.type === 'email' ? 'Email' : 'Webhook'}</span></td>
-              <td><span class="tgt-truncate" title={t.type === 'email' ? (t.to||[]).join(', ') : t.url}>{t.type === 'email' ? (t.to||[]).join(', ') : t.url}</span></td>
+              <td class="td-dest" title={t.type === 'email' ? (t.to||[]).join(', ') : t.url}>{t.type === 'email' ? (t.to||[]).join(', ') : t.url}</td>
               <td>
                 {#if trigs.length <= 2}
                   <span class="tgt-triggers">{#each trigs as tr}<span class="tgt-pill">{TRIGGER_LABELS[tr] || tr}</span>{/each}</span>
@@ -117,17 +117,13 @@
   .tgt-search:focus { box-shadow: 0 0 0 2px var(--color-accent); }
   .tgt-search::placeholder { color: var(--color-subtle); }
 
-  .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; margin-bottom: 12px; }
-  .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-  .target-tbl th, .target-tbl td { padding: 8px 6px; }
+  .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .target-tbl th, .target-tbl td { padding: 8px 6px; white-space: nowrap; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
-  .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; overflow: hidden; text-overflow: ellipsis; }
-  .col-dot { width: 22px; }
-  .col-type { width: 80px; }
-  .col-dest { width: 24%; }
-  .col-trig { width: 120px; }
-  .col-rep { width: 52px; }
-  .col-act { width: 1%; white-space: nowrap; }
+  .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
+  .col-dest { width: 99%; }
+  .td-dest { overflow: hidden; text-overflow: ellipsis; max-width: 0; }
   .target-tbl tbody tr:last-child td { border-bottom: none; }
   .target-tbl tbody tr:not(.empty-row):hover td { background: var(--color-surface); }
   .empty-row td { height: 42px; border-bottom: 1px solid var(--color-surface) !important; }
@@ -139,7 +135,6 @@
   .pill-type-email { background: var(--color-amber); }
   .tgt-pill { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--color-surface); color: var(--color-muted); white-space: nowrap; }
   .tgt-pill-more { background: var(--color-accent); color: #fff; cursor: help; }
-  .tgt-truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
