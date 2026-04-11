@@ -19,6 +19,10 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `HistoryModal.svelte` `statusClass()` always returned `'off'` — function checked for capitalised labels (`'Healthy'`/`'Grace'`/`'Alert'`) but API sends lowercase values (`'ok'`/`'grace'`/`'alert'`/`'off'`); all history badges rendered as grey "Offline"; fixed to map lowercase API values directly
+- `api.js` JSDoc typedefs mismatched the actual backend wire format: `HistoryEntry.duration_s` renamed to `state_duration_seconds` (nullable), added `transition`/`transition_from` fields; `NotifyTarget.destination` renamed to `url`, added `from`/`to`/`secret`/`enabled` fields
+- `state.svelte.js` `totalSessions` used `$derived(() => fn)` which stored the arrow function itself as the derived value instead of a numeric result; corrected to `$derived.by(() => counters.sessions)`
+
 - `NotifyState` session-warn map split from alert map (shared map caused silent deletion)
 - `loadNotifyConfig` JS falsy-zero trap (`parseInt("0") || 80` overrode disabled threshold)
 - `serviceHandler.cfg` race fixed with `atomic.Pointer`; `pipeConn.SetDeadline` forwarding fix

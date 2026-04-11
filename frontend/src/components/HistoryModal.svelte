@@ -45,12 +45,14 @@
     return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
   }
 
+  // The API returns lowercase status values ('ok', 'grace', 'alert', 'off').
+  // statusClass maps these directly to CSS class names (which match the status values).
   function statusClass(s) {
-    return s === 'Healthy' ? 'ok' : s === 'Grace' ? 'grace' : s === 'Alert' ? 'alert' : 'off';
+    return { ok: 'ok', grace: 'grace', alert: 'alert', off: 'off' }[s] ?? 'off';
   }
 
   function statusLabel(s) {
-    return { ok:'Healthy', grace:'Grace', alert:'Alert', off:'Offline', Healthy:'Healthy', Grace:'Grace', Alert:'Alert' }[s] || s;
+    return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
   }
 </script>
 

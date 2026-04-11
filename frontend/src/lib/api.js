@@ -38,11 +38,14 @@ const BASE = '/api/v1';
  * @typedef {Object} HistoryEntry
  * @property {string} timestamp
  * @property {string} host
- * @property {'ok'|'grace'|'alert'|'off'} status
- * @property {'none'|'graceful'|'immediate'} drain_mode
- * @property {number} sessions
- * @property {number} duration_s
- * @property {string} changed_by
+ * @property {string} status           - 'ok' | 'grace' | 'alert' | 'off'
+ * @property {string} drain_mode       - drain mode label string from the server
+ * @property {number|null} [state_duration_seconds] - seconds in this state before transition (nullable)
+ * @property {boolean} transition      - true when this record represents a state change
+ * @property {string} [transition_from] - previous drain mode label (only on transitions)
+ * @property {string} [changed_by]    - user who caused the transition
+ * @property {string} version
+ * @property {string} message
  */
 
 /**
@@ -63,10 +66,13 @@ const BASE = '/api/v1';
  * @typedef {Object} NotifyTarget
  * @property {string} id
  * @property {'webhook'|'ntfy'|'email'} type
- * @property {string} destination
+ * @property {string} url              - webhook or ntfy URL (empty for email)
+ * @property {string} [from]           - email from address (email type only)
+ * @property {string[]} [to]           - email to addresses (email type only)
+ * @property {string} [secret]         - HMAC secret for webhook signing
  * @property {string[]} triggers
- * @property {number} repeat_interval_m
- * @property {string} hmac_secret
+ * @property {number} repeat_minutes   - 0 = once only
+ * @property {boolean} [enabled]       - defaults to true if absent
  */
 
 /**

@@ -123,7 +123,7 @@ const avgInputDelay = $derived.by(() => {
   return perf.reduce((sum, p) => sum + p.input_delay_ms, 0) / perf.length;
 });
 
-const totalSessions = $derived(() => counters.sessions);
+const totalSessions = $derived.by(() => counters.sessions);
 
 // ---------------------------------------------------------------------------
 // Exported state object
