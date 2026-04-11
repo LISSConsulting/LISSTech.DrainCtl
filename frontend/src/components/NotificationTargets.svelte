@@ -28,12 +28,7 @@
     const start = page * PAGE_SIZE;
     return filtered.slice(start, start + PAGE_SIZE);
   });
-  // Lock table height to the high-water mark of target count (capped at PAGE_SIZE).
-  // Never shrinks — filtering/deleting pads with empty rows.
-  let maxSeen = $state(0);
-  $effect(() => { const n = targets?.length || 0; if (n > maxSeen) maxSeen = n; });
-  let tableRows = $derived(Math.min(PAGE_SIZE, maxSeen));
-  let emptyRows = $derived(Math.max(0, tableRows - pagedItems.length));
+  let emptyRows = $derived(PAGE_SIZE - pagedItems.length);
 
   // Reset page when search changes or targets shrink.
   $effect(() => { search; if (page >= totalPages) page = Math.max(0, totalPages - 1); });
