@@ -184,10 +184,10 @@
 </div>
 
 <style>
-  .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .tgt-edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; animation: modal-fade-in 0.2s ease-out; }
   .modal-wrap { position: relative; max-width: 560px; width: 94vw; }
   .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
-  .tgt-edit-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-height: 90vh; overflow-y: auto; padding: 24px; }
+  .tgt-edit-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); max-height: 90vh; overflow-y: auto; padding: 24px; animation: modal-card-in 0.2s ease-out; }
   .tgt-modal-title { font-family: 'Fraunces', serif; font-size: 1.25rem; font-weight: 700; margin: 8px 0 16px; text-align: center; }
   .tgt-form-row { margin-bottom: 14px; }
   .tgt-form-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); margin-bottom: 4px; }

@@ -212,6 +212,16 @@ body {
 .settings-input:focus       { box-shadow: 0 0 0 2px var(--color-accent); }
 .settings-input::placeholder { color: var(--color-subtle); }
 
+/* ─── Modal overlay animation ────────────────────────────────────────────── */
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ─── Event log severity classes ──────────────────────────────────────────── */
 .evt {
   font-family: 'JetBrains Mono', monospace;

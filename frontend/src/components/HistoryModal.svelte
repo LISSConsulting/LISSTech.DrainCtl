@@ -1,7 +1,7 @@
 <script>
   import { fetchHistory } from '../lib/api.js';
   import { formatTs, dur, modeLabel } from '../lib/utils.js';
-  import { Clock, X } from 'lucide-svelte';
+  import { Clock, X, ArrowRightLeft, CircleDot } from 'lucide-svelte';
 
   let { host, onclose } = $props();
 
@@ -80,11 +80,14 @@
           {#each entries as e}
             {@const sc = statusClass(e.status)}
             <div class="hist-entry" class:hist-entry-transition={e.transition}>
+              <span class="hist-icon {e.transition ? 'transition' : ''}">
+                {#if e.transition}<ArrowRightLeft size={12} />{:else}<CircleDot size={12} />{/if}
+              </span>
               <div class="hist-ts">{formatTs(e.timestamp)}</div>
               <div class="hist-badge {sc}">{statusLabel(sc)}</div>
               <div class="hist-detail">
-                {#if e.drain_mode && e.drain_mode !== 'none' && e.drain_mode !== 'ALLOW_ALL_CONNECTIONS'}{modeLabel(e.drain_mode)}{/if}
-                {#if e.state_duration_seconds != null} · {dur(e.state_duration_seconds)}{/if}
+                {#if e.transition && e.transition_from}<span class="hist-from">{statusLabel(e.transition_from)} →</span>{/if}
+                {#if e.state_duration_seconds != null}{dur(e.state_duration_seconds)}{/if}
                 {#if e.changed_by} · {e.changed_by}{/if}
               </div>
             </div>
@@ -97,10 +100,10 @@
 {/if}
 
 <style>
-  .hist-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 160; display: flex; justify-content: center; align-items: center; }
+  .hist-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 160; display: flex; justify-content: center; align-items: center; animation: modal-fade-in 0.2s ease-out; }
   .modal-wrap { position: relative; width: 640px; max-width: 94vw; }
   .modal-badge { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--color-accent); color: #fff; border: 3px solid var(--color-border); border-radius: 50%; box-shadow: 3px 3px 0 var(--color-shadow); z-index: 1; }
-  .hist-modal { max-height: 82vh; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); overflow: hidden; display: flex; flex-direction: column; }
+  .hist-modal { max-height: 82vh; background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); overflow: hidden; display: flex; flex-direction: column; animation: modal-card-in 0.2s ease-out; }
   .hist-head { padding: 20px 24px 16px; border-bottom: 1px solid var(--color-surface); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .hist-head-actions { display: flex; align-items: center; gap: 10px; }
   .hist-title { font-family: 'Fraunces', serif; font-size: 1.25rem; font-weight: 700; margin-bottom: 2px; }
@@ -108,9 +111,12 @@
   .hist-body { overflow-y: auto; padding: 8px 24px 20px; flex: 1; }
   .hist-empty { text-align: center; padding: 32px; color: var(--color-subtle); font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
   .hist-empty.err { color: var(--color-red); }
-  .hist-entry { display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--color-surface); border-left: 3px solid transparent; }
+  .hist-entry { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--color-surface); }
   .hist-entry:last-child { border-bottom: none; }
-  .hist-entry-transition { background: color-mix(in srgb, var(--color-accent) 8%, transparent); border-left: 3px solid var(--color-accent); padding-left: 8px; border-radius: 0 4px 4px 0; font-weight: 600; }
+  .hist-entry-transition { background: color-mix(in srgb, var(--color-accent) 4%, transparent); border-radius: 4px; }
+  .hist-icon { display: flex; align-items: center; color: var(--color-subtle); flex-shrink: 0; }
+  .hist-icon.transition { color: var(--color-accent); }
+  .hist-from { color: var(--color-subtle); margin-right: 2px; }
   .hist-ts { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--color-muted); white-space: nowrap; min-width: 96px; }
   .hist-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 4px; color: #fff; white-space: nowrap; min-width: 54px; text-align: center; }
   .hist-badge.ok { background: var(--color-green); }

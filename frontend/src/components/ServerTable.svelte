@@ -271,11 +271,13 @@
   .mono { font-family: 'JetBrains Mono', monospace; }
   .muted { color: var(--color-muted); }
   .fw7 { font-weight: 700; }
-  .btn-row { display: flex; gap: 6px; }
-  .btn-hist { font-family: 'Work Sans', sans-serif; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; background: var(--color-card); color: var(--color-accent); border: 1.5px solid var(--color-accent); border-radius: 4px; cursor: pointer; transition: background 0.1s, color 0.1s; }
-  .btn-hist:hover { background: var(--color-accent); color: #fff; }
-  .btn-rm { font-family: 'Work Sans', sans-serif; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; background: var(--color-card); color: var(--color-red); border: 1.5px solid var(--color-red); border-radius: 4px; cursor: pointer; transition: background 0.1s, color 0.1s; }
-  .btn-rm:hover { background: var(--color-red); color: #fff; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-hist { font-family: 'Work Sans', sans-serif; font-size: 0.7rem; font-weight: 700; padding: 4px 10px; background: var(--color-card); color: var(--color-accent); border: var(--spacing-bw) solid var(--color-accent); border-radius: var(--radius-default); box-shadow: 3px 3px 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+  .btn-hist:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--color-shadow); background: var(--color-accent); color: #fff; }
+  .btn-hist:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
+  .btn-rm { font-family: 'Work Sans', sans-serif; font-size: 0.7rem; font-weight: 700; padding: 4px 10px; background: var(--color-card); color: var(--color-red); border: var(--spacing-bw) solid var(--color-red); border-radius: var(--radius-default); box-shadow: 3px 3px 0 var(--color-shadow); cursor: pointer; transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s; }
+  .btn-rm:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--color-shadow); background: var(--color-red); color: #fff; }
+  .btn-rm:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .detail-row td { padding: 0 !important; border-bottom: var(--spacing-bw) solid var(--color-surface) !important; }
   .pill { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 4px; color: #fff; }
   .pill.ok { background: var(--color-green); }

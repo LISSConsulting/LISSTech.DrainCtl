@@ -26,9 +26,9 @@
 </div>
 
 <style>
-  .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: flex; align-items: center; justify-content: center; }
+  .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: flex; align-items: center; justify-content: center; animation: modal-fade-in 0.15s ease-out; }
   .modal-wrap { position: relative; max-width: 420px; width: 94vw; }
-  .confirm-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); padding: 28px 28px 24px; text-align: center; }
+  .confirm-modal { background: var(--color-card); border: 4px solid var(--color-border); border-radius: var(--radius-default); box-shadow: 10px 10px 0 var(--color-shadow); padding: 28px 28px 24px; text-align: center; animation: modal-card-in 0.15s ease-out; }
   .confirm-badge {
     position: absolute;
     top: -16px; left: 50%; transform: translateX(-50%);

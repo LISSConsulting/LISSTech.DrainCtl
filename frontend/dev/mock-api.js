@@ -309,7 +309,7 @@ function matchRoute(pattern, pathname) {
   return params;
 }
 
-function handleRequest(method, pathname, body) {
+function handleRequest(method, pathname, body, query = {}) {
   ensureState();
 
   // GET /api/v1/health
@@ -340,10 +340,12 @@ function handleRequest(method, pathname, body) {
   // GET /api/v1/history/:host
   const histMatch = matchRoute('/api/v1/history/:host', pathname);
   if (method === 'GET' && histMatch) {
-    const entries = history.get(histMatch.host) ?? [];
-    // Return newest-first, respect limit param
+    let entries = history.get(histMatch.host) ?? [];
+    const limit = parseInt(query.limit) || 50;
+    const changesOnly = query.changes_only === 'true';
+    if (changesOnly) entries = entries.filter(e => e.transition);
     const reversed = [...entries].reverse();
-    return { status: 200, body: reversed.slice(0, 50) };
+    return { status: 200, body: reversed.slice(0, limit) };
   }
 
   // GET /api/v1/notify-config
@@ -379,7 +381,8 @@ export default function mockApi() {
         // Only intercept /api/ requests
         if (!req.url?.startsWith('/api/')) return next();
 
-        const pathname = req.url.split('?')[0];
+        const [pathname, qs] = req.url.split('?');
+        const query = Object.fromEntries(new URLSearchParams(qs || ''));
         const method = req.method?.toUpperCase() ?? 'GET';
 
         // Collect body for PUT/POST
@@ -389,11 +392,11 @@ export default function mockApi() {
           req.on('end', () => {
             let body = null;
             try { body = JSON.parse(bodyStr); } catch {}
-            const result = handleRequest(method, pathname, body);
+            const result = handleRequest(method, pathname, body, query);
             sendResult(res, result, next);
           });
         } else {
-          const result = handleRequest(method, pathname, null);
+          const result = handleRequest(method, pathname, null, query);
           sendResult(res, result, next);
         }
       });
