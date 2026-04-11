@@ -119,7 +119,7 @@
 
   .target-tbl-wrap { border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
   .target-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .target-tbl th, .target-tbl td { padding: 10px 12px; white-space: nowrap; }
+  .target-tbl th, .target-tbl td { padding: 11px 14px; white-space: nowrap; }
   .target-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; border-bottom: 2px solid var(--color-border); background: var(--color-card); }
   .target-tbl td { border-bottom: 1px solid var(--color-surface); vertical-align: middle; height: 42px; }
   .col-dest { width: 99%; }
@@ -138,8 +138,8 @@
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
   .status-dot.on { background: var(--color-green); }
   .status-dot.off { background: var(--color-subtle); }
-  .btn-row { display: flex; gap: 4px; }
-  .btn-tbl { display: inline-flex; align-items: center; gap: 3px; font-family: 'Work Sans', sans-serif; font-size: 10px; font-weight: 700; padding: 3px 7px; border: 2px solid var(--color-border); border-radius: 5px; box-shadow: 2px 2px 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; white-space: nowrap; }
+  .btn-row { display: flex; gap: 6px; }
+  .btn-tbl { display: inline-flex; align-items: center; gap: 4px; font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 700; padding: 4px 9px; border: 2px solid var(--color-border); border-radius: 5px; box-shadow: 2px 2px 0 var(--color-shadow); cursor: pointer; background: var(--color-card); color: var(--color-fg); transition: transform 0.1s, box-shadow 0.1s; white-space: nowrap; }
   .btn-tbl:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--color-shadow); }
   .btn-tbl:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .btn-tbl-danger { color: var(--color-red); border-color: var(--color-red); }
