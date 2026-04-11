@@ -83,7 +83,7 @@
       cpu_warn: 70, cpu_crit: 90, mem_warn: 70, mem_crit: 90, delay_warn: 30, delay_crit: 80,
     },
     {
-      level: 3, label: 'Wired', icon: Coffee, beans: 3,
+      level: 3, label: 'Twitchy', icon: Coffee, beans: 3,
       grace_period: 15, session_warning: 60,
       cpu_warn: 60, cpu_crit: 80, mem_warn: 60, mem_crit: 80, delay_warn: 15, delay_crit: 40,
     },
@@ -219,7 +219,7 @@
               {/if}
               <span class="fire-icon-wrap">{#each { length: preset.beans } as _}<svg class="bean" viewBox="0 0 20 24" width="16" height="19"><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor"/><path d="M10 3 C8 8, 8 16, 10 21" stroke="var(--color-surface)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>{/each}</span>
               <span class="fire-label">{preset.label}</span>
-              <span class="fire-tagline">{preset.level === 1 ? 'Easy does it' : preset.level === 2 ? 'Something is brewing' : 'Triple espresso energy'}</span>
+              <span class="fire-tagline">{preset.level === 1 ? 'Easy does it' : preset.level === 2 ? 'Sleep with one eye open' : 'No Sleep Till Brooklyn'}</span>
               <span class="fire-detail">
                 Grace {preset.grace_period}m · Sessions {preset.session_warning}%
               </span>
@@ -422,15 +422,15 @@
     transition: all 0.15s;
     box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
   }
-  .fire-level-1 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 10%, var(--color-surface)) 0%, var(--color-surface) 70%); }
+  .fire-level-1 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-green) 14%, var(--color-surface)) 0%, var(--color-surface) 70%); }
   .fire-level-2 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 20%, var(--color-surface)) 0%, color-mix(in srgb, var(--color-amber) 6%, var(--color-surface)) 100%); }
-  .fire-level-3 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 35%, var(--color-surface)) 0%, color-mix(in srgb, var(--color-amber) 12%, var(--color-surface)) 100%); }
+  .fire-level-3 { background: linear-gradient(145deg, color-mix(in srgb, var(--color-red) 22%, var(--color-surface)) 0%, color-mix(in srgb, var(--color-red) 8%, var(--color-surface)) 100%); }
   .fire-card:hover { border-color: var(--color-accent); transform: translate(-2px, -2px); box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow); }
   .fire-card:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--color-shadow); }
   .fire-card.active { border-color: var(--color-accent); border-width: 3px; }
-  .fire-level-1.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 16%, var(--color-card)) 0%, var(--color-card) 70%); }
+  .fire-level-1.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-green) 22%, var(--color-card)) 0%, var(--color-card) 70%); }
   .fire-level-2.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 28%, var(--color-card)) 0%, color-mix(in srgb, var(--color-amber) 10%, var(--color-card)) 100%); }
-  .fire-level-3.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-amber) 42%, var(--color-card)) 0%, color-mix(in srgb, var(--color-amber) 18%, var(--color-card)) 100%); }
+  .fire-level-3.active { background: linear-gradient(145deg, color-mix(in srgb, var(--color-red) 32%, var(--color-card)) 0%, color-mix(in srgb, var(--color-red) 12%, var(--color-card)) 100%); }
   .fire-seal {
     position: absolute; top: -10px; right: -10px;
     display: flex; align-items: center; justify-content: center;
@@ -443,12 +443,12 @@
   }
   .fire-seal-1 { background: var(--color-green); }
   .fire-seal-2 { background: var(--color-amber); }
-  .fire-seal-3 { background: var(--color-accent); }
+  .fire-seal-3 { background: var(--color-red); }
   @keyframes seal-pop { from { transform: scale(0); } to { transform: scale(1); } }
   .fire-icon-wrap { display: flex; gap: 2px; line-height: 1; margin-bottom: 4px; }
-  .fire-level-1 .fire-icon-wrap { color: var(--color-amber); }
-  .fire-level-2 .fire-icon-wrap { color: color-mix(in srgb, var(--color-amber) 70%, var(--color-fg)); }
-  .fire-level-3 .fire-icon-wrap { color: color-mix(in srgb, var(--color-accent) 60%, var(--color-fg)); }
+  .fire-level-1 .fire-icon-wrap { color: var(--color-green); }
+  .fire-level-2 .fire-icon-wrap { color: var(--color-amber); }
+  .fire-level-3 .fire-icon-wrap { color: var(--color-red); }
   .fire-label { font-family: 'Work Sans', sans-serif; font-size: 0.9rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-fg); }
   .fire-tagline { font-family: 'Work Sans', sans-serif; font-size: 0.68rem; font-weight: 600; font-style: italic; color: var(--color-muted); margin-bottom: 4px; }
   .fire-detail { font-family: 'JetBrains Mono', monospace; font-size: 0.64rem; color: var(--color-muted); text-align: center; line-height: 1.5; font-weight: 500; }
