@@ -1,6 +1,6 @@
 <script>
   import { initTheme } from './lib/theme.js';
-  import { appState, addEvent, appendMetricsSample } from './lib/state.svelte.js';
+  import { appState, addEvent, appendMetricsSample, appendServerMetricsSample } from './lib/state.svelte.js';
   import { fetchServers, fetchHealth, fetchNotifyConfig } from './lib/api.js';
 
   import Nav from './components/Nav.svelte';
@@ -65,7 +65,25 @@
         : 0;
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
-      appendMetricsSample({ time: Date.now(), cpu, mem: memPct, inputDelay, sessions });
+      const ts = Date.now();
+      appendMetricsSample({ time: ts, cpu, mem: memPct, inputDelay, sessions });
+
+      // Per-server ring buffers for per-host sparklines in ServerDetail.
+      for (const sv of s) {
+        if (sv.perf && sv.perf.sample_count > 0) {
+          const svMemPct = sv.perf.mem_total_mb > 0
+            ? (1 - sv.perf.mem_free_mb / sv.perf.mem_total_mb) * 100
+            : 0;
+          appendServerMetricsSample(sv.host, {
+            time:       ts,
+            cpu:        sv.perf.cpu_pct,
+            mem:        svMemPct,
+            inputDelay: sv.perf.input_delay_ms,
+            sessions:   sv.sessions ?? 0,
+          });
+        }
+      }
+
       addEvent(`[${new Date().toLocaleTimeString()}] Refreshed — ${s.length} server(s), ${sessions} session(s)`);
     } catch (e) {
       appState.connected = false;

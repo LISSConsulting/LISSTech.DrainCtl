@@ -23,10 +23,14 @@
   let perf = $derived(server.perf || {});
   let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_free_mb / perf.mem_total_mb) * 100 : 0);
 
-  // CPU/mem history from metricsHistory for this server (simplified: use aggregate)
-  let cpuHistory = $derived(appState.metricsHistory.map(h => h.cpu));
-  let memHistory = $derived(appState.metricsHistory.map(h => h.mem));
-  let delayHistory = $derived(appState.metricsHistory.map(h => h.inputDelay));
+  // Per-server ring buffer; fall back to fleet aggregate when no server-specific
+  // data is available yet (e.g., first render before any refresh cycle completes).
+  let serverHistory = $derived(
+    appState.serverMetrics.get(server.host) ?? appState.metricsHistory
+  );
+  let cpuHistory     = $derived(serverHistory.map(h => h.cpu));
+  let memHistory     = $derived(serverHistory.map(h => h.mem));
+  let delayHistory   = $derived(serverHistory.map(h => h.inputDelay));
 
   // Config-aware thresholds — prefer user-configured values over static defaults.
   let perfCfg = $derived(appState.config?.perf_monitoring ?? null);

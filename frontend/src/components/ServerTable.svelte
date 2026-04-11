@@ -12,13 +12,28 @@
   let statusFilter = $state('all');
   let removeError = $state('');
 
+  // Reactive clock — ticks every 10 s so that relative timestamps and the
+  // grace-period countdown badge stay fresh between 30-second server refreshes.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => { now = Date.now(); }, 10_000);
+    return () => clearInterval(t);
+  });
+
   const STATUS_ORDER = { alert: 0, grace: 1, off: 2, ok: 3 };
 
-  function rel(iso) {
+  /**
+   * Human-readable relative timestamp (e.g. "3m ago").
+   * Takes `now` explicitly so the template tracks it as a reactive dependency.
+   * @param {string|null|undefined} iso
+   * @param {number} _now - current epoch ms (reactive)
+   * @returns {string}
+   */
+  function rel(iso, _now) {
     if (!iso) return 'never';
     const d = new Date(iso);
     if (isNaN(d)) return 'never';
-    const s = Math.floor((Date.now() - d) / 1000);
+    const s = Math.floor((_now - d) / 1000);
     if (s < 0) return 'now';
     if (s < 60) return s + 's ago';
     const m = Math.floor(s / 60);
@@ -30,14 +45,16 @@
 
   /**
    * Returns a human-readable countdown string for a grace deadline ISO timestamp.
+   * Takes `now` explicitly so the template tracks it as a reactive dependency.
    * @param {string|null|undefined} iso
+   * @param {number} _now - current epoch ms (reactive)
    * @returns {string|null}
    */
-  function graceCountdown(iso) {
+  function graceCountdown(iso, _now) {
     if (!iso) return null;
     const d = new Date(iso);
     if (isNaN(d)) return null;
-    const ms = d - Date.now();
+    const ms = d - _now;
     if (ms <= 0) return 'expired';
     const s = Math.floor(ms / 1000);
     if (s < 60) return s + 's left';
@@ -162,19 +179,19 @@
               <td>
                 <span class="pill {srv.status}">{statusLabel(srv.status)}</span>
                 {#if srv.status === 'grace'}
-                  {@const cd = graceCountdown(srv.grace_deadline)}
+                  {@const cd = graceCountdown(srv.grace_deadline, now)}
                   {#if cd}
                     <span class="grace-cd {cd === 'expired' ? 'grace-cd--expired' : ''}">{cd}</span>
                   {/if}
                 {/if}
               </td>
               <td class="mono">{modeLabel(srv.drain_mode)}</td>
-              <td class="mono muted">{rel(srv.registered_at)}</td>
+              <td class="mono muted">{rel(srv.registered_at, now)}</td>
               <td class="mono">{srv.sessions ?? '—'}</td>
               <td class="mono">{srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}</td>
               <td class="mono">{srv.perf ? (srv.perf.mem_free_mb / 1024).toFixed(1) + ' GB' : '—'}</td>
               <td class="mono">{srv.perf ? srv.perf.input_delay_ms + 'ms' : '—'}</td>
-              <td class="mono muted">{rel(srv.last_seen)}</td>
+              <td class="mono muted">{rel(srv.last_seen, now)}</td>
               <td onclick={(e) => e.stopPropagation()}>
                 <div class="btn-row">
                   <button class="btn-hist" onclick={() => onhistoryclick?.(srv.host)}>History</button>

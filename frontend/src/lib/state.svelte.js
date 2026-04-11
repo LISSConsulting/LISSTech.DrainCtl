@@ -2,7 +2,8 @@
  * state.svelte.js — Global reactive state using Svelte 5 runes.
  *
  * Import `appState` anywhere in the component tree without prop drilling.
- * Mutation helpers `addEvent` and `appendMetricsSample` keep array caps enforced.
+ * Mutation helpers `addEvent`, `appendMetricsSample`, and
+ * `appendServerMetricsSample` keep array caps enforced.
  */
 
 const MAX_EVENTS = 200;
@@ -58,6 +59,13 @@ let events = $state([]);
 
 /** @type {MetricsSample[]} */
 let metricsHistory = $state([]);
+
+/**
+ * Per-server metric ring buffers (capped at MAX_METRICS each).
+ * Key = hostname, value = MetricsSample[].
+ * @type {Map<string, MetricsSample[]>}
+ */
+let serverMetrics = $state(new Map());
 
 // UI state
 let connected = $state(false);
@@ -135,6 +143,7 @@ const totalSessions = $derived.by(() => counters.sessions);
  * All properties are reactive via Svelte 5 runes. Derived fields are read-only;
  * write to raw fields (`servers`, `health`, `config`, `events`, `metricsHistory`,
  * `connected`, `lastUpdated`) directly, or use the mutation helpers.
+ * `serverMetrics` is a Map and must be updated via `appendServerMetricsSample`.
  */
 export const appState = {
   // Raw data — assign directly: appState.servers = newList
@@ -152,6 +161,9 @@ export const appState = {
 
   get metricsHistory() { return metricsHistory; },
   set metricsHistory(v){ metricsHistory = v; },
+
+  // Per-server ring buffers — read-only; mutate via appendServerMetricsSample
+  get serverMetrics()  { return serverMetrics; },
 
   // UI state
   get connected()      { return connected; },
@@ -187,4 +199,17 @@ export function addEvent(msg) {
  */
 export function appendMetricsSample(sample) {
   metricsHistory = [...metricsHistory, sample].slice(-MAX_METRICS);
+}
+
+/**
+ * Append a per-server metrics sample, capping each host's ring buffer at MAX_METRICS.
+ * Creates a new Map to preserve Svelte 5 deep reactivity.
+ * @param {string} host
+ * @param {MetricsSample} sample
+ */
+export function appendServerMetricsSample(host, sample) {
+  const next = new Map(serverMetrics);
+  const prev = next.get(host) ?? [];
+  next.set(host, [...prev, sample].slice(-MAX_METRICS));
+  serverMetrics = next;
 }
