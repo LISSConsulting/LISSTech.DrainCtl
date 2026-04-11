@@ -76,22 +76,16 @@ let notifyConfig = {
     collect_remotefx: false,
   },
   notifications: [
-    {
-      type: 'webhook',
-      url: 'https://hooks.example.com/drainctl',
-      secret: '',
-      triggers: ['alert', 'grace', 'recovery'],
-      repeat_minutes: 15,
-      enabled: true,
-    },
-    {
-      type: 'ntfy',
-      url: 'https://ntfy.example.com/drainctl-alerts',
-      secret: '',
-      triggers: ['alert'],
-      repeat_minutes: 0,
-      enabled: true,
-    },
+    { type: 'webhook', url: 'https://hooks.example.com/drainctl', secret: 'hmac-secret-1', triggers: ['alert', 'grace_entered', 'healthy'], repeat_minutes: 15, enabled: true },
+    { type: 'ntfy', url: 'https://ntfy.example.com/drainctl-alerts', secret: '', triggers: ['alert'], repeat_minutes: 0, enabled: true },
+    { type: 'webhook', url: 'https://teams.example.com/webhook/rds', secret: '', triggers: ['drain_on', 'drain_off', 'alert'], repeat_minutes: 60, enabled: true },
+    { type: 'email', url: 'smtp://mail.contoso.com:587', from: 'drainctl@contoso.com', to: ['ops@contoso.com', 'rds-team@contoso.com'], triggers: ['alert', 'healthy'], repeat_minutes: 240, enabled: true },
+    { type: 'ntfy', url: 'https://ntfy.internal/rds-ops', secret: '', triggers: ['cpu_critical', 'memory_critical'], repeat_minutes: 15, enabled: true },
+    { type: 'webhook', url: 'https://pagerduty.example.com/v2/enqueue', secret: 'pd-routing-key', triggers: ['alert'], repeat_minutes: 0, enabled: true },
+    { type: 'webhook', url: 'https://slack.example.com/hooks/T0001/B0001/xxxx', secret: '', triggers: ['drain_on', 'drain_off', 'grace_entered', 'alert', 'healthy'], repeat_minutes: 0, enabled: true },
+    { type: 'ntfy', url: 'https://ntfy.example.com/rds-sessions', secret: '', triggers: ['session_warning'], repeat_minutes: 60, enabled: false },
+    { type: 'email', url: 'smtps://smtp.office365.com:587', from: 'alerts@contoso.com', to: ['manager@contoso.com'], triggers: ['alert', 'cpu_critical', 'memory_critical', 'input_delay_critical'], repeat_minutes: 480, enabled: true },
+    { type: 'webhook', url: 'https://grafana.internal/api/annotations', secret: '', triggers: ['drain_on', 'drain_off', 'alert', 'healthy'], repeat_minutes: 0, enabled: true },
   ],
 };
 
