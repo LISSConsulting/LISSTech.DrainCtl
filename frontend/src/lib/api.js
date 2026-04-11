@@ -103,23 +103,41 @@ const BASE = '/api/v1';
  * @property {{ total: number, ok: number, grace: number, alert: number, off: number }} servers
  */
 
+/** Default request timeout — prevents network hangs from freezing the dashboard. */
+const FETCH_TIMEOUT_MS = 20_000;
+
 /**
  * Core fetch helper. Always sends credentials for SSPI/Negotiate.
- * Throws an ApiError on non-2xx responses.
+ * Automatically aborts after FETCH_TIMEOUT_MS milliseconds.
+ * Throws an ApiError on non-2xx responses or timeout.
  *
  * @param {string} path - Path relative to BASE, e.g. '/health'
  * @param {RequestInit} [options]
  * @returns {Promise<Response>}
  */
 async function apiFetch(path, options = {}) {
-  const response = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    ...options,
-    headers: {
-      'Accept': 'application/json',
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      credentials: 'include',
+      signal: controller.signal,
+      ...options,
+      headers: {
+        'Accept': 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(0, 'Timeout', `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`, path);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     let detail = '';

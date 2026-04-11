@@ -17,6 +17,15 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Exponential backoff for dashboard config fetch (wall-clock, 5m base, 160m cap)
 - Background perfmon sampler (configurable interval) with aggregated snapshots over poll window
 
+## Features
+
+- `ServerTable.svelte` status filter pills now display live counts (e.g. "Grace (2)", "Alert (1)") so operators immediately see how many servers are in each state without expanding the table
+- `api.js` `apiFetch` now wraps every request in an `AbortController` with a 20-second timeout; network hangs no longer freeze the dashboard indefinitely — a timed-out request throws an `ApiError(0, 'Timeout', ...)` that surfaces as a normal refresh-failed event in the event log
+- `ServerTable.svelte` expandable rows are now keyboard-accessible: each `<tr>` receives `tabindex="0"` and responds to `Enter`/`Space` to toggle the detail accordion, with a `:focus-visible` ring using `--color-accent`; `aria-expanded` reflects the open/closed state
+- `frontend/src/lib/notify.js` (new): centralises `ALL_TRIGGERS`, `TRIGGER_LABELS`, `REPEAT_OPTIONS`, `REPEAT_MAP`, and `repeatLabel()` — `NotificationTargets.svelte` and `TargetEditModal.svelte` now import from here instead of duplicating the same objects
+- `frontend/src/lib/utils.js` (new): centralises `rel()`, `formatTs()`, and `dur()` — `ServerTable.svelte`, `ServerDetail.svelte`, and `HistoryModal.svelte` now import from here instead of each carrying its own copy
+- `ConfigModal.svelte` "Memory Thresholds" label now includes the hint "(% free — lower = more pressure)" and the inline unit labels read "% free" instead of "%" to prevent operators from misinterpreting the direction of the threshold (Go stores these as % free, not % used)
+
 ## Bug Fixes
 
 - `ServerTable.svelte` `removeServer()` did not clear `expandedHost` after deletion — the detail accordion pane for the removed server stayed open, displaying stale data for a host that no longer existed in the list; fixed by adding `if (expandedHost === host) expandedHost = null` immediately after the server is removed from `appState.servers`

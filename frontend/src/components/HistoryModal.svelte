@@ -1,5 +1,6 @@
 <script>
   import { fetchHistory } from '../lib/api.js';
+  import { formatTs, dur } from '../lib/utils.js';
 
   let { host, onclose } = $props();
 
@@ -7,16 +8,6 @@
   let loading = $state(false);
   let error = $state('');
   let changesOnly = $state(false);
-
-  function dur(sec) {
-    if (sec == null) return '—';
-    const s = Math.floor(sec);
-    if (s < 60) return s + 's';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + 'm ' + (s % 60) + 's';
-    const h = Math.floor(m / 60);
-    return h + 'h ' + (m % 60) + 'm';
-  }
 
   $effect(() => {
     if (!host) return;
@@ -50,12 +41,6 @@
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
-
-  function formatTs(iso) {
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
-  }
 
   // The API returns lowercase status values ('ok', 'grace', 'alert', 'off').
   // statusClass maps these directly to CSS class names (which match the status values).

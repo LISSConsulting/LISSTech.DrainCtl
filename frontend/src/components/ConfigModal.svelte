@@ -165,14 +165,14 @@
                   <input type="number" class="settings-num" bind:value={config.performance.cpu_crit_pct} min="0" max="100"/>
                   <span class="settings-num-label">%</span>
                 </div>
-                <div class="settings-label">Memory Thresholds</div>
+                <div class="settings-label">Memory Thresholds <span class="settings-label-hint">(% free — lower = more pressure)</span></div>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
                   <span class="settings-num-label">Warn</span>
                   <input type="number" class="settings-num" bind:value={config.performance.mem_warn_pct} min="0" max="100"/>
-                  <span class="settings-num-label">%</span>
+                  <span class="settings-num-label">% free</span>
                   <span class="settings-num-label">Crit</span>
                   <input type="number" class="settings-num" bind:value={config.performance.mem_crit_pct} min="0" max="100"/>
-                  <span class="settings-num-label">%</span>
+                  <span class="settings-num-label">% free</span>
                 </div>
               </div>
               <div>
@@ -236,6 +236,7 @@
   .settings-close:hover { color: var(--color-fg); }
   .settings-group { margin-bottom: 18px; }
   .settings-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent); margin-bottom: 6px; }
+  .settings-label-hint { font-size: 0.65rem; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--color-muted); }
   .settings-check { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
   .settings-check input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--color-accent); cursor: pointer; }
   .settings-num { width: 80px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; padding: 8px 12px; background: var(--color-surface); color: var(--color-fg); border: var(--spacing-bw) solid var(--color-border); border-radius: var(--radius-default); outline: none; }

@@ -2,6 +2,7 @@
   import { appState, removeServerMetrics } from '../lib/state.svelte.js';
   import { deleteServer } from '../lib/api.js';
   import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
+  import { rel } from '../lib/utils.js';
   import ServerDetail from './ServerDetail.svelte';
 
   let { onhistoryclick } = $props();
@@ -22,27 +23,6 @@
   });
 
   const STATUS_ORDER = { alert: 0, grace: 1, off: 2, ok: 3 };
-
-  /**
-   * Human-readable relative timestamp (e.g. "3m ago").
-   * Takes `now` explicitly so the template tracks it as a reactive dependency.
-   * @param {string|null|undefined} iso
-   * @param {number} _now - current epoch ms (reactive)
-   * @returns {string}
-   */
-  function rel(iso, _now) {
-    if (!iso) return 'never';
-    const d = new Date(iso);
-    if (isNaN(d)) return 'never';
-    const s = Math.floor((_now - d) / 1000);
-    if (s < 0) return 'now';
-    if (s < 60) return s + 's ago';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + 'm ago';
-    const h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h / 24) + 'd ago';
-  }
 
   /**
    * Returns a human-readable countdown string for a grace deadline ISO timestamp.
@@ -79,6 +59,15 @@
   function statusLabel(s) {
     return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
   }
+
+  // Counts per status for the filter pill labels ("Grace (2)").
+  let statusCounts = $derived.by(() => {
+    const counts = { ok: 0, grace: 0, alert: 0, off: 0 };
+    for (const sv of appState.servers) {
+      if (sv.status in counts) counts[sv.status]++;
+    }
+    return counts;
+  });
 
   let sorted = $derived.by(() => {
     let s = appState.servers.filter(sv => {
@@ -160,8 +149,9 @@
     <input class="srv-search settings-input" type="search" placeholder="Filter by hostname..." bind:value={search} style="max-width:300px" />
     <div class="filter-pills">
       {#each ['all', 'ok', 'grace', 'alert', 'off'] as f}
+        {@const count = f === 'all' ? appState.servers.length : statusCounts[f]}
         <button class="filter-pill {f === 'all' ? '' : f} {statusFilter === f ? 'active' : ''}" onclick={() => statusFilter = f}>
-          {f === 'all' ? 'All' : statusLabel(f)}
+          {f === 'all' ? 'All' : statusLabel(f)}{count ? ' (' + count + ')' : ''}
         </button>
       {/each}
     </div>
@@ -204,7 +194,10 @@
             {@const delayStyle = thresholdStyle(srv.perf ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit) : 'neutral')}
             <tr class="clickable {expandedHost === srv.host ? 'sel' : ''}"
                 data-host={srv.host} data-status={srv.status}
-                onclick={() => toggleRow(srv.host)}>
+                tabindex="0"
+                aria-expanded={expandedHost === srv.host}
+                onclick={() => toggleRow(srv.host)}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(srv.host); } }}>
               <td><span class="dot {srv.status}"></span></td>
               <td class="mono fw7">{srv.host.split('.')[0]}</td>
               <td>
@@ -264,6 +257,8 @@
   th.sortable:hover { color: var(--color-accent); }
   .clickable { cursor: pointer; }
   .clickable:hover td { background: var(--color-surface); }
+  .clickable:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  .clickable:focus-visible td { background: var(--color-surface); }
   .sel td { background: color-mix(in srgb, var(--color-accent) 8%, var(--color-card)) !important; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
   .dot.ok { background: var(--color-green); }

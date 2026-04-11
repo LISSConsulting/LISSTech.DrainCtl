@@ -1,23 +1,13 @@
 <script>
   import TargetEditModal from './TargetEditModal.svelte';
   import TargetDeleteModal from './TargetDeleteModal.svelte';
+  import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
 
   let { targets = $bindable([]) } = $props();
 
   let editTarget = $state(null);   // null = closed, {} = new, or existing target
   let editIdx = $state(-1);        // -1 = new
   let deleteIdx = $state(-1);      // -1 = closed
-
-  const TRIGGER_LABELS = {
-    drain_on: 'Drain On', drain_off: 'Drain Off', grace_entered: 'Grace',
-    alert: 'Alert', healthy: 'Healthy', session_warning: 'Sessions',
-    cpu_warning: 'CPU Warn', cpu_critical: 'CPU Crit',
-    memory_warning: 'Mem Warn', memory_critical: 'Mem Crit',
-    input_delay_warning: 'Delay Warn', input_delay_critical: 'Delay Crit',
-  };
-  const REPEAT_MAP = { 0: 'Once', 15: '15m', 60: '1h', 240: '4h', 480: '8h' };
-
-  function repeatLabel(m) { return REPEAT_MAP[m] || m + 'm'; }
 
   function openEdit(idx) {
     editIdx = idx;

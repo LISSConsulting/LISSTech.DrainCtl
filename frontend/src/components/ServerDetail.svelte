@@ -3,22 +3,9 @@
   import Sparkline from './Sparkline.svelte';
   import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
   import { appState } from '../lib/state.svelte.js';
+  import { rel } from '../lib/utils.js';
 
   let { server } = $props();
-
-  function rel(iso) {
-    if (!iso) return 'never';
-    const d = new Date(iso);
-    if (isNaN(d)) return 'never';
-    const s = Math.floor((Date.now() - d) / 1000);
-    if (s < 0) return 'now';
-    if (s < 60) return s + 's ago';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + 'm ago';
-    const h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h / 24) + 'd ago';
-  }
 
   let perf = $derived(server.perf || {});
   let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_avail_mb / perf.mem_total_mb) * 100 : 0);
