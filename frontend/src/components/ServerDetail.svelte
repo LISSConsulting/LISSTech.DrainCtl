@@ -67,13 +67,13 @@
   let lsColor = $derived(lastSeenColor(server.last_seen));
 
   // State Since formatting
-  let stateSinceStr = $derived(() => {
+  let stateSinceStr = $derived.by(() => {
     const iso = server.state_changed_at;
     if (!iso) return '—';
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '—';
     return d.toISOString().replace('T', ' ').slice(0, 19);
-  })();
+  });
 
   let isOff = $derived(server.status === 'off');
 </script>
