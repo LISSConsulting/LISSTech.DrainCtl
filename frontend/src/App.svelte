@@ -48,6 +48,45 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Event helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build a rich structured event object for a per-server state transition.
+   * Embeds the server's current drain state, perf metrics, and session counts
+   * so EventLog can render a detailed snapshot inline.
+   * @param {string} time
+   * @param {import('./lib/api.js').Server} sv
+   * @param {string} text
+   * @param {'ok'|'grace'|'alert'|'off'} sev
+   */
+  function serverEvent(time, sv, text, sev) {
+    const memFreePct = sv.perf && sv.perf.mem_total_mb > 0
+      ? Math.round(sv.perf.mem_avail_mb / sv.perf.mem_total_mb * 100)
+      : null;
+    return {
+      time,
+      host: sv.host.split('.')[0],
+      text,
+      sev,
+      transition: true,
+      drain_state: sv.status,
+      drain_mode: sv.drain_mode ?? null,
+      state_duration_seconds: sv.state_duration_seconds ?? null,
+      changed_by: sv.changed_by ?? '',
+      sessions_active: sv.sessions_active ?? sv.sessions,
+      sessions_disconnected: sv.sessions_disconnected ?? 0,
+      sessions_max: sv.max_sessions,
+      cpu_pct: sv.perf?.cpu_pct ?? null,
+      mem_free_pct: memFreePct,
+      input_delay_p95_ms: sv.perf?.input_delay_p95_ms ?? null,
+      pages_sec: sv.perf?.pages_sec ?? null,
+      tcp_retrans_sec: sv.perf?.tcp_retrans_sec ?? null,
+      disk_queue: sv.perf?.disk_queue ?? null,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Refresh logic
   // ---------------------------------------------------------------------------
 
@@ -84,14 +123,14 @@
         for (const sv of (servers || [])) {
           const prev = prevStates.get(sv.host);
           if (prev === undefined) {
-            addEvent({ time: evtTime, host: sv.host.split('.')[0], text: `registered (${statusLabel(sv.status)})`, sev: 'ok', transition: true });
+            addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, 'ok'));
           } else if (prev !== sv.status) {
-            addEvent({ time: evtTime, host: sv.host.split('.')[0], text: `${statusLabel(prev)} → ${statusLabel(sv.status)}`, sev: statusSev(sv.status), transition: true });
+            addEvent(serverEvent(evtTime, sv, `${statusLabel(prev)} → ${statusLabel(sv.status)}`, statusSev(sv.status)));
           }
         }
         for (const host of prevStates.keys()) {
           if (!seenHosts.has(host)) {
-            addEvent({ time: evtTime, host: host.split('.')[0], text: 'removed from dashboard', sev: 'alert', transition: true });
+            addEvent({ time: evtTime, host: host.split('.')[0], text: 'removed from dashboard', sev: 'alert', transition: true, drain_state: 'off' });
           }
         }
       }
@@ -145,11 +184,31 @@
         }
       }
 
-      addEvent(`[${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}] Refreshed — ${s.length} server(s), ${sessions} session(s)`);
+      addEvent({
+        time: evtTime,
+        host: '',
+        text: `Refreshed — ${s.length} server(s), ${sessions} session(s)`,
+        sev: 'ok',
+        transition: false,
+        fleet_servers: s.length,
+        fleet_sessions: sessions,
+        fleet_cpu_pct: Math.round(cpu * 10) / 10,
+        fleet_mem_used_pct: Math.round(memPct * 10) / 10,
+        fleet_input_delay_p95: Math.round(inputDelay * 10) / 10,
+        fleet_pages_sec: Math.round(pagesPerSec * 10) / 10,
+        fleet_tcp_retrans_sec: Math.round(tcpRetrans * 10) / 10,
+        fleet_disk_queue: Math.round(diskQueue * 100) / 100,
+      });
     } catch (e) {
       appState.connected = false;
       console.error('refresh:', e);
-      addEvent(`[${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}] Refresh failed: ${e?.message ?? e}`);
+      addEvent({
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+        host: '',
+        text: `Refresh failed: ${e?.message ?? e}`,
+        sev: 'alert',
+        transition: false,
+      });
     } finally {
       refreshing = false;
     }

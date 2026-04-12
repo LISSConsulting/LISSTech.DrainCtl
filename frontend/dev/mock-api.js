@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.0';
+export const MOCK_VERSION = '3.1';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,7 +121,7 @@ const ADMINS = ['admin@contoso', 'svc-rds@contoso', 'jsmith@contoso', ''];
 // Stateful mock data — evolves over time
 // ---------------------------------------------------------------------------
 
-/** @type {Map<string, { status: string, sessions: number, changedBy: string, graceDeadline: string|null, registeredAt: string, perf: object|null }>} */
+/** @type {Map<string, { status: string, sessions: number, sessionsDisconnected: number, stateChangedAt: string, changedBy: string, graceDeadline: string|null, registeredAt: string, perf: object|null }>} */
 const state = new Map();
 
 /** Per-host history ring buffers. @type {Map<string, object[]>} */
@@ -167,6 +167,8 @@ function ensureState() {
     state.set(def.host, {
       status,
       sessions,
+      sessionsDisconnected: status === 'off' ? 0 : randInt(0, 8),
+      stateChangedAt: isoAgo(randInt(5, 90)),
       changedBy: status === 'ok' ? '' : pick(ADMINS),
       graceDeadline: status === 'grace' ? isoFuture(randInt(10, 45)) : null,
       registeredAt: isoAgo(randInt(60 * 24 * 7, 60 * 24 * 30)),
@@ -285,11 +287,13 @@ function startEvolution() {
         s.status = pick(transitions[prev] ?? ['ok']);
         s.changedBy = s.status === 'ok' ? '' : pick(ADMINS);
         s.graceDeadline = s.status === 'grace' ? isoFuture(randInt(10, 45)) : null;
+        s.stateChangedAt = isoNow();
         s.perf = s.status === 'off' ? null : genPerf(s.status);
-        if (s.status === 'off') s.sessions = 0;
+        if (s.status === 'off') { s.sessions = 0; s.sessionsDisconnected = 0; }
         else if (prev === 'off') {
           const def = SERVERS.find(d => d.host === host);
           s.sessions = randInt(1, (def?.maxSessions ?? 30) / 2);
+          s.sessionsDisconnected = randInt(0, 5);
         }
 
         // Record in history
@@ -321,12 +325,18 @@ function startEvolution() {
 function serverView(host) {
   const s = state.get(host);
   if (!s) return null;
+  const stateDurationSeconds = s.stateChangedAt
+    ? Math.round((Date.now() - new Date(s.stateChangedAt).getTime()) / 1000)
+    : null;
   return {
     host,
     status: s.status,
     drain_mode: s.status === 'ok' ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
     sessions: s.sessions,
+    sessions_active: s.sessions,
+    sessions_disconnected: s.sessionsDisconnected ?? 0,
     max_sessions: SERVERS.find(d => d.host === host)?.maxSessions ?? 0,
+    state_duration_seconds: stateDurationSeconds,
     version: s.status === 'off' ? '' : '26.100.9',
     registered_at: s.registeredAt,
     last_seen: s.status === 'off' ? isoAgo(10) : isoNow(),

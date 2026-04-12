@@ -18,7 +18,7 @@ const MAX_METRICS = 60;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.0';
+const MOCK_VERSION = '3.1';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
