@@ -23,11 +23,26 @@
   let serverHistory = $derived(
     appState.serverMetrics.get(server.host) ?? appState.metricsHistory
   );
-  let cpuHistory       = $derived(serverHistory.map(h => h.cpu ?? 0));
-  let memHistory       = $derived(serverHistory.map(h => h.mem ?? 0));
-  let delayHistory     = $derived(serverHistory.map(h => h.inputDelay ?? 0));
-  let diskQueueHistory = $derived(serverHistory.map(h => h.diskQueue ?? 0));
-  let tcpRetransHistory= $derived(serverHistory.map(h => h.tcpRetrans ?? 0));
+  let cpuHistory        = $derived(serverHistory.map(h => h.cpu ?? 0));
+  let memHistory        = $derived(serverHistory.map(h => h.mem ?? 0));
+  let sessionsHistory   = $derived(serverHistory.map(h => h.sessions ?? 0));
+  let delayHistory      = $derived(serverHistory.map(h => h.inputDelay ?? 0));
+  let diskQueueHistory  = $derived(serverHistory.map(h => h.diskQueue ?? 0));
+  let tcpRetransHistory = $derived(serverHistory.map(h => h.tcpRetrans ?? 0));
+
+  // Time label for sparklines: age of the oldest sample in the ring buffer.
+  let sparkTimeLabel = $derived.by(() => {
+    const oldest = serverHistory[0]?.time;
+    if (!oldest) return '';
+    const ms = Date.now() - oldest;
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return h + 'h' + (rem > 0 ? ' ' + rem + 'm' : '') + ' ago';
+  });
 
   // Config-aware thresholds
   let perfCfg    = $derived(appState.config?.performance ?? null);
@@ -99,19 +114,22 @@
         </div>
       </div>
 
-      <!-- Sparkline row -->
+      <!-- Sparkline row — order matches rings: Sessions, CPU, Memory -->
       <div class="d-spark-row">
+        <div class="d-spark-cell">
+          <Sparkline data={sessionsHistory} color="var(--color-amber)" height={28} />
+          <div class="d-spark-labels"><span>Sess%</span><span>{sessionsPct != null ? sessionsPct.toFixed(0) + '%' : '—'}</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
+        </div>
         <div class="d-spark-cell">
           <Sparkline data={cpuHistory} color="var(--color-accent)" height={28} />
           <div class="d-spark-labels"><span>CPU</span><span>{perf.cpu_pct?.toFixed(1) ?? '—'}%</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
         </div>
         <div class="d-spark-cell">
           <Sparkline data={memHistory} color="var(--color-green)" height={28} />
           <div class="d-spark-labels"><span>Mem</span><span>{memPct.toFixed(1)}%</span></div>
-        </div>
-        <div class="d-spark-cell">
-          <Sparkline data={cpuHistory} color="var(--color-amber)" height={28} />
-          <div class="d-spark-labels"><span>Sess%</span><span>{sessionsPct != null ? sessionsPct.toFixed(0) + '%' : '—'}</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
         </div>
       </div>
 
@@ -167,19 +185,22 @@
         </div>
       </div>
 
-      <!-- Sparkline row -->
+      <!-- Sparkline row — order matches rings: Disk Q, Input Delay, TCP Rx -->
       <div class="d-spark-row">
         <div class="d-spark-cell">
           <Sparkline data={diskQueueHistory} color="var(--color-amber)" height={28} />
           <div class="d-spark-labels"><span>Disk Q</span><span>{perf.disk_queue?.toFixed(2) ?? '—'}</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
         </div>
         <div class="d-spark-cell">
           <Sparkline data={delayHistory} color="var(--color-amber)" height={28} />
           <div class="d-spark-labels"><span>Inp Dly</span><span>{perf.input_delay_p95_ms?.toFixed(1) ?? '—'}ms</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
         </div>
         <div class="d-spark-cell">
           <Sparkline data={tcpRetransHistory} color="var(--color-amber)" height={28} />
           <div class="d-spark-labels"><span>TCP Rx</span><span>{perf.tcp_retrans_sec?.toFixed(1) ?? '—'}/s</span></div>
+          <div class="d-spark-time"><span>{sparkTimeLabel}</span><span>now</span></div>
         </div>
       </div>
 
@@ -288,6 +309,14 @@
     font-size: 9px;
     color: var(--color-subtle);
     margin-top: 2px;
+  }
+  .d-spark-time {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: var(--color-subtle);
+    opacity: 0.7;
+    margin-top: 1px;
   }
 
   /* Legend */
