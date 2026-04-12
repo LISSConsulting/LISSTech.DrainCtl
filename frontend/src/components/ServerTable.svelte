@@ -242,6 +242,7 @@
 
 <style>
   .grid { margin-bottom: 24px; }
+  .grid > .card { border-radius: 0; overflow: hidden; }
   .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .filter-pills { display: flex; gap: 6px; }
   .filter-pill { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; border: var(--spacing-bw) solid var(--color-border); background: var(--color-card); color: var(--color-muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s; }
