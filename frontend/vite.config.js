@@ -1,13 +1,11 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import tailwindcss from '@tailwindcss/vite';
 import mockApi from './dev/mock-api.js';
 
 const useMock = process.env.DRAINCTL_MOCK !== '0';
 
 export default defineConfig({
   plugins: [
-    tailwindcss(),
     svelte(),
     ...(useMock ? [mockApi()] : []),
   ],

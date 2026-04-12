@@ -9,14 +9,12 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^5.0.3",
-    "svelte": "^5.28.1",
-    "vite": "^6.3.2"
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "svelte": "^5.55.3",
+    "vite": "^8.0.8"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.4",
     "layercake": "^10.0.2",
-    "lucide-svelte": "^1.0.1",
-    "tailwindcss": "^4.1.4"
+    "lucide-svelte": "^1.0.1"
   }
 }
