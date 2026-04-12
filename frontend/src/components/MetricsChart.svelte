@@ -118,7 +118,8 @@
   <div class="chart-card">
 
     <!-- ── LOAD: CPU, Memory, Sessions ── -->
-    <div class="sub-label">LOAD</div>
+    <div class="sub-label">LOAD <span class="sub-label-note">· Average across fleet</span></div>
+    <p class="chart-desc">Average CPU and memory utilization across all active servers. Sessions shows total connected users. Sustained high values indicate the farm needs more capacity or drain rotation.</p>
     <div class="chart-panel">
       <div class="chart-toggles">
         {#each LOAD_SERIES as s}
@@ -171,6 +172,7 @@
 
     <!-- ── HEALTH INDICATORS: Input Delay, Pages/sec, Retrans. Seg, Disk Queue ── -->
     <div class="sub-label">HEALTH INDICATORS <span class="sub-label-note">· P95 across fleet</span></div>
+    <p class="chart-desc">95th percentile health metrics across the fleet — showing the worst-performing servers. Spikes indicate individual servers experiencing issues that may require drain intervention.</p>
     <div class="chart-panel">
       <div class="chart-toggles">
         {#each HEALTH_SERIES as s}
@@ -254,6 +256,16 @@
     font-weight: 400;
     letter-spacing: 0.08em;
     opacity: 0.7;
+  }
+
+  .chart-desc {
+    font-family: 'Work Sans', sans-serif;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+    opacity: 0.7;
+    margin: 0 0 12px 0;
+    max-width: 640px;
   }
 
   /* Thin horizontal separator between the two chart sections */
