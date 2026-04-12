@@ -4,10 +4,64 @@
  * Import `appState` anywhere in the component tree without prop drilling.
  * Mutation helpers `addEvent`, `appendMetricsSample`, and
  * `appendServerMetricsSample` keep array caps enforced.
+ *
+ * metricsHistory, serverMetrics, and events are persisted to localStorage so
+ * they survive page reloads. Writes are debounced at 300 ms to avoid thrashing.
  */
 
 const MAX_EVENTS = 200;
 const MAX_METRICS = 60;
+
+// ---------------------------------------------------------------------------
+// localStorage persistence helpers
+// ---------------------------------------------------------------------------
+
+const LS_METRICS        = 'drainctl:metrics';
+const LS_SERVER_METRICS = 'drainctl:server-metrics';
+const LS_EVENTS         = 'drainctl:events';
+
+/** Read and JSON-parse a localStorage key; return `fallback` on any error. */
+function lsGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Load serverMetrics from localStorage as a Map (stored as array-of-entries). */
+function lsGetServerMetrics() {
+  try {
+    const raw = localStorage.getItem(LS_SERVER_METRICS);
+    if (!raw) return new Map();
+    return new Map(JSON.parse(raw));
+  } catch {
+    return new Map();
+  }
+}
+
+/** Return a debounced function that delays invoking `fn` until `ms` ms after the last call. */
+function debounce(fn, ms) {
+  let timer;
+  return (value) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(value), ms);
+  };
+}
+
+const persistMetrics = debounce(
+  (data) => { try { localStorage.setItem(LS_METRICS, JSON.stringify(data)); } catch {} },
+  300,
+);
+const persistServerMetrics = debounce(
+  (map)  => { try { localStorage.setItem(LS_SERVER_METRICS, JSON.stringify([...map.entries()])); } catch {} },
+  300,
+);
+const persistEvents = debounce(
+  (data) => { try { localStorage.setItem(LS_EVENTS, JSON.stringify(data)); } catch {} },
+  300,
+);
 
 /**
  * @typedef {import('./api.js').Server} Server
@@ -55,23 +109,33 @@ let health = $state(null);
 let config = $state(null);
 
 /** @type {(string|Record<string,unknown>)[]} */
-let events = $state([]);
+let events = $state(/** @type {(string|Record<string,unknown>)[]} */ (lsGet(LS_EVENTS, [])));
 
 /** @type {MetricsSample[]} */
-let metricsHistory = $state([]);
+let metricsHistory = $state(/** @type {MetricsSample[]} */ (lsGet(LS_METRICS, [])));
 
 /**
  * Per-server metric ring buffers (capped at MAX_METRICS each).
  * Key = hostname, value = MetricsSample[].
  * @type {Map<string, MetricsSample[]>}
  */
-let serverMetrics = $state(new Map());
+let serverMetrics = $state(lsGetServerMetrics());
 
 // UI state
 let connected = $state(false);
 
 /** @type {Date|null} */
 let lastUpdated = $state(null);
+
+// ---------------------------------------------------------------------------
+// localStorage persistence effects (module-level, outside any component)
+// ---------------------------------------------------------------------------
+
+$effect.root(() => {
+  $effect(() => { persistMetrics(metricsHistory); });
+  $effect(() => { persistServerMetrics(serverMetrics); });
+  $effect(() => { persistEvents(events); });
+});
 
 // ---------------------------------------------------------------------------
 // Derived state
