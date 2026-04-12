@@ -139,11 +139,18 @@
       for (const sv of (servers || [])) prevStates.set(sv.host, sv.status);
       hasRefreshed = true;
 
-      // Compute average metrics across all servers that have perf data.
-      // Divide by the count of servers with perf data, not total server count —
-      // servers with perf=null would otherwise pull averages toward 0.
+      // Compute fleet-wide P95 for health metrics — reveals outlier servers that
+      // averages would smooth out. CPU and memory stay as averages (capacity planning).
       const s = appState.servers;
       const perfSvs = s.filter(sv => sv.perf);
+
+      /** Return the P95 value from an array of numbers (sorted, 95th-percentile index). */
+      const p95 = (vals) => {
+        if (vals.length === 0) return 0;
+        const sorted = [...vals].sort((a, b) => a - b);
+        return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
+      };
+
       const cpu = perfSvs.length
         ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length
         : 0;
@@ -151,18 +158,10 @@
       const memPct = memSvs.length
         ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) / memSvs.length
         : 0;
-      const inputDelay = perfSvs.length
-        ? perfSvs.reduce((a, sv) => a + (sv.perf.input_delay_p95_ms || 0), 0) / perfSvs.length
-        : 0;
-      const pagesPerSec = perfSvs.length
-        ? perfSvs.reduce((a, sv) => a + (sv.perf.pages_sec || 0), 0) / perfSvs.length
-        : 0;
-      const tcpRetrans = perfSvs.length
-        ? perfSvs.reduce((a, sv) => a + (sv.perf.tcp_retrans_sec || 0), 0) / perfSvs.length
-        : 0;
-      const diskQueue = perfSvs.length
-        ? perfSvs.reduce((a, sv) => a + (sv.perf.disk_queue || 0), 0) / perfSvs.length
-        : 0;
+      const inputDelay  = p95(perfSvs.map(sv => sv.perf.input_delay_p95_ms || 0));
+      const pagesPerSec = p95(perfSvs.map(sv => sv.perf.pages_sec || 0));
+      const tcpRetrans  = p95(perfSvs.map(sv => sv.perf.tcp_retrans_sec || 0));
+      const diskQueue   = p95(perfSvs.map(sv => sv.perf.disk_queue || 0));
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
       const ts = Date.now();
@@ -197,9 +196,9 @@
         fleet_cpu_pct: Math.round(cpu * 10) / 10,
         fleet_mem_used_pct: Math.round(memPct * 10) / 10,
         fleet_input_delay_p95: Math.round(inputDelay * 10) / 10,
-        fleet_pages_sec: Math.round(pagesPerSec * 10) / 10,
-        fleet_tcp_retrans_sec: Math.round(tcpRetrans * 10) / 10,
-        fleet_disk_queue: Math.round(diskQueue * 100) / 100,
+        fleet_pages_sec_p95: Math.round(pagesPerSec * 10) / 10,
+        fleet_tcp_retrans_p95: Math.round(tcpRetrans * 10) / 10,
+        fleet_disk_queue_p95: Math.round(diskQueue * 100) / 100,
       });
     } catch (e) {
       appState.connected = false;

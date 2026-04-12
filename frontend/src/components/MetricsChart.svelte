@@ -25,7 +25,7 @@
     { key: 'inputDelay',  label: 'Input Delay',    color: 'var(--color-amber)',  axis: 'left',  show: () => showInputDelay,  toggle: () => { showInputDelay  = !showInputDelay;  } },
     { key: 'pagesPerSec', label: 'Pages/sec',      color: 'var(--color-accent)', axis: 'left',  show: () => showPagesPerSec, toggle: () => { showPagesPerSec = !showPagesPerSec; } },
     { key: 'tcpRetrans',  label: 'Retrans. Seg',   color: 'var(--color-red)',    axis: 'right', show: () => showTcpRetrans,  toggle: () => { showTcpRetrans  = !showTcpRetrans;  } },
-    { key: 'diskQueue',   label: 'Avg Disk Queue', color: 'var(--color-green)',  axis: 'right', show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
+    { key: 'diskQueue',   label: 'Disk Queue',     color: 'var(--color-green)',  axis: 'right', show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
   ];
 
   let history    = $derived(appState.metricsHistory);
@@ -170,7 +170,7 @@
     <div class="chart-separator"></div>
 
     <!-- ── HEALTH INDICATORS: Input Delay, Pages/sec, Retrans. Seg, Disk Queue ── -->
-    <div class="sub-label">HEALTH INDICATORS</div>
+    <div class="sub-label">HEALTH INDICATORS <span class="sub-label-note">· P95 across fleet</span></div>
     <div class="chart-panel">
       <div class="chart-toggles">
         {#each HEALTH_SERIES as s}
@@ -248,6 +248,12 @@
     color: var(--color-muted);
     margin-bottom: 10px;
     opacity: 0.65;
+  }
+
+  .sub-label-note {
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
   }
 
   /* Thin horizontal separator between the two chart sections */

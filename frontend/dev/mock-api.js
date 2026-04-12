@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.1';
+export const MOCK_VERSION = '3.2';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,6 +228,23 @@ function jitterPerf(perf) {
   };
 }
 
+/**
+ * Return a spiked version of perf — high input delay, TCP retrans, and disk queue.
+ * Used to simulate a troubled server so P95 charts show meaningful spikes.
+ */
+function spikePerf(perf) {
+  if (!perf) return null;
+  return {
+    ...perf,
+    input_delay_p95_ms: Math.round(rand(200, 450) * 10) / 10,
+    input_delay_p50_ms: Math.round(rand(80,  200) * 10) / 10,
+    input_delay_max_ms: Math.round(rand(500, 900) * 10) / 10,
+    tcp_retrans_sec:    Math.round(rand(35,  90)  * 10) / 10,
+    disk_queue:         Math.round(rand(6,   12)  * 100) / 100,
+    pages_sec:          Math.round(rand(250, 500) * 10) / 10,
+  };
+}
+
 /** Seed a history ring buffer with plausible past entries. */
 function seedHistory(host, currentStatus) {
   const entries = [];
@@ -265,9 +282,23 @@ function startEvolution() {
   if (evolveTimer) return;
   evolveTimer = setInterval(() => {
     ensureState();
+    const now = Date.now();
     for (const [host, s] of state) {
-      // Jitter perf
-      s.perf = jitterPerf(s.perf);
+      // Perf: spike on ~5% of ticks per server to make P95 charts interesting.
+      // A spike lasts 1–3 ticks (10–30 s) so the P95 line jumps visibly.
+      if (s.status !== 'off' && s.perf) {
+        s.spikeUntil = s.spikeUntil ?? 0;
+        if (now < s.spikeUntil) {
+          s.perf = spikePerf(s.perf);
+        } else if (Math.random() < 0.05) {
+          s.spikeUntil = now + randInt(1, 3) * 10_000;
+          s.perf = spikePerf(s.perf);
+        } else {
+          s.perf = jitterPerf(s.perf);
+        }
+      } else {
+        s.perf = jitterPerf(s.perf);
+      }
 
       // Fluctuate sessions
       if (s.status !== 'off') {

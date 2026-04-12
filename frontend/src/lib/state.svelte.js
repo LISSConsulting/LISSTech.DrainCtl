@@ -18,7 +18,7 @@ const MAX_METRICS = 60;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.1';
+const MOCK_VERSION = '3.2';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -132,11 +132,11 @@ const persistLastUpdated = debounce(
  * @property {number} time         - Unix timestamp (ms)
  * @property {number} cpu          - Average CPU % across all servers with perf data
  * @property {number} mem          - Average memory used % across all servers with perf data
- * @property {number} inputDelay   - Average input delay p95 (ms)
+ * @property {number} inputDelay   - P95 input delay across fleet (ms)
  * @property {number} sessions     - Total sessions across all servers
- * @property {number} pagesPerSec  - Average pages/sec (memory pressure indicator)
- * @property {number} tcpRetrans   - Average TCP retransmits/sec
- * @property {number} diskQueue    - Average disk queue length
+ * @property {number} pagesPerSec  - P95 pages/sec across fleet (memory pressure indicator)
+ * @property {number} tcpRetrans   - P95 TCP retransmits/sec across fleet
+ * @property {number} diskQueue    - P95 disk queue length across fleet
  */
 
 /**
@@ -253,28 +253,31 @@ const avgMem = $derived.by(() => {
   return usedPcts.reduce((sum, v) => sum + v, 0) / usedPcts.length;
 });
 
-const avgInputDelay = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null);
-  if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + (p.input_delay_p95_ms || 0), 0) / perf.length;
+/** Return the P95 value from a numeric array. */
+function deriveP95(vals) {
+  if (vals.length === 0) return 0;
+  const sorted = [...vals].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
+}
+
+const p95InputDelay = $derived.by(() => {
+  const vals = servers.map(s => s.perf?.input_delay_p95_ms ?? null).filter(v => v != null);
+  return deriveP95(/** @type {number[]} */ (vals));
 });
 
-const avgPagesPerSec = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null);
-  if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + (p.pages_sec || 0), 0) / perf.length;
+const p95PagesPerSec = $derived.by(() => {
+  const vals = servers.map(s => s.perf?.pages_sec ?? null).filter(v => v != null);
+  return deriveP95(/** @type {number[]} */ (vals));
 });
 
-const avgTcpRetrans = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null);
-  if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + (p.tcp_retrans_sec || 0), 0) / perf.length;
+const p95TcpRetrans = $derived.by(() => {
+  const vals = servers.map(s => s.perf?.tcp_retrans_sec ?? null).filter(v => v != null);
+  return deriveP95(/** @type {number[]} */ (vals));
 });
 
-const avgDiskQueue = $derived.by(() => {
-  const perf = servers.map(s => s.perf).filter(p => p != null);
-  if (perf.length === 0) return 0;
-  return perf.reduce((sum, p) => sum + (p.disk_queue || 0), 0) / perf.length;
+const p95DiskQueue = $derived.by(() => {
+  const vals = servers.map(s => s.perf?.disk_queue ?? null).filter(v => v != null);
+  return deriveP95(/** @type {number[]} */ (vals));
 });
 
 const totalSessions = $derived.by(() => counters.sessions);
@@ -323,10 +326,10 @@ export const appState = {
   get stateBarSegments()  { return stateBarSegments; },
   get avgCpu()            { return avgCpu; },
   get avgMem()            { return avgMem; },
-  get avgInputDelay()     { return avgInputDelay; },
-  get avgPagesPerSec()    { return avgPagesPerSec; },
-  get avgTcpRetrans()     { return avgTcpRetrans; },
-  get avgDiskQueue()      { return avgDiskQueue; },
+  get p95InputDelay()     { return p95InputDelay; },
+  get p95PagesPerSec()    { return p95PagesPerSec; },
+  get p95TcpRetrans()     { return p95TcpRetrans; },
+  get p95DiskQueue()      { return p95DiskQueue; },
   get totalSessions()     { return totalSessions; },
 };
 

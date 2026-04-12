@@ -203,8 +203,9 @@
     stroke="var(--color-border)" stroke-width="1" opacity="0.3"
   />
 
-  <!-- Time label -->
+  <!-- Time label + P95 badge -->
   <text x={tx + TIP_PAD} y={ty + 13} class="tip-time">{timeStr}</text>
+  <text x={tx + TIP_W - TIP_PAD} y={ty + 13} class="tip-time tip-p95" text-anchor="end">P95 fleet</text>
 
   <!-- Series value rows -->
   {#each vis as s, si}
@@ -258,6 +259,12 @@
     text-transform: uppercase;
     fill: var(--color-muted);
     pointer-events: none;
+  }
+
+  .tip-p95 {
+    font-weight: 400;
+    font-size: 9px;
+    opacity: 0.6;
   }
   .tip-val {
     font-family: 'JetBrains Mono', monospace;
