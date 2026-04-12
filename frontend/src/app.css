@@ -29,7 +29,7 @@
     --color-fg: #f5e8e8;
     --color-card: #1f1414;
     --color-border: #7a5a5a;
-    --color-shadow: #f5e8e8;
+    --color-shadow: #000;
     --color-muted: #c4a8a8;
     --color-subtle: #6b5050;
     --color-surface: #2e1e1e;
@@ -43,7 +43,7 @@ html[data-theme="dark"] {
   --color-fg: #f5e8e8;
   --color-card: #1f1414;
   --color-border: #7a5a5a;
-  --color-shadow: #f5e8e8;
+  --color-shadow: #000;
   --color-muted: #c4a8a8;
   --color-subtle: #6b5050;
   --color-surface: #2e1e1e;
