@@ -59,8 +59,8 @@
       width={size}
       height={size}
       style="transform:rotate(-90deg)"
-      role="img"
-      aria-label="{label ?? 'Gauge'}: {centerLabel ?? displayValue}"
+      aria-hidden="true"
+      focusable="false"
     >
       <circle class="ring-bg" cx={c} cy={c} r={r} stroke-width="5" />
       <circle
@@ -86,8 +86,9 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    border: none;
-    outline: none;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
   }
 
   .ring {
@@ -95,9 +96,18 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: none;
-    outline: none;
-    background: none;
+    border: none !important;
+    outline: none !important;
+    background: none !important;
+    box-shadow: none !important;
+  }
+
+  .ring svg {
+    display: block;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    overflow: visible;
   }
 
   .ring-bg {

@@ -298,7 +298,7 @@
 
   /* Ring row */
   .d-ring-row  { display: flex; gap: 8px; margin-bottom: 8px; justify-content: space-around; }
-  .d-ring-cell { flex: 1; display: flex; justify-content: center; border: none; outline: none; }
+  .d-ring-cell { flex: 1; display: flex; justify-content: center; border: none !important; outline: none !important; box-shadow: none !important; }
 
   /* Sparkline row */
   .d-spark-row  { display: flex; gap: 8px; margin-bottom: 6px; }
