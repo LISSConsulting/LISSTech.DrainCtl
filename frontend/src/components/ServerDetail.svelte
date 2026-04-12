@@ -255,7 +255,7 @@
   .d-tile {
     background: var(--color-card);
     border: 2.5px solid var(--color-border);
-    border-radius: 0;
+    border-radius: var(--radius-default);
     box-shadow: 4px 4px 0 var(--color-shadow);
     padding: 10px 12px;
     display: flex;
@@ -396,7 +396,7 @@
     font-weight: 700;
     padding: 4px 8px;
     border: 1.5px solid var(--color-border);
-    border-radius: 0;
+    border-radius: var(--radius-default);
     cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.05em;
