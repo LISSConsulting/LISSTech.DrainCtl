@@ -186,11 +186,11 @@
   {/each}
 
   <!-- Tooltip shadow (neobrutalist offset) -->
-  <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} fill="var(--color-shadow)" />
+  <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} rx="6" fill="var(--color-shadow)" />
 
   <!-- Tooltip card -->
   <rect
-    x={tx} y={ty} width={TIP_W} height={th}
+    x={tx} y={ty} width={TIP_W} height={th} rx="6"
     fill="var(--color-card)"
     stroke="var(--color-border)"
     stroke-width="3"
@@ -227,7 +227,7 @@
 <!-- ── Transparent overlay — captures mouse events, rendered last (topmost) ── -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <rect
-  x={0} y={0} width={$width} height={$height}
+  x={0} y={0} width={Math.max(0, $width)} height={Math.max(0, $height)}
   fill="transparent"
   style="cursor: crosshair"
   onmousemove={onMouseMove}

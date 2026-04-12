@@ -12,7 +12,6 @@
   let sortCol = $state('status');
   let sortDir = $state(1); // 1 = asc, -1 = desc
   let search = $state(localStorage.getItem('drainctl-search') || '');
-  let statusFilter = $state('all');
   let removeError   = $state('');
   /** @type {Set<string>} */
   let removingHosts = $state(new Set());
@@ -70,7 +69,7 @@
   let sorted = $derived.by(() => {
     let s = appState.servers.filter(sv => {
       const matchText = !search || sv.host.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === 'all' || sv.status === statusFilter;
+      const matchStatus = appState.serverFilter === 'all' || sv.status === appState.serverFilter;
       return matchText && matchStatus;
     });
     return s.sort((a, b) => {
@@ -172,7 +171,7 @@
     <div class="filter-pills">
       {#each ['all', 'ok', 'grace', 'alert', 'off'] as f}
         {@const count = f === 'all' ? appState.servers.length : statusCounts[f]}
-        <button class="filter-pill {f === 'all' ? '' : f} {statusFilter === f ? 'active' : ''}" onclick={() => statusFilter = f}>
+        <button class="filter-pill {f === 'all' ? '' : f} {appState.serverFilter === f ? 'active' : ''}" onclick={() => appState.serverFilter = f}>
           {f === 'all' ? 'All' : statusLabel(f)}{count ? ' (' + count + ')' : ''}
         </button>
       {/each}
@@ -202,7 +201,7 @@
             <th>Since</th>
             <th onclick={() => sort('sessions')} class="sortable" aria-sort={sortCol === 'sessions' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th onclick={() => sort('cpu')} class="sortable" aria-sort={sortCol === 'cpu' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
-            <th onclick={() => sort('mem')} class="sortable" aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Mem Free {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
+            <th onclick={() => sort('mem')} class="sortable" aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>MEM {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th onclick={() => sort('delay')} class="sortable" aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th onclick={() => sort('last_seen')} class="sortable" aria-sort={sortCol === 'last_seen' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}>Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th>
             <th></th>
@@ -248,7 +247,7 @@
               </td>
               <td class="mono spark-cell" style={memStyle}>
                 <CellSparkline data={srvHistory?.map(s => s.mem) ?? []} color={sparkColor(memColor)} />
-                {srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}
+                {memPct != null ? memPct.toFixed(0) + '%' : '—'}
               </td>
               <td class="mono spark-cell" style={delayStyle}>
                 <CellSparkline data={srvHistory?.map(s => s.inputDelay) ?? []} color={sparkColor(delayColor)} />

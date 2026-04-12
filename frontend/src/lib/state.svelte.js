@@ -18,7 +18,7 @@ const MAX_METRICS = 60;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.2';
+const MOCK_VERSION = '3.3';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -137,6 +137,10 @@ const persistLastUpdated = debounce(
  * @property {number} pagesPerSec  - P95 pages/sec across fleet (memory pressure indicator)
  * @property {number} tcpRetrans   - P95 TCP retransmits/sec across fleet
  * @property {number} diskQueue    - P95 disk queue length across fleet
+ * @property {number} [p50InputDelay]  - P50 (median) input delay across fleet (ms)
+ * @property {number} [p50PagesPerSec] - P50 pages/sec across fleet
+ * @property {number} [p50TcpRetrans]  - P50 TCP retransmits/sec across fleet
+ * @property {number} [p50DiskQueue]   - P50 disk queue length across fleet
  */
 
 /**
@@ -185,8 +189,29 @@ let serverMetrics = $state(lsGetServerMetrics());
 // UI state
 let connected = $state(false);
 
+/** @type {'overview'|'servers'|'events'} */
+let currentView = $state('overview');
+
+/** @type {'all'|'ok'|'grace'|'alert'|'off'} */
+let serverFilter = $state('all');
+
 /** @type {Date|null} */
 let lastUpdated = $state(lsGetDate(LS_LAST_UPDATED));
+
+/**
+ * Shared hovered data index for synchronized crosshairs across all charts.
+ * Set by whichever chart the user is currently hovering; cleared on mouseleave.
+ * @type {number|null}
+ */
+let hoveredChartIndex = $state(/** @type {number|null} */ (null));
+
+/**
+ * Pinned data index — click a data point to freeze all charts at that index.
+ * Click again (or click elsewhere) to unpin. When pinned, hoveredChartIndex
+ * is ignored and this value drives crosshairs, tooltips, and current values.
+ * @type {number|null}
+ */
+let pinnedChartIndex = $state(/** @type {number|null} */ (null));
 
 // ---------------------------------------------------------------------------
 // localStorage persistence effects (module-level, outside any component)
@@ -318,8 +343,20 @@ export const appState = {
   get connected()      { return connected; },
   set connected(v)     { connected = v; },
 
+  get currentView()    { return currentView; },
+  set currentView(v)   { currentView = v; },
+
+  get serverFilter()   { return serverFilter; },
+  set serverFilter(v)  { serverFilter = v; },
+
   get lastUpdated()    { return lastUpdated; },
   set lastUpdated(v)   { lastUpdated = v; },
+
+  get hoveredChartIndex()  { return hoveredChartIndex; },
+  set hoveredChartIndex(v) { hoveredChartIndex = v; },
+
+  get pinnedChartIndex()   { return pinnedChartIndex; },
+  set pinnedChartIndex(v)  { pinnedChartIndex = v; },
 
   // Derived — read-only
   get counters()          { return counters; },

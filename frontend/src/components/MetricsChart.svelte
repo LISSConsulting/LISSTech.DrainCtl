@@ -3,7 +3,8 @@
   import { appState } from '../lib/state.svelte.js';
   import { resolveThresholds } from '../lib/thresholds.js';
   import DualAxisChart from './chart/DualAxisChart.svelte';
-  import MiniHealthChart from './chart/MiniHealthChart.svelte';
+  import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
+  import { Gauge, Timer, FileText, Network, HardDrive, Cpu, MemoryStick, Users } from 'lucide-svelte';
 
   // ── Upper chart (LOAD): CPU %, Memory %, Sessions ────────────────────────
   let showCpu      = $state(true);
@@ -16,55 +17,59 @@
     { key: 'sessions', label: 'Sessions', color: 'var(--color-red)',    axis: 'right', lineOnly: true,  show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
   ];
 
-  // ── Lower section (HEALTH INDICATORS): 4 individual mini-charts ──────────
-  // Each chart has its own Y-axis scale, threshold zones, and current P95 value.
-  // Thresholds: warn = start of yellow zone, crit = start of red zone.
+  // ── Health Indicators: 4 full-size charts ────────────────────────────────
+  // inputDelay thresholds come from the alert sensitivity config.
+  // Pages/sec, TCP Retrans, Disk Queue use sensible hardcoded defaults.
 
-  /** @type {Array<{key:string,label:string,unit:string,yMax:number,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string}>} */
-  const MINI_CHARTS = [
+  /** @type {Array<{key:string,p50Key:string,label:string,unit:string,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string,icon:import('svelte').Component}>} */
+  const HIC_CHARTS = [
     {
       key:        'inputDelay',
+      p50Key:     'p50InputDelay',
       label:      'Input Delay',
       unit:       'ms',
-      yMax:       500,
-      thresholds: { warn: 100, crit: 250 },
+      thresholds: { warn: 50,  crit: 100  },
       color:      'var(--color-amber)',
       fmt:        v => `${Math.round(v)}ms`,
+      icon:       Timer,
     },
     {
       key:        'pagesPerSec',
+      p50Key:     'p50PagesPerSec',
       label:      'Pages/sec',
       unit:       '/sec',
-      yMax:       200,
-      thresholds: { warn: 80, crit: 150 },
+      thresholds: { warn: 80,  crit: 150  },
       color:      'var(--color-accent)',
       fmt:        v => `${Math.round(v)}/s`,
+      icon:       FileText,
     },
     {
       key:        'tcpRetrans',
+      p50Key:     'p50TcpRetrans',
       label:      'TCP Retrans',
       unit:       '/sec',
-      yMax:       50,
-      thresholds: { warn: 10, crit: 25 },
+      thresholds: { warn: 10,  crit: 25   },
       color:      'var(--color-red)',
       fmt:        v => `${v.toFixed(1)}/s`,
+      icon:       Network,
     },
     {
       key:        'diskQueue',
+      p50Key:     'p50DiskQueue',
       label:      'Avg Disk Queue',
       unit:       '',
-      yMax:       10,
-      thresholds: { warn: 2, crit: 5 },
+      thresholds: { warn: 2,   crit: 5    },
       color:      'var(--color-green)',
       fmt:        v => v.toFixed(2),
+      icon:       HardDrive,
     },
   ];
 
   // ── Config-derived thresholds ─────────────────────────────────────────────
-  // inputDelay thresholds come from the alert sensitivity config.
-  // Pages/sec, TCP Retrans, Disk Queue have no config knobs yet — use DEFAULTS.
   let perfCfg          = $derived(appState.config?.performance ?? null);
   let inputDelayThresh = $derived(resolveThresholds('inputDelay', perfCfg));
+  let cpuThresh        = $derived(resolveThresholds('cpu', perfCfg));
+  let memThresh        = $derived(resolveThresholds('mem', perfCfg));
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
@@ -102,16 +107,41 @@
     sessions: showSessions,
   });
 
+  // ── LOAD current values — show pinned/hovered point, or latest
+  let activeIdx = $derived(appState.pinnedChartIndex ?? appState.hoveredChartIndex);
+  let displayPoint = $derived(
+    activeIdx !== null
+      ? history[activeIdx] ?? history[history.length - 1]
+      : history[history.length - 1]
+  );
+  let loadCurrents = $derived([
+    { label: 'CPU',  value: displayPoint ? `${(+displayPoint.cpu).toFixed(1)}%`  : '—', color: 'var(--color-accent)', icon: Cpu,         show: () => showCpu },
+    { label: 'MEM',  value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%`  : '—', color: 'var(--color-green)',  icon: MemoryStick, show: () => showMem },
+    { label: 'SESS', value: displayPoint ? `${displayPoint.sessions ?? 0}`       : '—', color: 'var(--color-red)',    icon: Users,       show: () => showSessions },
+  ]);
+
+  let loadContainerW = $state(0);
+
+  // ── Mobile detection for HIC axis placement ────────────────────────────
+  let isMobile = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    isMobile = mq.matches;
+    const handler = (/** @type {MediaQueryListEvent} */ e) => { isMobile = e.matches; };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  });
+
   const Y_DOMAIN = [0, 100];
   let lcData = $derived(history.map((_, i) => ({ x: i, y: 50 })));
 </script>
 
+<!-- ── LOAD chart card ── -->
 <div class="chart-wrap">
   <div class="section-label">Performance Metrics</div>
   <div class="chart-card">
 
-    <!-- ── LOAD: CPU, Memory, Sessions ── -->
-    <div class="sub-label">LOAD <span class="sub-label-note">· Average across fleet</span></div>
+    <div class="sub-label"><Gauge size={12} strokeWidth={2.4} /> LOAD <span class="sub-label-note">· Average across fleet</span></div>
     <p class="chart-desc">Average CPU and memory utilization across all active servers. Sessions shows total connected users. Sustained high values indicate the farm needs more capacity or drain rotation.</p>
     <div class="chart-panel">
       <div class="chart-toggles">
@@ -134,25 +164,46 @@
         {/each}
       </div>
 
-      <div class="chart-body upper-chart">
+      <div class="load-chart-header">
+        <div></div>
+        <div class="load-currents" style="padding-right: {hasRight ? 64 : 16}px">
+          {#each loadCurrents as lc}
+            {#if lc.show()}
+              {@const Icon = lc.icon}
+              <span class="load-val">
+                <Icon size={11} strokeWidth={2.2} />
+                <span class="load-val-label">{lc.label}</span>
+                <span class="load-val-num" style="color: {lc.color}">{lc.value}</span>
+              </span>
+            {/if}
+          {/each}
+        </div>
+      </div>
+      <div class="chart-body upper-chart" bind:clientWidth={loadContainerW}>
         {#if history.length < 2}
           <div class="chart-placeholder">Collecting data… {history.length}/2</div>
-        {:else}
+        {:else if loadContainerW > 0}
           <LayerCake
             data={lcData}
             x="x"
             y="y"
             yDomain={Y_DOMAIN}
-            padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 8, left: 48 }}
+            padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 24, left: 48 }}
           >
             <Svg>
               <DualAxisChart
                 normData={loadNormData}
                 SERIES={LOAD_SERIES}
                 {rightTicks}
+                thresholds={[
+                  { pct: cpuThresh.warn,  opacity: 0.35, label: 'CPU WARN', show: () => showCpu },
+                  { pct: cpuThresh.crit,  opacity: 0.5,  label: 'CPU CRIT', show: () => showCpu },
+                  { pct: memThresh.warn,  opacity: 0.35, label: 'MEM WARN', show: () => showMem },
+                  { pct: memThresh.crit,  opacity: 0.5,  label: 'MEM CRIT', show: () => showMem },
+                ]}
                 {history}
                 visible={loadVisible}
-                showXAxis={false}
+                showXAxis={true}
               />
             </Svg>
           </LayerCake>
@@ -160,24 +211,29 @@
       </div>
     </div>
 
-    <!-- ── Separator ── -->
-    <div class="chart-separator"></div>
+  </div>
+</div>
 
-    <!-- ── HEALTH INDICATORS: 4 individual mini-charts ── -->
-    <div class="sub-label">HEALTH INDICATORS <span class="sub-label-note">· P95 across fleet</span></div>
-    <p class="chart-desc">95th percentile health metrics across the fleet — showing the worst-performing servers. Spikes indicate individual servers experiencing issues that may require drain intervention.</p>
+<!-- ── Health Indicators card ── -->
+<div class="chart-wrap">
+  <div class="chart-card hic-section">
 
-    <div class="mini-charts-row">
-      {#each MINI_CHARTS as mc}
-        <MiniHealthChart
+    <div class="sub-label"><Gauge size={12} strokeWidth={2.4} /> HEALTH INDICATORS <span class="sub-label-note">· P95 across fleet</span></div>
+    <p class="chart-desc">95th percentile health metrics across the fleet — highlighting the worst-performing servers. Spikes indicate individual servers experiencing issues that may need drain intervention. Hover any chart to see the same moment across all four.</p>
+
+    <div class="hic-grid">
+      {#each HIC_CHARTS as mc, i}
+        <HealthIndicatorChart
           {history}
           valueKey={mc.key}
+          p50Key={mc.p50Key}
           label={mc.label}
           unit={mc.unit}
-          yMax={mc.yMax}
           thresholds={mc.key === 'inputDelay' ? inputDelayThresh : mc.thresholds}
           color={mc.color}
           fmt={mc.fmt}
+          icon={mc.icon}
+          axisRight={i % 2 === 1 && !isMobile}
         />
       {/each}
     </div>
@@ -206,6 +262,43 @@
     padding: 16px 18px;
   }
 
+  /* ── LOAD current values — row above chart, right-aligned ── */
+  .load-chart-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .load-currents {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .load-val {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-fg);
+  }
+
+  .load-val-label {
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .load-val-num {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+
   /* Small sub-heading above each chart section */
   .sub-label {
     font-family: 'JetBrains Mono', monospace;
@@ -216,6 +309,9 @@
     color: var(--color-muted);
     margin-bottom: 10px;
     opacity: 0.65;
+    display: flex;
+    align-items: center;
+    gap: 5px;
   }
 
   .sub-label-note {
@@ -230,16 +326,8 @@
     line-height: 1.5;
     color: var(--color-muted);
     opacity: 0.7;
-    margin: 0 0 12px 0;
-    max-width: 640px;
-  }
-
-  /* Thin horizontal separator between the two chart sections */
-  .chart-separator {
-    height: 1px;
-    background: var(--color-border);
-    opacity: 0.25;
-    margin: 14px 0;
+    margin: 0 0 14px 0;
+    max-width: 700px;
   }
 
   .chart-panel {
@@ -262,7 +350,7 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     padding: 5px 10px;
-    border-radius: 0;
+    border-radius: var(--radius-default);
     border: var(--spacing-bw) solid var(--color-border);
     box-shadow: 2px 2px 0 var(--color-shadow);
     background: var(--color-surface);
@@ -338,7 +426,7 @@
   }
 
   .upper-chart {
-    height: 220px;
+    height: 240px;
   }
 
   .chart-placeholder {
@@ -351,9 +439,21 @@
     color: var(--color-muted);
   }
 
-  /* ── Health Indicators: 4 mini charts side by side ── */
-  .mini-charts-row {
-    display: flex;
+  /* ── Health Indicators section ── */
+  .hic-section {
+    padding: 16px 18px 18px;
+  }
+
+  /* 2 × 2 grid of full-size indicator cards */
+  .hic-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 16px;
+  }
+
+  @media (max-width: 760px) {
+    .hic-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

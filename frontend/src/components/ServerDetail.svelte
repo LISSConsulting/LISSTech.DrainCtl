@@ -154,7 +154,7 @@
         </div>
         <div class="d-leg-col">
           <div class="d-leg-head">Memory</div>
-          <div class="d-leg-row"><span class="d-leg-k">Free</span><span class="d-leg-v">{perf.mem_avail_mb ? (perf.mem_avail_mb / 1024).toFixed(1) + ' GB' : '—'}</span></div>
+          <div class="d-leg-row"><span class="d-leg-k">Used</span><span class="d-leg-v">{perf.mem_total_mb > 0 ? ((perf.mem_total_mb - perf.mem_avail_mb) / 1024).toFixed(1) + ' GB' : '—'}</span></div>
           <div class="d-leg-row"><span class="d-leg-k">Total</span><span class="d-leg-v">{perf.mem_total_mb ? (perf.mem_total_mb / 1024).toFixed(1) + ' GB' : '—'}</span></div>
           <div class="d-leg-row"><span class="d-leg-k has-tip">P95<span class="tip">95th percentile per-session memory usage.</span></span><span class="d-leg-v">{perf.session_mem_p95_bytes != null && perf.session_mem_p95_bytes > 0 ? (perf.session_mem_p95_bytes / (1024 * 1024)).toFixed(0) + ' MB' : '—'}</span></div>
         </div>

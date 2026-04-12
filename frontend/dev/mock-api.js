@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.2';
+export const MOCK_VERSION = '3.3';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -186,13 +186,14 @@ function seedPerfHistory(host, status, initSessions) {
     // Slightly vary sessions around the initial count so history looks live.
     const jitterSessions = Math.max(0, Math.round(initSessions + rand(-5, 5)));
     samples.push({
-      time:       now - i * 30_000,
-      cpu:        p.cpu_pct,
-      mem:        Math.round(svMemPct * 10) / 10,
-      inputDelay: p.input_delay_p95_ms,
-      sessions:   jitterSessions,
-      diskQueue:  p.disk_queue,
-      tcpRetrans: p.tcp_retrans_sec,
+      time:        now - i * 30_000,
+      cpu:         p.cpu_pct,
+      mem:         Math.round(svMemPct * 10) / 10,
+      inputDelay:  p.input_delay_p95_ms,
+      sessions:    jitterSessions,
+      diskQueue:   p.disk_queue,
+      tcpRetrans:  p.tcp_retrans_sec,
+      pagesPerSec: p.pages_sec,
     });
   }
   return samples;
@@ -355,13 +356,14 @@ function startEvolution() {
           ? (1 - s.perf.mem_avail_mb / s.perf.mem_total_mb) * 100 : 0;
         const hist = perfHistory.get(host) ?? [];
         hist.push({
-          time:       now,
-          cpu:        s.perf.cpu_pct,
-          mem:        Math.round(svMemPct * 10) / 10,
-          inputDelay: s.perf.input_delay_p95_ms,
-          sessions:   s.sessions,
-          diskQueue:  s.perf.disk_queue,
-          tcpRetrans: s.perf.tcp_retrans_sec,
+          time:        now,
+          cpu:         s.perf.cpu_pct,
+          mem:         Math.round(svMemPct * 10) / 10,
+          inputDelay:  s.perf.input_delay_p95_ms,
+          sessions:    s.sessions,
+          diskQueue:   s.perf.disk_queue,
+          tcpRetrans:  s.perf.tcp_retrans_sec,
+          pagesPerSec: s.perf.pages_sec,
         });
         if (hist.length > MAX_PERF_HISTORY) hist.splice(0, hist.length - MAX_PERF_HISTORY);
         perfHistory.set(host, hist);

@@ -1,5 +1,6 @@
 <script>
   import { getContext } from 'svelte';
+  import { appState } from '../../lib/state.svelte.js';
 
   /**
    * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
@@ -8,8 +9,11 @@
    * @typedef {{ pct: number, label: string }} RightTick
    */
 
-  /** @type {{ normData: NormPoint[], SERIES: SeriesDef[], rightTicks: RightTick[], history: any[], visible: Record<string,boolean>, showXAxis?: boolean }} */
-  let { normData, SERIES, rightTicks, history, visible, showXAxis = true } = $props();
+  /**
+   * @typedef {{ pct: number, opacity: number, label: string, show: () => boolean }} ThresholdLine
+   * @type {{ normData: NormPoint[], SERIES: SeriesDef[], rightTicks: RightTick[], history: any[], visible: Record<string,boolean>, showXAxis?: boolean, thresholds?: ThresholdLine[] }}
+   */
+  let { normData, SERIES, rightTicks, history, visible, showXAxis = true, thresholds = [] } = $props();
 
   const { xScale, yScale, width, height } = getContext('LayerCake');
 
@@ -19,9 +23,9 @@
   // lineOnly series get a bold dashed line; area series get solid strokes.
   /** @type {Record<string, { width: number, dash?: string }>} */
   const STROKE_CFG = {
-    cpu:      { width: 4   },
+    cpu:      { width: 3.5 },
     mem:      { width: 3.5 },
-    sessions: { width: 4,   dash: '10,5' },
+    sessions: { width: 3.5, dash: '10,5' },
   };
 
   // X-axis labels — up to 5 evenly spaced ticks (only when showXAxis is true)
@@ -70,24 +74,50 @@
   })());
 
   // ── Hover state ──
-  let hoverIndex = $state(/** @type {number|null} */ (null));
+  // Pinned index takes priority → then local hover → then global hover.
+  let localIndex = $state(/** @type {number|null} */ (null));
+  let displayIndex = $derived(appState.pinnedChartIndex ?? localIndex ?? appState.hoveredChartIndex);
 
   /** @param {MouseEvent} e */
   function onMouseMove(e) {
+    if (appState.pinnedChartIndex !== null) return;
     const rect = /** @type {Element} */ (e.currentTarget).getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const n = normData.length;
-    if (n < 2) { hoverIndex = null; return; }
-    hoverIndex = Math.max(0, Math.min(n - 1, Math.round(mouseX / rect.width * (n - 1))));
+    if (n < 2) { localIndex = null; appState.hoveredChartIndex = null; return; }
+    const idx = Math.max(0, Math.min(n - 1, Math.round(mouseX / rect.width * (n - 1))));
+    localIndex = idx;
+    appState.hoveredChartIndex = idx;
   }
 
-  function onMouseLeave() { hoverIndex = null; }
+  function onMouseLeave() {
+    if (appState.pinnedChartIndex !== null) return;
+    localIndex = null;
+    appState.hoveredChartIndex = null;
+  }
+
+  /** @param {MouseEvent} e */
+  function onClick(e) {
+    if (appState.pinnedChartIndex !== null) {
+      appState.pinnedChartIndex = null;
+      appState.hoveredChartIndex = null;
+      localIndex = null;
+      return;
+    }
+    const rect = /** @type {Element} */ (e.currentTarget).getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const n = normData.length;
+    if (n < 2) return;
+    const idx = Math.max(0, Math.min(n - 1, Math.round(mouseX / rect.width * (n - 1))));
+    appState.pinnedChartIndex = idx;
+    appState.hoveredChartIndex = idx;
+  }
 
   // Tooltip layout constants
   const TIP_W    = 160;
   const TIP_PAD  = 8;
-  const TIP_LNSP = 17;
-  const TIP_HDR  = 20;
+  const TIP_LNSP = 16;
+  const TIP_HDR  = 24;
 
   /** @param {SeriesDef[]} vis */
   function tipHeight(vis) {
@@ -102,17 +132,9 @@
   }
 </script>
 
-<!-- ── Grid lines + left-axis labels ── -->
+<!-- ── Left-axis labels (no grid lines) ── -->
 {#each GRID_PCTS as pct}
   {@const y = $yScale(pct)}
-  <line
-    x1={0} y1={y.toFixed(1)}
-    x2={$width} y2={y.toFixed(1)}
-    stroke="var(--color-border)"
-    stroke-width="1"
-    stroke-dasharray={pct === 0 || pct === 100 ? '' : '5,4'}
-    opacity={pct === 0 || pct === 100 ? '0.6' : '0.38'}
-  />
   <text x={-6} y={(y + 3.5).toFixed(1)} class="ax" text-anchor="end">{pct}%</text>
 {/each}
 
@@ -141,19 +163,48 @@
   {/if}
 {/each}
 
-<!-- ── Stroke lines: all visible series ── -->
+<!-- ── Stroke lines ── -->
 {#each SERIES as s}
   {#if visible[s.key] && allPaths[s.key]?.line}
-    {@const cfg = STROKE_CFG[s.key] ?? { width: 3 }}
-    <path
-      d={allPaths[s.key].line}
-      stroke={s.color}
-      stroke-width={cfg.width}
-      fill="none"
-      stroke-linejoin="round"
-      stroke-linecap="round"
-      stroke-dasharray={cfg.dash ?? ''}
+    {@const cfg = STROKE_CFG[s.key] ?? { width: 3.5 }}
+    {#if s.lineOnly}
+      <path
+        d={allPaths[s.key].line}
+        stroke={s.color}
+        stroke-width={cfg.width}
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-dasharray={cfg.dash ?? ''}
+      />
+    {:else}
+      <path
+        d={allPaths[s.key].line}
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
+      />
+    {/if}
+  {/if}
+{/each}
+
+<!-- ── Threshold lines (rendered after areas+strokes so they sit on top) ── -->
+{#each thresholds as t, ti}
+  {#if t.show()}
+    {@const y = $yScale(t.pct)}
+    <line
+      x1={0} y1={y.toFixed(1)} x2={$width} y2={y.toFixed(1)}
+      stroke="var(--color-fg)" stroke-width="2.5"
+      stroke-dasharray="8,4" opacity={t.opacity}
     />
+    <text
+      x={ti < 2 ? 48 : $width - 48}
+      y={(y - 3).toFixed(1)}
+      class="thresh-label"
+      text-anchor={ti < 2 ? 'start' : 'end'}
+      opacity={t.opacity}
+    >{t.label}</text>
   {/if}
 {/each}
 
@@ -163,17 +214,12 @@
 {/each}
 
 <!-- ── Hover crosshair + tooltip ── -->
-{#if hoverIndex !== null && normData[hoverIndex]}
-  {@const d   = normData[hoverIndex]}
-  {@const cx  = $xScale(hoverIndex)}
+{#if displayIndex !== null && normData[displayIndex]}
+  {@const d   = normData[displayIndex]}
+  {@const cx  = $xScale(displayIndex)}
   {@const vis = SERIES.filter(s => visible[s.key])}
-  {@const th  = tipHeight(vis)}
-  {@const tx  = cx + 14 + TIP_W > $width ? cx - TIP_W - 10 : cx + 14}
-  {@const ty  = Math.max(2, Math.min($height - th - 2, $yScale(50) - th / 2))}
-  {@const diffMs  = Date.now() - (d.time ?? Date.now())}
-  {@const timeStr = diffMs < 1200 ? 'now' : diffMs < 60_000 ? `${Math.round(diffMs/1000)}s ago` : `${Math.round(diffMs/60_000)}m ago`}
 
-  <!-- Vertical crosshair -->
+  <!-- Vertical crosshair — always visible when any chart is hovered -->
   <line
     x1={cx.toFixed(1)} y1={0} x2={cx.toFixed(1)} y2={$height}
     stroke="var(--color-fg)" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.5"
@@ -186,61 +232,74 @@
       fill={s.color} stroke="var(--color-border)" stroke-width="2" />
   {/each}
 
-  <!-- Tooltip shadow (neobrutalist offset) -->
-  <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} fill="var(--color-shadow)" />
+  <!-- Tooltip — visible on all synced charts when any one is hovered -->
+  {#if displayIndex !== null}
+    {@const th  = tipHeight(vis)}
+    {@const tx  = cx + 14 + TIP_W > $width ? cx - TIP_W - 10 : cx + 14}
+    {@const ty  = Math.max(2, Math.min($height - th - 2, $yScale(50) - th / 2))}
+    {@const diffMs  = Date.now() - (d.time ?? Date.now())}
+    {@const timeStr = diffMs < 1200 ? 'now' : diffMs < 60_000 ? `${Math.round(diffMs/1000)}s ago` : `${Math.round(diffMs/60_000)}m ago`}
 
-  <!-- Tooltip card -->
-  <rect
-    x={tx} y={ty} width={TIP_W} height={th}
-    fill="var(--color-card)"
-    stroke="var(--color-border)"
-    stroke-width="3"
-  />
+    <!-- Tooltip shadow (neobrutalist offset) -->
+    <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} rx="6" fill="var(--color-shadow)" />
 
-  <!-- Divider under time header -->
-  <line
-    x1={tx + TIP_PAD} y1={ty + TIP_HDR - 1}
-    x2={tx + TIP_W - TIP_PAD} y2={ty + TIP_HDR - 1}
-    stroke="var(--color-border)" stroke-width="1" opacity="0.3"
-  />
+    <!-- Tooltip card -->
+    <rect
+      x={tx} y={ty} width={TIP_W} height={th} rx="6"
+      fill="var(--color-card)"
+      stroke="var(--color-border)"
+      stroke-width="2.5"
+    />
 
-  <!-- Time label -->
-  <text x={tx + TIP_PAD} y={ty + 13} class="tip-time">{timeStr}</text>
+    <!-- Divider under time header -->
+    <line
+      x1={tx + TIP_PAD} y1={ty + 18}
+      x2={tx + TIP_W - TIP_PAD} y2={ty + 18}
+      stroke="var(--color-border)" stroke-width="1" opacity="0.25"
+    />
 
-  <!-- Series value rows -->
-  {#each vis as s, si}
-    <!-- Color swatch: square for areas, dash for line-only -->
-    {#if s.lineOnly}
-      <line
-        x1={tx + TIP_PAD} y1={ty + TIP_HDR + si * TIP_LNSP + 5}
-        x2={tx + TIP_PAD + 12} y2={ty + TIP_HDR + si * TIP_LNSP + 5}
-        stroke={s.color} stroke-width="2.5" stroke-dasharray="4,2"
-      />
-    {:else}
-      <rect
-        x={tx + TIP_PAD} y={ty + TIP_HDR + si * TIP_LNSP + 2}
-        width={6} height={6}
-        fill={s.color}
-        stroke="var(--color-border)" stroke-width="1"
-      />
-    {/if}
-    <text
-      x={tx + TIP_PAD + 16}
-      y={ty + TIP_HDR + si * TIP_LNSP + 10}
-      class="tip-val"
-    >{s.label}: <tspan font-weight="700" fill={s.color}>{fmtVal(d, s)}</tspan></text>
-  {/each}
+    <!-- Time label -->
+    <text x={tx + TIP_PAD} y={ty + 13} class="tip-time">{timeStr}</text>
+
+    <!-- Series value rows -->
+    {#each vis as s, si}
+      <!-- Color swatch: square for areas, dash for line-only -->
+      {#if s.lineOnly}
+        <line
+          x1={tx + TIP_PAD} y1={ty + TIP_HDR + si * TIP_LNSP + 5}
+          x2={tx + TIP_PAD + 12} y2={ty + TIP_HDR + si * TIP_LNSP + 5}
+          stroke={s.color} stroke-width="2.5" stroke-dasharray="4,2"
+        />
+      {:else}
+        <rect
+          x={tx + TIP_PAD} y={ty + TIP_HDR + si * TIP_LNSP + 2}
+          width={6} height={6}
+          fill={s.color}
+          stroke="var(--color-border)" stroke-width="1"
+        />
+      {/if}
+      <text
+        x={tx + TIP_PAD + 16}
+        y={ty + TIP_HDR + si * TIP_LNSP + 10}
+        class="tip-val"
+      >{s.label}: <tspan font-weight="700" fill={s.color}>{fmtVal(d, s)}</tspan></text>
+    {/each}
+  {/if}
 
 {/if}
 
 <!-- ── Transparent overlay — captures mouse events, rendered last (topmost) ── -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <rect
-  x={0} y={0} width={$width} height={$height}
+  x={0} y={0} width={Math.max(0, $width)} height={Math.max(0, $height)}
   fill="transparent"
-  style="cursor: crosshair"
+  style="cursor: crosshair; outline: none"
+  role="button"
+  tabindex="-1"
   onmousemove={onMouseMove}
   onmouseleave={onMouseLeave}
+  onclick={onClick}
+  onkeydown={(e) => { if (e.key === 'Escape') appState.pinnedChartIndex = null; }}
 />
 
 <style>
@@ -259,6 +318,17 @@
     font-size: 9px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+  .thresh-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    fill: var(--color-fg);
+    text-anchor: middle;
+    user-select: none;
+    pointer-events: none;
   }
   .tip-time {
     font-family: 'JetBrains Mono', monospace;

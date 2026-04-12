@@ -1,4 +1,6 @@
 <script>
+  import { untrack } from 'svelte';
+  import { fade } from 'svelte/transition';
   import { initTheme } from './lib/theme.svelte.js';
   import { appState, addEvent, appendMetricsSample, appendServerMetricsSample, seedServerMetrics } from './lib/state.svelte.js';
   import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
@@ -126,8 +128,59 @@
       // Seed per-server metric history from the mock endpoint (cold start only).
       // seedServerMetrics skips hosts that already have live data so this is safe
       // to call even when some samples have arrived via earlier poll cycles.
+      // Also synthesize fleet-wide metricsHistory so LOAD and HIC charts are
+      // populated immediately instead of waiting N×30 s to fill.
       if (seedData) {
-        seedServerMetrics(new Map(Object.entries(seedData)));
+        const seedMap = new Map(Object.entries(seedData));
+        seedServerMetrics(seedMap);
+
+        if (appState.metricsHistory.length < 2) {
+          const hosts = [...seedMap.values()];
+          const sampleCount = Math.max(...hosts.map(h => h.length), 0);
+          /** @type {import('./lib/state.svelte.js').MetricsSample[]} */
+          const fleetHistory = [];
+          for (let i = 0; i < sampleCount; i++) {
+            const slices = hosts.map(h => h[i]).filter(Boolean);
+            if (slices.length === 0) continue;
+            const cpuVals = slices.map(s => s.cpu ?? 0);
+            const memVals = slices.map(s => s.mem ?? 0);
+            const avgCpu = cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length;
+            const avgMem = memVals.reduce((a, b) => a + b, 0) / memVals.length;
+            const totalSess = slices.reduce((a, s) => a + (s.sessions ?? 0), 0);
+            const p95 = (/** @type {number[]} */ vals) => {
+              if (vals.length === 0) return 0;
+              const sorted = [...vals].sort((a, b) => a - b);
+              return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
+            };
+            const p50 = (/** @type {number[]} */ vals) => {
+              if (vals.length === 0) return 0;
+              const sorted = [...vals].sort((a, b) => a - b);
+              const mid = Math.floor(sorted.length / 2);
+              return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+            };
+            const idV = slices.map(s => s.inputDelay ?? 0);
+            const psV = slices.map(s => s.pagesPerSec ?? 0);
+            const trV = slices.map(s => s.tcpRetrans ?? 0);
+            const dqV = slices.map(s => s.diskQueue ?? 0);
+            fleetHistory.push({
+              time:        slices[0].time,
+              cpu:         avgCpu,
+              mem:         avgMem,
+              sessions:    totalSess,
+              inputDelay:  p95(idV),
+              pagesPerSec: p95(psV),
+              tcpRetrans:  p95(trV),
+              diskQueue:   p95(dqV),
+              p50InputDelay:  p50(idV),
+              p50PagesPerSec: p50(psV),
+              p50TcpRetrans:  p50(trV),
+              p50DiskQueue:   p50(dqV),
+            });
+          }
+          if (fleetHistory.length > 0) {
+            appState.metricsHistory = fleetHistory;
+          }
+        }
       }
 
       // Detect and log server state transitions (skipped on first refresh so we
@@ -173,14 +226,29 @@
       const memPct = memSvs.length
         ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) / memSvs.length
         : 0;
-      const inputDelay  = p95(perfSvs.map(sv => sv.perf.input_delay_p95_ms || 0));
-      const pagesPerSec = p95(perfSvs.map(sv => sv.perf.pages_sec || 0));
-      const tcpRetrans  = p95(perfSvs.map(sv => sv.perf.tcp_retrans_sec || 0));
-      const diskQueue   = p95(perfSvs.map(sv => sv.perf.disk_queue || 0));
+      const idVals      = perfSvs.map(sv => sv.perf.input_delay_p95_ms || 0);
+      const psVals      = perfSvs.map(sv => sv.perf.pages_sec || 0);
+      const trVals      = perfSvs.map(sv => sv.perf.tcp_retrans_sec || 0);
+      const dqVals      = perfSvs.map(sv => sv.perf.disk_queue || 0);
+      const inputDelay  = p95(idVals);
+      const pagesPerSec = p95(psVals);
+      const tcpRetrans  = p95(trVals);
+      const diskQueue   = p95(dqVals);
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
+      /** Return the P50 (median) from a numeric array. */
+      const p50 = (/** @type {number[]} */ vals) => {
+        if (vals.length === 0) return 0;
+        const sorted = [...vals].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      };
+
       const ts = Date.now();
-      appendMetricsSample({ time: ts, cpu, mem: memPct, inputDelay, sessions, pagesPerSec, tcpRetrans, diskQueue });
+      appendMetricsSample({
+        time: ts, cpu, mem: memPct, inputDelay, sessions, pagesPerSec, tcpRetrans, diskQueue,
+        p50InputDelay: p50(idVals), p50PagesPerSec: p50(psVals), p50TcpRetrans: p50(trVals), p50DiskQueue: p50(dqVals),
+      });
 
       // Per-server ring buffers for per-host sparklines in ServerDetail.
       for (const sv of s) {
@@ -189,13 +257,14 @@
             ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
             : 0;
           appendServerMetricsSample(sv.host, {
-            time:       ts,
-            cpu:        sv.perf.cpu_pct,
-            mem:        svMemPct,
-            inputDelay: sv.perf.input_delay_p95_ms,
-            sessions:   sv.sessions ?? 0,
-            diskQueue:  sv.perf.disk_queue ?? 0,
-            tcpRetrans: sv.perf.tcp_retrans_sec ?? 0,
+            time:        ts,
+            cpu:         sv.perf.cpu_pct,
+            mem:         svMemPct,
+            inputDelay:  sv.perf.input_delay_p95_ms,
+            sessions:    sv.sessions ?? 0,
+            diskQueue:   sv.perf.disk_queue ?? 0,
+            tcpRetrans:  sv.perf.tcp_retrans_sec ?? 0,
+            pagesPerSec: sv.perf.pages_sec ?? 0,
           });
         }
       }
@@ -230,9 +299,18 @@
     }
   }
 
-  // Run immediately on mount, then every 30 seconds.
+  // Scroll to top on view change.
   $effect(() => {
-    refresh();
+    appState.currentView;  // track
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // Run immediately on mount, then every 30 seconds.
+  // untrack prevents the effect from re-triggering when refresh() updates
+  // reactive state (appState.config, appState.serverMetrics, etc.) that it
+  // reads synchronously before its first await.
+  $effect(() => {
+    untrack(() => refresh());
     const interval = setInterval(refresh, 30_000);
     return () => clearInterval(interval);
   });
@@ -241,11 +319,19 @@
 <Nav onconfigopen={() => (configOpen = true)} />
 
 <main class="main">
-  <CounterGrid />
-  <StateBar />
-  <MetricsChart />
-  <EventLog />
-  <ServerTable onhistoryclick={(host) => (historyHost = host)} />
+  {#key appState.currentView}
+    <div in:fade={{ duration: 150, delay: 50 }} out:fade={{ duration: 100 }}>
+      {#if appState.currentView === 'overview'}
+        <CounterGrid />
+        <StateBar />
+        <MetricsChart />
+      {:else if appState.currentView === 'servers'}
+        <ServerTable onhistoryclick={(host) => (historyHost = host)} />
+      {:else if appState.currentView === 'events'}
+        <EventLog />
+      {/if}
+    </div>
+  {/key}
 </main>
 
 <Footer />
