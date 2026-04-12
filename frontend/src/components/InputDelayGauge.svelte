@@ -2,18 +2,19 @@
   /** @type {{ value?: number }} */
   let { value = 0 } = $props();
 
-  // ── Layout constants ──
-  const CX = 110, CY = 105;   // gauge centre (x, y)
-  const R  = 78;              // track centre radius
-  const TW = 20;              // track stroke width
-  const MAX_MS   = 200;
-  const GREEN_END = 50;
+  // ── Geometry constants ──────────────────────────────────────────────────────
+  const CX  = 130;   // arc centre x
+  const CY  = 120;   // arc centre y (= arc endpoint baseline)
+  const R   = 88;    // arc centre radius
+  const TW  = 22;    // track stroke width
+  const MAX_MS    = 200;
+  const GREEN_END =  50;
   const AMBER_END = 150;
 
   /**
-   * SVG arc path for the upper semicircle between fractions f1 and f2.
-   * f=0 → left endpoint (0 ms), f=1 → right endpoint (max ms).
-   * Always uses sweep-flag=0 (counter-clockwise / upper arc).
+   * SVG arc path along the UPPER semicircle from fraction f1 to f2.
+   * f=0 → left endpoint (0 ms), f=1 → right endpoint (MAX_MS).
+   * Angles: θ = π·(1−f), sweep-flag=0 draws the upper (counterclockwise) arc.
    * @param {number} f1 @param {number} f2
    */
   function arc(f1, f2) {
@@ -26,23 +27,24 @@
     return `M ${x1} ${y1} A ${R} ${R} 0 0 0 ${x2} ${y2}`;
   }
 
-  // Static zone paths (never change)
-  const BG_ARC    = arc(0, 1);
-  const GREEN_ARC = arc(0,                   GREEN_END / MAX_MS);  // 0–50 ms
-  const AMBER_ARC = arc(GREEN_END / MAX_MS,  AMBER_END / MAX_MS);  // 50–150 ms
-  const RED_ARC   = arc(AMBER_END / MAX_MS,  1);                   // 150–200 ms
+  // Static zone arcs (computed once)
+  const BG_ARC    = arc(0,                   1);
+  const GREEN_ARC = arc(0,                   GREEN_END / MAX_MS);
+  const AMBER_ARC = arc(GREEN_END / MAX_MS,  AMBER_END / MAX_MS);
+  const RED_ARC   = arc(AMBER_END / MAX_MS,  1);
 
-  // ── Reactive state ──
+  // ── Reactive state ──────────────────────────────────────────────────────────
   let frac      = $derived(Math.min(1, Math.max(0, value / MAX_MS)));
   let theta     = $derived(Math.PI * (1 - frac));
 
-  // Needle: base extends 14 px past the pivot in the opposite direction
-  let tipX  = $derived((CX + (R - TW / 2 - 4) * Math.cos(theta)).toFixed(2));
-  let tipY  = $derived((CY - (R - TW / 2 - 4) * Math.sin(theta)).toFixed(2));
-  let baseX = $derived((CX - 14 * Math.cos(theta)).toFixed(2));
-  let baseY = $derived((CY + 14 * Math.sin(theta)).toFixed(2));
+  // Needle tip sits just inside the inner edge of the track
+  let tipX  = $derived((CX + (R - TW / 2 - 2) * Math.cos(theta)).toFixed(2));
+  let tipY  = $derived((CY - (R - TW / 2 - 2) * Math.sin(theta)).toFixed(2));
+  // Needle tail extends 12 px past the pivot in the opposite direction
+  let baseX = $derived((CX - 12 * Math.cos(theta)).toFixed(2));
+  let baseY = $derived((CY + 12 * Math.sin(theta)).toFixed(2));
 
-  // Active fill (0 → current value)
+  // Progress arc (0 → current value)
   let activeArc = $derived(frac > 0.005 ? arc(0, frac) : null);
 
   let zoneColor = $derived(
@@ -53,86 +55,80 @@
 
   let displayVal = $derived(`${Math.round(value)}ms`);
 
-  // Precomputed label positions for 0 and 200ms arc endpoints
-  const LPAD    = R + TW / 2 + 11;
-  const L0_X    = (CX + LPAD * Math.cos(Math.PI)).toFixed(2);   // left  (0 ms)
-  const L0_Y    = (CY - LPAD * Math.sin(Math.PI) + 4).toFixed(2);
-  const L200_X  = (CX + LPAD * Math.cos(0)).toFixed(2);          // right (200 ms)
-  const L200_Y  = (CY - LPAD * Math.sin(0) + 4).toFixed(2);
+  // Endpoint labels: placed just outside and below each arc tip
+  const L0_X   = CX - R - 8;    // left  of left  endpoint
+  const L200_X = CX + R + 8;    // right of right endpoint
+  const L_Y    = CY + 16;       // below endpoint baseline
 </script>
 
 <div class="gauge-wrap">
   <div class="gauge-card">
-    <svg viewBox="0 0 220 162" role="img" aria-label="Fleet average input delay: {displayVal}">
+    <!--
+      viewBox "0 0 260 178"
+      Content bounds:
+        x: L0_X "0" label (text-anchor end) ≈ 28 … L200_X "200" (text-anchor start) ≈ 248 — within 0–260
+        y: top of track outer = CY − (R + TW/2) = 120 − 99 = 21 … label baseline 170 — within 0–178
+    -->
+    <svg viewBox="0 0 260 178"
+         role="img"
+         aria-label="Fleet average input delay: {displayVal}">
 
-      <!-- ── Background track (full arc) ── -->
+      <!-- ── Background track (full gray semicircle) ── -->
       <path d={BG_ARC}
         fill="none"
         stroke="var(--color-surface)"
         stroke-width={TW}
         stroke-linecap="butt" />
 
-      <!-- ── Zone arcs (muted background) ── -->
+      <!-- ── Muted zone arcs ── -->
       <path d={GREEN_ARC}
         fill="none" stroke="var(--color-green)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.4" />
+        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
       <path d={AMBER_ARC}
         fill="none" stroke="var(--color-amber)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.4" />
+        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
       <path d={RED_ARC}
         fill="none" stroke="var(--color-red)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.4" />
+        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
 
-      <!-- ── Active fill (0 → current value, fully opaque, thinner) ── -->
+      <!-- ── Active fill (0 → current value, thinner, full opacity) ── -->
       {#if activeArc}
         <path d={activeArc}
           fill="none" stroke={zoneColor}
           stroke-width={TW - 6} stroke-linecap="butt" />
       {/if}
 
-      <!-- ── Border ring (outer edge of track) ── -->
-      <path d={BG_ARC}
-        fill="none"
-        stroke="var(--color-border)"
-        stroke-width={TW + 5}
-        stroke-linecap="butt"
-        opacity="0.14" />
-
       <!-- ── Zone-boundary tick marks ── -->
-      {#each [0, GREEN_END, (GREEN_END + AMBER_END) / 2, AMBER_END, MAX_MS] as ms}
-        {@const tf  = ms / MAX_MS}
-        {@const tt  = Math.PI * (1 - tf)}
-        {@const ix  = (CX + (R - TW / 2 - 1) * Math.cos(tt)).toFixed(2)}
-        {@const iy  = (CY - (R - TW / 2 - 1) * Math.sin(tt)).toFixed(2)}
-        {@const ox  = (CX + (R + TW / 2 + 1) * Math.cos(tt)).toFixed(2)}
-        {@const oy  = (CY - (R + TW / 2 + 1) * Math.sin(tt)).toFixed(2)}
+      {#each [0, GREEN_END, AMBER_END, MAX_MS] as ms}
+        {@const tf = ms / MAX_MS}
+        {@const tt = Math.PI * (1 - tf)}
+        {@const ix = (CX + (R - TW / 2) * Math.cos(tt)).toFixed(2)}
+        {@const iy = (CY - (R - TW / 2) * Math.sin(tt)).toFixed(2)}
+        {@const ox = (CX + (R + TW / 2) * Math.cos(tt)).toFixed(2)}
+        {@const oy = (CY - (R + TW / 2) * Math.sin(tt)).toFixed(2)}
         <line x1={ix} y1={iy} x2={ox} y2={oy}
-          stroke="var(--color-border)" stroke-width="2.5" opacity="0.55" />
+          stroke="var(--color-border)" stroke-width="2" opacity="0.5" />
       {/each}
 
-      <!-- ── Arc endpoint labels (0 and 200) ── -->
-      <text x={L0_X} y={L0_Y} class="g-tick" text-anchor="end">0</text>
-      <text x={L200_X} y={L200_Y} class="g-tick" text-anchor="start">200</text>
+      <!-- ── Arc endpoint labels ── -->
+      <text x={L0_X}   y={L_Y} class="g-tick" text-anchor="end">0</text>
+      <text x={L200_X} y={L_Y} class="g-tick" text-anchor="start">200</text>
 
       <!-- ── Needle ── -->
       <line
         x1={baseX} y1={baseY}
         x2={tipX}  y2={tipY}
-        stroke="var(--color-fg)" stroke-width="4" stroke-linecap="round" />
+        stroke="var(--color-fg)" stroke-width="3.5" stroke-linecap="round" />
       <!-- Pivot ring -->
-      <circle cx={CX} cy={CY} r="9"
+      <circle cx={CX} cy={CY} r="8"
         fill="var(--color-card)" stroke="var(--color-border)" stroke-width="2.5" />
       <circle cx={CX} cy={CY} r="4" fill="var(--color-fg)" />
 
-      <!-- ── Big value readout (below arc, above label) ── -->
-      <!-- Shadow -->
-      <text x={CX + 3} y={133} class="g-val" text-anchor="middle"
-        fill="var(--color-shadow)" opacity="0.22">{displayVal}</text>
-      <!-- Value -->
-      <text x={CX} y={130} class="g-val g-val-live" text-anchor="middle">{displayVal}</text>
+      <!-- ── Value readout ── -->
+      <text x={CX} y={CY + 34} class="g-val" text-anchor="middle">{displayVal}</text>
 
       <!-- ── Fleet label ── -->
-      <text x={CX} y={152} class="g-label" text-anchor="middle">FLEET AVG INPUT DELAY</text>
+      <text x={CX} y={CY + 52} class="g-label" text-anchor="middle">FLEET AVG INPUT DELAY</text>
 
     </svg>
   </div>
@@ -141,11 +137,9 @@
 <style>
   .gauge-wrap {
     width: 100%;
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 4px;
   }
 
   .gauge-card {
@@ -153,15 +147,19 @@
     border: var(--spacing-bw) solid var(--color-border);
     box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
     border-radius: var(--radius-default);
-    padding: 14px 10px 10px;
+    padding: 12px 10px 10px;
     width: 100%;
+    box-sizing: border-box;
+    /* Prevent the box-shadow from leaking outside gauge-panel */
+    overflow: visible;
   }
 
   svg {
     display: block;
     width: 100%;
     height: auto;
-    overflow: visible;
+    /* All content lives inside the viewBox — no overflow needed */
+    overflow: hidden;
   }
 
   .g-val {
@@ -184,7 +182,7 @@
 
   .g-tick {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 700;
     fill: var(--color-muted);
     pointer-events: none;
