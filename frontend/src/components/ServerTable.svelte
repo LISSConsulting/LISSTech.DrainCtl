@@ -255,7 +255,7 @@
   .empty h2 { font-size: 1.3rem; font-weight: 400; margin-bottom: 4px; color: var(--color-fg); }
   table.srv-tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   table.srv-tbl th { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-muted); text-align: left; padding: 8px 12px; border-bottom: var(--spacing-bw) solid var(--color-border); white-space: nowrap; background: var(--color-card); }
-  table.srv-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--color-surface); vertical-align: middle; }
+  table.srv-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--color-border); vertical-align: middle; color: var(--color-fg); }
   th.sortable { cursor: pointer; user-select: none; }
   th.sortable:hover { color: var(--color-accent); }
   .clickable { cursor: pointer; }
