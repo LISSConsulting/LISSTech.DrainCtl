@@ -231,17 +231,19 @@ function jitterPerf(perf) {
 /**
  * Return a spiked version of perf — high input delay, TCP retrans, and disk queue.
  * Used to simulate a troubled server so P95 charts show meaningful spikes.
+ * Values are intentionally dramatic so fleet P95 (95th pct across 50 servers) shows
+ * visible spikes when 3–5 servers are simultaneously troubled.
  */
 function spikePerf(perf) {
   if (!perf) return null;
   return {
     ...perf,
-    input_delay_p95_ms: Math.round(rand(200, 450) * 10) / 10,
-    input_delay_p50_ms: Math.round(rand(80,  200) * 10) / 10,
-    input_delay_max_ms: Math.round(rand(500, 900) * 10) / 10,
-    tcp_retrans_sec:    Math.round(rand(35,  90)  * 10) / 10,
-    disk_queue:         Math.round(rand(6,   12)  * 100) / 100,
-    pages_sec:          Math.round(rand(250, 500) * 10) / 10,
+    input_delay_p95_ms: Math.round(rand(280, 480) * 10) / 10,
+    input_delay_p50_ms: Math.round(rand(120, 260) * 10) / 10,
+    input_delay_max_ms: Math.round(rand(550, 950) * 10) / 10,
+    tcp_retrans_sec:    Math.round(rand(30,  70)  * 10) / 10,
+    disk_queue:         Math.round(rand(5.5, 9.5) * 100) / 100,
+    pages_sec:          Math.round(rand(160, 400) * 10) / 10,
   };
 }
 
@@ -284,14 +286,16 @@ function startEvolution() {
     ensureState();
     const now = Date.now();
     for (const [host, s] of state) {
-      // Perf: spike on ~5% of ticks per server to make P95 charts interesting.
-      // A spike lasts 1–3 ticks (10–30 s) so the P95 line jumps visibly.
+      // Perf: spike on ~10% of ticks per server to make P95 charts interesting.
+      // With 50 servers at 10% each, ~5 servers spike simultaneously → fleet P95
+      // captures the spike (95th pct of 50 = position 47.5, within the top 5).
+      // A spike lasts 2–4 ticks (20–40 s) so the P95 line jumps visibly.
       if (s.status !== 'off' && s.perf) {
         s.spikeUntil = s.spikeUntil ?? 0;
         if (now < s.spikeUntil) {
           s.perf = spikePerf(s.perf);
-        } else if (Math.random() < 0.05) {
-          s.spikeUntil = now + randInt(1, 3) * 10_000;
+        } else if (Math.random() < 0.10) {
+          s.spikeUntil = now + randInt(2, 4) * 10_000;
           s.perf = spikePerf(s.perf);
         } else {
           s.perf = jitterPerf(s.perf);

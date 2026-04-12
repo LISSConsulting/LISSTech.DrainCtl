@@ -2,7 +2,7 @@
   import { LayerCake, Svg } from 'layercake';
   import { appState } from '../lib/state.svelte.js';
   import DualAxisChart from './chart/DualAxisChart.svelte';
-  import HealthChart from './chart/HealthChart.svelte';
+  import MiniHealthChart from './chart/MiniHealthChart.svelte';
 
   // ── Upper chart (LOAD): CPU %, Memory %, Sessions ────────────────────────
   let showCpu      = $state(true);
@@ -15,27 +15,53 @@
     { key: 'sessions', label: 'Sessions', color: 'var(--color-red)',    axis: 'right', lineOnly: true,  show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
   ];
 
-  // ── Lower chart (HEALTH): Input Delay, Pages/sec, Retrans. Seg, Disk Queue
-  let showInputDelay  = $state(true);
-  let showPagesPerSec = $state(true);
-  let showTcpRetrans  = $state(true);
-  let showDiskQueue   = $state(true);
+  // ── Lower section (HEALTH INDICATORS): 4 individual mini-charts ──────────
+  // Each chart has its own Y-axis scale, threshold zones, and current P95 value.
+  // Thresholds: warn = start of yellow zone, crit = start of red zone.
 
-  const HEALTH_SERIES = [
-    { key: 'inputDelay',  label: 'Input Delay',    color: 'var(--color-amber)',  axis: 'left',  show: () => showInputDelay,  toggle: () => { showInputDelay  = !showInputDelay;  } },
-    { key: 'pagesPerSec', label: 'Pages/sec',      color: 'var(--color-accent)', axis: 'left',  show: () => showPagesPerSec, toggle: () => { showPagesPerSec = !showPagesPerSec; } },
-    { key: 'tcpRetrans',  label: 'Retrans. Seg',   color: 'var(--color-red)',    axis: 'right', show: () => showTcpRetrans,  toggle: () => { showTcpRetrans  = !showTcpRetrans;  } },
-    { key: 'diskQueue',   label: 'Disk Queue',     color: 'var(--color-green)',  axis: 'right', show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
+  /** @type {Array<{key:string,label:string,unit:string,yMax:number,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string}>} */
+  const MINI_CHARTS = [
+    {
+      key:        'inputDelay',
+      label:      'Input Delay',
+      unit:       'ms',
+      yMax:       500,
+      thresholds: { warn: 100, crit: 250 },
+      color:      'var(--color-amber)',
+      fmt:        v => `${Math.round(v)}ms`,
+    },
+    {
+      key:        'pagesPerSec',
+      label:      'Pages/sec',
+      unit:       '/sec',
+      yMax:       200,
+      thresholds: { warn: 80, crit: 150 },
+      color:      'var(--color-accent)',
+      fmt:        v => `${Math.round(v)}/s`,
+    },
+    {
+      key:        'tcpRetrans',
+      label:      'TCP Retrans',
+      unit:       '/sec',
+      yMax:       50,
+      thresholds: { warn: 10, crit: 25 },
+      color:      'var(--color-red)',
+      fmt:        v => `${v.toFixed(1)}/s`,
+    },
+    {
+      key:        'diskQueue',
+      label:      'Avg Disk Queue',
+      unit:       '',
+      yMax:       10,
+      thresholds: { warn: 2, crit: 5 },
+      color:      'var(--color-green)',
+      fmt:        v => v.toFixed(2),
+    },
   ];
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
   let hasRight   = $derived(showSessions);
-
-  // HEALTH chart — dynamic scale maxes for each axis group
-  let healthLeftMax  = $derived(Math.max(...history.map(h => Math.max(h.inputDelay ?? 0, h.pagesPerSec ?? 0)), 50));
-  let healthRightMax = $derived(Math.max(...history.map(h => Math.max(h.tcpRetrans ?? 0, h.diskQueue ?? 0)), 1));
-  let hasHealthRight = $derived(showTcpRetrans || showDiskQueue);
 
   // LOAD chart — normalise to 0–100; raw values carried for tooltip
   let loadNormData = $derived(
@@ -67,46 +93,6 @@
     cpu:      showCpu,
     mem:      showMem,
     sessions: showSessions,
-  });
-
-  // HEALTH chart — left axis: inputDelay + pagesPerSec; right axis: tcpRetrans + diskQueue
-  // Both groups normalised to 0–100 against their own shared max; tick labels show real values.
-  let healthNormData = $derived(
-    history.map((h, i) => ({
-      i,
-      time:        h.time,
-      inputDelay:  Math.min(((h.inputDelay  ?? 0) / healthLeftMax)  * 100, 100),
-      pagesPerSec: Math.min(((h.pagesPerSec ?? 0) / healthLeftMax)  * 100, 100),
-      tcpRetrans:  Math.min(((h.tcpRetrans  ?? 0) / healthRightMax) * 100, 100),
-      diskQueue:   Math.min(((h.diskQueue   ?? 0) / healthRightMax) * 100, 100),
-      raw: {
-        inputDelay:  +(h.inputDelay  ?? 0).toFixed(1),
-        pagesPerSec: +(h.pagesPerSec ?? 0).toFixed(0),
-        tcpRetrans:  +(h.tcpRetrans  ?? 0).toFixed(1),
-        diskQueue:   +(h.diskQueue   ?? 0).toFixed(2),
-      },
-    }))
-  );
-
-  let healthLeftTicks = $derived(
-    [0, 0.25, 0.5, 0.75, 1].map(f => ({
-      pct:   f * 100,
-      label: Math.round(f * healthLeftMax).toString(),
-    }))
-  );
-
-  let healthRightTicks = $derived(
-    [0, 0.25, 0.5, 0.75, 1].map(f => ({
-      pct:   f * 100,
-      label: (f * healthRightMax).toFixed(f === 0 ? 0 : 1),
-    }))
-  );
-
-  let healthVisible = $derived({
-    inputDelay:  showInputDelay,
-    pagesPerSec: showPagesPerSec,
-    tcpRetrans:  showTcpRetrans,
-    diskQueue:   showDiskQueue,
   });
 
   const Y_DOMAIN = [0, 100];
@@ -170,50 +156,23 @@
     <!-- ── Separator ── -->
     <div class="chart-separator"></div>
 
-    <!-- ── HEALTH INDICATORS: Input Delay, Pages/sec, Retrans. Seg, Disk Queue ── -->
+    <!-- ── HEALTH INDICATORS: 4 individual mini-charts ── -->
     <div class="sub-label">HEALTH INDICATORS <span class="sub-label-note">· P95 across fleet</span></div>
     <p class="chart-desc">95th percentile health metrics across the fleet — showing the worst-performing servers. Spikes indicate individual servers experiencing issues that may require drain intervention.</p>
-    <div class="chart-panel">
-      <div class="chart-toggles">
-        {#each HEALTH_SERIES as s}
-          <button
-            class="chart-toggle"
-            class:active={s.show()}
-            style="--sc: {s.color}"
-            aria-pressed={s.show()}
-            onclick={s.toggle}
-          >
-            <span class="t-dot" aria-hidden="true"></span>
-            {s.label}
-            {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
-          </button>
-        {/each}
-      </div>
 
-      <div class="chart-body lower-chart">
-        {#if history.length < 2}
-          <div class="chart-placeholder">Collecting data… {history.length}/2</div>
-        {:else}
-          <LayerCake
-            data={lcData}
-            x="x"
-            y="y"
-            yDomain={Y_DOMAIN}
-            padding={{ top: 16, right: hasHealthRight ? 64 : 16, bottom: 32, left: 48 }}
-          >
-            <Svg>
-              <HealthChart
-                normData={healthNormData}
-                SERIES={HEALTH_SERIES}
-                leftTicks={healthLeftTicks}
-                rightTicks={healthRightTicks}
-                {history}
-                visible={healthVisible}
-              />
-            </Svg>
-          </LayerCake>
-        {/if}
-      </div>
+    <div class="mini-charts-row">
+      {#each MINI_CHARTS as mc}
+        <MiniHealthChart
+          {history}
+          valueKey={mc.key}
+          label={mc.label}
+          unit={mc.unit}
+          yMax={mc.yMax}
+          thresholds={mc.thresholds}
+          color={mc.color}
+          fmt={mc.fmt}
+        />
+      {/each}
     </div>
 
   </div>
@@ -360,38 +319,19 @@
     );
   }
 
-  /* Solid line indicator (health chart series) */
-  .t-line {
-    width: 18px;
-    height: 3px;
-    border-radius: 1px;
-    background: var(--sc);
-    flex-shrink: 0;
-  }
-
-  .chart-toggle.active .t-line {
-    background: rgba(255, 255, 255, 0.9);
-  }
-
   .t-axis {
     font-size: 0.52rem;
     opacity: 0.55;
     margin-left: -2px;
   }
 
-  /* ── Chart areas ── */
+  /* ── Load chart area ── */
   .chart-body {
     position: relative;
   }
 
-  /* Upper (LOAD) ~60% of total chart height */
   .upper-chart {
     height: 220px;
-  }
-
-  /* Lower (HEALTH) ~40% of total chart height */
-  .lower-chart {
-    height: 150px;
   }
 
   .chart-placeholder {
@@ -402,5 +342,11 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
     color: var(--color-muted);
+  }
+
+  /* ── Health Indicators: 4 mini charts side by side ── */
+  .mini-charts-row {
+    display: flex;
+    gap: 10px;
   }
 </style>
