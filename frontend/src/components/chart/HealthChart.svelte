@@ -2,20 +2,25 @@
   import { getContext } from 'svelte';
 
   /**
-   * Health indicator chart — renders all series as area fills with bold stroke lines.
-   * Y-axis shows unitless normalized 0–100 scale; tooltip shows raw values with proper units.
+   * Health indicator chart — dual Y-axes with area fills.
+   * Left axis: Input Delay (ms) + Pages/sec (tens-to-hundreds range).
+   * Right axis: TCP Retrans/sec + Avg Disk Queue (low single-digit range).
+   * All series pre-normalised to 0–100 by MetricsChart; tick labels show real values.
    *
    * @typedef {{ i: number, time: number, raw: Record<string,number>, [key: string]: any }} HealthPoint
-   * @typedef {{ key: string, label: string, color: string }} HealthSeriesDef
+   * @typedef {{ key: string, label: string, color: string, axis: string }} HealthSeriesDef
+   * @typedef {{ pct: number, label: string }} AxisTick
    */
 
-  /** @type {{ normData: HealthPoint[], SERIES: HealthSeriesDef[], history: any[], visible: Record<string,boolean> }} */
-  let { normData, SERIES, history, visible } = $props();
+  /** @type {{ normData: HealthPoint[], SERIES: HealthSeriesDef[], leftTicks: AxisTick[], rightTicks: AxisTick[], history: any[], visible: Record<string,boolean> }} */
+  let { normData, SERIES, leftTicks, rightTicks, history, visible } = $props();
 
   const { xScale, yScale, width, height } = getContext('LayerCake');
 
-  const GRID_PCTS = [0, 25, 50, 75, 100];
   const LINE_WIDTH = 3.5;
+
+  // Whether any right-axis series are currently visible
+  let hasRight = $derived(SERIES.some(s => s.axis === 'right' && visible[s.key]));
 
   // X-axis labels — up to 5 evenly spaced ticks
   let xLabels = $derived((() => {
@@ -86,31 +91,43 @@
     return TIP_HDR + vis.length * TIP_LNSP + TIP_PAD;
   }
 
-  /** Format raw value with proper units per the user spec. @param {HealthPoint} d @param {HealthSeriesDef} s */
+  /** Format raw value with proper units. @param {HealthPoint} d @param {HealthSeriesDef} s */
   function fmtRaw(d, s) {
     const raw = d.raw?.[s.key];
     if (raw == null) return '—';
     if (s.key === 'inputDelay')  return `${Math.round(raw)}ms`;
-    if (s.key === 'pagesPerSec') return `${Math.round(raw)}`;
-    if (s.key === 'tcpRetrans')  return `${Math.round(raw)}`;
-    if (s.key === 'diskQueue')   return raw.toFixed(1);
+    if (s.key === 'pagesPerSec') return `${Math.round(raw)}/s`;
+    if (s.key === 'tcpRetrans')  return `${raw.toFixed(1)}/s`;
+    if (s.key === 'diskQueue')   return raw.toFixed(2);
     return String(raw);
   }
 </script>
 
 <!-- ── Grid lines + left-axis labels ── -->
-{#each GRID_PCTS as pct}
-  {@const y = $yScale(pct)}
+{#each leftTicks as tick}
+  {@const y = $yScale(tick.pct)}
   <line
     x1={0} y1={y.toFixed(1)}
     x2={$width} y2={y.toFixed(1)}
     stroke="var(--color-border)"
     stroke-width="1"
-    stroke-dasharray={pct === 0 || pct === 100 ? '' : '5,4'}
-    opacity={pct === 0 || pct === 100 ? '0.6' : '0.38'}
+    stroke-dasharray={tick.pct === 0 || tick.pct === 100 ? '' : '5,4'}
+    opacity={tick.pct === 0 || tick.pct === 100 ? '0.6' : '0.38'}
   />
-  <text x={-6} y={(y + 3.5).toFixed(1)} class="ax" text-anchor="end">{pct}</text>
+  <text x={-6} y={(y + 3.5).toFixed(1)} class="ax" text-anchor="end">{tick.label}</text>
 {/each}
+
+<!-- ── Right-axis ── -->
+{#if hasRight && rightTicks.length > 0}
+  <line
+    x1={$width} y1={0} x2={$width} y2={$height}
+    stroke="var(--color-border)" stroke-width="1" opacity="0.35"
+  />
+  {#each rightTicks as tick}
+    {@const y = $yScale(tick.pct)}
+    <text x={$width + 6} y={(y + 3.5).toFixed(1)} class="ax ax-r" text-anchor="start">{tick.label}</text>
+  {/each}
+{/if}
 
 <!-- ── Axis borders ── -->
 <line x1={0} y1={0} x2={0} y2={$height}
@@ -224,6 +241,9 @@
     fill: var(--color-muted);
     user-select: none;
     pointer-events: none;
+  }
+  .ax-r {
+    /* right-axis labels — same style, positioned via x attribute */
   }
   .x-ax {
     font-size: 9px;

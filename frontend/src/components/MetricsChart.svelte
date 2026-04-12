@@ -22,15 +22,20 @@
   let showDiskQueue   = $state(true);
 
   const HEALTH_SERIES = [
-    { key: 'inputDelay',  label: 'Input Delay',   color: 'var(--color-amber)',  show: () => showInputDelay,  toggle: () => { showInputDelay  = !showInputDelay;  } },
-    { key: 'pagesPerSec', label: 'Pages/sec',     color: 'var(--color-accent)', show: () => showPagesPerSec, toggle: () => { showPagesPerSec = !showPagesPerSec; } },
-    { key: 'tcpRetrans',  label: 'Retrans. Seg',  color: 'var(--color-red)',    show: () => showTcpRetrans,  toggle: () => { showTcpRetrans  = !showTcpRetrans;  } },
-    { key: 'diskQueue',   label: 'Avg Disk Queue', color: 'var(--color-green)',  show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
+    { key: 'inputDelay',  label: 'Input Delay',    color: 'var(--color-amber)',  axis: 'left',  show: () => showInputDelay,  toggle: () => { showInputDelay  = !showInputDelay;  } },
+    { key: 'pagesPerSec', label: 'Pages/sec',      color: 'var(--color-accent)', axis: 'left',  show: () => showPagesPerSec, toggle: () => { showPagesPerSec = !showPagesPerSec; } },
+    { key: 'tcpRetrans',  label: 'Retrans. Seg',   color: 'var(--color-red)',    axis: 'right', show: () => showTcpRetrans,  toggle: () => { showTcpRetrans  = !showTcpRetrans;  } },
+    { key: 'diskQueue',   label: 'Avg Disk Queue', color: 'var(--color-green)',  axis: 'right', show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
   ];
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
   let hasRight   = $derived(showSessions);
+
+  // HEALTH chart — dynamic scale maxes for each axis group
+  let healthLeftMax  = $derived(Math.max(...history.map(h => Math.max(h.inputDelay ?? 0, h.pagesPerSec ?? 0)), 50));
+  let healthRightMax = $derived(Math.max(...history.map(h => Math.max(h.tcpRetrans ?? 0, h.diskQueue ?? 0)), 1));
+  let hasHealthRight = $derived(showTcpRetrans || showDiskQueue);
 
   // LOAD chart — normalise to 0–100; raw values carried for tooltip
   let loadNormData = $derived(
@@ -64,23 +69,36 @@
     sessions: showSessions,
   });
 
-  // HEALTH chart — each metric normalised to its own max for shared 0–100% Y-axis
-  const HEALTH_MAX = { inputDelay: 200, pagesPerSec: 500, tcpRetrans: 100, diskQueue: 10 };
-
+  // HEALTH chart — left axis: inputDelay + pagesPerSec; right axis: tcpRetrans + diskQueue
+  // Both groups normalised to 0–100 against their own shared max; tick labels show real values.
   let healthNormData = $derived(
     history.map((h, i) => ({
       i,
       time:        h.time,
-      inputDelay:  Math.min(((h.inputDelay  ?? 0) / HEALTH_MAX.inputDelay)  * 100, 100),
-      pagesPerSec: Math.min(((h.pagesPerSec ?? 0) / HEALTH_MAX.pagesPerSec) * 100, 100),
-      tcpRetrans:  Math.min(((h.tcpRetrans  ?? 0) / HEALTH_MAX.tcpRetrans)  * 100, 100),
-      diskQueue:   Math.min(((h.diskQueue   ?? 0) / HEALTH_MAX.diskQueue)   * 100, 100),
+      inputDelay:  Math.min(((h.inputDelay  ?? 0) / healthLeftMax)  * 100, 100),
+      pagesPerSec: Math.min(((h.pagesPerSec ?? 0) / healthLeftMax)  * 100, 100),
+      tcpRetrans:  Math.min(((h.tcpRetrans  ?? 0) / healthRightMax) * 100, 100),
+      diskQueue:   Math.min(((h.diskQueue   ?? 0) / healthRightMax) * 100, 100),
       raw: {
         inputDelay:  +(h.inputDelay  ?? 0).toFixed(1),
         pagesPerSec: +(h.pagesPerSec ?? 0).toFixed(0),
         tcpRetrans:  +(h.tcpRetrans  ?? 0).toFixed(1),
         diskQueue:   +(h.diskQueue   ?? 0).toFixed(2),
       },
+    }))
+  );
+
+  let healthLeftTicks = $derived(
+    [0, 0.25, 0.5, 0.75, 1].map(f => ({
+      pct:   f * 100,
+      label: Math.round(f * healthLeftMax).toString(),
+    }))
+  );
+
+  let healthRightTicks = $derived(
+    [0, 0.25, 0.5, 0.75, 1].map(f => ({
+      pct:   f * 100,
+      label: (f * healthRightMax).toFixed(f === 0 ? 0 : 1),
     }))
   );
 
@@ -163,8 +181,9 @@
             aria-pressed={s.show()}
             onclick={s.toggle}
           >
-            <span class="t-line" aria-hidden="true"></span>
+            <span class="t-dot" aria-hidden="true"></span>
             {s.label}
+            {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
           </button>
         {/each}
       </div>
@@ -178,12 +197,14 @@
             x="x"
             y="y"
             yDomain={Y_DOMAIN}
-            padding={{ top: 16, right: 16, bottom: 32, left: 48 }}
+            padding={{ top: 16, right: hasHealthRight ? 64 : 16, bottom: 32, left: 48 }}
           >
             <Svg>
               <HealthChart
                 normData={healthNormData}
                 SERIES={HEALTH_SERIES}
+                leftTicks={healthLeftTicks}
+                rightTicks={healthRightTicks}
                 {history}
                 visible={healthVisible}
               />
