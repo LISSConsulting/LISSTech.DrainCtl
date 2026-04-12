@@ -254,9 +254,9 @@
   /* Neobrutalist tiles */
   .d-tile {
     background: var(--color-card);
-    border: 2.5px solid var(--color-fg);
+    border: 2.5px solid var(--color-border);
     border-radius: 0;
-    box-shadow: 4px 4px 0 var(--color-fg);
+    box-shadow: 4px 4px 0 var(--color-shadow);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
@@ -277,7 +277,7 @@
 
   /* Ring row */
   .d-ring-row  { display: flex; gap: 8px; margin-bottom: 8px; justify-content: space-around; }
-  .d-ring-cell { flex: 1; display: flex; justify-content: center; }
+  .d-ring-cell { flex: 1; display: flex; justify-content: center; border: none; outline: none; }
 
   /* Sparkline row */
   .d-spark-row  { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -395,7 +395,7 @@
     font-size: 11px;
     font-weight: 700;
     padding: 4px 8px;
-    border: 1.5px solid var(--color-fg);
+    border: 1.5px solid var(--color-border);
     border-radius: 0;
     cursor: pointer;
     text-transform: uppercase;
@@ -407,8 +407,8 @@
     color: var(--color-fg);
   }
   .d-btn-hist:hover {
-    background: var(--color-fg);
-    color: var(--color-bg);
+    background: var(--color-border);
+    color: var(--color-fg);
   }
   .d-btn-rm {
     background: var(--color-card);

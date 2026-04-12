@@ -86,6 +86,8 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
+    border: none;
+    outline: none;
   }
 
   .ring {
@@ -93,6 +95,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    border: none;
+    outline: none;
+    background: none;
   }
 
   .ring-bg {
