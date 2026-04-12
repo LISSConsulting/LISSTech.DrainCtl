@@ -2,8 +2,8 @@
   import { getContext } from 'svelte';
 
   /**
-   * Health indicator chart — renders all series as bold solid lines (no area fills).
-   * Y-axis shows normalized 0–100% scale; tooltip shows raw values with proper units.
+   * Health indicator chart — renders all series as area fills with bold stroke lines.
+   * Y-axis shows unitless normalized 0–100 scale; tooltip shows raw values with proper units.
    *
    * @typedef {{ i: number, time: number, raw: Record<string,number>, [key: string]: any }} HealthPoint
    * @typedef {{ key: string, label: string, color: string }} HealthSeriesDef
@@ -33,20 +33,32 @@
     });
   })());
 
-  // Pre-compute SVG line paths for all series
+  // Pre-compute SVG line + area paths for all series
   let allPaths = $derived((() => {
     const n = normData.length;
-    if (n < 2) return /** @type {Record<string,string>} */ ({});
-    /** @type {Record<string,string>} */
+    if (n < 2) return /** @type {Record<string,{line:string,area:string}>} */ ({});
+    /** @type {Record<string,{line:string,area:string}>} */
     const out = {};
+    const bottomY = $yScale(0).toFixed(1);
     for (const s of SERIES) {
       const pts = normData.map(d => ({
         x: $xScale(d.i),
         y: $yScale(/** @type {any} */ (d)[s.key] ?? 0),
       }));
-      out[s.key] = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const lineParts = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const area = `${lineParts} L${pts[pts.length-1].x.toFixed(1)},${bottomY} L${pts[0].x.toFixed(1)},${bottomY} Z`;
+      out[s.key] = { line: lineParts, area };
     }
     return out;
+  })());
+
+  // Area series sorted highest-value-first so large areas render behind small ones
+  let areaRenderOrder = $derived((() => {
+    const last = normData[normData.length - 1];
+    if (!last) return SERIES;
+    return [...SERIES].sort((a, b) =>
+      (/** @type {any} */ (last)[b.key] ?? 0) - (/** @type {any} */ (last)[a.key] ?? 0)
+    );
   })());
 
   // Hover state
@@ -97,7 +109,7 @@
     stroke-dasharray={pct === 0 || pct === 100 ? '' : '5,4'}
     opacity={pct === 0 || pct === 100 ? '0.6' : '0.38'}
   />
-  <text x={-6} y={(y + 3.5).toFixed(1)} class="ax" text-anchor="end">{pct}%</text>
+  <text x={-6} y={(y + 3.5).toFixed(1)} class="ax" text-anchor="end">{pct}</text>
 {/each}
 
 <!-- ── Axis borders ── -->
@@ -106,11 +118,18 @@
 <line x1={0} y1={$height} x2={$width} y2={$height}
   stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 
-<!-- ── Bold solid lines for all visible series ── -->
+<!-- ── Area fills: largest first ── -->
+{#each areaRenderOrder as s}
+  {#if visible[s.key] && allPaths[s.key]?.line}
+    <path d={allPaths[s.key].area} fill={s.color} fill-opacity="1" />
+  {/if}
+{/each}
+
+<!-- ── Stroke lines: all visible series ── -->
 {#each SERIES as s}
-  {#if visible[s.key] && allPaths[s.key]}
+  {#if visible[s.key] && allPaths[s.key]?.line}
     <path
-      d={allPaths[s.key]}
+      d={allPaths[s.key].line}
       stroke={s.color}
       stroke-width={LINE_WIDTH}
       fill="none"
@@ -172,11 +191,12 @@
 
   <!-- Series value rows -->
   {#each vis as s, si}
-    <!-- Solid line swatch -->
-    <line
-      x1={tx + TIP_PAD} y1={ty + TIP_HDR + si * TIP_LNSP + 5}
-      x2={tx + TIP_PAD + 12} y2={ty + TIP_HDR + si * TIP_LNSP + 5}
-      stroke={s.color} stroke-width="3"
+    <!-- Area color swatch -->
+    <rect
+      x={tx + TIP_PAD} y={ty + TIP_HDR + si * TIP_LNSP + 2}
+      width={6} height={6}
+      fill={s.color}
+      stroke="var(--color-border)" stroke-width="1"
     />
     <text
       x={tx + TIP_PAD + 16}
