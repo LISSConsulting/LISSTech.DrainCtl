@@ -34,16 +34,26 @@ const isoAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString(
 const isoFuture = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
 // ---------------------------------------------------------------------------
-// Server definitions — realistic RDS farm
+// Server definitions — realistic RDS farm (14-node fleet)
 // ---------------------------------------------------------------------------
 
+// initStatus / initSessions produce a realistic starting snapshot:
+//   8 ok · 3 grace · 2 alert · 1 off  ≈ 637 total sessions
 const SERVERS = [
-  { host: 'RDSH01.contoso.com', role: 'primary',   maxSessions: 50 },
-  { host: 'RDSH02.contoso.com', role: 'primary',   maxSessions: 50 },
-  { host: 'RDSH03.contoso.com', role: 'primary',   maxSessions: 50 },
-  { host: 'RDSH04.contoso.com', role: 'secondary', maxSessions: 30 },
-  { host: 'RDSH05.contoso.com', role: 'secondary', maxSessions: 30 },
-  { host: 'RDSH06.contoso.com', role: 'standby',   maxSessions: 30 },
+  { host: 'RDSH01.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  78 },
+  { host: 'RDSH02.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  75 },
+  { host: 'RDSH03.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  64 },
+  { host: 'RDSH04.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'grace', initSessions:  52 },
+  { host: 'RDSH05.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok',    initSessions:  45 },
+  { host: 'RDSH06.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok',    initSessions:  53 },
+  { host: 'RDSH07.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'alert', initSessions:  79 },
+  { host: 'RDSH08.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'grace', initSessions:  28 },
+  { host: 'RDSH09.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok',    initSessions:  16 },
+  { host: 'RDSH10.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok',    initSessions:  22 },
+  { host: 'RDSH11.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'alert', initSessions:  60 },
+  { host: 'RDSH12.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'ok',    initSessions:  41 },
+  { host: 'RDSH13.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'grace', initSessions:  24 },
+  { host: 'RDSH14.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'off',   initSessions:   0 },
 ];
 
 const ADMINS = ['admin@contoso', 'svc-rds@contoso', 'jsmith@contoso', ''];
@@ -92,11 +102,9 @@ let notifyConfig = {
 /** Initialise server state on first access. */
 function ensureState() {
   if (state.size > 0) return;
-  const statuses = ['ok', 'ok', 'ok', 'grace', 'alert', 'off'];
-  for (let i = 0; i < SERVERS.length; i++) {
-    const def = SERVERS[i];
-    const status = statuses[i];
-    const sessions = status === 'off' ? 0 : randInt(2, def.maxSessions);
+  for (const def of SERVERS) {
+    const status = def.initStatus;
+    const sessions = def.initSessions;
     state.set(def.host, {
       status,
       sessions,
