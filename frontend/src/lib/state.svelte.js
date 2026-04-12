@@ -13,6 +13,13 @@
 const MAX_EVENTS = 200;
 const MAX_METRICS = 60;
 
+/**
+ * Must match MOCK_VERSION in frontend/dev/mock-api.js.
+ * Bump both when the mock fleet definition changes; mismatched localStorage
+ * data is wiped automatically on the next page load.
+ */
+const MOCK_VERSION = '2.0';
+
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
 // ---------------------------------------------------------------------------
@@ -23,6 +30,29 @@ const LS_METRICS        = 'drainctl:metrics';
 const LS_SERVER_METRICS = 'drainctl:server-metrics';
 const LS_EVENTS         = 'drainctl:events';
 const LS_LAST_UPDATED   = 'drainctl:last-updated';
+const LS_MOCK_VERSION   = 'drainctl:mock-version';
+
+/**
+ * If the stored mock-data version doesn't match the current MOCK_VERSION,
+ * wipe all drainctl:* keys so the dashboard starts fresh with new mock data.
+ * Runs once at module init, before any $state declarations read localStorage.
+ */
+function clearStaleState() {
+  try {
+    if (localStorage.getItem(LS_MOCK_VERSION) === MOCK_VERSION) return;
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('drainctl:')) keysToRemove.push(key);
+    }
+    for (const key of keysToRemove) localStorage.removeItem(key);
+    localStorage.setItem(LS_MOCK_VERSION, MOCK_VERSION);
+  } catch {
+    // localStorage unavailable — no-op
+  }
+}
+
+clearStaleState();
 
 /** Read and JSON-parse a localStorage key; return `fallback` on any error. */
 function lsGet(key, fallback) {

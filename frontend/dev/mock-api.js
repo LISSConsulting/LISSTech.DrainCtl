@@ -6,7 +6,14 @@
  *
  * Data is dynamic — server statuses shift over time, perf metrics jitter,
  * sessions fluctuate — so the dashboard feels alive while iterating on UI.
+ *
+ * MOCK_VERSION must be bumped whenever the fleet definition changes so that
+ * state.svelte.js can detect and discard stale localStorage data.
  */
+
+// Bump this string whenever the mock fleet definition changes.
+// state.svelte.js reads the matching constant and auto-clears stale localStorage.
+export const MOCK_VERSION = '2.0';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,26 +41,78 @@ const isoAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString(
 const isoFuture = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 
 // ---------------------------------------------------------------------------
-// Server definitions — realistic RDS farm (14-node fleet)
+// Server definitions — realistic RDS farm (50-node fleet)
 // ---------------------------------------------------------------------------
 
 // initStatus / initSessions produce a realistic starting snapshot:
-//   8 ok · 3 grace · 2 alert · 1 off  ≈ 637 total sessions
+//   25 ok · 12 grace · 8 alert · 5 off  ≈ 2955 total sessions
+//
+// Session profile:
+//   alert  → heavy  100–120  sessions  (8 servers)
+//   grace  → mid    45–82    sessions  (12 servers)
+//   ok     → heavy  70–95    (8), mid 35–65 (12), light 11–28 (5)
+//   off    → 0                          (5 servers)
 const SERVERS = [
-  { host: 'RDSH01.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  78 },
-  { host: 'RDSH02.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  75 },
-  { host: 'RDSH03.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok',    initSessions:  64 },
-  { host: 'RDSH04.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'grace', initSessions:  52 },
-  { host: 'RDSH05.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok',    initSessions:  45 },
-  { host: 'RDSH06.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok',    initSessions:  53 },
-  { host: 'RDSH07.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'alert', initSessions:  79 },
-  { host: 'RDSH08.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'grace', initSessions:  28 },
-  { host: 'RDSH09.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok',    initSessions:  16 },
-  { host: 'RDSH10.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok',    initSessions:  22 },
-  { host: 'RDSH11.contoso.com', role: 'primary',   maxSessions:  75, initStatus: 'alert', initSessions:  60 },
-  { host: 'RDSH12.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'ok',    initSessions:  41 },
-  { host: 'RDSH13.contoso.com', role: 'secondary', maxSessions:  50, initStatus: 'grace', initSessions:  24 },
-  { host: 'RDSH14.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'off',   initSessions:   0 },
+  // ── 8 alert — at/near capacity (RDSH01–RDSH08) ──────────────────────────
+  { host: 'RDSH01.contoso.com', role: 'primary',   maxSessions: 120, initStatus: 'alert', initSessions: 117 },
+  { host: 'RDSH02.contoso.com', role: 'primary',   maxSessions: 120, initStatus: 'alert', initSessions: 113 },
+  { host: 'RDSH03.contoso.com', role: 'primary',   maxSessions: 120, initStatus: 'alert', initSessions: 110 },
+  { host: 'RDSH04.contoso.com', role: 'primary',   maxSessions: 120, initStatus: 'alert', initSessions: 107 },
+  { host: 'RDSH05.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'alert', initSessions: 103 },
+  { host: 'RDSH06.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'alert', initSessions: 100 },
+  { host: 'RDSH07.contoso.com', role: 'secondary', maxSessions: 100, initStatus: 'alert', initSessions:  97 },
+  { host: 'RDSH08.contoso.com', role: 'secondary', maxSessions: 100, initStatus: 'alert', initSessions:  93 },
+
+  // ── 12 grace — draining, mid-heavy load (RDSH09–RDSH20) ─────────────────
+  { host: 'RDSH09.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'grace', initSessions:  82 },
+  { host: 'RDSH10.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'grace', initSessions:  76 },
+  { host: 'RDSH11.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'grace', initSessions:  71 },
+  { host: 'RDSH12.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  67 },
+  { host: 'RDSH13.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  64 },
+  { host: 'RDSH14.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  69 },
+  { host: 'RDSH15.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  61 },
+  { host: 'RDSH16.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  74 },
+  { host: 'RDSH17.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'grace', initSessions:  66 },
+  { host: 'RDSH18.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'grace', initSessions:  52 },
+  { host: 'RDSH19.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'grace', initSessions:  48 },
+  { host: 'RDSH20.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'grace', initSessions:  46 },
+
+  // ── 25 ok — healthy fleet, varied load (RDSH21–RDSH45) ──────────────────
+  // 8 heavy-ok (primary / secondary, 70–95 sessions)
+  { host: 'RDSH21.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok', initSessions:  94 },
+  { host: 'RDSH22.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok', initSessions:  90 },
+  { host: 'RDSH23.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok', initSessions:  87 },
+  { host: 'RDSH24.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok', initSessions:  83 },
+  { host: 'RDSH25.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'ok', initSessions:  79 },
+  { host: 'RDSH26.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  75 },
+  { host: 'RDSH27.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  73 },
+  { host: 'RDSH28.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  70 },
+  // 12 mid-ok (secondary / standby, 35–65 sessions)
+  { host: 'RDSH29.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  65 },
+  { host: 'RDSH30.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  62 },
+  { host: 'RDSH31.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  59 },
+  { host: 'RDSH32.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  55 },
+  { host: 'RDSH33.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'ok', initSessions:  53 },
+  { host: 'RDSH34.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  50 },
+  { host: 'RDSH35.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  47 },
+  { host: 'RDSH36.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  45 },
+  { host: 'RDSH37.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  43 },
+  { host: 'RDSH38.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  41 },
+  { host: 'RDSH39.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  38 },
+  { host: 'RDSH40.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  35 },
+  // 5 light-ok (standby, 11–28 sessions)
+  { host: 'RDSH41.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  28 },
+  { host: 'RDSH42.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  23 },
+  { host: 'RDSH43.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  19 },
+  { host: 'RDSH44.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  14 },
+  { host: 'RDSH45.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'ok', initSessions:  11 },
+
+  // ── 5 offline (RDSH46–RDSH50) ────────────────────────────────────────────
+  { host: 'RDSH46.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'off', initSessions:   0 },
+  { host: 'RDSH47.contoso.com', role: 'standby',   maxSessions:  50, initStatus: 'off', initSessions:   0 },
+  { host: 'RDSH48.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'off', initSessions:   0 },
+  { host: 'RDSH49.contoso.com', role: 'secondary', maxSessions:  75, initStatus: 'off', initSessions:   0 },
+  { host: 'RDSH50.contoso.com', role: 'primary',   maxSessions: 100, initStatus: 'off', initSessions:   0 },
 ];
 
 const ADMINS = ['admin@contoso', 'svc-rds@contoso', 'jsmith@contoso', ''];
