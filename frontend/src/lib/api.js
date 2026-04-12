@@ -272,7 +272,13 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
  */
 export async function fetchNotifyConfig() {
   const res = await apiFetch('/notify-config');
-  return /** @type {NotifyConfig} */ (await res.json());
+  const cfg = /** @type {NotifyConfig} */ (await res.json());
+  // Go stores memory thresholds as % free; UI works in % used — invert on load.
+  if (cfg.performance) {
+    if (cfg.performance.mem_warn_pct > 0) cfg.performance.mem_warn_pct = 100 - cfg.performance.mem_warn_pct;
+    if (cfg.performance.mem_crit_pct > 0) cfg.performance.mem_crit_pct = 100 - cfg.performance.mem_crit_pct;
+  }
+  return cfg;
 }
 
 /**
@@ -283,10 +289,16 @@ export async function fetchNotifyConfig() {
  * @returns {Promise<void>}
  */
 export async function saveNotifyConfig(config) {
+  // Deep-clone to avoid mutating the UI state, then invert mem % used → % free for Go.
+  const payload = JSON.parse(JSON.stringify(config));
+  if (payload.performance) {
+    if (payload.performance.mem_warn_pct > 0) payload.performance.mem_warn_pct = 100 - payload.performance.mem_warn_pct;
+    if (payload.performance.mem_crit_pct > 0) payload.performance.mem_crit_pct = 100 - payload.performance.mem_crit_pct;
+  }
   await apiFetch('/notify-config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
+    body: JSON.stringify(payload),
   });
 }
 

@@ -75,7 +75,17 @@
 
   // ── Hover state ──
   // Pinned index takes priority → then local hover → then global hover.
+  // When pinned, localIndex is stale — ignore it until next real mousemove.
   let localIndex = $state(/** @type {number|null} */ (null));
+  let wasPinned = $state(false);
+  $effect(() => {
+    if (appState.pinnedChartIndex !== null) {
+      wasPinned = true;
+    } else if (wasPinned) {
+      localIndex = null;
+      wasPinned = false;
+    }
+  });
   let displayIndex = $derived(appState.pinnedChartIndex ?? localIndex ?? appState.hoveredChartIndex);
 
   /** @param {MouseEvent} e */
@@ -195,8 +205,8 @@
     {@const y = $yScale(t.pct)}
     <line
       x1={0} y1={y.toFixed(1)} x2={$width} y2={y.toFixed(1)}
-      stroke="var(--color-fg)" stroke-width="2.5"
-      stroke-dasharray="8,4" opacity={t.opacity}
+      stroke="var(--color-fg)" stroke-width="1.5"
+      stroke-dasharray="6,4" opacity={t.opacity}
     />
     <text
       x={ti < 2 ? 48 : $width - 48}

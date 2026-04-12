@@ -306,16 +306,16 @@
         <!-- ── Threshold marker lines with inline labels ── -->
         <line
           x1={PL} y1={yCrit.toFixed(1)} x2={PL + cw} y2={yCrit.toFixed(1)}
-          stroke="var(--color-fg)" stroke-width="2.5"
-          stroke-dasharray="8,4" opacity="0.5"
+          stroke="var(--color-fg)" stroke-width="1.5"
+          stroke-dasharray="6,4" opacity="0.35"
         />
-        <text x={PL + cw / 2} y={(yCrit - 3).toFixed(1)} class="thresh-label" opacity="0.5">CRIT</text>
+        <text x={PL + cw / 2} y={(yCrit - 3).toFixed(1)} class="thresh-label" opacity="0.3">CRIT</text>
         <line
           x1={PL} y1={yWarn.toFixed(1)} x2={PL + cw} y2={yWarn.toFixed(1)}
-          stroke="var(--color-fg)" stroke-width="2.5"
-          stroke-dasharray="8,4" opacity="0.35"
+          stroke="var(--color-fg)" stroke-width="1.5"
+          stroke-dasharray="6,4" opacity="0.25"
         />
-        <text x={PL + cw / 2} y={(yWarn - 3).toFixed(1)} class="thresh-label" opacity="0.35">WARN</text>
+        <text x={PL + cw / 2} y={(yWarn - 3).toFixed(1)} class="thresh-label" opacity="0.2">WARN</text>
 
         <!-- ── Synchronized crosshair ── -->
         {#if crosshairX !== null}

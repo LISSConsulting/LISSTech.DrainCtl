@@ -196,10 +196,10 @@
                 SERIES={LOAD_SERIES}
                 {rightTicks}
                 thresholds={[
-                  { pct: cpuThresh.warn,  opacity: 0.35, label: 'CPU WARN', show: () => showCpu },
-                  { pct: cpuThresh.crit,  opacity: 0.5,  label: 'CPU CRIT', show: () => showCpu },
-                  { pct: memThresh.warn,  opacity: 0.35, label: 'MEM WARN', show: () => showMem },
-                  { pct: memThresh.crit,  opacity: 0.5,  label: 'MEM CRIT', show: () => showMem },
+                  { pct: cpuThresh.warn,  opacity: 0.25, label: 'CPU WARN', show: () => showCpu },
+                  { pct: cpuThresh.crit,  opacity: 0.35, label: 'CPU CRIT', show: () => showCpu },
+                  { pct: memThresh.warn,  opacity: 0.25, label: 'MEM WARN', show: () => showMem },
+                  { pct: memThresh.crit,  opacity: 0.35, label: 'MEM CRIT', show: () => showMem },
                 ]}
                 {history}
                 visible={loadVisible}

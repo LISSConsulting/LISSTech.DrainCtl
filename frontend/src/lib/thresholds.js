@@ -114,12 +114,12 @@ export function resolveThresholds(metricKey, perfConfig) {
         warn: perfConfig.cpu_warn_pct > 0 ? perfConfig.cpu_warn_pct : defaults.warn,
         crit: perfConfig.cpu_crit_pct > 0 ? perfConfig.cpu_crit_pct : defaults.crit,
       };
-    case 'mem': {
-      // Go config stores % free; ring gauge uses % used — invert.
-      const warnUsed = perfConfig.mem_warn_pct > 0 ? 100 - perfConfig.mem_warn_pct : defaults.warn;
-      const critUsed = perfConfig.mem_crit_pct > 0 ? 100 - perfConfig.mem_crit_pct : defaults.crit;
-      return { warn: warnUsed, crit: critUsed };
-    }
+    case 'mem':
+      // API layer already converts Go's % free to % used on load.
+      return {
+        warn: perfConfig.mem_warn_pct > 0 ? perfConfig.mem_warn_pct : defaults.warn,
+        crit: perfConfig.mem_crit_pct > 0 ? perfConfig.mem_crit_pct : defaults.crit,
+      };
     case 'inputDelay':
       return {
         warn: perfConfig.input_delay_warn_ms > 0 ? perfConfig.input_delay_warn_ms : defaults.warn,
