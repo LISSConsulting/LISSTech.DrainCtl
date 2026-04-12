@@ -5,8 +5,9 @@
  * Mutation helpers `addEvent`, `appendMetricsSample`, and
  * `appendServerMetricsSample` keep array caps enforced.
  *
- * metricsHistory, serverMetrics, and events are persisted to localStorage so
- * they survive page reloads. Writes are debounced at 300 ms to avoid thrashing.
+ * servers, health, metricsHistory, serverMetrics, events, and lastUpdated are
+ * persisted to localStorage so they survive page reloads. Writes are debounced
+ * at 300 ms to avoid thrashing. connected and config are intentionally transient.
  */
 
 const MAX_EVENTS = 200;
@@ -16,9 +17,12 @@ const MAX_METRICS = 60;
 // localStorage persistence helpers
 // ---------------------------------------------------------------------------
 
+const LS_SERVERS        = 'drainctl:servers';
+const LS_HEALTH         = 'drainctl:health';
 const LS_METRICS        = 'drainctl:metrics';
 const LS_SERVER_METRICS = 'drainctl:server-metrics';
 const LS_EVENTS         = 'drainctl:events';
+const LS_LAST_UPDATED   = 'drainctl:last-updated';
 
 /** Read and JSON-parse a localStorage key; return `fallback` on any error. */
 function lsGet(key, fallback) {
@@ -41,6 +45,18 @@ function lsGetServerMetrics() {
   }
 }
 
+/** Load a Date stored as a Unix ms timestamp; return null on missing/error. */
+function lsGetDate(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const ts = JSON.parse(raw);
+    return ts != null ? new Date(ts) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Return a debounced function that delays invoking `fn` until `ms` ms after the last call. */
 function debounce(fn, ms) {
   let timer;
@@ -50,6 +66,14 @@ function debounce(fn, ms) {
   };
 }
 
+const persistServers = debounce(
+  (data) => { try { localStorage.setItem(LS_SERVERS, JSON.stringify(data)); } catch {} },
+  300,
+);
+const persistHealth = debounce(
+  (data) => { try { localStorage.setItem(LS_HEALTH, JSON.stringify(data)); } catch {} },
+  300,
+);
 const persistMetrics = debounce(
   (data) => { try { localStorage.setItem(LS_METRICS, JSON.stringify(data)); } catch {} },
   300,
@@ -60,6 +84,10 @@ const persistServerMetrics = debounce(
 );
 const persistEvents = debounce(
   (data) => { try { localStorage.setItem(LS_EVENTS, JSON.stringify(data)); } catch {} },
+  300,
+);
+const persistLastUpdated = debounce(
+  (date) => { try { localStorage.setItem(LS_LAST_UPDATED, JSON.stringify(date ? date.getTime() : null)); } catch {} },
   300,
 );
 
@@ -100,10 +128,10 @@ const persistEvents = debounce(
 // ---------------------------------------------------------------------------
 
 /** @type {Server[]} */
-let servers = $state([]);
+let servers = $state(/** @type {Server[]} */ (lsGet(LS_SERVERS, [])));
 
 /** @type {HealthResponse|null} */
-let health = $state(null);
+let health = $state(/** @type {HealthResponse|null} */ (lsGet(LS_HEALTH, null)));
 
 /** @type {NotifyConfig|null} */
 let config = $state(null);
@@ -125,16 +153,19 @@ let serverMetrics = $state(lsGetServerMetrics());
 let connected = $state(false);
 
 /** @type {Date|null} */
-let lastUpdated = $state(null);
+let lastUpdated = $state(lsGetDate(LS_LAST_UPDATED));
 
 // ---------------------------------------------------------------------------
 // localStorage persistence effects (module-level, outside any component)
 // ---------------------------------------------------------------------------
 
 $effect.root(() => {
+  $effect(() => { persistServers(servers); });
+  $effect(() => { persistHealth(health); });
   $effect(() => { persistMetrics(metricsHistory); });
   $effect(() => { persistServerMetrics(serverMetrics); });
   $effect(() => { persistEvents(events); });
+  $effect(() => { persistLastUpdated(lastUpdated); });
 });
 
 // ---------------------------------------------------------------------------
