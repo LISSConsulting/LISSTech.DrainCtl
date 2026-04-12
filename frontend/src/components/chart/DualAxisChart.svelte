@@ -90,7 +90,7 @@
 
   /** @param {SeriesDef[]} vis */
   function tipHeight(vis) {
-    return TIP_HDR + vis.length * TIP_LNSP + TIP_PAD;
+    return TIP_HDR + (vis.length + 1) * TIP_LNSP + TIP_PAD;  // +1 row for input delay
   }
 
   /** @param {NormPoint} d @param {SeriesDef} s */
@@ -229,6 +229,15 @@
       class="tip-val"
     >{s.label}: <tspan font-weight="700" fill={s.color}>{fmtVal(d, s)}</tspan></text>
   {/each}
+
+  <!-- Input delay row (not a chart series — no swatch, uses muted color) -->
+  {@const idMs = Math.round(history[hoverIndex]?.inputDelay ?? 0)}
+  {@const idColor = idMs < 50 ? 'var(--color-green)' : idMs < 150 ? 'var(--color-amber)' : 'var(--color-red)'}
+  <text
+    x={tx + TIP_PAD + 16}
+    y={ty + TIP_HDR + vis.length * TIP_LNSP + 10}
+    class="tip-val"
+  >Inp. Delay: <tspan font-weight="700" fill={idColor}>{idMs}ms</tspan></text>
 {/if}
 
 <!-- ── Transparent overlay — captures mouse events, rendered last (topmost) ── -->

@@ -61,30 +61,29 @@
 
     <p class="chart-desc">Fleet-wide averages. Left axis: CPU &amp; Memory %. Right axis: Sessions count. Input delay gauge shows fleet average. Updated every 30&nbsp;s.</p>
 
-    <div class="perf-layout">
+    <div class="chart-panel">
+      <div class="chart-toggles">
+        {#each SERIES as s}
+          <button
+            class="chart-toggle"
+            class:active={s.show()}
+            style="--sc: {s.color}"
+            aria-pressed={s.show()}
+            onclick={s.toggle}
+          >
+            {#if s.lineOnly}
+              <span class="t-dash" aria-hidden="true"></span>
+            {:else}
+              <span class="t-dot" aria-hidden="true"></span>
+            {/if}
+            {s.label}
+            {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
+          </button>
+        {/each}
+      </div>
 
-      <!-- ── LEFT: main chart ── -->
-      <div class="chart-panel">
-        <div class="chart-toggles">
-          {#each SERIES as s}
-            <button
-              class="chart-toggle"
-              class:active={s.show()}
-              style="--sc: {s.color}"
-              aria-pressed={s.show()}
-              onclick={s.toggle}
-            >
-              {#if s.lineOnly}
-                <span class="t-dash" aria-hidden="true"></span>
-              {:else}
-                <span class="t-dot" aria-hidden="true"></span>
-              {/if}
-              {s.label}
-              {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
-            </button>
-          {/each}
-        </div>
-
+      <!-- ── Chart + gauge side-by-side, gauge aligned to plot area ── -->
+      <div class="chart-lower">
         <div class="chart-body">
           {#if history.length < 2}
             <div class="chart-placeholder">Collecting data… {history.length}/2</div>
@@ -102,13 +101,12 @@
             </LayerCake>
           {/if}
         </div>
-      </div>
 
-      <!-- ── RIGHT: Input Delay gauge ── -->
-      <div class="gauge-panel">
-        <InputDelayGauge value={appState.avgInputDelay} />
+        <!-- ── Input Delay gauge: narrow column, plot-area aligned ── -->
+        <div class="gauge-panel">
+          <InputDelayGauge value={appState.avgInputDelay} />
+        </div>
       </div>
-
     </div>
   </div>
 </div>
@@ -142,35 +140,42 @@
     line-height: 1.5;
   }
 
-  /* ── Side-by-side layout ── */
-  .perf-layout {
-    display: flex;
-    gap: 16px;
-    align-items: stretch;
-  }
-
+  /* ── Layout ── */
   .chart-panel {
-    flex: 65 1 0;
-    min-width: 0;
     display: flex;
     flex-direction: column;
   }
 
-  .gauge-panel {
-    flex: 35 1 0;
-    min-width: 180px;
+  /* Chart body + gauge side-by-side, flush (no gap — bar border acts as separator) */
+  .chart-lower {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  /*
+    Gauge column: fixed narrow width.
+    padding-top must match LayerCake padding.top (16px) so the bar's
+    top aligns with the chart's 100% grid line.
+    No bottom padding — the flex layout in InputDelayGauge fills the rest.
+  */
+  .gauge-panel {
+    flex: 0 0 64px;
+    height: 220px;          /* must match .chart-body height */
+    padding-top: 16px;      /* matches LayerCake padding.top */
+    box-sizing: border-box;
+    overflow: visible;      /* number/label may extend below */
   }
 
   @media (max-width: 680px) {
-    .perf-layout {
+    .chart-lower {
       flex-direction: column;
     }
     .gauge-panel {
-      min-width: 0;
-      min-height: 200px;
+      flex: 0 0 auto;
+      width: 100%;
+      height: 80px;
+      padding-top: 0;
     }
   }
 
@@ -261,7 +266,8 @@
 
   /* ── Chart area ── */
   .chart-body {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     height: 220px;
     position: relative;
   }
