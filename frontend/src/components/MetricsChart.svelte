@@ -347,6 +347,6 @@
   /* ── Health Indicators: 4 mini charts side by side ── */
   .mini-charts-row {
     display: flex;
-    gap: 10px;
+    gap: 16px;
   }
 </style>
