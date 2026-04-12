@@ -4,6 +4,7 @@
   import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
   import { rel, modeLabel } from '../lib/utils.js';
   import ServerDetail from './ServerDetail.svelte';
+  import CellSparkline from './CellSparkline.svelte';
 
   let { onhistoryclick } = $props();
 
@@ -125,6 +126,10 @@
   let memThresh   = $derived(resolveThresholds('mem',        perfCfg));
   let delayThresh = $derived(resolveThresholds('inputDelay', perfCfg));
 
+  // Session warning threshold — raw session count from alert-sensitivity config.
+  // Used for both the sparkline color and (potentially) future session-cell coloring.
+  let sessionWarnThresh = $derived(appState.config?.session_warning_threshold ?? 80);
+
   /**
    * Map a getThresholdColor result to a CSS color variable string.
    * Returns empty string when there is no data ('neutral').
@@ -136,6 +141,20 @@
     if (color === 'amber') return 'color:var(--color-amber)';
     if (color === 'red')   return 'color:var(--color-red)';
     return '';
+  }
+
+  /**
+   * Map a getThresholdColor token to the matching CSS color variable.
+   * Used to tint sparklines — returns the muted variable for 'neutral'
+   * (no data), though the sparkline won't render at all when history is empty.
+   * @param {'green'|'amber'|'red'|'neutral'} color
+   * @returns {string}
+   */
+  function sparkColor(color) {
+    if (color === 'green') return 'var(--color-green)';
+    if (color === 'amber') return 'var(--color-amber)';
+    if (color === 'red')   return 'var(--color-red)';
+    return 'var(--color-muted)';
   }
 
   // Persist search
@@ -191,10 +210,15 @@
         </thead>
         <tbody>
           {#each sorted as srv (srv.host)}
-            {@const memPct = srv.perf?.mem_total_mb > 0 ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100 : null}
-            {@const cpuStyle  = srv.perf ? thresholdStyle(getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)) : ''}
-            {@const memStyle  = memPct != null ? thresholdStyle(getThresholdColor(memPct, memThresh.warn, memThresh.crit)) : ''}
-            {@const delayStyle = thresholdStyle(srv.perf ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit) : 'neutral')}
+            {@const memPct      = srv.perf?.mem_total_mb > 0 ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100 : null}
+            {@const cpuColor    = srv.perf ? getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit) : 'neutral'}
+            {@const memColor    = memPct != null ? getThresholdColor(memPct, memThresh.warn, memThresh.crit) : 'neutral'}
+            {@const delayColor  = srv.perf ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit) : 'neutral'}
+            {@const sessColor   = getThresholdColor(srv.sessions ?? null, sessionWarnThresh, Infinity)}
+            {@const cpuStyle    = thresholdStyle(cpuColor)}
+            {@const memStyle    = thresholdStyle(memColor)}
+            {@const delayStyle  = thresholdStyle(delayColor)}
+            {@const srvHistory  = appState.serverMetrics.get(srv.host)}
             <tr class="clickable {expandedHost === srv.host ? 'sel' : ''}"
                 data-host={srv.host} data-status={srv.status}
                 tabindex="0"
@@ -214,10 +238,22 @@
               </td>
               <td class="mono">{modeLabel(srv.drain_mode)}</td>
               <td class="mono muted">{rel(srv.registered_at, now)}</td>
-              <td class="mono">{srv.sessions ?? '—'}</td>
-              <td class="mono" style={cpuStyle}>{srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}</td>
-              <td class="mono" style={memStyle}>{srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}</td>
-              <td class="mono" style={delayStyle}>{srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}</td>
+              <td class="mono spark-cell">
+                <CellSparkline data={srvHistory?.map(s => s.sessions) ?? []} color={sparkColor(sessColor)} />
+                {srv.sessions ?? '—'}
+              </td>
+              <td class="mono spark-cell" style={cpuStyle}>
+                <CellSparkline data={srvHistory?.map(s => s.cpu) ?? []} color={sparkColor(cpuColor)} />
+                {srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}
+              </td>
+              <td class="mono spark-cell" style={memStyle}>
+                <CellSparkline data={srvHistory?.map(s => s.mem) ?? []} color={sparkColor(memColor)} />
+                {srv.perf ? (srv.perf.mem_avail_mb / 1024).toFixed(1) + ' GB free' : '—'}
+              </td>
+              <td class="mono spark-cell" style={delayStyle}>
+                <CellSparkline data={srvHistory?.map(s => s.inputDelay) ?? []} color={sparkColor(delayColor)} />
+                {srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}
+              </td>
               <td class="mono muted">{rel(srv.last_seen, now)}</td>
               <td onclick={(e) => e.stopPropagation()}>
                 <div class="btn-row">
@@ -242,7 +278,7 @@
 
 <style>
   .grid { margin-bottom: 24px; }
-  .grid > .card { border-radius: 0; overflow: hidden; }
+  .grid > .card { overflow: hidden; }
   .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .filter-pills { display: flex; gap: 6px; }
   .filter-pill { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; border: var(--spacing-bw) solid var(--color-border); background: var(--color-card); color: var(--color-muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; transition: all 0.15s; }
@@ -270,6 +306,8 @@
   .dot.alert { background: var(--color-red); }
   .dot.off { background: var(--color-subtle); }
   .mono { font-family: 'JetBrains Mono', monospace; }
+  /* Cells that carry a sparkline background — SVG is position:absolute inside */
+  .spark-cell { position: relative; overflow: hidden; }
   .muted { color: var(--color-muted); }
   .fw7 { font-weight: 700; }
   .btn-row { display: flex; gap: 8px; }

@@ -1,7 +1,7 @@
 <script>
   import { initTheme } from './lib/theme.svelte.js';
-  import { appState, addEvent, appendMetricsSample, appendServerMetricsSample } from './lib/state.svelte.js';
-  import { fetchServers, fetchHealth, fetchNotifyConfig } from './lib/api.js';
+  import { appState, addEvent, appendMetricsSample, appendServerMetricsSample, seedServerMetrics } from './lib/state.svelte.js';
+  import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
 
   import Nav from './components/Nav.svelte';
   import Footer from './components/Footer.svelte';
@@ -102,11 +102,19 @@
     refreshing = true;
     try {
       // Fetch config once on the first successful refresh (lazy load).
+      // Also fetch metric history in parallel when serverMetrics is empty so
+      // sparklines are populated immediately on a cold start.
       const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
       const needsConfig = appState.config === null;
+      const needsMetricSeed = appState.serverMetrics.size === 0;
       if (needsConfig) calls.push(fetchNotifyConfig());
+      // Fetch seed history in parallel; silently ignore failures (non-mock envs
+      // won't have this endpoint and should fall back to natural poll accumulation).
+      const metricSeedPromise = needsMetricSeed
+        ? fetchAllServerMetrics().catch(() => null)
+        : Promise.resolve(null);
 
-      const results = await Promise.all(calls);
+      const [results, seedData] = await Promise.all([Promise.all(calls), metricSeedPromise]);
       const [servers, health] = results;
 
       appState.servers = servers || [];
@@ -114,6 +122,13 @@
       if (needsConfig) appState.config = results[2] ?? null;
       appState.connected = true;
       appState.lastUpdated = new Date();
+
+      // Seed per-server metric history from the mock endpoint (cold start only).
+      // seedServerMetrics skips hosts that already have live data so this is safe
+      // to call even when some samples have arrived via earlier poll cycles.
+      if (seedData) {
+        seedServerMetrics(new Map(Object.entries(seedData)));
+      }
 
       // Detect and log server state transitions (skipped on first refresh so we
       // don't flood the log with N "registered" lines when the page loads).

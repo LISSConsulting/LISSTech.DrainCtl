@@ -221,6 +221,28 @@ export async function deleteServer(host) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-server perf metrics history (sparkline seed)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/metrics
+ *
+ * Returns a map of hostname → MetricsSample[] containing the last
+ * MAX_PERF_HISTORY samples per server. Used by App.svelte to seed
+ * appState.serverMetrics on a cold start so sparklines are visible
+ * immediately without waiting for polling cycles to accumulate data.
+ *
+ * This endpoint is only served by the dev mock; in production the client
+ * accumulates samples from the regular /api/v1/servers poll.
+ *
+ * @returns {Promise<Record<string, import('./state.svelte.js').MetricsSample[]>>}
+ */
+export async function fetchAllServerMetrics() {
+  const res = await apiFetch('/metrics');
+  return /** @type {Record<string, any[]>} */ (await res.json());
+}
+
+// ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
 

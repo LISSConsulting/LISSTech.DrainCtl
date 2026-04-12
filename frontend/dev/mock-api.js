@@ -124,8 +124,18 @@ const ADMINS = ['admin@contoso', 'svc-rds@contoso', 'jsmith@contoso', ''];
 /** @type {Map<string, { status: string, sessions: number, sessionsDisconnected: number, stateChangedAt: string, changedBy: string, graceDeadline: string|null, registeredAt: string, perf: object|null }>} */
 const state = new Map();
 
-/** Per-host history ring buffers. @type {Map<string, object[]>} */
+/** Per-host state-transition history ring buffers. @type {Map<string, object[]>} */
 const history = new Map();
+
+/**
+ * Per-host perf metric ring buffers — same shape as the MetricsSample records
+ * that App.svelte appends to appState.serverMetrics on each poll.
+ * Exposed via GET /api/v1/metrics so the client can seed its own ring buffers
+ * immediately on first load instead of waiting 30 min to fill them.
+ * @type {Map<string, object[]>}
+ */
+const perfHistory = new Map();
+const MAX_PERF_HISTORY = 60;
 
 /** Notification config (mutable via PUT). */
 let notifyConfig = {
@@ -158,6 +168,36 @@ let notifyConfig = {
   ],
 };
 
+/**
+ * Seed a perf-metrics ring buffer with MAX_PERF_HISTORY plausible past samples.
+ * Each sample is generated independently with genPerf so the sparkline shows
+ * natural variation rather than a flat line.
+ * @param {string} host
+ * @param {string} status  - 'ok' | 'grace' | 'alert'
+ * @param {number} initSessions
+ */
+function seedPerfHistory(host, status, initSessions) {
+  const now = Date.now();
+  const samples = [];
+  for (let i = MAX_PERF_HISTORY - 1; i >= 0; i--) {
+    const p = genPerf(status);
+    const svMemPct = p.mem_total_mb > 0
+      ? (1 - p.mem_avail_mb / p.mem_total_mb) * 100 : 0;
+    // Slightly vary sessions around the initial count so history looks live.
+    const jitterSessions = Math.max(0, Math.round(initSessions + rand(-5, 5)));
+    samples.push({
+      time:       now - i * 30_000,
+      cpu:        p.cpu_pct,
+      mem:        Math.round(svMemPct * 10) / 10,
+      inputDelay: p.input_delay_p95_ms,
+      sessions:   jitterSessions,
+      diskQueue:  p.disk_queue,
+      tcpRetrans: p.tcp_retrans_sec,
+    });
+  }
+  return samples;
+}
+
 /** Initialise server state on first access. */
 function ensureState() {
   if (state.size > 0) return;
@@ -174,8 +214,13 @@ function ensureState() {
       registeredAt: isoAgo(randInt(60 * 24 * 7, 60 * 24 * 30)),
       perf: status === 'off' ? null : genPerf(status),
     });
-    // Seed history
+    // Seed state-transition history
     history.set(def.host, seedHistory(def.host, status));
+    // Seed perf-metrics history (offline servers get an empty buffer)
+    perfHistory.set(
+      def.host,
+      status === 'off' ? [] : seedPerfHistory(def.host, status, sessions),
+    );
   }
 }
 
@@ -302,6 +347,24 @@ function startEvolution() {
         }
       } else {
         s.perf = jitterPerf(s.perf);
+      }
+
+      // Append current perf snapshot to the per-host perf-history ring buffer.
+      if (s.status !== 'off' && s.perf) {
+        const svMemPct = s.perf.mem_total_mb > 0
+          ? (1 - s.perf.mem_avail_mb / s.perf.mem_total_mb) * 100 : 0;
+        const hist = perfHistory.get(host) ?? [];
+        hist.push({
+          time:       now,
+          cpu:        s.perf.cpu_pct,
+          mem:        Math.round(svMemPct * 10) / 10,
+          inputDelay: s.perf.input_delay_p95_ms,
+          sessions:   s.sessions,
+          diskQueue:  s.perf.disk_queue,
+          tcpRetrans: s.perf.tcp_retrans_sec,
+        });
+        if (hist.length > MAX_PERF_HISTORY) hist.splice(0, hist.length - MAX_PERF_HISTORY);
+        perfHistory.set(host, hist);
       }
 
       // Fluctuate sessions
@@ -453,6 +516,12 @@ function handleRequest(method, pathname, body, query = {}) {
     if (changesOnly) entries = entries.filter(e => e.transition);
     const reversed = [...entries].reverse();
     return { status: 200, body: reversed.slice(0, limit) };
+  }
+
+  // GET /api/v1/metrics — returns per-server perf history for sparkline seeding
+  if (method === 'GET' && pathname === '/api/v1/metrics') {
+    const result = Object.fromEntries(perfHistory);
+    return { status: 200, body: result };
   }
 
   // GET /api/v1/notify-config
