@@ -18,7 +18,7 @@ const MAX_METRICS = 60;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '2.0';
+const MOCK_VERSION = '3.0';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -129,11 +129,14 @@ const persistLastUpdated = debounce(
 
 /**
  * @typedef {Object} MetricsSample
- * @property {number} time        - Unix timestamp (ms)
- * @property {number} cpu         - Average CPU % across all servers with perf data
- * @property {number} mem         - Average memory used % across all servers with perf data
- * @property {number} inputDelay  - Average input delay (ms)
- * @property {number} sessions    - Total sessions across all servers
+ * @property {number} time         - Unix timestamp (ms)
+ * @property {number} cpu          - Average CPU % across all servers with perf data
+ * @property {number} mem          - Average memory used % across all servers with perf data
+ * @property {number} inputDelay   - Average input delay p95 (ms)
+ * @property {number} sessions     - Total sessions across all servers
+ * @property {number} pagesPerSec  - Average pages/sec (memory pressure indicator)
+ * @property {number} tcpRetrans   - Average TCP retransmits/sec
+ * @property {number} diskQueue    - Average disk queue length
  */
 
 /**
@@ -256,6 +259,24 @@ const avgInputDelay = $derived.by(() => {
   return perf.reduce((sum, p) => sum + (p.input_delay_p95_ms || 0), 0) / perf.length;
 });
 
+const avgPagesPerSec = $derived.by(() => {
+  const perf = servers.map(s => s.perf).filter(p => p != null);
+  if (perf.length === 0) return 0;
+  return perf.reduce((sum, p) => sum + (p.pages_sec || 0), 0) / perf.length;
+});
+
+const avgTcpRetrans = $derived.by(() => {
+  const perf = servers.map(s => s.perf).filter(p => p != null);
+  if (perf.length === 0) return 0;
+  return perf.reduce((sum, p) => sum + (p.tcp_retrans_sec || 0), 0) / perf.length;
+});
+
+const avgDiskQueue = $derived.by(() => {
+  const perf = servers.map(s => s.perf).filter(p => p != null);
+  if (perf.length === 0) return 0;
+  return perf.reduce((sum, p) => sum + (p.disk_queue || 0), 0) / perf.length;
+});
+
 const totalSessions = $derived.by(() => counters.sessions);
 
 // ---------------------------------------------------------------------------
@@ -303,6 +324,9 @@ export const appState = {
   get avgCpu()            { return avgCpu; },
   get avgMem()            { return avgMem; },
   get avgInputDelay()     { return avgInputDelay; },
+  get avgPagesPerSec()    { return avgPagesPerSec; },
+  get avgTcpRetrans()     { return avgTcpRetrans; },
+  get avgDiskQueue()      { return avgDiskQueue; },
   get totalSessions()     { return totalSessions; },
 };
 

@@ -115,10 +115,19 @@
       const inputDelay = perfSvs.length
         ? perfSvs.reduce((a, sv) => a + (sv.perf.input_delay_p95_ms || 0), 0) / perfSvs.length
         : 0;
+      const pagesPerSec = perfSvs.length
+        ? perfSvs.reduce((a, sv) => a + (sv.perf.pages_sec || 0), 0) / perfSvs.length
+        : 0;
+      const tcpRetrans = perfSvs.length
+        ? perfSvs.reduce((a, sv) => a + (sv.perf.tcp_retrans_sec || 0), 0) / perfSvs.length
+        : 0;
+      const diskQueue = perfSvs.length
+        ? perfSvs.reduce((a, sv) => a + (sv.perf.disk_queue || 0), 0) / perfSvs.length
+        : 0;
       const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
       const ts = Date.now();
-      appendMetricsSample({ time: ts, cpu, mem: memPct, inputDelay, sessions });
+      appendMetricsSample({ time: ts, cpu, mem: memPct, inputDelay, sessions, pagesPerSec, tcpRetrans, diskQueue });
 
       // Per-server ring buffers for per-host sparklines in ServerDetail.
       for (const sv of s) {

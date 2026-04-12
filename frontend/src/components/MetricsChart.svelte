@@ -2,25 +2,38 @@
   import { LayerCake, Svg } from 'layercake';
   import { appState } from '../lib/state.svelte.js';
   import DualAxisChart from './chart/DualAxisChart.svelte';
-  import InputDelayGauge from './InputDelayGauge.svelte';
+  import HealthChart from './chart/HealthChart.svelte';
 
+  // ── Upper chart (LOAD): CPU %, Memory %, Sessions ────────────────────────
   let showCpu      = $state(true);
   let showMem      = $state(true);
-  let showSessions = $state(true);   // active by default
+  let showSessions = $state(true);
 
-  const SERIES = [
+  const LOAD_SERIES = [
     { key: 'cpu',      label: 'CPU %',    color: 'var(--color-accent)', axis: 'left',  lineOnly: false, show: () => showCpu,      toggle: () => { showCpu      = !showCpu;      } },
     { key: 'mem',      label: 'Memory %', color: 'var(--color-green)',  axis: 'left',  lineOnly: false, show: () => showMem,      toggle: () => { showMem      = !showMem;      } },
     { key: 'sessions', label: 'Sessions', color: 'var(--color-red)',    axis: 'right', lineOnly: true,  show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
+  ];
+
+  // ── Lower chart (HEALTH): Input Delay, Pages/sec, Retrans. Seg, Disk Queue
+  let showInputDelay  = $state(true);
+  let showPagesPerSec = $state(true);
+  let showTcpRetrans  = $state(true);
+  let showDiskQueue   = $state(true);
+
+  const HEALTH_SERIES = [
+    { key: 'inputDelay',  label: 'Input Delay',   color: 'var(--color-amber)',  show: () => showInputDelay,  toggle: () => { showInputDelay  = !showInputDelay;  } },
+    { key: 'pagesPerSec', label: 'Pages/sec',     color: 'var(--color-accent)', show: () => showPagesPerSec, toggle: () => { showPagesPerSec = !showPagesPerSec; } },
+    { key: 'tcpRetrans',  label: 'Retrans. Seg',  color: 'var(--color-red)',    show: () => showTcpRetrans,  toggle: () => { showTcpRetrans  = !showTcpRetrans;  } },
+    { key: 'diskQueue',   label: 'Avg Disk Queue', color: 'var(--color-green)',  show: () => showDiskQueue,   toggle: () => { showDiskQueue   = !showDiskQueue;   } },
   ];
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
   let hasRight   = $derived(showSessions);
 
-  // All series normalised to 0–100 for shared rendering scale.
-  // Raw values are carried for the tooltip.
-  let normData = $derived(
+  // LOAD chart — normalise to 0–100; raw values carried for tooltip
+  let loadNormData = $derived(
     history.map((h, i) => ({
       i,
       time:     h.time,
@@ -35,7 +48,7 @@
     }))
   );
 
-  // Right-axis tick labels for the sessions scale
+  // Right-axis tick labels for sessions scale
   let rightTicks = $derived(
     showSessions
       ? [0, 0.25, 0.5, 0.75, 1].map(f => ({
@@ -45,25 +58,52 @@
       : []
   );
 
-  let visible = $derived({
+  let loadVisible = $derived({
     cpu:      showCpu,
     mem:      showMem,
     sessions: showSessions,
   });
 
+  // HEALTH chart — each metric normalised to its own max for shared 0–100% Y-axis
+  const HEALTH_MAX = { inputDelay: 200, pagesPerSec: 500, tcpRetrans: 100, diskQueue: 10 };
+
+  let healthNormData = $derived(
+    history.map((h, i) => ({
+      i,
+      time:        h.time,
+      inputDelay:  Math.min(((h.inputDelay  ?? 0) / HEALTH_MAX.inputDelay)  * 100, 100),
+      pagesPerSec: Math.min(((h.pagesPerSec ?? 0) / HEALTH_MAX.pagesPerSec) * 100, 100),
+      tcpRetrans:  Math.min(((h.tcpRetrans  ?? 0) / HEALTH_MAX.tcpRetrans)  * 100, 100),
+      diskQueue:   Math.min(((h.diskQueue   ?? 0) / HEALTH_MAX.diskQueue)   * 100, 100),
+      raw: {
+        inputDelay:  +(h.inputDelay  ?? 0).toFixed(1),
+        pagesPerSec: +(h.pagesPerSec ?? 0).toFixed(0),
+        tcpRetrans:  +(h.tcpRetrans  ?? 0).toFixed(1),
+        diskQueue:   +(h.diskQueue   ?? 0).toFixed(2),
+      },
+    }))
+  );
+
+  let healthVisible = $derived({
+    inputDelay:  showInputDelay,
+    pagesPerSec: showPagesPerSec,
+    tcpRetrans:  showTcpRetrans,
+    diskQueue:   showDiskQueue,
+  });
+
   const Y_DOMAIN = [0, 100];
-  let lcData = $derived(normData.map(d => ({ x: d.i, y: 50 })));
+  let lcData = $derived(history.map((_, i) => ({ x: i, y: 50 })));
 </script>
 
 <div class="chart-wrap">
   <div class="section-label">Performance Metrics</div>
   <div class="chart-card">
 
-    <p class="chart-desc">Fleet-wide averages. Left axis: CPU &amp; Memory %. Right axis: Sessions count. Input delay gauge shows fleet average. Updated every 30&nbsp;s.</p>
-
+    <!-- ── LOAD: CPU, Memory, Sessions ── -->
+    <div class="sub-label">LOAD</div>
     <div class="chart-panel">
       <div class="chart-toggles">
-        {#each SERIES as s}
+        {#each LOAD_SERIES as s}
           <button
             class="chart-toggle"
             class:active={s.show()}
@@ -82,32 +122,77 @@
         {/each}
       </div>
 
-      <!-- ── Chart + gauge side-by-side, gauge aligned to plot area ── -->
-      <div class="chart-lower">
-        <div class="chart-body">
-          {#if history.length < 2}
-            <div class="chart-placeholder">Collecting data… {history.length}/2</div>
-          {:else}
-            <LayerCake
-              data={lcData}
-              x="x"
-              y="y"
-              yDomain={Y_DOMAIN}
-              padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 32, left: 48 }}
-            >
-              <Svg>
-                <DualAxisChart {normData} {SERIES} {rightTicks} {history} {visible} />
-              </Svg>
-            </LayerCake>
-          {/if}
-        </div>
-
-        <!-- ── Input Delay gauge: narrow column, plot-area aligned ── -->
-        <div class="gauge-panel">
-          <InputDelayGauge value={appState.avgInputDelay} />
-        </div>
+      <div class="chart-body upper-chart">
+        {#if history.length < 2}
+          <div class="chart-placeholder">Collecting data… {history.length}/2</div>
+        {:else}
+          <LayerCake
+            data={lcData}
+            x="x"
+            y="y"
+            yDomain={Y_DOMAIN}
+            padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 8, left: 48 }}
+          >
+            <Svg>
+              <DualAxisChart
+                normData={loadNormData}
+                SERIES={LOAD_SERIES}
+                {rightTicks}
+                {history}
+                visible={loadVisible}
+                showXAxis={false}
+              />
+            </Svg>
+          </LayerCake>
+        {/if}
       </div>
     </div>
+
+    <!-- ── Separator ── -->
+    <div class="chart-separator"></div>
+
+    <!-- ── HEALTH INDICATORS: Input Delay, Pages/sec, Retrans. Seg, Disk Queue ── -->
+    <div class="sub-label">HEALTH INDICATORS</div>
+    <div class="chart-panel">
+      <div class="chart-toggles">
+        {#each HEALTH_SERIES as s}
+          <button
+            class="chart-toggle"
+            class:active={s.show()}
+            style="--sc: {s.color}"
+            aria-pressed={s.show()}
+            onclick={s.toggle}
+          >
+            <span class="t-line" aria-hidden="true"></span>
+            {s.label}
+          </button>
+        {/each}
+      </div>
+
+      <div class="chart-body lower-chart">
+        {#if history.length < 2}
+          <div class="chart-placeholder">Collecting data… {history.length}/2</div>
+        {:else}
+          <LayerCake
+            data={lcData}
+            x="x"
+            y="y"
+            yDomain={Y_DOMAIN}
+            padding={{ top: 16, right: 16, bottom: 32, left: 48 }}
+          >
+            <Svg>
+              <HealthChart
+                normData={healthNormData}
+                SERIES={HEALTH_SERIES}
+                {history}
+                visible={healthVisible}
+              />
+            </Svg>
+          </LayerCake>
+        {/if}
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -132,51 +217,29 @@
     padding: 16px 18px;
   }
 
-  .chart-desc {
-    font-family: 'Work Sans', sans-serif;
-    font-size: 0.72rem;
-    color: var(--color-subtle);
-    margin: 0 0 12px;
-    line-height: 1.5;
+  /* Small sub-heading above each chart section */
+  .sub-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 10px;
+    opacity: 0.65;
   }
 
-  /* ── Layout ── */
+  /* Thin horizontal separator between the two chart sections */
+  .chart-separator {
+    height: 1px;
+    background: var(--color-border);
+    opacity: 0.25;
+    margin: 14px 0;
+  }
+
   .chart-panel {
     display: flex;
     flex-direction: column;
-  }
-
-  /* Chart body + gauge side-by-side, flush (no gap — bar border acts as separator) */
-  .chart-lower {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-  }
-
-  /*
-    Gauge column: fixed narrow width.
-    padding-top must match LayerCake padding.top (16px) so the bar's
-    top aligns with the chart's 100% grid line.
-    No bottom padding — the flex layout in InputDelayGauge fills the rest.
-  */
-  .gauge-panel {
-    flex: 0 0 64px;
-    height: 220px;          /* must match .chart-body height */
-    padding-top: 16px;      /* matches LayerCake padding.top */
-    box-sizing: border-box;
-    overflow: visible;      /* number/label may extend below */
-  }
-
-  @media (max-width: 680px) {
-    .chart-lower {
-      flex-direction: column;
-    }
-    .gauge-panel {
-      flex: 0 0 auto;
-      width: 100%;
-      height: 80px;
-      padding-top: 0;
-    }
   }
 
   /* ── Toggle buttons — neobrutalist ── */
@@ -222,7 +285,7 @@
     color: #fff;
   }
 
-  /* Area series: solid square dot */
+  /* Area series indicator: solid square */
   .t-dot {
     width: 8px;
     height: 8px;
@@ -237,7 +300,7 @@
     border-color: rgba(255, 255, 255, 0.4);
   }
 
-  /* Line-only series: dashed bar indicator */
+  /* Dashed line indicator (Sessions — right-axis series) */
   .t-dash {
     width: 18px;
     height: 3px;
@@ -258,18 +321,38 @@
     );
   }
 
+  /* Solid line indicator (health chart series) */
+  .t-line {
+    width: 18px;
+    height: 3px;
+    border-radius: 1px;
+    background: var(--sc);
+    flex-shrink: 0;
+  }
+
+  .chart-toggle.active .t-line {
+    background: rgba(255, 255, 255, 0.9);
+  }
+
   .t-axis {
     font-size: 0.52rem;
     opacity: 0.55;
     margin-left: -2px;
   }
 
-  /* ── Chart area ── */
+  /* ── Chart areas ── */
   .chart-body {
-    flex: 1 1 0;
-    min-width: 0;
-    height: 220px;
     position: relative;
+  }
+
+  /* Upper (LOAD) ~60% of total chart height */
+  .upper-chart {
+    height: 220px;
+  }
+
+  /* Lower (HEALTH) ~40% of total chart height */
+  .lower-chart {
+    height: 150px;
   }
 
   .chart-placeholder {

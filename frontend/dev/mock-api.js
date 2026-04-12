@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '2.0';
+export const MOCK_VERSION = '3.0';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,10 +180,10 @@ function ensureState() {
 /** Generate realistic perf metrics for a given status. */
 function genPerf(status) {
   const base = {
-    ok:    { cpu: [15, 55], mem: [40, 65], delay: [3, 15],  disk: [0.1, 0.5], pages: [5, 30] },
-    grace: { cpu: [40, 70], mem: [55, 78], delay: [15, 40], disk: [0.3, 1.2], pages: [20, 80] },
-    alert: { cpu: [65, 95], mem: [75, 95], delay: [35, 90], disk: [1.0, 3.0], pages: [60, 200] },
-  }[status] ?? { cpu: [15, 55], mem: [40, 65], delay: [3, 15], disk: [0.1, 0.5], pages: [5, 30] };
+    ok:    { cpu: [15, 55], mem: [40, 65], delay: [3, 15],  disk: [0.1, 1.5],  pages: [5, 45],   retrans: [0, 8]  },
+    grace: { cpu: [40, 70], mem: [55, 78], delay: [15, 40], disk: [1.0, 4.0],  pages: [30, 120], retrans: [5, 30] },
+    alert: { cpu: [65, 95], mem: [75, 95], delay: [35, 90], disk: [3.5, 8.5],  pages: [80, 350], retrans: [20, 75] },
+  }[status] ?? { cpu: [15, 55], mem: [40, 65], delay: [3, 15], disk: [0.1, 1.5], pages: [5, 45], retrans: [0, 8] };
 
   const cpu = rand(...base.cpu);
   const memTotalMb = 16384;
@@ -199,7 +199,7 @@ function genPerf(status) {
     mem_total_mb:        memTotalMb,
     pages_sec:           Math.round(rand(...base.pages) * 10) / 10,
     disk_queue:          Math.round(rand(...base.disk) * 100) / 100,
-    tcp_retrans_sec:     Math.round(rand(0, 3) * 10) / 10,
+    tcp_retrans_sec:     Math.round(rand(...base.retrans) * 10) / 10,
     input_delay_p50_ms:  Math.round(p50 * 10) / 10,
     input_delay_p95_ms:  Math.round(p95 * 10) / 10,
     input_delay_max_ms:  Math.round(max * 10) / 10,
