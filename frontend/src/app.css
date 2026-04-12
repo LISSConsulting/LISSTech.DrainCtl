@@ -246,30 +246,8 @@ input[type="checkbox"]:focus-visible {
   to   { opacity: 0; transform: translateY(12px); }
 }
 
-/* ─── Event log severity classes ──────────────────────────────────────────── */
-.evt {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.74rem;
-  line-height: 1.8;
-  color: #efe0e0;
-  padding: 4px 8px;
-  border-bottom: 1px solid rgba(255, 200, 200, 0.08);
-  border-left: 3px solid transparent;
-  animation: fadeIn 0.3s;
-}
-
+/* ─── Event log entry fade-in animation ───────────────────────────────────── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-3px); }
   to   { opacity: 1; transform: none; }
-}
-
-.evt.sev-ok    { border-left-color: #7dc09a; }
-.evt.sev-grace { border-left-color: #e0a060; background: rgba(224, 160, 96, 0.12); }
-.evt.sev-alert { border-left-color: #e87080; background: rgba(232, 112, 128, 0.15); }
-.evt.sev-off   { border-left-color: #6b5050; opacity: 0.5; }
-.evt.is-transition {
-  border-left-width: 5px;
-  font-weight: 700;
-  background: rgba(163, 71, 91, 0.18);
-  color: #fff;
 }

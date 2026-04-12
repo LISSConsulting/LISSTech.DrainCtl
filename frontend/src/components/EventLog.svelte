@@ -283,16 +283,6 @@
 <style>
   .log-section { margin-bottom: 24px; }
 
-  .section-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--color-muted);
-    margin-bottom: 8px;
-  }
-
   .log-bar {
     display: flex;
     align-items: center;
@@ -340,8 +330,12 @@
     transform: translate(1px, 1px);
   }
 
+  /* ── Log panel ───────────────────────────────────────────────────── */
+
   .log {
-    background: var(--color-code-bg);
+    /* Uses --color-surface so it tracks the theme:
+       light → #f5ebe8 (warm paper), dark → #1f1414 (warm dark). */
+    background: var(--color-surface);
     border: var(--spacing-bw) solid var(--color-border);
     border-radius: var(--radius-default);
     box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
@@ -367,16 +361,16 @@
     padding: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
-    color: color-mix(in srgb, var(--color-code-fg) 75%, transparent);
+    color: var(--color-muted);
     border: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 25%, transparent);
     background: transparent;
     cursor: pointer;
     margin-bottom: 8px;
   }
 
   .log-restore:hover {
-    color: var(--color-code-fg);
+    color: var(--color-fg);
   }
 
   .log-title {
@@ -385,10 +379,10 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: color-mix(in srgb, var(--color-code-fg) 75%, transparent);
+    color: var(--color-muted);
     margin-bottom: 10px;
     padding-bottom: 8px;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 25%, transparent);
   }
 
   /* ── Event entry ─────────────────────────────────────────────────── */
@@ -397,18 +391,21 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.74rem;
     line-height: 1.6;
-    color: var(--color-code-fg);
+    color: var(--color-fg);
     padding: 6px 8px 6px 10px;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-code-fg) 8%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 18%, transparent);
     border-left: 3px solid transparent;
+    animation: fadeIn 0.25s ease;
   }
 
-  .evt.sev-alert     { border-left-color: #e87080; background: rgba(232,112,128,0.07); }
-  .evt.sev-grace     { border-left-color: #e0a060; background: rgba(224,160,96,0.07); }
-  .evt.sev-off       { border-left-color: #6b5050; opacity: 0.6; }
+  .evt.sev-ok    { border-left-color: var(--color-green); }
+  .evt.sev-grace { border-left-color: var(--color-amber); background: color-mix(in srgb, var(--color-amber) 8%, transparent); }
+  .evt.sev-alert { border-left-color: var(--color-red);   background: color-mix(in srgb, var(--color-red)   8%, transparent); }
+  .evt.sev-off   { border-left-color: var(--color-subtle); opacity: 0.65; }
+
   .evt.is-transition { border-left-width: 4px; }
-  .evt.sev-alert.is-transition { background: rgba(232,112,128,0.13); }
-  .evt.sev-grace.is-transition { background: rgba(224,160,96,0.13); }
+  .evt.sev-grace.is-transition { background: color-mix(in srgb, var(--color-amber) 12%, transparent); }
+  .evt.sev-alert.is-transition { background: color-mix(in srgb, var(--color-red)   12%, transparent); }
 
   /* ── Primary row ─────────────────────────────────────────────────── */
 
@@ -420,20 +417,21 @@
   }
 
   .evt-time {
-    color: color-mix(in srgb, var(--color-code-fg) 55%, transparent);
+    color: var(--color-muted);
     flex-shrink: 0;
   }
 
   .evt-host {
-    color: #f0b8c8;
+    color: var(--color-accent);
     font-weight: 700;
     flex-shrink: 0;
   }
 
-  .evt-msg            { color: #c8dfc8; }
-  .evt-msg.sev-alert  { color: #f08090; }
-  .evt-msg.sev-grace  { color: #f0b870; }
-  .evt-msg.sev-off    { color: color-mix(in srgb, var(--color-code-fg) 50%, transparent); }
+  .evt-msg           { color: var(--color-fg); }
+  .evt-msg.sev-ok    { color: var(--color-green); }
+  .evt-msg.sev-alert { color: var(--color-red); }
+  .evt-msg.sev-grace { color: var(--color-amber); }
+  .evt-msg.sev-off   { color: var(--color-subtle); }
 
   /* ── Detail rows ─────────────────────────────────────────────────── */
 
@@ -449,7 +447,7 @@
 
   .evt-metrics {
     margin-top: 2px;
-    opacity: 0.88;
+    opacity: 0.9;
   }
 
   /* Drain-state badge */
@@ -461,14 +459,14 @@
     text-transform: uppercase;
     padding: 1px 7px;
     border-radius: 3px;
-    border: 1.5px solid rgba(255,255,255,0.18);
+    border: 1.5px solid color-mix(in srgb, var(--color-border) 30%, transparent);
     flex-shrink: 0;
   }
 
-  .det-badge.state-ok    { background: rgba(93,138,110,0.35);  color: #8dd4a8; }
-  .det-badge.state-grace { background: rgba(224,160,96,0.25);  color: #f0c078; }
-  .det-badge.state-alert { background: rgba(232,112,128,0.25); color: #f08090; }
-  .det-badge.state-off   { background: rgba(107,80,80,0.35);   color: #c0a8a8; }
+  .det-badge.state-ok    { background: color-mix(in srgb, var(--color-green)  18%, var(--color-surface)); color: var(--color-green); }
+  .det-badge.state-grace { background: color-mix(in srgb, var(--color-amber)  18%, var(--color-surface)); color: var(--color-amber); }
+  .det-badge.state-alert { background: color-mix(in srgb, var(--color-red)    18%, var(--color-surface)); color: var(--color-red); }
+  .det-badge.state-off   { background: color-mix(in srgb, var(--color-subtle) 18%, var(--color-surface)); color: var(--color-muted); }
 
   /* Key–value pairs */
   .det-kv {
@@ -483,23 +481,23 @@
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-code-fg) 45%, transparent);
+    color: var(--color-subtle);
   }
 
   .det-v {
     font-size: 0.72rem;
     font-weight: 600;
-    color: color-mix(in srgb, var(--color-code-fg) 85%, transparent);
+    color: var(--color-fg);
   }
 
   .det-dim {
-    opacity: 0.4;
+    color: var(--color-subtle);
   }
 
   /* Metric value severity colouring */
-  .det-v.val-ok   { color: #8dd4a8; }
-  .det-v.val-warn { color: #f0c078; }
-  .det-v.val-crit { color: #f08090; }
+  .det-v.val-ok   { color: var(--color-green); }
+  .det-v.val-warn { color: var(--color-amber); }
+  .det-v.val-crit { color: var(--color-red); }
 
   /* ── Empty state ─────────────────────────────────────────────────── */
 
