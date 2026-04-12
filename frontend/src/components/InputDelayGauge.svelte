@@ -1,51 +1,55 @@
 <script>
+  import { onDestroy, untrack } from 'svelte';
+
   /** @type {{ value?: number }} */
   let { value = 0 } = $props();
 
-  // ── Geometry constants ──────────────────────────────────────────────────────
-  const CX  = 130;   // arc centre x
-  const CY  = 120;   // arc centre y (= arc endpoint baseline)
-  const R   = 88;    // arc centre radius
-  const TW  = 22;    // track stroke width
+  // ── Constants ──────────────────────────────────────────────────────────────
+  const N         = 20;          // number of LED segments
   const MAX_MS    = 200;
-  const GREEN_END =  50;
+  const GREEN_END = 50;
   const AMBER_END = 150;
+  const STEP      = MAX_MS / N;  // 10 ms per segment
 
-  /**
-   * SVG arc path along the UPPER semicircle from fraction f1 to f2.
-   * f=0 → left endpoint (0 ms), f=1 → right endpoint (MAX_MS).
-   * Angles: θ = π·(1−f), sweep-flag=0 draws the upper (counterclockwise) arc.
-   * @param {number} f1 @param {number} f2
-   */
-  function arc(f1, f2) {
-    const t1 = Math.PI * (1 - f1);
-    const t2 = Math.PI * (1 - f2);
-    const x1 = (CX + R * Math.cos(t1)).toFixed(2);
-    const y1 = (CY - R * Math.sin(t1)).toFixed(2);
-    const x2 = (CX + R * Math.cos(t2)).toFixed(2);
-    const y2 = (CY - R * Math.sin(t2)).toFixed(2);
-    return `M ${x1} ${y1} A ${R} ${R} 0 0 0 ${x2} ${y2}`;
+  const SEG_H  = 12;   // segment height (SVG px)
+  const GAP    = 3;    // gap between segments
+  const BAR_W  = 36;   // bar width
+  const PAD_X  = 7;    // horizontal padding inside panel
+  const PAD_Y  = 8;    // vertical padding inside panel
+
+  const BAR_H  = N * SEG_H + (N - 1) * GAP;   // 297 px
+  const SVG_W  = BAR_W + PAD_X * 2;            // 50 px
+  const SVG_H  = BAR_H + PAD_Y * 2;            // 313 px
+
+  // ── Segment metadata (static — position & zone never change) ──────────────
+  /** @param {number} i  0 = top (red), N-1 = bottom (green) */
+  function segZone(i) {
+    const mid = (N - i - 0.5) * STEP;
+    if (mid >= AMBER_END) return /** @type {'red'}   */ ('red');
+    if (mid >= GREEN_END) return /** @type {'amber'} */ ('amber');
+    return                       /** @type {'green'} */ ('green');
   }
 
-  // Static zone arcs (computed once)
-  const BG_ARC    = arc(0,                   1);
-  const GREEN_ARC = arc(0,                   GREEN_END / MAX_MS);
-  const AMBER_ARC = arc(GREEN_END / MAX_MS,  AMBER_END / MAX_MS);
-  const RED_ARC   = arc(AMBER_END / MAX_MS,  1);
+  const COLOR_VAR = /** @type {Record<string,string>} */ ({
+    red:   'var(--color-red)',
+    amber: 'var(--color-amber)',
+    green: 'var(--color-green)',
+  });
 
-  // ── Reactive state ──────────────────────────────────────────────────────────
-  let frac      = $derived(Math.min(1, Math.max(0, value / MAX_MS)));
-  let theta     = $derived(Math.PI * (1 - frac));
+  const GRAD_ID = /** @type {Record<string,string>} */ ({
+    red:   'vug-r',
+    amber: 'vug-a',
+    green: 'vug-g',
+  });
 
-  // Needle tip sits just inside the inner edge of the track
-  let tipX  = $derived((CX + (R - TW / 2 - 2) * Math.cos(theta)).toFixed(2));
-  let tipY  = $derived((CY - (R - TW / 2 - 2) * Math.sin(theta)).toFixed(2));
-  // Needle tail extends 12 px past the pivot in the opposite direction
-  let baseX = $derived((CX - 12 * Math.cos(theta)).toFixed(2));
-  let baseY = $derived((CY + 12 * Math.sin(theta)).toFixed(2));
+  const SEGS = Array.from({ length: N }, (_, i) => ({
+    i,
+    y: PAD_Y + i * (SEG_H + GAP),
+    zone: segZone(i),
+  }));
 
-  // Progress arc (0 → current value)
-  let activeArc = $derived(frac > 0.005 ? arc(0, frac) : null);
+  // ── Reactive derived values ────────────────────────────────────────────────
+  let activeCount = $derived(Math.round(Math.min(N, Math.max(0, value / STEP))));
 
   let zoneColor = $derived(
     value < GREEN_END ? 'var(--color-green)' :
@@ -55,136 +59,186 @@
 
   let displayVal = $derived(`${Math.round(value)}ms`);
 
-  // Endpoint labels: placed just outside and below each arc tip
-  const L0_X   = CX - R - 8;    // left  of left  endpoint
-  const L200_X = CX + R + 8;    // right of right endpoint
-  const L_Y    = CY + 16;       // below endpoint baseline
+  // ── Peak hold ──────────────────────────────────────────────────────────────
+  let peak   = $state(0);
+  let _timer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+  let _raf   = /** @type {number|null} */ (null);
+
+  function _cancelDecay() {
+    if (_timer !== null) { clearTimeout(_timer);        _timer = null; }
+    if (_raf   !== null) { cancelAnimationFrame(_raf);  _raf   = null; }
+  }
+
+  function _startDecay(fromPeak) {
+    const HOLD_MS  = 2000;
+    const DECAY_MS = 2500;
+
+    _timer = setTimeout(() => {
+      _timer = null;
+      const t0 = performance.now();
+
+      const tick = (/** @type {number} */ now) => {
+        const t      = Math.min(1, (now - t0) / DECAY_MS);
+        const eased  = 1 - (1 - t) * (1 - t);          // ease-in-quad for natural fall
+        const next   = Math.max(value, fromPeak * (1 - eased));
+        peak = next;
+
+        if (t < 1 && next > value) {
+          _raf = requestAnimationFrame(tick);
+        } else {
+          _raf = null;
+          peak = value;
+        }
+      };
+
+      _raf = requestAnimationFrame(tick);
+    }, HOLD_MS);
+  }
+
+  $effect(() => {
+    const v = value;
+    if (v >= untrack(() => peak)) {
+      _cancelDecay();
+      peak = v;
+      _startDecay(v);
+    }
+  });
+
+  onDestroy(_cancelDecay);
+
+  // Peak segment: topmost lit segment at peak value. -1 = no peak shown.
+  let peakActive = $derived(Math.round(Math.min(N, Math.max(0, peak / STEP))));
+  let peakIdx    = $derived(peakActive > 0 ? N - peakActive : -1);
 </script>
 
-<div class="gauge-wrap">
-  <div class="gauge-card">
-    <!--
-      viewBox "0 0 260 178"
-      Content bounds:
-        x: L0_X "0" label (text-anchor end) ≈ 28 … L200_X "200" (text-anchor start) ≈ 248 — within 0–260
-        y: top of track outer = CY − (R + TW/2) = 120 − 99 = 21 … label baseline 170 — within 0–178
-    -->
-    <svg viewBox="0 0 260 178"
-         role="img"
-         aria-label="Fleet average input delay: {displayVal}">
+<div class="vu">
+  <!-- LED panel -->
+  <svg
+    class="vu-bar"
+    viewBox="0 0 {SVG_W} {SVG_H}"
+    width={SVG_W}
+    height={SVG_H}
+    role="img"
+    aria-label="Fleet average input delay: {displayVal}"
+    aria-valuenow={Math.round(value)}
+    aria-valuemin="0"
+    aria-valuemax={MAX_MS}
+  >
+    <defs>
+      <!--
+        Per-segment gradients use objectBoundingBox by default, so each rect
+        gets its own top-to-bottom gradient regardless of absolute position.
+        The lighter-top / darker-bottom gives the "lit LED" depth effect.
+      -->
+      <linearGradient id="vug-g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="var(--color-green)" stop-opacity="1"    />
+        <stop offset="100%" stop-color="var(--color-green)" stop-opacity="0.68" />
+      </linearGradient>
+      <linearGradient id="vug-a" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="var(--color-amber)" stop-opacity="1"    />
+        <stop offset="100%" stop-color="var(--color-amber)" stop-opacity="0.68" />
+      </linearGradient>
+      <linearGradient id="vug-r" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="var(--color-red)"   stop-opacity="1"    />
+        <stop offset="100%" stop-color="var(--color-red)"   stop-opacity="0.68" />
+      </linearGradient>
+    </defs>
 
-      <!-- ── Background track (full gray semicircle) ── -->
-      <path d={BG_ARC}
-        fill="none"
-        stroke="var(--color-surface)"
-        stroke-width={TW}
-        stroke-linecap="butt" />
+    <!-- Dark panel background -->
+    <rect x="0" y="0" width={SVG_W} height={SVG_H} fill="#0c0c0e" rx="4" />
 
-      <!-- ── Muted zone arcs ── -->
-      <path d={GREEN_ARC}
-        fill="none" stroke="var(--color-green)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
-      <path d={AMBER_ARC}
-        fill="none" stroke="var(--color-amber)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
-      <path d={RED_ARC}
-        fill="none" stroke="var(--color-red)"
-        stroke-width={TW} stroke-linecap="butt" opacity="0.35" />
+    <!-- Segment rows -->
+    {#each SEGS as { i, y, zone }}
+      {@const active = i >= N - activeCount}
+      {@const isPeak = i === peakIdx && !active}
+      {@const cvar   = COLOR_VAR[zone]}
+      {@const gid    = GRAD_ID[zone]}
 
-      <!-- ── Active fill (0 → current value, thinner, full opacity) ── -->
-      {#if activeArc}
-        <path d={activeArc}
-          fill="none" stroke={zoneColor}
-          stroke-width={TW - 6} stroke-linecap="butt" />
+      <!-- Unlit background: very faint zone colour so structure is always visible -->
+      <rect
+        x={PAD_X} y={y}
+        width={BAR_W} height={SEG_H}
+        fill={cvar} opacity="0.10"
+        rx="1.5"
+      />
+
+      {#if active || isPeak}
+        <!-- Lit segment with gradient depth -->
+        <rect
+          x={PAD_X} y={y}
+          width={BAR_W} height={SEG_H}
+          fill="url(#{gid})"
+          rx="1.5"
+        />
+        <!-- Subtle surface highlight: thin bright stripe at very top of segment -->
+        <rect
+          x={PAD_X + 1} y={y + 1}
+          width={BAR_W - 2} height="2"
+          fill="white" opacity="0.18"
+          rx="0.5"
+        />
       {/if}
 
-      <!-- ── Zone-boundary tick marks ── -->
-      {#each [0, GREEN_END, AMBER_END, MAX_MS] as ms}
-        {@const tf = ms / MAX_MS}
-        {@const tt = Math.PI * (1 - tf)}
-        {@const ix = (CX + (R - TW / 2) * Math.cos(tt)).toFixed(2)}
-        {@const iy = (CY - (R - TW / 2) * Math.sin(tt)).toFixed(2)}
-        {@const ox = (CX + (R + TW / 2) * Math.cos(tt)).toFixed(2)}
-        {@const oy = (CY - (R + TW / 2) * Math.sin(tt)).toFixed(2)}
-        <line x1={ix} y1={iy} x2={ox} y2={oy}
-          stroke="var(--color-border)" stroke-width="2" opacity="0.5" />
-      {/each}
+      {#if isPeak}
+        <!--
+          Peak hold marker: full-brightness segment with a crisp white accent
+          stripe at its top edge — the "floating dot" above the main bar.
+        -->
+        <rect
+          x={PAD_X + 1} y={y + 0.5}
+          width={BAR_W - 2} height="2.5"
+          fill="white" opacity="0.70"
+          rx="0.5"
+        />
+        <rect
+          x={PAD_X + 1} y={y + 0.5}
+          width={BAR_W - 2} height="2.5"
+          fill={cvar} opacity="0.60"
+          rx="0.5"
+        />
+      {/if}
+    {/each}
+  </svg>
 
-      <!-- ── Arc endpoint labels ── -->
-      <text x={L0_X}   y={L_Y} class="g-tick" text-anchor="end">0</text>
-      <text x={L200_X} y={L_Y} class="g-tick" text-anchor="start">200</text>
-
-      <!-- ── Needle ── -->
-      <line
-        x1={baseX} y1={baseY}
-        x2={tipX}  y2={tipY}
-        stroke="var(--color-fg)" stroke-width="3.5" stroke-linecap="round" />
-      <!-- Pivot ring -->
-      <circle cx={CX} cy={CY} r="8"
-        fill="var(--color-card)" stroke="var(--color-border)" stroke-width="2.5" />
-      <circle cx={CX} cy={CY} r="4" fill="var(--color-fg)" />
-
-      <!-- ── Value readout ── -->
-      <text x={CX} y={CY + 34} class="g-val" text-anchor="middle">{displayVal}</text>
-
-      <!-- ── Fleet label ── -->
-      <text x={CX} y={CY + 52} class="g-label" text-anchor="middle">FLEET AVG INPUT DELAY</text>
-
-    </svg>
-  </div>
+  <!-- Digital readout -->
+  <div class="vu-num" style:color={zoneColor}>{displayVal}</div>
+  <div class="vu-lbl">INPUT DELAY</div>
 </div>
 
 <style>
-  .gauge-wrap {
-    width: 100%;
+  .vu {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: 10px;
+    padding: 4px 0 2px;
   }
 
-  .gauge-card {
-    background: var(--color-card);
-    border: var(--spacing-bw) solid var(--color-border);
-    box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
-    border-radius: var(--radius-default);
-    padding: 12px 10px 10px;
-    width: 100%;
-    box-sizing: border-box;
-    /* Prevent the box-shadow from leaking outside gauge-panel */
-    overflow: visible;
-  }
-
-  svg {
+  .vu-bar {
     display: block;
-    width: 100%;
+    /* Fixed intrinsic size; scales down if container is narrower */
+    max-width: 100%;
     height: auto;
-    /* All content lives inside the viewBox — no overflow needed */
-    overflow: hidden;
   }
 
-  .g-val {
+  .vu-num {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 30px;
+    font-size: 1.85rem;
     font-weight: 800;
-    fill: var(--color-fg);
-    pointer-events: none;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    /* Glow in zone colour — gives the "lit display" instrument feel */
+    text-shadow: 0 0 14px currentColor;
+    transition: color 0.15s ease, text-shadow 0.15s ease;
   }
 
-  .g-label {
+  .vu-lbl {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 7px;
+    font-size: 0.44rem;
     font-weight: 700;
-    letter-spacing: 0.11em;
+    letter-spacing: 0.24em;
     text-transform: uppercase;
-    fill: var(--color-muted);
-    pointer-events: none;
-  }
-
-  .g-tick {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    font-weight: 700;
-    fill: var(--color-muted);
-    pointer-events: none;
+    color: var(--color-muted);
+    margin-top: -2px;
   }
 </style>
