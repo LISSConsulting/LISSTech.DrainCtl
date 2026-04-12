@@ -229,7 +229,7 @@
             {#if expandedHost === srv.host}
               <tr class="detail-row">
                 <td colspan="11">
-                  <ServerDetail server={srv} />
+                  <ServerDetail server={srv} onhistoryclick={onhistoryclick} onremove={removeServer} />
                 </td>
               </tr>
             {/if}

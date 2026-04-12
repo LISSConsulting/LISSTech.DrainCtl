@@ -337,6 +337,7 @@ function serverView(host) {
     sessions_disconnected: s.sessionsDisconnected ?? 0,
     max_sessions: SERVERS.find(d => d.host === host)?.maxSessions ?? 0,
     state_duration_seconds: stateDurationSeconds,
+    state_changed_at: s.stateChangedAt,
     version: s.status === 'off' ? '' : '26.100.9',
     registered_at: s.registeredAt,
     last_seen: s.status === 'off' ? isoAgo(10) : isoNow(),

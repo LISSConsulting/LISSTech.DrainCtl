@@ -180,6 +180,8 @@
             mem:        svMemPct,
             inputDelay: sv.perf.input_delay_p95_ms,
             sessions:   sv.sessions ?? 0,
+            diskQueue:  sv.perf.disk_queue ?? 0,
+            tcpRetrans: sv.perf.tcp_retrans_sec ?? 0,
           });
         }
       }

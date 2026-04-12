@@ -14,6 +14,7 @@
       x="x"
       y="y"
       yDomain={[0, null]}
+      yRange={({ height }) => [height, 0]}
       padding={{ top: 2, right: 2, bottom: 2, left: 2 }}
     >
       <Svg>
