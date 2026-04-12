@@ -1,6 +1,7 @@
 <script>
   import { LayerCake, Svg } from 'layercake';
   import { appState } from '../lib/state.svelte.js';
+  import { resolveThresholds } from '../lib/thresholds.js';
   import DualAxisChart from './chart/DualAxisChart.svelte';
   import MiniHealthChart from './chart/MiniHealthChart.svelte';
 
@@ -58,6 +59,12 @@
       fmt:        v => v.toFixed(2),
     },
   ];
+
+  // ── Config-derived thresholds ─────────────────────────────────────────────
+  // inputDelay thresholds come from the alert sensitivity config.
+  // Pages/sec, TCP Retrans, Disk Queue have no config knobs yet — use DEFAULTS.
+  let perfCfg          = $derived(appState.config?.performance ?? null);
+  let inputDelayThresh = $derived(resolveThresholds('inputDelay', perfCfg));
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
@@ -168,7 +175,7 @@
           label={mc.label}
           unit={mc.unit}
           yMax={mc.yMax}
-          thresholds={mc.thresholds}
+          thresholds={mc.key === 'inputDelay' ? inputDelayThresh : mc.thresholds}
           color={mc.color}
           fmt={mc.fmt}
         />

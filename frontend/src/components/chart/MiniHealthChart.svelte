@@ -178,16 +178,6 @@
           >{tick.label}</text>
         {/each}
 
-        <!-- ── Threshold marker lines ── -->
-        <line
-          x1={PL} y1={yCrit.toFixed(1)} x2={PL + cw} y2={yCrit.toFixed(1)}
-          stroke="var(--color-red)" stroke-width="1" stroke-dasharray="3,2" opacity="0.55"
-        />
-        <line
-          x1={PL} y1={yWarn.toFixed(1)} x2={PL + cw} y2={yWarn.toFixed(1)}
-          stroke="var(--color-amber)" stroke-width="1" stroke-dasharray="3,2" opacity="0.55"
-        />
-
         <!-- ── Axis borders (left + bottom) ── -->
         <line x1={PL} y1={yChartTop} x2={PL} y2={yChartBot}
           stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
@@ -210,6 +200,16 @@
             stroke-linecap="round"
           />
         {/if}
+
+        <!-- ── Threshold marker lines — rendered AFTER area fill so they sit in foreground ── -->
+        <line
+          x1={PL} y1={yCrit.toFixed(1)} x2={PL + cw} y2={yCrit.toFixed(1)}
+          stroke="var(--color-red)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"
+        />
+        <line
+          x1={PL} y1={yWarn.toFixed(1)} x2={PL + cw} y2={yWarn.toFixed(1)}
+          stroke="var(--color-amber)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"
+        />
 
         <!-- ── X-axis time labels ── -->
         {#each xLabels as xl}
