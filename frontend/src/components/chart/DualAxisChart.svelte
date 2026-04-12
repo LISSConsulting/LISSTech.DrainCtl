@@ -2,9 +2,9 @@
   import { getContext } from 'svelte';
 
   /**
-   * @typedef {{ i: number, time: number, cpu: number, mem: number, inputDelay: number, sessions: number,
-   *             raw: { cpu: number, mem: number, inputDelay: number, sessions: number } }} NormPoint
-   * @typedef {{ key: string, label: string, color: string, axis: string }} SeriesDef
+   * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
+   *             raw: { cpu: number, mem: number, sessions: number } }} NormPoint
+   * @typedef {{ key: string, label: string, color: string, axis: string, lineOnly?: boolean }} SeriesDef
    * @typedef {{ pct: number, label: string }} RightTick
    */
 
@@ -15,13 +15,13 @@
 
   const GRID_PCTS = [0, 25, 50, 75, 100];
 
-  // Per-series stroke config — bold, fully opaque (neobrutalist stacked area style)
-  /** @type {Record<string, { width: number }>} */
+  // Per-series stroke config.
+  // lineOnly series get a bold dashed line; area series get solid strokes.
+  /** @type {Record<string, { width: number, dash?: string }>} */
   const STROKE_CFG = {
-    cpu:        { width: 4   },
-    mem:        { width: 3.5 },
-    inputDelay: { width: 3   },
-    sessions:   { width: 3.5 },
+    cpu:      { width: 4   },
+    mem:      { width: 3.5 },
+    sessions: { width: 4,   dash: '10,5' },
   };
 
   // X-axis labels — up to 5 evenly spaced ticks
@@ -59,7 +59,7 @@
     return out;
   })());
 
-  // Series sorted highest-value-first so large areas render behind small ones (stacking order)
+  // Area series sorted highest-value-first so large areas render behind small ones
   let areaRenderOrder = $derived((() => {
     const last = normData[normData.length - 1];
     if (!last) return SERIES;
@@ -86,18 +86,17 @@
   const TIP_W    = 160;
   const TIP_PAD  = 8;
   const TIP_LNSP = 17;
-  const TIP_HDR  = 20; // header row height
+  const TIP_HDR  = 20;
 
-  /** @param {NormPoint} d @param {SeriesDef[]} vis */
+  /** @param {SeriesDef[]} vis */
   function tipHeight(vis) {
     return TIP_HDR + vis.length * TIP_LNSP + TIP_PAD;
   }
 
   /** @param {NormPoint} d @param {SeriesDef} s */
   function fmtVal(d, s) {
-    if (s.key === 'cpu')        return `${d.raw.cpu}%`;
-    if (s.key === 'mem')        return `${d.raw.mem}%`;
-    if (s.key === 'inputDelay') return `${d.raw.inputDelay}ms`;
+    if (s.key === 'cpu') return `${d.raw.cpu}%`;
+    if (s.key === 'mem') return `${d.raw.mem}%`;
     return `${d.raw.sessions}`;
   }
 </script>
@@ -134,12 +133,14 @@
 <line x1={0} y1={$height} x2={$width} y2={$height}
   stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 
-<!-- ── Series: areas largest-first (behind), then bold lines on top ── -->
+<!-- ── Area fills: non-lineOnly series only, largest first ── -->
 {#each areaRenderOrder as s}
-  {#if visible[s.key] && allPaths[s.key]?.line}
+  {#if !s.lineOnly && visible[s.key] && allPaths[s.key]?.line}
     <path d={allPaths[s.key].area} fill={s.color} fill-opacity="1" />
   {/if}
 {/each}
+
+<!-- ── Stroke lines: all visible series ── -->
 {#each SERIES as s}
   {#if visible[s.key] && allPaths[s.key]?.line}
     {@const cfg = STROKE_CFG[s.key] ?? { width: 3 }}
@@ -150,6 +151,7 @@
       fill="none"
       stroke-linejoin="round"
       stroke-linecap="round"
+      stroke-dasharray={cfg.dash ?? ''}
     />
   {/if}
 {/each}
@@ -206,15 +208,23 @@
 
   <!-- Series value rows -->
   {#each vis as s, si}
-    <!-- Color swatch -->
-    <rect
-      x={tx + TIP_PAD} y={ty + TIP_HDR + si * TIP_LNSP + 2}
-      width={6} height={6}
-      fill={s.color}
-      stroke="var(--color-border)" stroke-width="1"
-    />
+    <!-- Color swatch: square for areas, dash for line-only -->
+    {#if s.lineOnly}
+      <line
+        x1={tx + TIP_PAD} y1={ty + TIP_HDR + si * TIP_LNSP + 5}
+        x2={tx + TIP_PAD + 12} y2={ty + TIP_HDR + si * TIP_LNSP + 5}
+        stroke={s.color} stroke-width="2.5" stroke-dasharray="4,2"
+      />
+    {:else}
+      <rect
+        x={tx + TIP_PAD} y={ty + TIP_HDR + si * TIP_LNSP + 2}
+        width={6} height={6}
+        fill={s.color}
+        stroke="var(--color-border)" stroke-width="1"
+      />
+    {/if}
     <text
-      x={tx + TIP_PAD + 10}
+      x={tx + TIP_PAD + 16}
       y={ty + TIP_HDR + si * TIP_LNSP + 10}
       class="tip-val"
     >{s.label}: <tspan font-weight="700" fill={s.color}>{fmtVal(d, s)}</tspan></text>

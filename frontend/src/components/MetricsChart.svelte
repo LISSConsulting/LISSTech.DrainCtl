@@ -2,71 +2,55 @@
   import { LayerCake, Svg } from 'layercake';
   import { appState } from '../lib/state.svelte.js';
   import DualAxisChart from './chart/DualAxisChart.svelte';
+  import InputDelayGauge from './InputDelayGauge.svelte';
 
   let showCpu      = $state(true);
   let showMem      = $state(true);
-  let showDelay    = $state(false);
-  let showSessions = $state(false);
-
-  const MAX_DELAY_MS = 200;
+  let showSessions = $state(true);   // active by default
 
   const SERIES = [
-    { key: 'cpu',        label: 'CPU %',       color: 'var(--color-accent)', axis: 'left',  show: () => showCpu,      toggle: () => { showCpu      = !showCpu;      } },
-    { key: 'mem',        label: 'Memory %',    color: 'var(--color-green)',  axis: 'left',  show: () => showMem,      toggle: () => { showMem      = !showMem;      } },
-    { key: 'inputDelay', label: 'Input Delay', color: 'var(--color-amber)', axis: 'right', show: () => showDelay,    toggle: () => { showDelay    = !showDelay;    } },
-    { key: 'sessions',   label: 'Sessions',    color: 'var(--color-red)',   axis: 'right', show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
+    { key: 'cpu',      label: 'CPU %',    color: 'var(--color-accent)', axis: 'left',  lineOnly: false, show: () => showCpu,      toggle: () => { showCpu      = !showCpu;      } },
+    { key: 'mem',      label: 'Memory %', color: 'var(--color-green)',  axis: 'left',  lineOnly: false, show: () => showMem,      toggle: () => { showMem      = !showMem;      } },
+    { key: 'sessions', label: 'Sessions', color: 'var(--color-red)',    axis: 'right', lineOnly: true,  show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
   ];
 
   let history    = $derived(appState.metricsHistory);
   let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
-  let hasRight   = $derived(showDelay || showSessions);
+  let hasRight   = $derived(showSessions);
 
-  // All series normalised to 0–100 for a shared rendering scale.
-  // Raw values are carried along for the tooltip.
+  // All series normalised to 0–100 for shared rendering scale.
+  // Raw values are carried for the tooltip.
   let normData = $derived(
     history.map((h, i) => ({
       i,
-      time:       h.time,
-      cpu:        Math.min(h.cpu ?? 0, 100),
-      mem:        Math.min(h.mem ?? 0, 100),
-      inputDelay: Math.min((h.inputDelay ?? 0) / MAX_DELAY_MS * 100, 100),
-      sessions:   ((h.sessions ?? 0) / sessionMax) * 100,
+      time:     h.time,
+      cpu:      Math.min(h.cpu ?? 0, 100),
+      mem:      Math.min(h.mem ?? 0, 100),
+      sessions: ((h.sessions ?? 0) / sessionMax) * 100,
       raw: {
-        cpu:        +(h.cpu ?? 0).toFixed(1),
-        mem:        +(h.mem ?? 0).toFixed(1),
-        inputDelay: +(h.inputDelay ?? 0).toFixed(1),
-        sessions:   h.sessions ?? 0,
+        cpu:      +(h.cpu ?? 0).toFixed(1),
+        mem:      +(h.mem ?? 0).toFixed(1),
+        sessions: h.sessions ?? 0,
       },
     }))
   );
 
-  // Right-axis tick labels: delay takes priority over sessions.
-  let rightTicks = $derived((() => {
-    if (showDelay) {
-      return [0, 50, 100, 150, 200].map(ms => ({
-        pct:   (ms / MAX_DELAY_MS) * 100,
-        label: String(ms),
-      }));
-    }
-    if (showSessions) {
-      return [0, 0.25, 0.5, 0.75, 1].map(f => ({
-        pct:   f * 100,
-        label: Math.round(f * sessionMax).toString(),
-      }));
-    }
-    return [];
-  })());
+  // Right-axis tick labels for the sessions scale
+  let rightTicks = $derived(
+    showSessions
+      ? [0, 0.25, 0.5, 0.75, 1].map(f => ({
+          pct:   f * 100,
+          label: Math.round(f * sessionMax).toString(),
+        }))
+      : []
+  );
 
-  // Passed as a plain reactive object so DualAxisChart can use visible[key]
-  // without having to call closures, keeping reactivity unambiguous in Svelte 5.
   let visible = $derived({
-    cpu:        showCpu,
-    mem:        showMem,
-    inputDelay: showDelay,
-    sessions:   showSessions,
+    cpu:      showCpu,
+    mem:      showMem,
+    sessions: showSessions,
   });
 
-  // Minimal dataset for LayerCake — provides responsive scaling context.
   const Y_DOMAIN = [0, 100];
   let lcData = $derived(normData.map(d => ({ x: d.i, y: 50 })));
 </script>
@@ -75,42 +59,57 @@
   <div class="section-label">Performance Metrics</div>
   <div class="chart-card">
 
-    <p class="chart-desc">Fleet-wide averages across all reporting servers. Left axis: percentage (0–100%). Right axis: absolute values — toggle Input Delay or Sessions to activate. Updated every 30&nbsp;s.</p>
+    <p class="chart-desc">Fleet-wide averages. Left axis: CPU &amp; Memory %. Right axis: Sessions count. Input delay gauge shows fleet average. Updated every 30&nbsp;s.</p>
 
-    <div class="chart-toggles">
-      {#each SERIES as s}
-        <button
-          class="chart-toggle"
-          class:active={s.show()}
-          style="--sc: {s.color}"
-          aria-pressed={s.show()}
-          onclick={s.toggle}
-        >
-          <span class="t-dot"></span>
-          {s.label}
-          {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
-        </button>
-      {/each}
+    <div class="perf-layout">
+
+      <!-- ── LEFT: main chart ── -->
+      <div class="chart-panel">
+        <div class="chart-toggles">
+          {#each SERIES as s}
+            <button
+              class="chart-toggle"
+              class:active={s.show()}
+              style="--sc: {s.color}"
+              aria-pressed={s.show()}
+              onclick={s.toggle}
+            >
+              {#if s.lineOnly}
+                <span class="t-dash" aria-hidden="true"></span>
+              {:else}
+                <span class="t-dot" aria-hidden="true"></span>
+              {/if}
+              {s.label}
+              {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
+            </button>
+          {/each}
+        </div>
+
+        <div class="chart-body">
+          {#if history.length < 2}
+            <div class="chart-placeholder">Collecting data… {history.length}/2</div>
+          {:else}
+            <LayerCake
+              data={lcData}
+              x="x"
+              y="y"
+              yDomain={Y_DOMAIN}
+              padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 32, left: 48 }}
+            >
+              <Svg>
+                <DualAxisChart {normData} {SERIES} {rightTicks} {history} {visible} />
+              </Svg>
+            </LayerCake>
+          {/if}
+        </div>
+      </div>
+
+      <!-- ── RIGHT: Input Delay gauge ── -->
+      <div class="gauge-panel">
+        <InputDelayGauge value={appState.avgInputDelay} />
+      </div>
+
     </div>
-
-    <div class="chart-body">
-      {#if history.length < 2}
-        <div class="chart-placeholder">Collecting data… {history.length}/2</div>
-      {:else}
-        <LayerCake
-          data={lcData}
-          x="x"
-          y="y"
-          yDomain={Y_DOMAIN}
-          padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 32, left: 48 }}
-        >
-          <Svg>
-            <DualAxisChart {normData} {SERIES} {rightTicks} {history} {visible} />
-          </Svg>
-        </LayerCake>
-      {/if}
-    </div>
-
   </div>
 </div>
 
@@ -141,6 +140,38 @@
     color: var(--color-subtle);
     margin: 0 0 12px;
     line-height: 1.5;
+  }
+
+  /* ── Side-by-side layout ── */
+  .perf-layout {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .chart-panel {
+    flex: 65 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gauge-panel {
+    flex: 35 1 0;
+    min-width: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  @media (max-width: 680px) {
+    .perf-layout {
+      flex-direction: column;
+    }
+    .gauge-panel {
+      min-width: 0;
+      min-height: 200px;
+    }
   }
 
   /* ── Toggle buttons — neobrutalist ── */
@@ -186,6 +217,7 @@
     color: #fff;
   }
 
+  /* Area series: solid square dot */
   .t-dot {
     width: 8px;
     height: 8px;
@@ -200,6 +232,27 @@
     border-color: rgba(255, 255, 255, 0.4);
   }
 
+  /* Line-only series: dashed bar indicator */
+  .t-dash {
+    width: 18px;
+    height: 3px;
+    border-radius: 0;
+    background: repeating-linear-gradient(
+      to right,
+      var(--sc) 0px, var(--sc) 7px,
+      transparent 7px, transparent 11px
+    );
+    flex-shrink: 0;
+  }
+
+  .chart-toggle.active .t-dash {
+    background: repeating-linear-gradient(
+      to right,
+      rgba(255,255,255,0.9) 0px, rgba(255,255,255,0.9) 7px,
+      transparent 7px, transparent 11px
+    );
+  }
+
   .t-axis {
     font-size: 0.52rem;
     opacity: 0.55;
@@ -208,6 +261,7 @@
 
   /* ── Chart area ── */
   .chart-body {
+    flex: 1;
     height: 220px;
     position: relative;
   }
