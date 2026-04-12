@@ -58,7 +58,7 @@
       viewBox="0 0 {size} {size}"
       width={size}
       height={size}
-      style="transform:rotate(-90deg)"
+      style="display:block;transform:rotate(-90deg);border:none;outline:none;box-shadow:none;background:none;overflow:visible;"
       aria-hidden="true"
       focusable="false"
     >
