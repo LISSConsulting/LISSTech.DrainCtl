@@ -1,171 +1,116 @@
 <script>
+  import { LayerCake, Svg } from 'layercake';
   import { appState } from '../lib/state.svelte.js';
+  import DualAxisChart from './chart/DualAxisChart.svelte';
 
-  let showCpu     = $state(true);
-  let showMem     = $state(true);
-  let showDelay   = $state(false);
+  let showCpu      = $state(true);
+  let showMem      = $state(true);
+  let showDelay    = $state(false);
   let showSessions = $state(false);
 
-  /** @type {HTMLDivElement|null} */
-  let containerEl = $state(null);
-  let width = $state(600);
-
-  const PAD = { left: 48, right: 12, top: 12, bottom: 24 };
-  const H = 200;
+  const MAX_DELAY_MS = 200;
 
   const SERIES = [
-    { key: 'cpu',        label: 'CPU %',       color: 'var(--color-accent)', show: () => showCpu,      toggle: () => { showCpu      = !showCpu;      } },
-    { key: 'mem',        label: 'Memory %',    color: 'var(--color-green)',  show: () => showMem,      toggle: () => { showMem      = !showMem;      } },
-    { key: 'inputDelay', label: 'Input Delay', color: 'var(--color-amber)', show: () => showDelay,    toggle: () => { showDelay    = !showDelay;    } },
-    { key: 'sessions',   label: 'Sessions',    color: 'var(--color-red)',   show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
+    { key: 'cpu',        label: 'CPU %',       color: 'var(--color-accent)', axis: 'left',  show: () => showCpu,      toggle: () => { showCpu      = !showCpu;      } },
+    { key: 'mem',        label: 'Memory %',    color: 'var(--color-green)',  axis: 'left',  show: () => showMem,      toggle: () => { showMem      = !showMem;      } },
+    { key: 'inputDelay', label: 'Input Delay', color: 'var(--color-amber)', axis: 'right', show: () => showDelay,    toggle: () => { showDelay    = !showDelay;    } },
+    { key: 'sessions',   label: 'Sessions',    color: 'var(--color-red)',   axis: 'right', show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
   ];
 
-  let history = $derived(appState.metricsHistory);
+  let history    = $derived(appState.metricsHistory);
+  let sessionMax = $derived(Math.max(...history.map(h => h.sessions ?? 0), 1));
+  let hasRight   = $derived(showDelay || showSessions);
 
-  // Normalise sessions to 0-100
-  let sessionMax = $derived(
-    Math.max(...history.map(h => h.sessions ?? 0), 1)
-  );
-
-  /**
-   * Build normalised data: each entry has a value 0-100 for each series key.
-   * @type {{ cpu: number, mem: number, inputDelay: number, sessions: number }[]}
-   */
-  // Input delay chart scale: values above this are clamped to 100% on the Y-axis.
-  // Chosen to give comfortable headroom for typical RDS farms (most healthy servers
-  // stay well below 50ms, 200ms = obvious degradation).
-  const MAX_DELAY_CHART_MS = 200;
-
-  let normalised = $derived(
-    history.map(h => ({
+  // All series normalised to 0–100 for a shared rendering scale.
+  // Raw values are carried along for the tooltip.
+  let normData = $derived(
+    history.map((h, i) => ({
+      i,
+      time:       h.time,
       cpu:        Math.min(h.cpu ?? 0, 100),
       mem:        Math.min(h.mem ?? 0, 100),
-      inputDelay: Math.min((h.inputDelay ?? 0) / MAX_DELAY_CHART_MS * 100, 100),
+      inputDelay: Math.min((h.inputDelay ?? 0) / MAX_DELAY_MS * 100, 100),
       sessions:   ((h.sessions ?? 0) / sessionMax) * 100,
+      raw: {
+        cpu:        +(h.cpu ?? 0).toFixed(1),
+        mem:        +(h.mem ?? 0).toFixed(1),
+        inputDelay: +(h.inputDelay ?? 0).toFixed(1),
+        sessions:   h.sessions ?? 0,
+      },
     }))
   );
 
-  /**
-   * Convert normalised data points into an SVG area+line path pair.
-   * @param {string} key
-   * @returns {{ area: string, line: string }}
-   */
-  let paths = $derived(
-    (() => {
-      /** @type {Record<string, { area: string, line: string }>} */
-      const result = {};
-      const n = normalised.length;
-      if (n < 2) return result;
+  // Right-axis tick labels: delay takes priority over sessions.
+  let rightTicks = $derived((() => {
+    if (showDelay) {
+      return [0, 50, 100, 150, 200].map(ms => ({
+        pct:   (ms / MAX_DELAY_MS) * 100,
+        label: String(ms),
+      }));
+    }
+    if (showSessions) {
+      return [0, 0.25, 0.5, 0.75, 1].map(f => ({
+        pct:   f * 100,
+        label: Math.round(f * sessionMax).toString(),
+      }));
+    }
+    return [];
+  })());
 
-      const chartW = width - PAD.left - PAD.right;
-      const chartH = H - PAD.top - PAD.bottom;
-
-      for (const s of SERIES) {
-        const pts = normalised.map((d, i) => {
-          const x = PAD.left + (i / (n - 1)) * chartW;
-          const y = PAD.top + chartH * (1 - d[s.key] / 100);
-          return { x, y };
-        });
-
-        const lineParts = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-        const bottomY  = (PAD.top + chartH).toFixed(1);
-        const area     = `${lineParts} L${pts[pts.length - 1].x.toFixed(1)},${bottomY} L${pts[0].x.toFixed(1)},${bottomY} Z`;
-
-        result[s.key] = { line: lineParts, area };
-      }
-      return result;
-    })()
-  );
-
-  // Y-axis grid lines at 0%, 25%, 50%, 75%, 100%
-  let gridLines = $derived(
-    [0, 25, 50, 75, 100].map(pct => {
-      const chartH = H - PAD.top - PAD.bottom;
-      const y = PAD.top + chartH * (1 - pct / 100);
-      return { y, pct };
-    })
-  );
-
-  // X-axis time labels (up to 5)
-  let xLabels = $derived(
-    (() => {
-      if (history.length < 2) return [];
-      const indices = [0, Math.floor((history.length - 1) * 0.25), Math.floor((history.length - 1) * 0.5), Math.floor((history.length - 1) * 0.75), history.length - 1];
-      const unique = [...new Set(indices)];
-      const chartW = width - PAD.left - PAD.right;
-      const now = Date.now();
-      return unique.map(i => {
-        const x = PAD.left + (i / (history.length - 1)) * chartW;
-        const diffMs = now - (history[i]?.time ?? now);
-        const label  = i === history.length - 1 ? 'now' : diffMs < 60_000 ? `${Math.round(diffMs / 1000)}s` : `${Math.round(diffMs / 60_000)}m ago`;
-        return { x, label };
-      });
-    })()
-  );
-
-  $effect(() => {
-    if (!containerEl) return;
-    const ro = new ResizeObserver(entries => {
-      width = entries[0].contentRect.width;
-    });
-    ro.observe(containerEl);
-    return () => ro.disconnect();
+  // Passed as a plain reactive object so DualAxisChart can use visible[key]
+  // without having to call closures, keeping reactivity unambiguous in Svelte 5.
+  let visible = $derived({
+    cpu:        showCpu,
+    mem:        showMem,
+    inputDelay: showDelay,
+    sessions:   showSessions,
   });
+
+  // Minimal dataset for LayerCake — provides responsive scaling context.
+  const Y_DOMAIN = [0, 100];
+  let lcData = $derived(normData.map(d => ({ x: d.i, y: 50 })));
 </script>
 
 <div class="chart-wrap">
-  <div class="section-label">PERFORMANCE METRICS</div>
-  <div class="chart card" bind:this={containerEl}>
+  <div class="section-label">Performance Metrics</div>
+  <div class="chart-card">
+
+    <p class="chart-desc">Fleet-wide averages across all reporting servers. Left axis: percentage (0–100%). Right axis: absolute values — toggle Input Delay or Sessions to activate. Updated every 30&nbsp;s.</p>
+
     <div class="chart-toggles">
       {#each SERIES as s}
         <button
-          class="chart-toggle {s.show() ? 'active' : ''}"
-          style="--series-color: {s.color}"
+          class="chart-toggle"
+          class:active={s.show()}
+          style="--sc: {s.color}"
           aria-pressed={s.show()}
           onclick={s.toggle}
         >
-          <span class="dot"></span>{s.label}
+          <span class="t-dot"></span>
+          {s.label}
+          {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
         </button>
       {/each}
     </div>
 
-    {#if history.length < 2}
-      <div class="chart-placeholder">Collecting data... {history.length}/2</div>
-    {:else}
-      <svg width={width} height={H} class="chart-svg">
-        <!-- Grid lines -->
-        {#each gridLines as gl}
-          <line
-            x1={PAD.left} y1={gl.y.toFixed(1)}
-            x2={(width - PAD.right).toFixed(1)} y2={gl.y.toFixed(1)}
-            stroke="var(--color-border)" stroke-width="1"
-            stroke-dasharray={gl.pct === 0 || gl.pct === 100 ? '' : '4,4'}
-            opacity="0.5"
-          />
-          <text x={(PAD.left - 4).toFixed(1)} y={(gl.y + 4).toFixed(1)} class="axis-label" text-anchor="end">{gl.pct}%</text>
-        {/each}
+    <div class="chart-body">
+      {#if history.length < 2}
+        <div class="chart-placeholder">Collecting data… {history.length}/2</div>
+      {:else}
+        <LayerCake
+          data={lcData}
+          x="x"
+          y="y"
+          yDomain={Y_DOMAIN}
+          padding={{ top: 16, right: hasRight ? 64 : 16, bottom: 32, left: 48 }}
+        >
+          <Svg>
+            <DualAxisChart {normData} {SERIES} {rightTicks} {history} {visible} />
+          </Svg>
+        </LayerCake>
+      {/if}
+    </div>
 
-        <!-- X-axis line -->
-        <line
-          x1={PAD.left} y1={(H - PAD.bottom).toFixed(1)}
-          x2={(width - PAD.right).toFixed(1)} y2={(H - PAD.bottom).toFixed(1)}
-          stroke="var(--color-border)" stroke-width="1" opacity="0.5"
-        />
-
-        <!-- Series (area first, then lines on top) -->
-        {#each SERIES as s}
-          {#if s.show() && paths[s.key]}
-            <path d={paths[s.key].area}  fill={s.color} opacity="0.18" />
-            <path d={paths[s.key].line}  stroke={s.color} stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round" />
-          {/if}
-        {/each}
-
-        <!-- X-axis labels -->
-        {#each xLabels as xl}
-          <text x={xl.x.toFixed(1)} y={(H - 4).toFixed(1)} class="axis-label" text-anchor="middle">{xl.label}</text>
-        {/each}
-      </svg>
-    {/if}
   </div>
 </div>
 
@@ -182,7 +127,7 @@
     margin-bottom: 8px;
   }
 
-  .chart {
+  .chart-card {
     background: var(--color-card);
     border: var(--spacing-bw) solid var(--color-border);
     border-radius: var(--radius-default);
@@ -190,65 +135,90 @@
     padding: 16px 18px;
   }
 
+  .chart-desc {
+    font-family: 'Work Sans', sans-serif;
+    font-size: 0.72rem;
+    color: var(--color-subtle);
+    margin: 0 0 12px;
+    line-height: 1.5;
+  }
+
+  /* ── Toggle buttons — neobrutalist ── */
   .chart-toggles {
     display: flex;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 8px;
+    margin-bottom: 14px;
     flex-wrap: wrap;
   }
 
   .chart-toggle {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 20px;
-    border: 1.5px solid var(--color-border);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 0;
+    border: var(--spacing-bw) solid var(--color-border);
+    box-shadow: 2px 2px 0 var(--color-shadow);
     background: var(--color-surface);
-    color: var(--color-muted);
+    color: var(--color-fg);
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.15s;
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+    white-space: nowrap;
+  }
+
+  .chart-toggle:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0 var(--color-shadow);
+  }
+
+  .chart-toggle:active {
+    transform: translate(2px, 2px);
+    box-shadow: none;
   }
 
   .chart-toggle.active {
-    background: var(--series-color);
+    background: var(--sc);
     color: #fff;
-    border-color: var(--series-color);
   }
 
-  .chart-toggle .dot {
+  .t-dot {
     width: 8px;
     height: 8px;
-    border-radius: 2px;
-    background: var(--series-color);
+    border-radius: 1px;
+    background: var(--sc);
+    border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent);
     flex-shrink: 0;
   }
 
-  .chart-toggle.active .dot {
-    background: rgba(255, 255, 255, 0.8);
+  .chart-toggle.active .t-dot {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+
+  .t-axis {
+    font-size: 0.52rem;
+    opacity: 0.55;
+    margin-left: -2px;
+  }
+
+  /* ── Chart area ── */
+  .chart-body {
+    height: 220px;
+    position: relative;
   }
 
   .chart-placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 200px;
+    height: 100%;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
     color: var(--color-muted);
-  }
-
-  .chart-svg {
-    display: block;
-    overflow: visible;
-  }
-
-  .axis-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    fill: var(--color-muted);
   }
 </style>
