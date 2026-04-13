@@ -2,8 +2,8 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <UI>
-      <Dialog Id="InstallModeDlg" Width="370" Height="270"
-        Title="!(loc.InstallModeDlg_Title)">
+      <Dialog Id="NotificationsDlg" Width="370" Height="270"
+        Title="!(loc.NotificationsDlg_Title)">
 
         <!-- Banner -->
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
@@ -13,15 +13,21 @@
 
         <!-- Header -->
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15"
-          Transparent="yes" NoPrefix="yes" Text="!(loc.InstallModeDlgTitle)" />
+          Transparent="yes" NoPrefix="yes" Text="!(loc.NotificationsDlgTitle)" />
         <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15"
-          Transparent="yes" NoPrefix="yes" Text="!(loc.InstallModeDlgDescription)" />
+          Transparent="yes" NoPrefix="yes" Text="!(loc.NotificationsDlgDescription)" />
 
-        <!-- Install Mode -->
-        <Control Id="ModeLabel" Type="Text" X="20" Y="56" Width="100" Height="17"
-          NoPrefix="yes" Text="!(loc.InstallModeDlgModeLabel)" />
-        <Control Id="ModeCombo" Type="ComboBox" X="20" Y="73" Width="200" Height="17"
-          Property="INSTALL_MODE" Sorted="no" ComboList="yes" />
+        <!-- Webhook URL -->
+        <Control Id="WebhookLabel" Type="Text" X="20" Y="60" Width="200" Height="15"
+          NoPrefix="yes" Text="!(loc.NotificationsDlgWebhookLabel)" />
+        <Control Id="WebhookEdit" Type="Edit" X="20" Y="77" Width="330" Height="18"
+          Property="WEBHOOK_URL" />
+
+        <!-- ntfy URL -->
+        <Control Id="NtfyLabel" Type="Text" X="20" Y="107" Width="200" Height="15"
+          NoPrefix="yes" Text="!(loc.NotificationsDlgNtfyLabel)" />
+        <Control Id="NtfyEdit" Type="Edit" X="20" Y="124" Width="330" Height="18"
+          Property="NTFY_URL" />
 
         <!-- Navigation -->
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
