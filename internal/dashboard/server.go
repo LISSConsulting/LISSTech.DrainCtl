@@ -246,6 +246,24 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		http.FileServerFS(assets).ServeHTTP(w, r)
 	}))))
 
+	// Unhashed static files from Vite public/ (logo, images, etc.).
+	// Serves any file with a static extension from the dist root;
+	// everything else falls through to the SPA handler.
+	distRoot, _ := fs.Sub(distFS, "dist")
+	staticFS := http.FileServerFS(distRoot)
+	mux.Handle("GET /{file}", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("file")
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			switch strings.ToLower(name[dot:]) {
+			case ".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp", ".gif", ".webmanifest":
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+				staticFS.ServeHTTP(w, r)
+				return
+			}
+		}
+		ds.handleUI(w, r)
+	})))
+
 	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
 	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
 
