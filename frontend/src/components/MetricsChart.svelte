@@ -18,7 +18,14 @@
         Activity,
         Grid2x2,
         Rows3,
+        HelpCircle,
     } from 'lucide-svelte';
+
+    // ── Help text visibility toggles (collapsed by default) ──────────────────
+    let showLoadHelp = $state(false);
+    let showHicHelp = $state(false);
+    let showSessionHelp = $state(false);
+    let showRfxHelp = $state(false);
 
     // ── Upper chart (LOAD): CPU %, Memory %, Sessions ────────────────────────
     let showCpu = $state(true);
@@ -442,14 +449,25 @@
                             <div class="sub-label">
                                 <Gauge size={12} strokeWidth={2.4} /> LOAD
                                 <span class="sub-label-note">· Average across fleet</span>
+                                <button
+                                    class="help-toggle"
+                                    class:active={showLoadHelp}
+                                    onclick={() => (showLoadHelp = !showLoadHelp)}
+                                    aria-label="Toggle help text"
+                                    aria-pressed={showLoadHelp}
+                                >
+                                    <HelpCircle size={11} strokeWidth={2.2} />
+                                </button>
                             </div>
-                            <p class="chart-desc">
-                                Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
-                                across all cores on all hosts; memory is the percentage of physical RAM in use. The
-                                Sessions line (right axis) tracks how many users are connected fleet-wide — rising
-                                sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
-                                per-user cost is climbing.
-                            </p>
+                            {#if showLoadHelp}
+                                <p class="chart-desc">
+                                    Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
+                                    across all cores on all hosts; memory is the percentage of physical RAM in use. The
+                                    Sessions line (right axis) tracks how many users are connected fleet-wide — rising
+                                    sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
+                                    per-user cost is climbing.
+                                </p>
+                            {/if}
                         </div>
                         <div class="chart-toggles-stacked">
                             {#each LOAD_SERIES as s}
@@ -547,12 +565,23 @@
                     <div class="sub-label">
                         <Gauge size={12} strokeWidth={2.4} /> HEALTH INDICATORS
                         <span class="sub-label-note">· P95 across fleet</span>
+                        <button
+                            class="help-toggle"
+                            class:active={showHicHelp}
+                            onclick={() => (showHicHelp = !showHicHelp)}
+                            aria-label="Toggle help text"
+                            aria-pressed={showHicHelp}
+                        >
+                            <HelpCircle size={11} strokeWidth={2.2} />
+                        </button>
                     </div>
-                    <p class="chart-desc">
-                        P95 health indicators across the fleet — input responsiveness, memory pressure, network
-                        reliability, and storage I/O. P95 highlights the worst-performing 5% of servers; P50 shows the
-                        median.
-                    </p>
+                    {#if showHicHelp}
+                        <p class="chart-desc">
+                            P95 health indicators across the fleet — input responsiveness, memory pressure, network
+                            reliability, and storage I/O. P95 highlights the worst-performing 5% of servers; P50 shows the
+                            median.
+                        </p>
+                    {/if}
 
                     <div class="hic-grid {gridLayout ? '' : 'single-col'}">
                         {#each HIC_CHARTS as mc, i}
@@ -568,6 +597,7 @@
                                 icon={mc.icon}
                                 axisRight={i % 2 === 1 && !isMobile && gridLayout}
                                 helpText={mc.helpText ?? ''}
+                                showHelp={showHicHelp}
                             />
                         {/each}
                     </div>
@@ -582,12 +612,23 @@
                     <div class="sub-label">
                         <Users size={12} strokeWidth={2.4} /> SESSION METRICS
                         <span class="sub-label-note">· Fleet overview</span>
+                        <button
+                            class="help-toggle"
+                            class:active={showSessionHelp}
+                            onclick={() => (showSessionHelp = !showSessionHelp)}
+                            aria-label="Toggle help text"
+                            aria-pressed={showSessionHelp}
+                        >
+                            <HelpCircle size={11} strokeWidth={2.2} />
+                        </button>
                     </div>
-                    <p class="chart-desc">
-                        How many sessions are running, how full the farm is, and what each session costs in CPU and
-                        memory. The gap between P95 and P50 tells you how much spread there is between your heaviest
-                        users and everyone else.
-                    </p>
+                    {#if showSessionHelp}
+                        <p class="chart-desc">
+                            How many sessions are running, how full the farm is, and what each session costs in CPU and
+                            memory. The gap between P95 and P50 tells you how much spread there is between your heaviest
+                            users and everyone else.
+                        </p>
+                    {/if}
 
                     <div class="hic-grid {gridLayout ? '' : 'single-col'}">
                         {#each SESSION_CHARTS as mc, i}
@@ -611,6 +652,7 @@
                                 transform={mc.transform ?? IDENTITY}
                                 invertThresholds={mc.invertThresholds ?? false}
                                 helpText={mc.helpText ?? ''}
+                                showHelp={showSessionHelp}
                             />
                         {/each}
                     </div>
@@ -625,12 +667,23 @@
                     <div class="sub-label">
                         <Monitor size={12} strokeWidth={2.4} /> REMOTEFX
                         <span class="sub-label-note">· Graphics & Network P95 / P50</span>
+                        <button
+                            class="help-toggle"
+                            class:active={showRfxHelp}
+                            onclick={() => (showRfxHelp = !showRfxHelp)}
+                            aria-label="Toggle help text"
+                            aria-pressed={showRfxHelp}
+                        >
+                            <HelpCircle size={11} strokeWidth={2.2} />
+                        </button>
                     </div>
-                    <p class="chart-desc">
-                        What the users actually see: frame rates, encoding speed, visual quality, and the network
-                        between them. P95 shows the worst-affected sessions; P50 shows what a typical user experiences.
-                        The gap between them reveals how much spread there is across your fleet.
-                    </p>
+                    {#if showRfxHelp}
+                        <p class="chart-desc">
+                            What the users actually see: frame rates, encoding speed, visual quality, and the network
+                            between them. P95 shows the worst-affected sessions; P50 shows what a typical user experiences.
+                            The gap between them reveals how much spread there is across your fleet.
+                        </p>
+                    {/if}
 
                     <div class="rfx-grid {gridLayout ? '' : 'single-col'}">
                         {#each RFX_CHARTS as mc, i}
@@ -648,6 +701,7 @@
                                 timeKey={mc.timeKey ?? 'time'}
                                 invertThresholds={mc.invertThresholds ?? false}
                                 helpText={mc.helpText ?? ''}
+                                showHelp={showRfxHelp}
                             />
                         {/each}
                     </div>
@@ -809,6 +863,37 @@
         font-weight: 400;
         letter-spacing: 0.08em;
         opacity: 0.7;
+    }
+
+    .help-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2px 4px;
+        margin-left: 4px;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        color: var(--color-muted);
+        opacity: 0.45;
+        cursor: pointer;
+        line-height: 0;
+        transition:
+            opacity 0.1s linear,
+            color 0.1s linear,
+            border-color 0.1s linear;
+    }
+
+    .help-toggle:hover {
+        opacity: 0.9;
+        color: var(--color-fg);
+        border-color: var(--color-border);
+    }
+
+    .help-toggle.active {
+        opacity: 1;
+        color: var(--color-accent);
+        border-color: var(--color-accent);
     }
 
     .chart-desc {
