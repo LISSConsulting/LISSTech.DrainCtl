@@ -57,6 +57,7 @@
         noThresholdZones = false,
         autoScale = false,
         helpText = '',
+        showHelp = false,
         fmtYTick = /** @type {((v:number)=>string)|null} */ (null),
     } = $props();
 
@@ -296,7 +297,7 @@
     </div>
 
     <!-- ── Per-chart help text ── -->
-    {#if helpText}
+    {#if helpText && showHelp}
         <p class="hic-help">{helpText}</p>
     {/if}
 
