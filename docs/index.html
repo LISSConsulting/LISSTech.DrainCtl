@@ -139,7 +139,8 @@
             .nav-links {
                 display: flex;
                 align-items: center;
-                gap: 28px;
+                justify-content: space-evenly;
+                flex: 1;
                 list-style: none;
                 height: 100%;
                 margin: 0;
@@ -403,6 +404,10 @@
             .stat-value {
                 font-size: 1.6rem;
                 font-weight: 900;
+                height: 2rem;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 font-family: "JetBrains Mono", monospace;
                 letter-spacing: -0.02em;
             }
@@ -644,15 +649,18 @@
                 border: var(--bw) solid var(--border);
                 border-top: none;
                 border-radius: 0 0 var(--r) var(--r);
+            }
+            .usage-panel.active {
+                display: block;
+            }
+            .usage-panel pre {
                 padding: 28px;
                 font-family: "JetBrains Mono", monospace;
                 font-size: 0.82rem;
                 line-height: 1.8;
-                overflow-x: auto;
                 white-space: pre;
-            }
-            .usage-panel.active {
-                display: block;
+                overflow-x: auto;
+                margin: 0;
             }
             .c {
                 color: #6b7280;
@@ -909,7 +917,217 @@
                 justify-content: center;
                 margin-bottom: 16px;
             }
+
+            /* ── Why DrainCtl ─────────────────────────────────────── */
+            .why-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 18px;
+            }
+            .why-card { padding: 28px; }
+            .why-problem {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 0.75rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: var(--red);
+                margin-bottom: 10px;
+            }
+            .why-card h3 {
+                font-size: 1rem;
+                font-weight: 700;
+                margin-bottom: 10px;
+                font-family: "Work Sans", sans-serif;
+            }
+            .why-card p {
+                font-size: 0.88rem;
+                color: var(--muted);
+                line-height: 1.6;
+                margin-bottom: 16px;
+            }
+            .why-solution {
+                font-size: 0.82rem;
+                font-weight: 600;
+                color: var(--green);
+                padding: 9px 12px;
+                background: rgba(93, 138, 110, 0.1);
+                border-radius: 6px;
+                border-left: 3px solid var(--green);
+                line-height: 1.5;
+            }
+            .why-icon {
+                color: var(--accent);
+                margin-bottom: 18px;
+                display: block;
+            }
+            .why-icon svg { display: block; }
+            .why-problem svg { flex-shrink: 0; }
+            @media (max-width: 768px) {
+                .why-grid { grid-template-columns: 1fr; }
+            }
+
+            /* ── Quick Start ──────────────────────────────────────── */
+            .quickstart-steps {
+                border: var(--bw) solid var(--border);
+                border-radius: var(--r);
+                box-shadow: var(--so) var(--so) 0 var(--shadow);
+                overflow: hidden;
+            }
+            .qs-step {
+                display: grid;
+                grid-template-columns: 72px 1fr;
+                background: var(--card);
+                border-bottom: var(--bw) solid var(--border);
+                min-width: 0;
+            }
+            .qs-step:last-child { border-bottom: none; }
+            .qs-num {
+                grid-column: 1;
+                grid-row: 1 / 3;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 1.4rem;
+                font-weight: 700;
+                color: rgba(163, 71, 91, 0.3);
+                display: flex;
+                align-items: flex-start;
+                justify-content: center;
+                padding: 24px 12px;
+                border-right: var(--bw) solid var(--border);
+            }
+            .qs-info {
+                grid-column: 2;
+                grid-row: 1;
+                padding: 22px 28px 18px;
+            }
+            .qs-info h3 { font-size: 1rem; font-weight: 800; margin-bottom: 5px; }
+            .qs-info p { font-size: 0.84rem; color: var(--muted); line-height: 1.55; }
+            .qs-code {
+                grid-column: 2;
+                grid-row: 2;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.8rem;
+                background: var(--code-bg);
+                color: var(--code-fg);
+                padding: 13px 28px;
+                white-space: pre;
+                overflow-x: auto;
+                border-top: var(--bw) solid var(--border);
+            }
+            .qs-done { background: var(--accent) !important; }
+            .qs-done .qs-num { color: rgba(255, 255, 255, 0.25); }
+            .qs-done .qs-info h3 { color: #fff; }
+            .qs-done .qs-info p { color: rgba(255,255,255,0.82); }
+            @media (max-width: 600px) {
+                .qs-num { font-size: 1.1rem; padding: 20px 10px; }
+                .qs-info { padding: 18px 20px 14px; }
+                .qs-code { padding: 11px 20px; }
+            }
+
+            /* ── Dashboard Gallery ────────────────────────────────── */
+            .dash-gallery { margin-bottom: 28px; }
+            .dash-gallery-tabs {
+                display: flex;
+                border: var(--bw) solid var(--border);
+                border-bottom: none;
+                border-radius: var(--r) var(--r) 0 0;
+                overflow: hidden;
+            }
+            .dash-tab {
+                flex: 1;
+                padding: 10px 16px;
+                font-family: "Work Sans", sans-serif;
+                font-size: 0.78rem;
+                font-weight: 700;
+                background: var(--surface);
+                border: none;
+                cursor: pointer;
+                color: var(--muted);
+                border-right: var(--bw) solid var(--border);
+                transition: background 0.15s, color 0.15s;
+                white-space: nowrap;
+            }
+            .dash-tab:last-child { border-right: var(--bw) solid var(--border); }
+            .dash-tab.active { background: var(--card); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+            .dash-tab:hover:not(.active) { background: var(--card); color: var(--fg); }
+            .dash-panel {
+                display: none;
+                border: var(--bw) solid var(--border);
+                border-radius: 0 0 var(--r) var(--r);
+                overflow: hidden;
+            }
+            .dash-panel.active { display: block; }
+            .dash-panel img { width: 100%; display: block; }
+            .dash-placeholder { padding: 56px 32px; background: var(--surface); text-align: center; }
+            .dash-placeholder-icon { font-size: 2.8rem; margin-bottom: 14px; }
+            .dash-placeholder h4 {
+                font-family: "Fraunces", serif;
+                font-size: 1.15rem;
+                font-weight: 400;
+                font-style: italic;
+                margin-bottom: 8px;
+            }
+            .dash-placeholder p { font-size: 0.88rem; color: var(--muted); max-width: 440px; margin: 0 auto; line-height: 1.6; }
+            @media (max-width: 640px) { .dash-tab { padding: 9px 11px; font-size: 0.72rem; } }
+
+            /* ── LISS Technologies section ────────────────────────── */
+            .liss-section {
+                padding: 80px 0;
+                background: var(--fg);
+                color: var(--bg);
+                border-top: var(--bw) solid var(--border);
+            }
+            .liss-section .section-label { color: var(--accent); }
+            .liss-inner {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 64px;
+                align-items: start;
+            }
+            .liss-tagline {
+                font-family: "Fraunces", serif;
+                font-size: 2rem;
+                font-weight: 400;
+                font-style: italic;
+                line-height: 1.2;
+                margin-bottom: 20px;
+                color: var(--bg);
+            }
+            .liss-body { font-size: 0.98rem; line-height: 1.75; color: rgba(253, 248, 246, 0.72); }
+            .liss-body p + p { margin-top: 14px; }
+            .liss-cta { margin-top: 28px; }
+            .btn-liss {
+                background: var(--accent);
+                color: #fff;
+                border-color: var(--accent);
+                box-shadow: var(--so) var(--so) 0 rgba(255, 255, 255, 0.15);
+            }
+            .btn-liss:hover { box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 rgba(255, 255, 255, 0.15); }
+            .liss-facts { display: flex; flex-direction: column; gap: 18px; }
+            .liss-fact {
+                padding: 20px 24px;
+                border: var(--bw) solid rgba(253, 248, 246, 0.15);
+                border-radius: var(--r);
+                background: rgba(253, 248, 246, 0.05);
+                box-shadow: var(--so) var(--so) 0 rgba(0, 0, 0, 0.3);
+            }
+            .liss-fact-label {
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: var(--accent);
+                margin-bottom: 6px;
+            }
+            .liss-fact p { font-size: 0.88rem; color: rgba(253, 248, 246, 0.65); line-height: 1.6; }
+            @media (max-width: 768px) {
+                .liss-inner { grid-template-columns: 1fr; gap: 40px; }
+                .liss-tagline { font-size: 1.6rem; }
+            }
         </style>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     </head>
     <body>
         <nav class="nav">
@@ -934,8 +1152,9 @@
                     ≡
                 </button>
                 <ul class="nav-links" id="nav-links" role="list">
+                    <li><a href="#why">Why</a></li>
                     <li><a href="#features">Features</a></li>
-                    <li><a href="#how">How It Works</a></li>
+                    <li><a href="#quickstart">Quick Start</a></li>
                     <li><a href="#dashboard">Dashboard</a></li>
                     <li><a href="#usage">Usage</a></li>
                     <li><a href="#install">Install</a></li>
@@ -1013,8 +1232,47 @@
                     <div class="stat-label">Notification targets</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">&#x1F512;</div>
+                    <div class="stat-value"><i data-lucide="shield-check" width="28" height="28" style="color:var(--accent)"></i></div>
                     <div class="stat-label">Kerberos auth</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value"><i data-lucide="circle-check-big" width="28" height="28" style="color:var(--green)"></i></div>
+                    <div class="stat-label">Running in production</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Why DrainCtl -->
+        <section class="section section--bordered" id="why">
+            <div class="wrap">
+                <div class="section-label">Why DrainCtl</div>
+                <div class="section-title">PowerShell scripts don't call you at 2&nbsp;AM.</div>
+                <div class="section-desc">
+                    Every RDSH admin has been there: something's wrong, users are calling, and you're
+                    RDP-ing into servers one at a time to find out who put what into drain mode and when.
+                </div>
+                <div class="why-grid">
+                    <div class="why-card card">
+                        <i class="why-icon" data-lucide="terminal" width="32" height="32"></i>
+                        <div class="why-problem"><i data-lucide="ban" width="12" height="12"></i> The old way</div>
+                        <h3>PowerShell scripts</h3>
+                        <p>You've got a script. It polls every 5 minutes. Maybe it emails you. But it doesn't know <em>who</em> changed it, it can't attribute events to a user account, and the last thing you need is another fragile cron job to maintain.</p>
+                        <div class="why-solution">DrainCtl uses kernel-level registry notifications &mdash; zero polling delay, built-in attribution via Windows Security Events.</div>
+                    </div>
+                    <div class="why-card card">
+                        <i class="why-icon" data-lucide="monitor-x" width="32" height="32"></i>
+                        <div class="why-problem"><i data-lucide="ban" width="12" height="12"></i> The old way</div>
+                        <h3>Manual checking</h3>
+                        <p>Log into each server. Run <code>chglogon /query</code>. Check 8 hosts. Repeat. You're always the last to know &mdash; and there's no record of how long the server was drained or who was responsible.</p>
+                        <div class="why-solution">One dashboard for your entire farm. Instant detection. 90-day audit trail with timestamps, durations, and who did it.</div>
+                    </div>
+                    <div class="why-card card">
+                        <i class="why-icon" data-lucide="gauge" width="32" height="32"></i>
+                        <div class="why-problem"><i data-lucide="ban" width="12" height="12"></i> The old way</div>
+                        <h3>Generic monitoring</h3>
+                        <p>PRTG, Zabbix, and your RMM don't understand RDSH drain semantics. They'll alert on everything or nothing, and you'll spend more time tuning thresholds than managing your farm.</p>
+                        <div class="why-solution">DrainCtl speaks RDSH natively &mdash; it knows a 5-minute maintenance drain from a forgotten overnight drain, and tells you exactly who to call.</div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -1108,8 +1366,46 @@
             </div>
         </section>
 
+        <!-- Quick Start -->
+        <section class="section section--shaded" id="quickstart">
+            <div class="wrap">
+                <div class="section-label">Quick Start</div>
+                <div class="section-title">From download to monitoring in under&nbsp;3&nbsp;minutes.</div>
+                <div class="section-desc">Three steps on the dashboard server. Session hosts discover it automatically via DNS SRV &mdash; no per-machine config.</div>
+                <div class="quickstart-steps">
+                    <div class="qs-step">
+                        <div class="qs-num">01</div>
+                        <div class="qs-info">
+                            <h3>Install</h3>
+                            <p>Run the MSI on your dashboard server with the interactive wizard, or use PowerShell for silent RMM deployment.</p>
+                        </div>
+                        <code class="qs-code">irm https://lissconsulting.github.io/LISSTech.DrainCtl/install.ps1 | iex</code>
+                    </div>
+                    <div class="qs-step">
+                        <div class="qs-num">02</div>
+                        <div class="qs-info">
+                            <h3>Add one DNS SRV record</h3>
+                            <p>Point your internal DNS at the dashboard host. Every session host finds it on its own &mdash; no scripts, no URLs pushed to machines.</p>
+                        </div>
+                        <code class="qs-code">_drainctl._tcp.contoso.com  →  your-dashboard-host:7072</code>
+                    </div>
+                    <div class="qs-step qs-done" style="grid-template-rows: auto;">
+                        <div class="qs-num" style="grid-row: 1;">03</div>
+                        <div class="qs-info">
+                            <h3>Done.</h3>
+                            <p>Agents self-register. The dashboard shows every server. Drain changes alert in under a second. Configure notifications and thresholds from the UI &mdash; all agents inherit them.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="section-cta">
+                    <a href="guide.html" class="btn btn-fill">Full Setup Guide</a>
+                    <a href="#install" class="btn btn-ghost">Installation Options</a>
+                </div>
+            </div>
+        </section>
+
         <!-- How it works -->
-        <section class="section section--shaded" id="how">
+        <section class="section" id="how">
             <div class="wrap">
                 <div class="section-label">Architecture</div>
                 <div class="section-title">Five layers. One service.</div>
@@ -1249,14 +1545,29 @@
                     dashboard, add one DNS SRV record, done.
                 </div>
 
-                <div class="dashboard-ss">
-                    <picture>
-                        <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)" />
-                        <img
-                            src="dashboard-screenshot.png"
-                            alt="DrainCtl Dashboard showing server overview, state history chart, and server cards with session gauges"
-                        />
-                    </picture>
+                <div class="dash-gallery">
+                    <div class="dash-gallery-tabs">
+                        <button class="dash-tab active" onclick="showDashTab(0)">Overview</button>
+                        <button class="dash-tab" onclick="showDashTab(1)">Dark Mode</button>
+                        <button class="dash-tab" onclick="showDashTab(2)">Servers</button>
+                        <button class="dash-tab" onclick="showDashTab(3)">Events</button>
+                        <button class="dash-tab" onclick="showDashTab(4)">Config</button>
+                    </div>
+                    <div class="dash-panel active" id="dash0">
+                        <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard — Overview, farm summary with metrics chart and per-server health cards" />
+                    </div>
+                    <div class="dash-panel" id="dash1">
+                        <img src="dashboard-screenshot-dark.png" alt="DrainCtl Dashboard — dark mode overview" />
+                    </div>
+                    <div class="dash-panel" id="dash2">
+                        <img src="dashboard-screenshot-servers.png" alt="DrainCtl Dashboard — Servers list with drain state, sessions, CPU, memory, input delay per host" />
+                    </div>
+                    <div class="dash-panel" id="dash3">
+                        <img src="dashboard-screenshot-events.png" alt="DrainCtl Dashboard — Event log with drain mode changes, attribution, and performance alerts" />
+                    </div>
+                    <div class="dash-panel" id="dash4">
+                        <img src="dashboard-screenshot-config.png" alt="DrainCtl Dashboard — Configuration modal with alert presets and notification targets" />
+                    </div>
                 </div>
 
                 <div class="features-grid features-grid--2col">
@@ -1314,84 +1625,90 @@
                 </div>
 
                 <div class="usage-panel active" id="tab0">
-                    <span class="c"># Check drain mode status (instant via service pipe)</span>
-                    <span class="b">PS&gt;</span> drainctl check <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> source=service <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> host=MDS-LDC1-RDS5 <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
-                    <span class="d">2026-04-02T20:08:56-04:00</span>
-                    <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
-                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
-                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy
-                    connections_allowed=true exit=0
+                    <pre>
+<span class="c"># Check drain mode status (instant via service pipe)</span>
+<span class="b">PS&gt;</span> drainctl check
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> source=service
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> host=MDS-LDC1-RDS5
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
+<span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=<span class="g">Healthy</span> connections_allowed=<span class="g">true</span> exit=0
 
-                    <span class="c"># When drain mode is active beyond grace period:</span>
-                    <span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r"
-                        >Alert</span
-                    >
-                    connections_allowed=<span class="r">false</span> exit=1
-                    <span class="c"># Exit code 1 triggers your RMM monitoring threshold</span>
+<span class="c"># When drain mode is active beyond grace period:</span>
+<span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r">Alert</span> connections_allowed=<span class="r">false</span> exit=1
+<span class="c"># Exit code 1 triggers your RMM monitoring threshold</span>
+</pre>
                 </div>
 
                 <div class="usage-panel" id="tab1">
-                    <span class="c"># Rich status object</span> <span class="b">PS&gt;</span> Get-RDSHDrainMode
+                    <pre>
+<span class="c"># Rich status object</span>
+<span class="b">PS&gt;</span> Get-RDSHDrainMode
 
-                    <span class="w">Timestamp :</span> <span class="d">4/2/2026 8:08:56 PM</span>
-                    <span class="w">Host :</span> <span class="d">MDS-LDC1-RDS5</span>
-                    <span class="w">DrainMode :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
-                    <span class="w">StateSince :</span> <span class="d">4/2/2026 6:30:00 PM</span>
-                    <span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
-                    <span class="w">Status :</span> <span class="g">Healthy</span>
-                    <span class="w">ConnectionsAllowed :</span> <span class="g">True</span>
-                    <span class="w">Message :</span> <span class="d">All connections allowed.</span>
-                    <span class="w">ExitCode :</span> <span class="d">0</span>
+<span class="w">Timestamp            :</span> <span class="d">4/2/2026 8:08:56 PM</span>
+<span class="w">Host                 :</span> <span class="d">MDS-LDC1-RDS5</span>
+<span class="w">DrainMode            :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
+<span class="w">StateSince           :</span> <span class="d">4/2/2026 6:30:00 PM</span>
+<span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
+<span class="w">Status               :</span> <span class="g">Healthy</span>
+<span class="w">ConnectionsAllowed   :</span> <span class="g">True</span>
+<span class="w">Message              :</span> <span class="d">All connections allowed.</span>
+<span class="w">ExitCode             :</span> <span class="d">0</span>
 
-                    <span class="c"># Boolean check for scripts and alerts</span>
-                    <span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) {
-                    <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
-                    <span class="g">OK</span>
+<span class="c"># Boolean check for scripts and alerts</span>
+<span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) { <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
+<span class="g">OK</span>
 
-                    <span class="c"># One-liner for monitoring scripts</span>
-                    <span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status <span class="g">Healthy</span>
+<span class="c"># One-liner for monitoring scripts</span>
+<span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status
+<span class="g">Healthy</span>
+</pre>
                 </div>
 
                 <div class="usage-panel" id="tab2">
-                    <span class="c"># Machine-readable output for automation</span>
-                    <span class="b">PS&gt;</span> drainctl check --format json
-                    <span class="w">{</span>
-                    <span class="b">"version"</span>: <span class="d">"26.103.4"</span>, <span class="b">"host"</span>:
-                    <span class="d">"MDS-LDC1-RDS5"</span>, <span class="b">"drain_mode"</span>:
-                    <span class="d">"ALLOW_ALL_CONNECTIONS"</span>, <span class="b">"drain_mode_value"</span>:
-                    <span class="d">0</span>, <span class="b">"state_since"</span>:
-                    <span class="d">"2026-04-02T18:30:00-04:00"</span>, <span class="b">"state_duration_seconds"</span>:
-                    <span class="d">5936.42</span>, <span class="b">"grace_period_seconds"</span>:
-                    <span class="d">3600</span>, <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
-                    <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
-                    <span class="b">"sessions"</span>: { <span class="b">"active_sessions"</span>:
-                    <span class="d">12</span>, <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
-                    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
-                    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
-                    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
-                    },
-                    <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
-                    <span class="b">"exit_code"</span>: <span class="d">0</span> <span class="w">}</span>
+                    <pre>
+<span class="c"># Machine-readable output for automation</span>
+<span class="b">PS&gt;</span> drainctl check --format json
+<span class="w">{</span>
+  <span class="b">"version"</span>: <span class="d">"26.103.4"</span>,
+  <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
+  <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
+  <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
+  <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
+  <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
+  <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
+  <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
+  <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
+  <span class="b">"sessions"</span>: <span class="w">{</span>
+    <span class="b">"active_sessions"</span>: <span class="d">12</span>,
+    <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
+    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
+    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
+    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
+  <span class="w">}</span>,
+  <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
+  <span class="b">"exit_code"</span>: <span class="d">0</span>
+<span class="w">}</span>
+</pre>
                 </div>
 
                 <div class="usage-panel" id="tab3">
-                    <span class="c"># View recent state transitions with attribution</span>
-                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
+                    <pre>
+<span class="c"># View recent state transitions with attribution</span>
+<span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
 
-                    <span class="w">Timestamp DrainMode Changed ChangedBy Exit</span>
-                    <span class="d">--------- --------- ------- --------- ----</span>
-                    <span class="y">4/2/2026 10:14:04 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\lissadmin 0</span>
-                    <span class="g">4/2/2026 10:13:32 PM ALLOW_ALL_CONNECTIONS YES MDS\lissadmin 0</span>
-                    <span class="y">4/2/2026 10:10:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\lissadmin 0</span>
-                    <span class="g">4/2/2026 8:30:00 PM ALLOW_ALL_CONNECTIONS YES MDS\svcaccount 0</span>
-                    <span class="y">4/2/2026 6:15:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\jdoe 0</span>
+<span class="w">Timestamp              DrainMode                             Changed  ChangedBy         Exit</span>
+<span class="d">---------              ---------                             -------  ---------         ----</span>
+<span class="y">4/2/2026 10:14:04 PM   ALLOW_RECONNECTIONS_PREVENT_NEW..     YES      MDS\lissadmin     0</span>
+<span class="g">4/2/2026 10:13:32 PM   ALLOW_ALL_CONNECTIONS                 YES      MDS\lissadmin     0</span>
+<span class="y">4/2/2026 10:10:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW..     YES      MDS\lissadmin     0</span>
+<span class="g">4/2/2026  8:30:00 PM   ALLOW_ALL_CONNECTIONS                 YES      MDS\svcaccount    0</span>
+<span class="y">4/2/2026  6:15:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW..     YES      MDS\jdoe          0</span>
 
-                    <span class="c"># Filter in pipeline</span>
-                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp,
-                    ChangedBy
+<span class="c"># Filter in pipeline</span>
+<span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp, ChangedBy
+</pre>
                 </div>
             </div>
         </section>
@@ -1473,21 +1790,51 @@
             </div>
         </section>
 
+        <!-- Built by LISS Technologies -->
+        <section class="liss-section" id="liss">
+            <div class="wrap">
+                <div class="section-label">About</div>
+                <div class="liss-inner">
+                    <div>
+                        <div class="liss-tagline">Built by people who manage RDSH farms every day.</div>
+                        <div class="liss-body">
+                            <p>LISS Technologies is a NYC-based managed services provider &mdash; in business since 1984. We manage Windows infrastructure, RDSH farms, and enterprise environments for our clients.</p>
+                            <p>DrainCtl exists because we needed it. No tool on the market gave us instant drain detection with proper attribution, a farm-wide dashboard, and alerts that understood RDSH semantics &mdash; so we built one. It's been running in production at client sites since before this page existed.</p>
+                            <p>We open-source the tools we'd want to use ourselves. If your team manages session hosts, you're the kind of shop we work with.</p>
+                        </div>
+                        <div class="liss-cta">
+                            <a href="https://lisstech.com" class="btn btn-liss">Visit lisstech.com &rarr;</a>
+                        </div>
+                    </div>
+                    <div class="liss-facts">
+                        <div class="liss-fact">
+                            <div class="liss-fact-label">Track record</div>
+                            <p>NYC-based MSP since 1984. Four decades of enterprise Windows infrastructure management.</p>
+                        </div>
+                        <div class="liss-fact">
+                            <div class="liss-fact-label">Dogfooded first</div>
+                            <p>Every tool we release is running in production at a client site before it ships publicly. DrainCtl monitors live RDSH farms daily.</p>
+                        </div>
+                        <div class="liss-fact">
+                            <div class="liss-fact-label">Open source, no strings</div>
+                            <p>Apache 2.0. Fork it, deploy it, modify it. We release tools we'd want to exist &mdash; not lead-generation demos.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <footer class="footer">
             <div class="wrap">
                 <div class="footer-links">
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a>
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE"
-                        >Apache 2.0 License</a
-                    >
+                    <a href="guide.html">Guide</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0</a>
+                    <a href="https://lisstech.com">lisstech.com</a>
                 </div>
-                <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
-                <p style="font-size: 0.6rem; opacity: 0.35; margin-top: 4px">
-                    <a href="https://www.flaticon.com/free-icons/pipe" title="pipe icons" style="color: inherit"
-                        >Pipe icons created by Smashicons - Flaticon</a
-                    >
-                </p>
+                <p>DrainCtl &mdash; a <a href="https://lisstech.com">LISS Technologies</a> open source project &mdash; LISS Consulting, Corp. d/b/a LISS Technologies</p>
+                <p style="font-size:0.6rem;opacity:0.35;margin-top:4px"><a href="https://www.flaticon.com/free-icons/pipe" title="pipe icons" style="color:inherit">Pipe icons created by Smashicons - Flaticon</a></p>
             </div>
         </footer>
 
@@ -1515,6 +1862,10 @@
                 document.querySelectorAll(".usage-tab").forEach((t, j) => t.classList.toggle("active", j === i));
                 document.querySelectorAll(".usage-panel").forEach((p, j) => p.classList.toggle("active", j === i));
             }
+            function showDashTab(i) {
+                document.querySelectorAll(".dash-tab").forEach((t, j) => t.classList.toggle("active", j === i));
+                document.querySelectorAll(".dash-panel").forEach((p, j) => p.classList.toggle("active", j === i));
+            }
             function copyPS() {
                 var t = document.getElementById("ps-install").textContent;
                 var b = document.getElementById("ps-copy-btn");
@@ -1532,5 +1883,6 @@
                 });
             }
         </script>
+        <script>lucide.createIcons();</script>
     </body>
 </html>
