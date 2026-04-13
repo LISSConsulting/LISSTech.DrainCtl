@@ -25,12 +25,12 @@
  * @type {Record<string, {warn: number, crit: number}>}
  */
 export const DEFAULTS = {
-  cpu:            { warn: 70,  crit: 85  },
-  mem:            { warn: 80,  crit: 90  },
-  sessions:       { warn: 80,  crit: 95  },
-  diskQueue:      { warn: 2,   crit: 5   },
-  inputDelay:     { warn: 50,  crit: 100 },
-  tcpRetransmits: { warn: 5,   crit: 10  },
+    cpu: { warn: 70, crit: 85 },
+    mem: { warn: 80, crit: 90 },
+    sessions: { warn: 80, crit: 95 },
+    diskQueue: { warn: 2, crit: 5 },
+    inputDelay: { warn: 50, crit: 100 },
+    tcpRetransmits: { warn: 5, crit: 10 },
 };
 
 // ---------------------------------------------------------------------------
@@ -55,19 +55,19 @@ export const DEFAULTS = {
  * @returns {'green'|'amber'|'red'|'neutral'}
  */
 export function getThresholdColor(value, warn, crit, direction = 'higher-worse') {
-  if (value == null || !Number.isFinite(value)) return 'neutral';
+    if (value == null || !Number.isFinite(value)) return 'neutral';
 
-  if (direction === 'lower-worse') {
-    // Low values are bad (e.g. available capacity score)
-    if (value <= crit) return 'red';
-    if (value <= warn) return 'amber';
+    if (direction === 'lower-worse') {
+        // Low values are bad (e.g. available capacity score)
+        if (value <= crit) return 'red';
+        if (value <= warn) return 'amber';
+        return 'green';
+    }
+
+    // Higher-worse (default): high values are bad
+    if (value >= crit) return 'red';
+    if (value >= warn) return 'amber';
     return 'green';
-  }
-
-  // Higher-worse (default): high values are bad
-  if (value >= crit) return 'red';
-  if (value >= warn) return 'amber';
-  return 'green';
 }
 
 // ---------------------------------------------------------------------------
@@ -104,28 +104,28 @@ export function getThresholdColor(value, warn, crit, direction = 'higher-worse')
  * @returns {Thresholds}
  */
 export function resolveThresholds(metricKey, perfConfig) {
-  const defaults = DEFAULTS[metricKey] ?? { warn: Infinity, crit: Infinity };
+    const defaults = DEFAULTS[metricKey] ?? { warn: Infinity, crit: Infinity };
 
-  if (perfConfig == null) return { ...defaults };
+    if (perfConfig == null) return { ...defaults };
 
-  switch (metricKey) {
-    case 'cpu':
-      return {
-        warn: perfConfig.cpu_warn_pct > 0 ? perfConfig.cpu_warn_pct : defaults.warn,
-        crit: perfConfig.cpu_crit_pct > 0 ? perfConfig.cpu_crit_pct : defaults.crit,
-      };
-    case 'mem':
-      // API layer already converts Go's % free to % used on load.
-      return {
-        warn: perfConfig.mem_warn_pct > 0 ? perfConfig.mem_warn_pct : defaults.warn,
-        crit: perfConfig.mem_crit_pct > 0 ? perfConfig.mem_crit_pct : defaults.crit,
-      };
-    case 'inputDelay':
-      return {
-        warn: perfConfig.input_delay_warn_ms > 0 ? perfConfig.input_delay_warn_ms : defaults.warn,
-        crit: perfConfig.input_delay_crit_ms > 0 ? perfConfig.input_delay_crit_ms : defaults.crit,
-      };
-    default:
-      return { ...defaults };
-  }
+    switch (metricKey) {
+        case 'cpu':
+            return {
+                warn: perfConfig.cpu_warn_pct > 0 ? perfConfig.cpu_warn_pct : defaults.warn,
+                crit: perfConfig.cpu_crit_pct > 0 ? perfConfig.cpu_crit_pct : defaults.crit,
+            };
+        case 'mem':
+            // API layer already converts Go's % free to % used on load.
+            return {
+                warn: perfConfig.mem_warn_pct > 0 ? perfConfig.mem_warn_pct : defaults.warn,
+                crit: perfConfig.mem_crit_pct > 0 ? perfConfig.mem_crit_pct : defaults.crit,
+            };
+        case 'inputDelay':
+            return {
+                warn: perfConfig.input_delay_warn_ms > 0 ? perfConfig.input_delay_warn_ms : defaults.warn,
+                crit: perfConfig.input_delay_crit_ms > 0 ? perfConfig.input_delay_crit_ms : defaults.crit,
+            };
+        default:
+            return { ...defaults };
+    }
 }

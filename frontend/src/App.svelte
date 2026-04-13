@@ -1,355 +1,466 @@
 <script>
-  import { untrack } from 'svelte';
-  import { fade } from 'svelte/transition';
-  import { initTheme } from './lib/theme.svelte.js';
-  import { appState, addEvent, appendMetricsSample, appendServerMetricsSample, seedServerMetrics } from './lib/state.svelte.js';
-  import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
+    import { untrack } from 'svelte';
+    import { fly } from 'svelte/transition';
+    import { initTheme } from './lib/theme.svelte.js';
+    import {
+        appState,
+        addEvent,
+        appendMetricsSample,
+        appendServerMetricsSample,
+        seedServerMetrics,
+        appendSessionSample,
+        appendRfxSample,
+        deriveP95,
+        deriveP50,
+    } from './lib/state.svelte.js';
+    import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
 
-  import Nav from './components/Nav.svelte';
-  import Footer from './components/Footer.svelte';
-  import CounterGrid from './components/CounterGrid.svelte';
-  import StateBar from './components/StateBar.svelte';
-  import MetricsChart from './components/MetricsChart.svelte';
-  import EventLog from './components/EventLog.svelte';
-  import ServerTable from './components/ServerTable.svelte';
-  import ConfigModal from './components/ConfigModal.svelte';
-  import HistoryModal from './components/HistoryModal.svelte';
-  import Toast from './components/Toast.svelte';
+    import Nav from './components/Nav.svelte';
+    import Footer from './components/Footer.svelte';
+    import CounterGrid from './components/CounterGrid.svelte';
+    import StateBar from './components/StateBar.svelte';
+    import MetricsChart from './components/MetricsChart.svelte';
+    import EventLog from './components/EventLog.svelte';
+    import ServerTable from './components/ServerTable.svelte';
+    import ConfigModal from './components/ConfigModal.svelte';
+    import HistoryModal from './components/HistoryModal.svelte';
+    import Toast from './components/Toast.svelte';
 
-  // ---------------------------------------------------------------------------
-  // Initialise theme once on load
-  // ---------------------------------------------------------------------------
-  initTheme();
+    // ---------------------------------------------------------------------------
+    // Initialise theme once on load
+    // ---------------------------------------------------------------------------
+    initTheme();
 
-  // ---------------------------------------------------------------------------
-  // Modal visibility state
-  // ---------------------------------------------------------------------------
-  let configOpen = $state(false);
-  /** @type {string|null} */
-  let historyHost = $state(null);
+    // ---------------------------------------------------------------------------
+    // Modal visibility state
+    // ---------------------------------------------------------------------------
+    let configOpen = $state(false);
+    /** @type {string|null} */
+    let historyHost = $state(null);
 
-  // ---------------------------------------------------------------------------
-  // State transition tracking — detect status changes between refresh cycles
-  // ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // State transition tracking — detect status changes between refresh cycles
+    // ---------------------------------------------------------------------------
 
-  /** Previous server statuses keyed by hostname. Populated after first refresh. */
-  const prevStates = /** @type {Map<string, string>} */ (new Map());
-  /** True after the first successful refresh completes. */
-  let hasRefreshed = false;
+    /** Previous server statuses keyed by hostname. Populated after first refresh. */
+    const prevStates = /** @type {Map<string, string>} */ (new Map());
+    /** True after the first successful refresh completes. */
+    let hasRefreshed = false;
 
-  /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
-  function statusLabel(s) {
-    return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
-  }
-
-  /** Map a server status to the event severity used by EventLog for colouring. */
-  function statusSev(s) {
-    if (s === 'alert' || s === 'off') return 'alert';
-    if (s === 'grace') return 'grace';
-    return 'ok';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Event helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Build a rich structured event object for a per-server state transition.
-   * Embeds the server's current drain state, perf metrics, and session counts
-   * so EventLog can render a detailed snapshot inline.
-   * @param {string} time
-   * @param {import('./lib/api.js').Server} sv
-   * @param {string} text
-   * @param {'ok'|'grace'|'alert'|'off'} sev
-   */
-  function serverEvent(time, sv, text, sev) {
-    const memFreePct = sv.perf && sv.perf.mem_total_mb > 0
-      ? Math.round(sv.perf.mem_avail_mb / sv.perf.mem_total_mb * 100)
-      : null;
-    return {
-      time,
-      host: sv.host.split('.')[0],
-      text,
-      sev,
-      transition: true,
-      drain_state: sv.status,
-      drain_mode: sv.drain_mode ?? null,
-      state_duration_seconds: sv.state_duration_seconds ?? null,
-      changed_by: sv.changed_by ?? '',
-      sessions_active: sv.sessions_active ?? sv.sessions,
-      sessions_disconnected: sv.sessions_disconnected ?? 0,
-      sessions_max: sv.max_sessions,
-      cpu_pct: sv.perf?.cpu_pct ?? null,
-      mem_free_pct: memFreePct,
-      input_delay_p95_ms: sv.perf?.input_delay_p95_ms ?? null,
-      pages_sec: sv.perf?.pages_sec ?? null,
-      tcp_retrans_sec: sv.perf?.tcp_retrans_sec ?? null,
-      disk_queue: sv.perf?.disk_queue ?? null,
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Refresh logic
-  // ---------------------------------------------------------------------------
-
-  let refreshing = false;
-
-  /**
-   * Pull fresh data from the API and update global state.
-   * Guard prevents concurrent calls — if the previous fetch hasn't resolved
-   * before the 30-second tick fires, the tick is skipped.
-   */
-  async function refresh() {
-    if (refreshing) return;
-    refreshing = true;
-    try {
-      // Fetch config once on the first successful refresh (lazy load).
-      // Also fetch metric history in parallel when serverMetrics is empty so
-      // sparklines are populated immediately on a cold start.
-      const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
-      const needsConfig = appState.config === null;
-      const needsMetricSeed = appState.serverMetrics.size === 0;
-      if (needsConfig) calls.push(fetchNotifyConfig());
-      // Fetch seed history in parallel; silently ignore failures (non-mock envs
-      // won't have this endpoint and should fall back to natural poll accumulation).
-      const metricSeedPromise = needsMetricSeed
-        ? fetchAllServerMetrics().catch(() => null)
-        : Promise.resolve(null);
-
-      const [results, seedData] = await Promise.all([Promise.all(calls), metricSeedPromise]);
-      const [servers, health] = results;
-
-      appState.servers = servers || [];
-      appState.health = health;
-      if (needsConfig) appState.config = results[2] ?? null;
-      appState.connected = true;
-      appState.lastUpdated = new Date();
-
-      // Seed per-server metric history from the mock endpoint (cold start only).
-      // seedServerMetrics skips hosts that already have live data so this is safe
-      // to call even when some samples have arrived via earlier poll cycles.
-      // Also synthesize fleet-wide metricsHistory so LOAD and HIC charts are
-      // populated immediately instead of waiting N×30 s to fill.
-      if (seedData) {
-        const seedMap = new Map(Object.entries(seedData));
-        seedServerMetrics(seedMap);
-
-        if (appState.metricsHistory.length < 2) {
-          const hosts = [...seedMap.values()];
-          const sampleCount = Math.max(...hosts.map(h => h.length), 0);
-          /** @type {import('./lib/state.svelte.js').MetricsSample[]} */
-          const fleetHistory = [];
-          for (let i = 0; i < sampleCount; i++) {
-            const slices = hosts.map(h => h[i]).filter(Boolean);
-            if (slices.length === 0) continue;
-            const cpuVals = slices.map(s => s.cpu ?? 0);
-            const memVals = slices.map(s => s.mem ?? 0);
-            const avgCpu = cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length;
-            const avgMem = memVals.reduce((a, b) => a + b, 0) / memVals.length;
-            const totalSess = slices.reduce((a, s) => a + (s.sessions ?? 0), 0);
-            const p95 = (/** @type {number[]} */ vals) => {
-              if (vals.length === 0) return 0;
-              const sorted = [...vals].sort((a, b) => a - b);
-              return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
-            };
-            const p50 = (/** @type {number[]} */ vals) => {
-              if (vals.length === 0) return 0;
-              const sorted = [...vals].sort((a, b) => a - b);
-              const mid = Math.floor(sorted.length / 2);
-              return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-            };
-            const idV = slices.map(s => s.inputDelay ?? 0);
-            const psV = slices.map(s => s.pagesPerSec ?? 0);
-            const trV = slices.map(s => s.tcpRetrans ?? 0);
-            const dqV = slices.map(s => s.diskQueue ?? 0);
-            fleetHistory.push({
-              time:        slices[0].time,
-              cpu:         avgCpu,
-              mem:         avgMem,
-              sessions:    totalSess,
-              inputDelay:  p95(idV),
-              pagesPerSec: p95(psV),
-              tcpRetrans:  p95(trV),
-              diskQueue:   p95(dqV),
-              p50InputDelay:  p50(idV),
-              p50PagesPerSec: p50(psV),
-              p50TcpRetrans:  p50(trV),
-              p50DiskQueue:   p50(dqV),
-            });
-          }
-          if (fleetHistory.length > 0) {
-            appState.metricsHistory = fleetHistory;
-          }
-        }
-      }
-
-      // Detect and log server state transitions (skipped on first refresh so we
-      // don't flood the log with N "registered" lines when the page loads).
-      const evtTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-      if (hasRefreshed) {
-        const seenHosts = new Set((servers || []).map(sv => sv.host));
-        for (const sv of (servers || [])) {
-          const prev = prevStates.get(sv.host);
-          if (prev === undefined) {
-            addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, 'ok'));
-          } else if (prev !== sv.status) {
-            addEvent(serverEvent(evtTime, sv, `${statusLabel(prev)} → ${statusLabel(sv.status)}`, statusSev(sv.status)));
-          }
-        }
-        for (const host of prevStates.keys()) {
-          if (!seenHosts.has(host)) {
-            addEvent({ time: evtTime, host: host.split('.')[0], text: 'removed from dashboard', sev: 'alert', transition: true, drain_state: 'off' });
-          }
-        }
-      }
-      // Snapshot for next cycle.
-      prevStates.clear();
-      for (const sv of (servers || [])) prevStates.set(sv.host, sv.status);
-      hasRefreshed = true;
-
-      // Compute fleet-wide P95 for health metrics — reveals outlier servers that
-      // averages would smooth out. CPU and memory stay as averages (capacity planning).
-      const s = appState.servers;
-      const perfSvs = s.filter(sv => sv.perf);
-
-      /** Return the P95 value from an array of numbers (sorted, 95th-percentile index). */
-      const p95 = (vals) => {
-        if (vals.length === 0) return 0;
-        const sorted = [...vals].sort((a, b) => a - b);
-        return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
-      };
-
-      const cpu = perfSvs.length
-        ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length
-        : 0;
-      const memSvs = s.filter(sv => sv.perf?.mem_total_mb > 0);
-      const memPct = memSvs.length
-        ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) / memSvs.length
-        : 0;
-      const idVals      = perfSvs.map(sv => sv.perf.input_delay_p95_ms || 0);
-      const psVals      = perfSvs.map(sv => sv.perf.pages_sec || 0);
-      const trVals      = perfSvs.map(sv => sv.perf.tcp_retrans_sec || 0);
-      const dqVals      = perfSvs.map(sv => sv.perf.disk_queue || 0);
-      const inputDelay  = p95(idVals);
-      const pagesPerSec = p95(psVals);
-      const tcpRetrans  = p95(trVals);
-      const diskQueue   = p95(dqVals);
-      const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
-
-      /** Return the P50 (median) from a numeric array. */
-      const p50 = (/** @type {number[]} */ vals) => {
-        if (vals.length === 0) return 0;
-        const sorted = [...vals].sort((a, b) => a - b);
-        const mid = Math.floor(sorted.length / 2);
-        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-      };
-
-      const ts = Date.now();
-      appendMetricsSample({
-        time: ts, cpu, mem: memPct, inputDelay, sessions, pagesPerSec, tcpRetrans, diskQueue,
-        p50InputDelay: p50(idVals), p50PagesPerSec: p50(psVals), p50TcpRetrans: p50(trVals), p50DiskQueue: p50(dqVals),
-      });
-
-      // Per-server ring buffers for per-host sparklines in ServerDetail.
-      for (const sv of s) {
-        if (sv.perf) {
-          const svMemPct = sv.perf.mem_total_mb > 0
-            ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
-            : 0;
-          appendServerMetricsSample(sv.host, {
-            time:        ts,
-            cpu:         sv.perf.cpu_pct,
-            mem:         svMemPct,
-            inputDelay:  sv.perf.input_delay_p95_ms,
-            sessions:    sv.sessions ?? 0,
-            diskQueue:   sv.perf.disk_queue ?? 0,
-            tcpRetrans:  sv.perf.tcp_retrans_sec ?? 0,
-            pagesPerSec: sv.perf.pages_sec ?? 0,
-          });
-        }
-      }
-
-      addEvent({
-        time: evtTime,
-        host: '',
-        text: `Refreshed — ${s.length} server(s), ${sessions} session(s)`,
-        sev: 'ok',
-        transition: false,
-        fleet_servers: s.length,
-        fleet_sessions: sessions,
-        fleet_cpu_pct: Math.round(cpu * 10) / 10,
-        fleet_mem_used_pct: Math.round(memPct * 10) / 10,
-        fleet_input_delay_p95: Math.round(inputDelay * 10) / 10,
-        fleet_pages_sec_p95: Math.round(pagesPerSec * 10) / 10,
-        fleet_tcp_retrans_p95: Math.round(tcpRetrans * 10) / 10,
-        fleet_disk_queue_p95: Math.round(diskQueue * 100) / 100,
-      });
-    } catch (e) {
-      appState.connected = false;
-      console.error('refresh:', e);
-      addEvent({
-        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
-        host: '',
-        text: `Refresh failed: ${e?.message ?? e}`,
-        sev: 'alert',
-        transition: false,
-      });
-    } finally {
-      refreshing = false;
+    /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
+    function statusLabel(s) {
+        return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
     }
-  }
 
-  // Scroll to top on view change.
-  $effect(() => {
-    appState.currentView;  // track
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
+    /** Map a server status to the event severity used by EventLog for colouring. */
+    function statusSev(s) {
+        if (s === 'alert' || s === 'off') return 'alert';
+        if (s === 'grace') return 'grace';
+        return 'ok';
+    }
 
-  // Run immediately on mount, then every 30 seconds.
-  // untrack prevents the effect from re-triggering when refresh() updates
-  // reactive state (appState.config, appState.serverMetrics, etc.) that it
-  // reads synchronously before its first await.
-  $effect(() => {
-    untrack(() => refresh());
-    const interval = setInterval(refresh, 30_000);
-    return () => clearInterval(interval);
-  });
+    // ---------------------------------------------------------------------------
+    // Event helpers
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build a rich structured event object for a per-server state transition.
+     * Embeds the server's current drain state, perf metrics, and session counts
+     * so EventLog can render a detailed snapshot inline.
+     * @param {string} time
+     * @param {import('./lib/api.js').Server} sv
+     * @param {string} text
+     * @param {'ok'|'grace'|'alert'|'off'} sev
+     */
+    function serverEvent(time, sv, text, sev) {
+        const memFreePct =
+            sv.perf && sv.perf.mem_total_mb > 0
+                ? Math.round((sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100)
+                : null;
+        return {
+            time,
+            host: sv.host.split('.')[0],
+            text,
+            sev,
+            transition: true,
+            drain_state: sv.status,
+            drain_mode: sv.drain_mode ?? null,
+            state_duration_seconds: sv.state_duration_seconds ?? null,
+            changed_by: sv.changed_by ?? '',
+            sessions_active: sv.sessions_active ?? sv.sessions,
+            sessions_disconnected: sv.sessions_disconnected ?? 0,
+            sessions_max: sv.max_sessions,
+            cpu_pct: sv.perf?.cpu_pct ?? null,
+            mem_free_pct: memFreePct,
+            input_delay_p95_ms: sv.perf?.input_delay_p95_ms ?? null,
+            pages_sec: sv.perf?.pages_sec ?? null,
+            tcp_retrans_sec: sv.perf?.tcp_retrans_sec ?? null,
+            disk_queue: sv.perf?.disk_queue ?? null,
+        };
+    }
+
+    // ---------------------------------------------------------------------------
+    // Refresh logic
+    // ---------------------------------------------------------------------------
+
+    let refreshing = false;
+
+    /**
+     * Pull fresh data from the API and update global state.
+     * Guard prevents concurrent calls — if the previous fetch hasn't resolved
+     * before the 30-second tick fires, the tick is skipped.
+     */
+    async function refresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+            // Fetch config once on the first successful refresh (lazy load).
+            // Also fetch metric history in parallel when serverMetrics is empty so
+            // sparklines are populated immediately on a cold start.
+            const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
+            const needsConfig = appState.config === null;
+            const needsMetricSeed = appState.serverMetrics.size === 0;
+            if (needsConfig) calls.push(fetchNotifyConfig());
+            // Fetch seed history in parallel; silently ignore failures (non-mock envs
+            // won't have this endpoint and should fall back to natural poll accumulation).
+            const metricSeedPromise = needsMetricSeed
+                ? fetchAllServerMetrics().catch(() => null)
+                : Promise.resolve(null);
+
+            const [results, seedData] = await Promise.all([Promise.all(calls), metricSeedPromise]);
+            const [servers, health] = results;
+
+            appState.servers = servers || [];
+            appState.health = health;
+            if (needsConfig) appState.config = results[2] ?? null;
+            appState.connected = true;
+            appState.lastUpdated = new Date();
+
+            // Seed per-server metric history from the mock endpoint (cold start only).
+            // seedServerMetrics skips hosts that already have live data so this is safe
+            // to call even when some samples have arrived via earlier poll cycles.
+            // Also synthesize fleet-wide metricsHistory so LOAD and HIC charts are
+            // populated immediately instead of waiting N×30 s to fill.
+            if (seedData) {
+                const seedMap = new Map(Object.entries(seedData));
+                seedServerMetrics(seedMap);
+
+                if (appState.metricsHistory.length < 2) {
+                    const hosts = [...seedMap.values()];
+                    const sampleCount = Math.max(...hosts.map((h) => h.length), 0);
+                    /** @type {import('./lib/state.svelte.js').MetricsSample[]} */
+                    const fleetHistory = [];
+                    /** @type {import('./lib/state.svelte.js').SessionSample[]} */
+                    const sessHistory = [];
+                    /** @type {import('./lib/state.svelte.js').RfxSample[]} */
+                    const rfxHistSeed = [];
+                    for (let i = 0; i < sampleCount; i++) {
+                        const slices = hosts.map((h) => h[i]).filter(Boolean);
+                        if (slices.length === 0) continue;
+                        const cpuVals = slices.map((s) => s.cpu ?? 0);
+                        const memVals = slices.map((s) => s.mem ?? 0);
+                        const avgCpu = cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length;
+                        const avgMem = memVals.reduce((a, b) => a + b, 0) / memVals.length;
+                        const totalSess = slices.reduce((a, s) => a + (s.sessions ?? 0), 0);
+                        const idV = slices.map((s) => s.inputDelay ?? 0);
+                        const psV = slices.map((s) => s.pagesPerSec ?? 0);
+                        const trV = slices.map((s) => s.tcpRetrans ?? 0);
+                        const dqV = slices.map((s) => s.diskQueue ?? 0);
+                        fleetHistory.push({
+                            time: slices[0].time,
+                            cpu: avgCpu,
+                            mem: avgMem,
+                            sessions: totalSess,
+                            inputDelay: deriveP95(idV),
+                            pagesPerSec: deriveP95(psV),
+                            tcpRetrans: deriveP95(trV),
+                            diskQueue: deriveP95(dqV),
+                            p50InputDelay: deriveP50(idV),
+                            p50PagesPerSec: deriveP50(psV),
+                            p50TcpRetrans: deriveP50(trV),
+                            p50DiskQueue: deriveP50(dqV),
+                        });
+
+                        // Session aggregate history
+                        const active = slices.reduce((a, s) => a + (s.sessionsActive ?? s.sessions ?? 0), 0);
+                        const disconnected = slices.reduce((a, s) => a + (s.sessionsDisconnected ?? 0), 0);
+                        const total = active + disconnected;
+                        const maxAll = slices.reduce((a, s) => a + (s.maxSessions ?? 0), 0);
+                        sessHistory.push({
+                            ts: slices[0].time,
+                            active,
+                            disconnected,
+                            total,
+                            utilization: maxAll > 0 ? Math.round((total / maxAll) * 100) : 0,
+                            sessionCpuP95: deriveP95(slices.map((s) => s.sessionCpuP95 ?? 0)),
+                            sessionMemP95: deriveP95(slices.map((s) => s.sessionMemP95 ?? 0)),
+                            sessionCpuP50: deriveP50(slices.map((s) => s.sessionCpuP50 ?? 0)),
+                            sessionMemP50: deriveP50(slices.map((s) => s.sessionMemP50 ?? 0)),
+                        });
+
+                        // RemoteFX aggregate history
+                        rfxHistSeed.push({
+                            ts: slices[0].time,
+                            fpsOut: deriveP95(slices.map((s) => s.rfxFpsOut ?? 0)),
+                            encodeMs: deriveP95(slices.map((s) => s.rfxEncodeMs ?? 0)),
+                            quality: deriveP95(slices.map((s) => s.rfxQuality ?? 0)),
+                            rtt: deriveP95(slices.map((s) => s.rfxRtt ?? 0)),
+                            loss: deriveP95(slices.map((s) => s.rfxLoss ?? 0)),
+                            skipServer: deriveP95(slices.map((s) => s.rfxSkipServer ?? 0)),
+                            skipNet: deriveP95(slices.map((s) => s.rfxSkipNet ?? 0)),
+                            fpsOutP50: deriveP50(slices.map((s) => s.rfxFpsOutP50 ?? 0)),
+                            encodeMsP50: deriveP50(slices.map((s) => s.rfxEncodeMsP50 ?? 0)),
+                            qualityP50: deriveP50(slices.map((s) => s.rfxQualityP50 ?? 0)),
+                            rttP50: deriveP50(slices.map((s) => s.rfxRttP50 ?? 0)),
+                            lossP50: deriveP50(slices.map((s) => s.rfxLossP50 ?? 0)),
+                            skipServerP50: deriveP50(slices.map((s) => s.rfxSkipServerP50 ?? 0)),
+                            skipNetP50: deriveP50(slices.map((s) => s.rfxSkipNetP50 ?? 0)),
+                        });
+                    }
+                    if (fleetHistory.length > 0) {
+                        appState.metricsHistory = fleetHistory;
+                    }
+                    if (sessHistory.length > 0) {
+                        appState.sessionHistory = sessHistory;
+                    }
+                    if (rfxHistSeed.length > 0) {
+                        appState.remoteFxHistory = rfxHistSeed;
+                        appState.rfxAvailable = true;
+                    }
+                }
+            }
+
+            // Detect and log server state transitions (skipped on first refresh so we
+            // don't flood the log with N "registered" lines when the page loads).
+            const evtTime = new Date().toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false,
+            });
+            if (hasRefreshed) {
+                const seenHosts = new Set((servers || []).map((sv) => sv.host));
+                for (const sv of servers || []) {
+                    const prev = prevStates.get(sv.host);
+                    if (prev === undefined) {
+                        addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, 'ok'));
+                    } else if (prev !== sv.status) {
+                        addEvent(
+                            serverEvent(
+                                evtTime,
+                                sv,
+                                `${statusLabel(prev)} → ${statusLabel(sv.status)}`,
+                                statusSev(sv.status),
+                            ),
+                        );
+                    }
+                }
+                for (const host of prevStates.keys()) {
+                    if (!seenHosts.has(host)) {
+                        addEvent({
+                            time: evtTime,
+                            host: host.split('.')[0],
+                            text: 'removed from dashboard',
+                            sev: 'alert',
+                            transition: true,
+                            drain_state: 'off',
+                        });
+                    }
+                }
+            }
+            // Snapshot for next cycle.
+            prevStates.clear();
+            for (const sv of servers || []) prevStates.set(sv.host, sv.status);
+            hasRefreshed = true;
+
+            // Compute fleet-wide P95 for health metrics — reveals outlier servers that
+            // averages would smooth out. CPU and memory stay as averages (capacity planning).
+            const s = appState.servers;
+            const perfSvs = s.filter((sv) => sv.perf);
+
+            const cpu = perfSvs.length ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length : 0;
+            const memSvs = s.filter((sv) => sv.perf?.mem_total_mb > 0);
+            const memPct = memSvs.length
+                ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) /
+                  memSvs.length
+                : 0;
+            const idVals = perfSvs.map((sv) => sv.perf.input_delay_p95_ms || 0);
+            const psVals = perfSvs.map((sv) => sv.perf.pages_sec || 0);
+            const trVals = perfSvs.map((sv) => sv.perf.tcp_retrans_sec || 0);
+            const dqVals = perfSvs.map((sv) => sv.perf.disk_queue || 0);
+            const inputDelay = deriveP95(idVals);
+            const pagesPerSec = deriveP95(psVals);
+            const tcpRetrans = deriveP95(trVals);
+            const diskQueue = deriveP95(dqVals);
+            const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
+
+
+            const ts = Date.now();
+            appendMetricsSample({
+                time: ts,
+                cpu,
+                mem: memPct,
+                inputDelay,
+                sessions,
+                pagesPerSec,
+                tcpRetrans,
+                diskQueue,
+                p50InputDelay: deriveP50(idVals),
+                p50PagesPerSec: deriveP50(psVals),
+                p50TcpRetrans: deriveP50(trVals),
+                p50DiskQueue: deriveP50(dqVals),
+            });
+
+            // Fleet session aggregates
+            const totalActive = s.reduce((a, sv) => a + (sv.sessions_active ?? sv.sessions ?? 0), 0);
+            const totalDisconnected = s.reduce((a, sv) => a + (sv.sessions_disconnected ?? 0), 0);
+            const totalAll = totalActive + totalDisconnected;
+            const totalMax = s.reduce((a, sv) => a + (sv.max_sessions ?? 0), 0);
+            const scpuVals = perfSvs.map((sv) => sv.perf.session_cpu_p95 ?? null).filter((v) => v != null);
+            const smemVals = perfSvs.map((sv) => sv.perf.session_mem_p95 ?? null).filter((v) => v != null);
+            const scpuP50Vals = perfSvs.map((sv) => sv.perf.session_cpu_p50 ?? null).filter((v) => v != null);
+            const smemP50Vals = perfSvs.map((sv) => sv.perf.session_mem_p50 ?? null).filter((v) => v != null);
+            appendSessionSample({
+                ts,
+                active: totalActive,
+                disconnected: totalDisconnected,
+                total: totalAll,
+                utilization: totalMax > 0 ? Math.round((totalAll / totalMax) * 100) : 0,
+                sessionCpuP95: deriveP95(/** @type {number[]} */ (scpuVals)),
+                sessionMemP95: deriveP95(/** @type {number[]} */ (smemVals)),
+                sessionCpuP50: deriveP50(/** @type {number[]} */ (scpuP50Vals)),
+                sessionMemP50: deriveP50(/** @type {number[]} */ (smemP50Vals)),
+            });
+
+            // Fleet RemoteFX aggregates
+            const rfxSvs = perfSvs.filter((sv) => sv.perf.rfx_available);
+            appState.rfxAvailable = rfxSvs.length > 0;
+            if (rfxSvs.length > 0) {
+                appendRfxSample({
+                    ts,
+                    fpsOut: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_fps_out ?? 0)),
+                    encodeMs: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_encode_ms ?? 0)),
+                    quality: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_quality ?? 0)),
+                    rtt: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_rtt ?? 0)),
+                    loss: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_loss ?? 0)),
+                    skipServer: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_server ?? 0)),
+                    skipNet: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_net ?? 0)),
+                    fpsOutP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_fps_out_p50 ?? 0)),
+                    encodeMsP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_encode_ms_p50 ?? 0)),
+                    qualityP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_quality_p50 ?? 0)),
+                    rttP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_rtt_p50 ?? 0)),
+                    lossP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_loss_p50 ?? 0)),
+                    skipServerP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_server_p50 ?? 0)),
+                    skipNetP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_net_p50 ?? 0)),
+                });
+            }
+
+            // Per-server ring buffers for per-host sparklines in ServerDetail.
+            for (const sv of s) {
+                if (sv.perf) {
+                    const svMemPct =
+                        sv.perf.mem_total_mb > 0 ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100 : 0;
+                    appendServerMetricsSample(sv.host, {
+                        time: ts,
+                        cpu: sv.perf.cpu_pct,
+                        mem: svMemPct,
+                        inputDelay: sv.perf.input_delay_p95_ms,
+                        sessions: sv.sessions ?? 0,
+                        diskQueue: sv.perf.disk_queue ?? 0,
+                        tcpRetrans: sv.perf.tcp_retrans_sec ?? 0,
+                        pagesPerSec: sv.perf.pages_sec ?? 0,
+                    });
+                }
+            }
+
+            addEvent({
+                time: evtTime,
+                host: '',
+                text: `Refreshed — ${s.length} server(s), ${sessions} session(s)`,
+                sev: 'ok',
+                transition: false,
+                fleet_servers: s.length,
+                fleet_sessions: sessions,
+                fleet_cpu_pct: Math.round(cpu * 10) / 10,
+                fleet_mem_used_pct: Math.round(memPct * 10) / 10,
+                fleet_input_delay_p95: Math.round(inputDelay * 10) / 10,
+                fleet_pages_sec_p95: Math.round(pagesPerSec * 10) / 10,
+                fleet_tcp_retrans_p95: Math.round(tcpRetrans * 10) / 10,
+                fleet_disk_queue_p95: Math.round(diskQueue * 100) / 100,
+            });
+        } catch (e) {
+            appState.connected = false;
+            console.error('refresh:', e);
+            addEvent({
+                time: new Date().toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }),
+                host: '',
+                text: `Refresh failed: ${e?.message ?? e}`,
+                sev: 'alert',
+                transition: false,
+            });
+        } finally {
+            refreshing = false;
+        }
+    }
+
+    // Scroll to top on view change.
+    $effect(() => {
+        appState.currentView; // track
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // Run immediately on mount, then every 30 seconds.
+    // untrack prevents the effect from re-triggering when refresh() updates
+    // reactive state (appState.config, appState.serverMetrics, etc.) that it
+    // reads synchronously before its first await.
+    $effect(() => {
+        untrack(() => refresh());
+        const interval = setInterval(refresh, 30_000);
+        return () => clearInterval(interval);
+    });
 </script>
 
 <Nav onconfigopen={() => (configOpen = true)} />
 
 <main class="main">
-  {#key appState.currentView}
-    <div in:fade={{ duration: 150, delay: 50 }} out:fade={{ duration: 100 }}>
-      {#if appState.currentView === 'overview'}
-        <CounterGrid />
-        <StateBar />
-        <MetricsChart />
-      {:else if appState.currentView === 'servers'}
-        <ServerTable onhistoryclick={(host) => (historyHost = host)} />
-      {:else if appState.currentView === 'events'}
-        <EventLog />
-      {/if}
-    </div>
-  {/key}
+    {#key appState.currentView}
+        <div in:fly={{ y: 12, duration: 120, delay: 60 }} out:fly={{ y: -6, duration: 80 }}>
+            {#if appState.currentView === 'overview'}
+                <CounterGrid />
+                <StateBar />
+                <MetricsChart />
+            {:else if appState.currentView === 'servers'}
+                <ServerTable onhistoryclick={(host) => (historyHost = host)} />
+            {:else if appState.currentView === 'events'}
+                <EventLog />
+            {/if}
+        </div>
+    {/key}
 </main>
 
-<Footer />
+<Footer onrefresh={refresh} />
 
 {#if configOpen}
-  <ConfigModal onclose={() => (configOpen = false)} />
+    <ConfigModal onclose={() => (configOpen = false)} />
 {/if}
 
 {#if historyHost}
-  <HistoryModal host={historyHost} onclose={() => (historyHost = null)} />
+    <HistoryModal host={historyHost} onclose={() => (historyHost = null)} />
 {/if}
 
 <Toast />
 
 <style>
-  .main {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 28px 24px 48px;
-  }
+    .main {
+        flex: 1;
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 28px 24px 48px;
+        width: 100%;
+    }
 </style>

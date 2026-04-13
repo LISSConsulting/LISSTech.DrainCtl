@@ -23,10 +23,10 @@ export const theme = $state({ current: /** @type {'light'|'dark'} */ ('light') }
  * @returns {'light'|'dark'}
  */
 function systemPreference() {
-  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
-  return 'light';
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+        return 'dark';
+    }
+    return 'light';
 }
 
 /**
@@ -34,10 +34,10 @@ function systemPreference() {
  * @param {'light'|'dark'} theme
  */
 function applyTheme(value) {
-  theme.current = value;
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = value;
-  }
+    theme.current = value;
+    if (typeof document !== 'undefined') {
+        document.documentElement.dataset.theme = value;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -55,30 +55,30 @@ function applyTheme(value) {
  * Call once from your root component's onMount or main entry point.
  */
 export function initTheme() {
-  /** @type {'light'|'dark'} */
-  let resolved = 'light';
+    /** @type {'light'|'dark'} */
+    let resolved = 'light';
 
-  if (typeof localStorage !== 'undefined') {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark') {
-      resolved = stored;
+    if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark') {
+            resolved = stored;
+        } else {
+            resolved = systemPreference();
+        }
     } else {
-      resolved = systemPreference();
+        resolved = systemPreference();
     }
-  } else {
-    resolved = systemPreference();
-  }
 
-  applyTheme(resolved);
+    applyTheme(resolved);
 }
 
 /**
  * Toggle between light and dark, persist to localStorage, and update the DOM.
  */
 export function toggleTheme() {
-  const next = theme.current === 'dark' ? 'light' : 'dark';
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(STORAGE_KEY, next);
-  }
-  applyTheme(next);
+    const next = theme.current === 'dark' ? 'light' : 'dark';
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, next);
+    }
+    applyTheme(next);
 }

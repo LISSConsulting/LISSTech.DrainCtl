@@ -47,9 +47,7 @@
             // Deadline ~45 minutes from now.
             graceDeadline = new Date(Date.now() + 45 * 60 * 1000).toISOString();
         }
-        var drainMode = status === "ok"
-            ? "ALLOW_ALL_CONNECTIONS"
-            : "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS";
+        var drainMode = status === "ok" ? "ALLOW_ALL_CONNECTIONS" : "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS";
         return {
             host: name,
             status: status,
@@ -86,16 +84,16 @@
     for (var i = 0; i < patterns.length; i++) {
         var p = patterns[i];
         render([
-            mk("RDSH01", p[0], "",                  12, perfHealthy),
-            mk("RDSH02", p[1], "admin@contoso",     20, perfWarn),
-            mk("RDSH03", p[2], "svc-rds@contoso",   24, perfWarn),
-            mk("RDSH04", p[3], "",                   0, null),
+            mk("RDSH01", p[0], "", 12, perfHealthy),
+            mk("RDSH02", p[1], "admin@contoso", 20, perfWarn),
+            mk("RDSH03", p[2], "svc-rds@contoso", 24, perfWarn),
+            mk("RDSH04", p[3], "", 0, null),
         ]);
     }
     render([
-        mk("RDSH01", "ok",    "",                  12, perfHealthy),
-        mk("RDSH02", "grace", "admin@contoso",     20, perfWarn),
-        mk("RDSH03", "alert", "svc-rds@contoso",   24, null),
-        mk("RDSH04", null,    null,                  0, null),
+        mk("RDSH01", "ok", "", 12, perfHealthy),
+        mk("RDSH02", "grace", "admin@contoso", 20, perfWarn),
+        mk("RDSH03", "alert", "svc-rds@contoso", 24, null),
+        mk("RDSH04", null, null, 0, null),
     ]);
 })();

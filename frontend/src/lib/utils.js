@@ -19,17 +19,17 @@
  * @returns {string}
  */
 export function rel(iso, _now = Date.now()) {
-  if (!iso) return 'never';
-  const d = new Date(iso);
-  if (isNaN(d)) return 'never';
-  const s = Math.floor((_now - d.getTime()) / 1000);
-  if (s < 0) return 'now';
-  if (s < 60) return s + 's ago';
-  const m = Math.floor(s / 60);
-  if (m < 60) return m + 'm ago';
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + 'h ago';
-  return Math.floor(h / 24) + 'd ago';
+    if (!iso) return 'never';
+    const d = new Date(iso);
+    if (isNaN(d)) return 'never';
+    const s = Math.floor((_now - d.getTime()) / 1000);
+    if (s < 0) return 'now';
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
 }
 
 /**
@@ -39,13 +39,16 @@ export function rel(iso, _now = Date.now()) {
  * @returns {string}
  */
 export function formatTs(iso) {
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toLocaleString('en-US', {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  });
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
 }
 
 /**
@@ -59,13 +62,15 @@ export function formatTs(iso) {
  * @returns {string}
  */
 export function modeLabel(m) {
-  const ML = {
-    ALLOW_ALL_CONNECTIONS:                              'Open',
-    ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS:             'Drain',
-    ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART: 'Drain (Restart)',
-    none: 'Open', graceful: 'Graceful', immediate: 'Immediate',
-  };
-  return ML[m] || m || '—';
+    const ML = {
+        ALLOW_ALL_CONNECTIONS: 'Open',
+        ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: 'Drain',
+        ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART: 'Drain (Restart)',
+        none: 'Open',
+        graceful: 'Graceful',
+        immediate: 'Immediate',
+    };
+    return ML[m] || m || '—';
 }
 
 /**
@@ -75,11 +80,11 @@ export function modeLabel(m) {
  * @returns {string}
  */
 export function dur(sec) {
-  if (sec == null) return '—';
-  const s = Math.floor(sec);
-  if (s < 60) return s + 's';
-  const m = Math.floor(s / 60);
-  if (m < 60) return m + 'm ' + (s % 60) + 's';
-  const h = Math.floor(m / 60);
-  return h + 'h ' + (m % 60) + 'm';
+    if (sec == null) return '—';
+    const s = Math.floor(sec);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ' + (s % 60) + 's';
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm';
 }

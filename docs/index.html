@@ -6,22 +6,40 @@
         <link rel="icon" href="favicon.ico" type="image/x-icon" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
         <title>DrainCtl — Remote Desktop Services Drain Mode & Performance Monitor</title>
-        <meta name="description" content="Real-time drain mode monitoring, session tracking, and performance alerting for Windows Remote Desktop Services (RDS/RDSH). Know who disabled connections, track active sessions, monitor CPU and input delay — with a centralized dashboard for your entire farm." />
-        <meta name="keywords" content="Remote Desktop Services, RDSH, drain mode, session monitor, RDS monitoring, Windows Server, performance monitoring, session host, terminal services" />
+        <meta
+            name="description"
+            content="Real-time drain mode monitoring, session tracking, and performance alerting for Windows Remote Desktop Services (RDS/RDSH). Know who disabled connections, track active sessions, monitor CPU and input delay — with a centralized dashboard for your entire farm."
+        />
+        <meta
+            name="keywords"
+            content="Remote Desktop Services, RDSH, drain mode, session monitor, RDS monitoring, Windows Server, performance monitoring, session host, terminal services"
+        />
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
         <meta property="og:title" content="DrainCtl — Remote Desktop Services Monitor" />
-        <meta property="og:description" content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. Instant detection, change attribution, 12 alert triggers, centralized dashboard." />
+        <meta
+            property="og:description"
+            content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. Instant detection, change attribution, 12 alert triggers, centralized dashboard."
+        />
         <meta property="og:url" content="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
-        <meta property="og:image" content="https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png" />
+        <meta
+            property="og:image"
+            content="https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png"
+        />
         <meta property="og:site_name" content="LISS Technologies" />
 
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="DrainCtl — Remote Desktop Services Monitor" />
-        <meta name="twitter:description" content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. One service, one dashboard, instant alerts." />
-        <meta name="twitter:image" content="https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png" />
+        <meta
+            name="twitter:description"
+            content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. One service, one dashboard, instant alerts."
+        />
+        <meta
+            name="twitter:image"
+            content="https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png"
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -511,11 +529,16 @@
                 flex-wrap: wrap;
             }
             @media (max-width: 900px) {
-                .features-grid--2col { grid-template-columns: 1fr 1fr; }
-                .compact-grid { grid-template-columns: repeat(2, 1fr); }
+                .features-grid--2col {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .compact-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
             }
             @media (max-width: 768px) {
-                .hero-feature, .hero-feature:nth-child(even) {
+                .hero-feature,
+                .hero-feature:nth-child(even) {
                     flex-direction: column;
                     text-align: center;
                     border-left: var(--bw) solid var(--border);
@@ -524,10 +547,14 @@
                 }
             }
             @media (max-width: 600px) {
-                .features-grid--2col { grid-template-columns: 1fr; }
+                .features-grid--2col {
+                    grid-template-columns: 1fr;
+                }
             }
             @media (max-width: 480px) {
-                .compact-grid { grid-template-columns: 1fr; }
+                .compact-grid {
+                    grid-template-columns: 1fr;
+                }
             }
 
             /* ── How it works ─────────────────────────────────────── */
@@ -921,12 +948,12 @@
         <!-- Hero -->
         <section class="hero">
             <div class="wrap">
-                <img src="logo.png" alt="" width="72" height="72" style="display:block;margin:0 auto 12px" />
+                <img src="logo.png" alt="" width="72" height="72" style="display: block; margin: 0 auto 12px" />
                 <h1>Remote Desktop Services<br />monitoring that <em>just works.</em></h1>
                 <p class="hero-sub">
-                    DrainCtl watches every session host in your RDS farm. Drain mode changes, active sessions,
-                    CPU, memory, input delay &mdash; one service, one dashboard, instant alerts.
-                    Someone disabled new connections at 2 AM? You'll know who, when, and how long ago.
+                    DrainCtl watches every session host in your RDS farm. Drain mode changes, active sessions, CPU,
+                    memory, input delay &mdash; one service, one dashboard, instant alerts. Someone disabled new
+                    connections at 2 AM? You'll know who, when, and how long ago.
                 </p>
                 <div class="hero-buttons">
                     <a
@@ -998,36 +1025,48 @@
                 <div class="section-label">Capabilities</div>
                 <div class="section-title">Complete visibility for your RDS farm.</div>
                 <div class="section-desc">
-                    Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything.
-                    One dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.
+                    Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything. One
+                    dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.
                 </div>
                 <div class="hero-features">
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#9889;</div>
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Instant Detection</div>
-                            <div class="hero-feature-desc">The moment someone runs <code>chglogon /drain</code>, the service knows. No polling delay &mdash; Windows notifies DrainCtl directly through the kernel.</div>
+                            <div class="hero-feature-desc">
+                                The moment someone runs <code>chglogon /drain</code>, the service knows. No polling
+                                delay &mdash; Windows notifies DrainCtl directly through the kernel.
+                            </div>
                         </div>
                     </div>
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#128100;</div>
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Who Changed It</div>
-                            <div class="hero-feature-desc">DrainCtl tells you the exact user account that enabled drain mode. Not just that it changed &mdash; who did it, and when.</div>
+                            <div class="hero-feature-desc">
+                                DrainCtl tells you the exact user account that enabled drain mode. Not just that it
+                                changed &mdash; who did it, and when.
+                            </div>
                         </div>
                     </div>
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#128200;</div>
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Performance Monitoring</div>
-                            <div class="hero-feature-desc">CPU, memory, disk I/O, input delay, and RemoteFX &mdash; collected every poll cycle through the Windows PDH API. Threshold alerts fire before users notice.</div>
+                            <div class="hero-feature-desc">
+                                CPU, memory, disk I/O, input delay, and RemoteFX &mdash; collected every poll cycle
+                                through the Windows PDH API. Threshold alerts fire before users notice.
+                            </div>
                         </div>
                     </div>
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#127760;</div>
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Farm Dashboard</div>
-                            <div class="hero-feature-desc">One page for your entire RDSH farm. Live status, session gauges, state history chart, and event log &mdash; secured with Kerberos SSO.</div>
+                            <div class="hero-feature-desc">
+                                One page for your entire RDSH farm. Live status, session gauges, state history chart,
+                                and event log &mdash; secured with Kerberos SSO.
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1036,22 +1075,34 @@
                     <div class="compact-card">
                         <div class="compact-card-icon">&#128202;</div>
                         <div class="compact-card-title">Session Tracking</div>
-                        <div class="compact-card-desc">Active and disconnected sessions on every server. Capacity threshold alerts before your farm runs out of slots.</div>
+                        <div class="compact-card-desc">
+                            Active and disconnected sessions on every server. Capacity threshold alerts before your farm
+                            runs out of slots.
+                        </div>
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#128276;</div>
                         <div class="compact-card-title">Smart Alerts</div>
-                        <div class="compact-card-desc">12 trigger types across drain mode, sessions, CPU, memory, and input delay. Webhook, ntfy, and email (SMTP) with per-target intervals.</div>
+                        <div class="compact-card-desc">
+                            12 trigger types across drain mode, sessions, CPU, memory, and input delay. Webhook, ntfy,
+                            and email (SMTP) with per-target intervals.
+                        </div>
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#128203;</div>
                         <div class="compact-card-title">90-Day Audit Trail</div>
-                        <div class="compact-card-desc">Every state change logged with timestamps, durations, and attribution. CLI, PowerShell, or dashboard.</div>
+                        <div class="compact-card-desc">
+                            Every state change logged with timestamps, durations, and attribution. CLI, PowerShell, or
+                            dashboard.
+                        </div>
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#128274;</div>
                         <div class="compact-card-title">Enterprise Ready</div>
-                        <div class="compact-card-desc">DNS SRV discovery, EV code-signed, Kerberos SSO, virtual service account, 12 PowerShell cmdlets + CLI.</div>
+                        <div class="compact-card-desc">
+                            DNS SRV discovery, EV code-signed, Kerberos SSO, virtual service account, 12 PowerShell
+                            cmdlets + CLI.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1063,34 +1114,40 @@
                 <div class="section-label">Architecture</div>
                 <div class="section-title">Five layers. One service.</div>
                 <div class="section-desc">
-                    The service triangulates registry notifications, event log subscriptions, performance counters, and safety-net polling &mdash; then routes results to the dashboard, notifications, and dual-sink logging.
+                    The service triangulates registry notifications, event log subscriptions, performance counters, and
+                    safety-net polling &mdash; then routes results to the dashboard, notifications, and dual-sink
+                    logging.
                 </div>
                 <div class="flow-steps">
                     <div class="flow-step card">
                         <h3>Registry + Event Log</h3>
                         <p>
-                            <code>RegNotifyChangeKeyValue</code> fires the instant drain mode changes. <code>EvtSubscribe</code> on Security Event 4657 delivers who did it.
+                            <code>RegNotifyChangeKeyValue</code> fires the instant drain mode changes.
+                            <code>EvtSubscribe</code> on Security Event 4657 delivers who did it.
                         </p>
                         <span class="tag">~0ms</span>
                     </div>
                     <div class="flow-step card">
                         <h3>Performance Counters</h3>
                         <p>
-                            PDH API collects CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle. Threshold alerts fire on two consecutive breaches.
+                            PDH API collects CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle.
+                            Threshold alerts fire on two consecutive breaches.
                         </p>
                         <span class="tag">PDH + RemoteFX</span>
                     </div>
                     <div class="flow-step card">
                         <h3>Notifications</h3>
                         <p>
-                            Webhook, ntfy.sh, and email (SMTP with HTML templates and natural-language subjects). Per-target triggers and repeat intervals.
+                            Webhook, ntfy.sh, and email (SMTP with HTML templates and natural-language subjects).
+                            Per-target triggers and repeat intervals.
                         </p>
                         <span class="tag">N&times;M targets</span>
                     </div>
                     <div class="flow-step card">
                         <h3>Dashboard + Logging</h3>
                         <p>
-                            In-process HTTPS dashboard with Kerberos SSO. Dual-sink logging to Windows Event Log and file. Runs as NT SERVICE\DrainCtl.
+                            In-process HTTPS dashboard with Kerberos SSO. Dual-sink logging to Windows Event Log and
+                            file. Runs as NT SERVICE\DrainCtl.
                         </p>
                         <span class="tag">\\.\pipe\drainctl</span>
                     </div>
@@ -1135,7 +1192,8 @@
                             <div class="comic-icon">&#128231;</div>
                             <h3>Email + Webhook + ntfy</h3>
                             <p>
-                                SMTP email with HTML templates and natural-language subjects. Webhook and ntfy.sh too. Manage all targets from the dashboard with per-target triggers.
+                                SMTP email with HTML templates and natural-language subjects. Webhook and ntfy.sh too.
+                                Manage all targets from the dashboard with per-target triggers.
                             </p>
                         </div>
                     </div>
@@ -1145,7 +1203,8 @@
                             <div class="comic-icon">&#128200;</div>
                             <h3>Performance Monitoring</h3>
                             <p>
-                                CPU, memory, input delay, disk I/O, and RemoteFX &mdash; collected via PDH every poll cycle. Threshold alerts fire before users complain.
+                                CPU, memory, input delay, disk I/O, and RemoteFX &mdash; collected via PDH every poll
+                                cycle. Threshold alerts fire before users complain.
                             </p>
                         </div>
                     </div>
@@ -1254,75 +1313,83 @@
                     <button class="usage-tab" onclick="showTab(3)">History</button>
                 </div>
 
-                <div class="usage-panel active" id="tab0"><span class="c"># Check drain mode status (instant via service pipe)</span>
-<span class="b">PS&gt;</span> drainctl check
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> source=service
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> host=MDS-LDC1-RDS5
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
-<span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy connections_allowed=true exit=0
+                <div class="usage-panel active" id="tab0">
+                    <span class="c"># Check drain mode status (instant via service pipe)</span>
+                    <span class="b">PS&gt;</span> drainctl check <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> source=service <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> host=MDS-LDC1-RDS5 <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> drain_mode=<span class="g">ALLOW_ALL_CONNECTIONS</span> value=0
+                    <span class="d">2026-04-02T20:08:56-04:00</span>
+                    <span class="d">[INF]</span> state_since=2026-04-02T18:30:00-04:00 state_duration=1h38m56s
+                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="d">[INF]</span> grace_period=1h0m0s
+                    <span class="d">2026-04-02T20:08:56-04:00</span> <span class="g">[OK ]</span> status=Healthy
+                    connections_allowed=true exit=0
 
-<span class="c"># When drain mode is active beyond grace period:</span>
-<span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r">Alert</span> connections_allowed=<span class="r">false</span> exit=1
-<span class="c"># Exit code 1 triggers your RMM monitoring threshold</span></div>
+                    <span class="c"># When drain mode is active beyond grace period:</span>
+                    <span class="d">2026-04-02T22:15:00-04:00</span> <span class="r">[ERR]</span> status=<span class="r"
+                        >Alert</span
+                    >
+                    connections_allowed=<span class="r">false</span> exit=1
+                    <span class="c"># Exit code 1 triggers your RMM monitoring threshold</span>
+                </div>
 
-                <div class="usage-panel" id="tab1"><span class="c"># Rich status object</span>
-<span class="b">PS&gt;</span> Get-RDSHDrainMode
+                <div class="usage-panel" id="tab1">
+                    <span class="c"># Rich status object</span> <span class="b">PS&gt;</span> Get-RDSHDrainMode
 
-<span class="w">Timestamp            :</span> <span class="d">4/2/2026 8:08:56 PM</span>
-<span class="w">Host                 :</span> <span class="d">MDS-LDC1-RDS5</span>
-<span class="w">DrainMode            :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
-<span class="w">StateSince           :</span> <span class="d">4/2/2026 6:30:00 PM</span>
-<span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
-<span class="w">Status               :</span> <span class="g">Healthy</span>
-<span class="w">ConnectionsAllowed   :</span> <span class="g">True</span>
-<span class="w">Message              :</span> <span class="d">All connections allowed.</span>
-<span class="w">ExitCode             :</span> <span class="d">0</span>
+                    <span class="w">Timestamp :</span> <span class="d">4/2/2026 8:08:56 PM</span>
+                    <span class="w">Host :</span> <span class="d">MDS-LDC1-RDS5</span>
+                    <span class="w">DrainMode :</span> <span class="g">ALLOW_ALL_CONNECTIONS</span>
+                    <span class="w">StateSince :</span> <span class="d">4/2/2026 6:30:00 PM</span>
+                    <span class="w">StateDurationSeconds :</span> <span class="d">5936</span>
+                    <span class="w">Status :</span> <span class="g">Healthy</span>
+                    <span class="w">ConnectionsAllowed :</span> <span class="g">True</span>
+                    <span class="w">Message :</span> <span class="d">All connections allowed.</span>
+                    <span class="w">ExitCode :</span> <span class="d">0</span>
 
-<span class="c"># Boolean check for scripts and alerts</span>
-<span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) { <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
-<span class="g">OK</span>
+                    <span class="c"># Boolean check for scripts and alerts</span>
+                    <span class="b">PS&gt;</span> <span class="w">if</span> (Test-RDSHDrainMode) {
+                    <span class="g">"OK"</span> } <span class="w">else</span> { <span class="r">"ALERT"</span> }
+                    <span class="g">OK</span>
 
-<span class="c"># One-liner for monitoring scripts</span>
-<span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status
-<span class="g">Healthy</span></div>
+                    <span class="c"># One-liner for monitoring scripts</span>
+                    <span class="b">PS&gt;</span> (Get-RDSHDrainMode).Status <span class="g">Healthy</span>
+                </div>
 
-                <div class="usage-panel" id="tab2"><span class="c"># Machine-readable output for automation</span>
-<span class="b">PS&gt;</span> drainctl check --format json
-<span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.100.9"</span>,
-  <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
-  <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
-  <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
-  <span class="b">"state_since"</span>: <span class="d">"2026-04-02T18:30:00-04:00"</span>,
-  <span class="b">"state_duration_seconds"</span>: <span class="d">5936.42</span>,
-  <span class="b">"grace_period_seconds"</span>: <span class="d">3600</span>,
-  <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
-  <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
-  <span class="b">"sessions"</span>: {
-    <span class="b">"active_sessions"</span>: <span class="d">12</span>,
-    <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
-    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
-    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
-    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
-  },
-  <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
-  <span class="b">"exit_code"</span>: <span class="d">0</span>
-<span class="w">}</span></div>
+                <div class="usage-panel" id="tab2">
+                    <span class="c"># Machine-readable output for automation</span>
+                    <span class="b">PS&gt;</span> drainctl check --format json
+                    <span class="w">{</span>
+                    <span class="b">"version"</span>: <span class="d">"26.100.9"</span>, <span class="b">"host"</span>:
+                    <span class="d">"MDS-LDC1-RDS5"</span>, <span class="b">"drain_mode"</span>:
+                    <span class="d">"ALLOW_ALL_CONNECTIONS"</span>, <span class="b">"drain_mode_value"</span>:
+                    <span class="d">0</span>, <span class="b">"state_since"</span>:
+                    <span class="d">"2026-04-02T18:30:00-04:00"</span>, <span class="b">"state_duration_seconds"</span>:
+                    <span class="d">5936.42</span>, <span class="b">"grace_period_seconds"</span>:
+                    <span class="d">3600</span>, <span class="b">"status"</span>: <span class="g">"Healthy"</span>,
+                    <span class="b">"connections_allowed"</span>: <span class="g">true</span>,
+                    <span class="b">"sessions"</span>: { <span class="b">"active_sessions"</span>:
+                    <span class="d">12</span>, <span class="b">"disconnected_sessions"</span>: <span class="d">3</span>,
+                    <span class="b">"total_sessions"</span>: <span class="d">15</span>,
+                    <span class="b">"max_sessions"</span>: <span class="d">25</span>,
+                    <span class="b">"utilization_pct"</span>: <span class="d">60</span>
+                    },
+                    <span class="b">"message"</span>: <span class="d">"All connections allowed."</span>,
+                    <span class="b">"exit_code"</span>: <span class="d">0</span> <span class="w">}</span>
+                </div>
 
-                <div class="usage-panel" id="tab3"><span class="c"># View recent state transitions with attribution</span>
-<span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
+                <div class="usage-panel" id="tab3">
+                    <span class="c"># View recent state transitions with attribution</span>
+                    <span class="b">PS&gt;</span> Get-RDSHDrainHistory -ChangesOnly -Limit 5
 
-<span class="w">Timestamp              DrainMode                         Changed  ChangedBy       Exit</span>
-<span class="d">---------              ---------                         -------  ---------       ----</span>
-<span class="y">4/2/2026 10:14:04 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\lissadmin   0</span>
-<span class="g">4/2/2026 10:13:32 PM   ALLOW_ALL_CONNECTIONS             YES      MDS\lissadmin   0</span>
-<span class="y">4/2/2026 10:10:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\lissadmin   0</span>
-<span class="g">4/2/2026  8:30:00 PM   ALLOW_ALL_CONNECTIONS             YES      MDS\svcaccount  0</span>
-<span class="y">4/2/2026  6:15:00 PM   ALLOW_RECONNECTIONS_PREVENT_NEW.. YES      MDS\jdoe        0</span>
+                    <span class="w">Timestamp DrainMode Changed ChangedBy Exit</span>
+                    <span class="d">--------- --------- ------- --------- ----</span>
+                    <span class="y">4/2/2026 10:14:04 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\lissadmin 0</span>
+                    <span class="g">4/2/2026 10:13:32 PM ALLOW_ALL_CONNECTIONS YES MDS\lissadmin 0</span>
+                    <span class="y">4/2/2026 10:10:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\lissadmin 0</span>
+                    <span class="g">4/2/2026 8:30:00 PM ALLOW_ALL_CONNECTIONS YES MDS\svcaccount 0</span>
+                    <span class="y">4/2/2026 6:15:00 PM ALLOW_RECONNECTIONS_PREVENT_NEW.. YES MDS\jdoe 0</span>
 
-<span class="c"># Filter in pipeline</span>
+                    <span class="c"># Filter in pipeline</span>
                     <span class="b">PS&gt;</span> Get-RDSHDrainHistory | Where-Object Changed | Select Timestamp,
                     ChangedBy
                 </div>
@@ -1411,10 +1478,16 @@
                 <div class="footer-links">
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a>
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases">Releases</a>
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE">Apache 2.0 License</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE"
+                        >Apache 2.0 License</a
+                    >
                 </div>
                 <p>Built by <a href="https://lisstech.com">LISS Consulting, Corp.</a> d/b/a LISS Technologies</p>
-                <p style="font-size:0.6rem;opacity:0.35;margin-top:4px"><a href="https://www.flaticon.com/free-icons/pipe" title="pipe icons" style="color:inherit">Pipe icons created by Smashicons - Flaticon</a></p>
+                <p style="font-size: 0.6rem; opacity: 0.35; margin-top: 4px">
+                    <a href="https://www.flaticon.com/free-icons/pipe" title="pipe icons" style="color: inherit"
+                        >Pipe icons created by Smashicons - Flaticon</a
+                    >
+                </p>
             </div>
         </footer>
 

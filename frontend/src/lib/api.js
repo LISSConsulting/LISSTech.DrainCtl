@@ -116,62 +116,62 @@ const FETCH_TIMEOUT_MS = 20_000;
  * @returns {Promise<Response>}
  */
 async function apiFetch(path, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  let response;
-  try {
-    response = await fetch(`${BASE}${path}`, {
-      credentials: 'include',
-      signal: controller.signal,
-      ...options,
-      headers: {
-        'Accept': 'application/json',
-        ...options.headers,
-      },
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new ApiError(0, 'Timeout', `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`, path);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    let detail = '';
+    let response;
     try {
-      const body = await response.json();
-      detail = body.error ?? body.message ?? JSON.stringify(body);
-    } catch {
-      detail = await response.text().catch(() => '');
+        response = await fetch(`${BASE}${path}`, {
+            credentials: 'include',
+            signal: controller.signal,
+            ...options,
+            headers: {
+                Accept: 'application/json',
+                ...options.headers,
+            },
+        });
+    } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+            throw new ApiError(0, 'Timeout', `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`, path);
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
     }
-    throw new ApiError(response.status, response.statusText, detail, path);
-  }
 
-  return response;
+    if (!response.ok) {
+        let detail = '';
+        try {
+            const body = await response.json();
+            detail = body.error ?? body.message ?? JSON.stringify(body);
+        } catch {
+            detail = await response.text().catch(() => '');
+        }
+        throw new ApiError(response.status, response.statusText, detail, path);
+    }
+
+    return response;
 }
 
 /**
  * Structured error thrown for non-2xx API responses.
  */
 export class ApiError extends Error {
-  /**
-   * @param {number} status
-   * @param {string} statusText
-   * @param {string} detail
-   * @param {string} path
-   */
-  constructor(status, statusText, detail, path) {
-    const message = `API ${status} ${statusText} — ${path}${detail ? ': ' + detail : ''}`;
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.statusText = statusText;
-    this.detail = detail;
-    this.path = path;
-  }
+    /**
+     * @param {number} status
+     * @param {string} statusText
+     * @param {string} detail
+     * @param {string} path
+     */
+    constructor(status, statusText, detail, path) {
+        const message = `API ${status} ${statusText} — ${path}${detail ? ': ' + detail : ''}`;
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.statusText = statusText;
+        this.detail = detail;
+        this.path = path;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -183,8 +183,8 @@ export class ApiError extends Error {
  * @returns {Promise<HealthResponse>}
  */
 export async function fetchHealth() {
-  const res = await apiFetch('/health');
-  return /** @type {HealthResponse} */ (await res.json());
+    const res = await apiFetch('/health');
+    return /** @type {HealthResponse} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +196,8 @@ export async function fetchHealth() {
  * @returns {Promise<Server[]>}
  */
 export async function fetchServers() {
-  const res = await apiFetch('/servers');
-  return /** @type {Server[]} */ (await res.json());
+    const res = await apiFetch('/servers');
+    return /** @type {Server[]} */ (await res.json());
 }
 
 /**
@@ -206,8 +206,8 @@ export async function fetchServers() {
  * @returns {Promise<Server>}
  */
 export async function fetchServer(host) {
-  const res = await apiFetch(`/servers/${encodeURIComponent(host)}`);
-  return /** @type {Server} */ (await res.json());
+    const res = await apiFetch(`/servers/${encodeURIComponent(host)}`);
+    return /** @type {Server} */ (await res.json());
 }
 
 /**
@@ -217,7 +217,7 @@ export async function fetchServer(host) {
  * @returns {Promise<void>}
  */
 export async function deleteServer(host) {
-  await apiFetch(`/servers/${encodeURIComponent(host)}`, { method: 'DELETE' });
+    await apiFetch(`/servers/${encodeURIComponent(host)}`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------
@@ -238,8 +238,8 @@ export async function deleteServer(host) {
  * @returns {Promise<Record<string, import('./state.svelte.js').MetricsSample[]>>}
  */
 export async function fetchAllServerMetrics() {
-  const res = await apiFetch('/metrics');
-  return /** @type {Record<string, any[]>} */ (await res.json());
+    const res = await apiFetch('/metrics');
+    return /** @type {Record<string, any[]>} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -254,12 +254,12 @@ export async function fetchAllServerMetrics() {
  * @returns {Promise<HistoryEntry[]>}
  */
 export async function fetchHistory(host, limit = 50, changesOnly = false) {
-  const params = new URLSearchParams({
-    limit: String(limit),
-    changes_only: String(changesOnly),
-  });
-  const res = await apiFetch(`/history/${encodeURIComponent(host)}?${params}`);
-  return /** @type {HistoryEntry[]} */ (await res.json());
+    const params = new URLSearchParams({
+        limit: String(limit),
+        changes_only: String(changesOnly),
+    });
+    const res = await apiFetch(`/history/${encodeURIComponent(host)}?${params}`);
+    return /** @type {HistoryEntry[]} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -271,14 +271,16 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
  * @returns {Promise<NotifyConfig>}
  */
 export async function fetchNotifyConfig() {
-  const res = await apiFetch('/notify-config');
-  const cfg = /** @type {NotifyConfig} */ (await res.json());
-  // Go stores memory thresholds as % free; UI works in % used — invert on load.
-  if (cfg.performance) {
-    if (cfg.performance.mem_warn_pct > 0) cfg.performance.mem_warn_pct = 100 - cfg.performance.mem_warn_pct;
-    if (cfg.performance.mem_crit_pct > 0) cfg.performance.mem_crit_pct = 100 - cfg.performance.mem_crit_pct;
-  }
-  return cfg;
+    const res = await apiFetch('/notify-config');
+    const cfg = /** @type {NotifyConfig} */ (await res.json());
+    // Go stores memory thresholds as % free; UI works in % used — always invert on load.
+    // 0 means "use default" in Go; inverting it to 100 is harmless (resolveThresholds
+    // checks > 0 and falls back to the default, which matches Go's behavior).
+    if (cfg.performance) {
+        cfg.performance.mem_warn_pct = 100 - (cfg.performance.mem_warn_pct ?? 0);
+        cfg.performance.mem_crit_pct = 100 - (cfg.performance.mem_crit_pct ?? 0);
+    }
+    return cfg;
 }
 
 /**
@@ -289,17 +291,17 @@ export async function fetchNotifyConfig() {
  * @returns {Promise<void>}
  */
 export async function saveNotifyConfig(config) {
-  // Deep-clone to avoid mutating the UI state, then invert mem % used → % free for Go.
-  const payload = JSON.parse(JSON.stringify(config));
-  if (payload.performance) {
-    if (payload.performance.mem_warn_pct > 0) payload.performance.mem_warn_pct = 100 - payload.performance.mem_warn_pct;
-    if (payload.performance.mem_crit_pct > 0) payload.performance.mem_crit_pct = 100 - payload.performance.mem_crit_pct;
-  }
-  await apiFetch('/notify-config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+    // Deep-clone to avoid mutating the UI state, then invert mem % used → % free for Go.
+    const payload = JSON.parse(JSON.stringify(config));
+    if (payload.performance) {
+        payload.performance.mem_warn_pct = 100 - (payload.performance.mem_warn_pct ?? 0);
+        payload.performance.mem_crit_pct = 100 - (payload.performance.mem_crit_pct ?? 0);
+    }
+    await apiFetch('/notify-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -317,10 +319,10 @@ export async function saveNotifyConfig(config) {
  * @returns {Promise<{ok: boolean, message?: string}>}
  */
 export async function sendNotifyTest(target = null) {
-  const res = await apiFetch('/notify-test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: target != null ? JSON.stringify(target) : '{}',
-  });
-  return /** @type {{ok: boolean, message?: string}} */ (await res.json());
+    const res = await apiFetch('/notify-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: target != null ? JSON.stringify(target) : '{}',
+    });
+    return /** @type {{ok: boolean, message?: string}} */ (await res.json());
 }

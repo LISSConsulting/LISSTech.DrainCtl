@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.3';
+export const MOCK_VERSION = '3.5';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,6 +178,8 @@ let notifyConfig = {
  */
 function seedPerfHistory(host, status, initSessions) {
   const now = Date.now();
+  const def = SERVERS.find(d => d.host === host);
+  const maxSessions = def?.maxSessions ?? 100;
   const samples = [];
   for (let i = MAX_PERF_HISTORY - 1; i >= 0; i--) {
     const p = genPerf(status);
@@ -185,15 +187,37 @@ function seedPerfHistory(host, status, initSessions) {
       ? (1 - p.mem_avail_mb / p.mem_total_mb) * 100 : 0;
     // Slightly vary sessions around the initial count so history looks live.
     const jitterSessions = Math.max(0, Math.round(initSessions + rand(-5, 5)));
+    const sessDisc = randInt(0, 5);
     samples.push({
-      time:        now - i * 30_000,
-      cpu:         p.cpu_pct,
-      mem:         Math.round(svMemPct * 10) / 10,
-      inputDelay:  p.input_delay_p95_ms,
-      sessions:    jitterSessions,
-      diskQueue:   p.disk_queue,
-      tcpRetrans:  p.tcp_retrans_sec,
-      pagesPerSec: p.pages_sec,
+      time:               now - i * 30_000,
+      cpu:                p.cpu_pct,
+      mem:                Math.round(svMemPct * 10) / 10,
+      inputDelay:         p.input_delay_p95_ms,
+      sessions:           jitterSessions,
+      diskQueue:          p.disk_queue,
+      tcpRetrans:         p.tcp_retrans_sec,
+      pagesPerSec:        p.pages_sec,
+      sessionsActive:     jitterSessions,
+      sessionsDisconnected: sessDisc,
+      maxSessions,
+      sessionCpuP95:      p.session_cpu_p95,
+      sessionCpuP50:      p.session_cpu_p50,
+      sessionMemP95:      p.session_mem_p95,
+      sessionMemP50:      p.session_mem_p50,
+      rfxFpsOut:          p.rfx_fps_out,
+      rfxEncodeMs:        p.rfx_encode_ms,
+      rfxQuality:         p.rfx_quality,
+      rfxRtt:             p.rfx_rtt,
+      rfxLoss:            p.rfx_loss,
+      rfxSkipServer:      p.rfx_skip_server,
+      rfxSkipNet:         p.rfx_skip_net,
+      rfxFpsOutP50:       p.rfx_fps_out_p50,
+      rfxEncodeMsP50:     p.rfx_encode_ms_p50,
+      rfxQualityP50:      p.rfx_quality_p50,
+      rfxRttP50:          p.rfx_rtt_p50,
+      rfxLossP50:         p.rfx_loss_p50,
+      rfxSkipServerP50:   p.rfx_skip_server_p50,
+      rfxSkipNetP50:      p.rfx_skip_net_p50,
     });
   }
   return samples;
@@ -233,6 +257,18 @@ function genPerf(status) {
     alert: { cpu: [65, 95], mem: [75, 95], delay: [35, 90], disk: [3.5, 8.5],  pages: [80, 350], retrans: [20, 75] },
   }[status] ?? { cpu: [15, 55], mem: [40, 65], delay: [3, 15], disk: [0.1, 1.5], pages: [5, 45], retrans: [0, 8] };
 
+  const sessionBase = {
+    ok:    { cpuP95: [1,  12], memMbP95: [200, 500] },
+    grace: { cpuP95: [5,  20], memMbP95: [300, 600] },
+    alert: { cpuP95: [12, 35], memMbP95: [450, 850] },
+  }[status] ?? { cpuP95: [1, 12], memMbP95: [200, 500] };
+
+  const rfxBase = {
+    ok:    { fps: [20, 30], enc: [5,  15], qual: [85, 99], rtt: [10, 40], loss: [0.0, 0.8], skipSvr: [0.0, 1.0], skipNet: [0.0, 0.5] },
+    grace: { fps: [14, 24], enc: [12, 30], qual: [72, 88], rtt: [25, 65], loss: [0.3, 2.5], skipSvr: [0.2, 3.0], skipNet: [0.1, 1.5] },
+    alert: { fps: [7,  18], enc: [25, 60], qual: [52, 78], rtt: [40, 90], loss: [1.0, 7.0], skipSvr: [2.0, 8.0], skipNet: [0.5, 4.0] },
+  }[status] ?? { fps: [20, 30], enc: [5, 15], qual: [85, 99], rtt: [10, 40], loss: [0, 0.8], skipSvr: [0, 1], skipNet: [0, 0.5] };
+
   const cpu = rand(...base.cpu);
   const memTotalMb = 16384;
   const memUsedPct = rand(...base.mem) / 100;
@@ -251,6 +287,26 @@ function genPerf(status) {
     input_delay_p50_ms:  Math.round(p50 * 10) / 10,
     input_delay_p95_ms:  Math.round(p95 * 10) / 10,
     input_delay_max_ms:  Math.round(max * 10) / 10,
+    session_cpu_p95:     Math.round(rand(...sessionBase.cpuP95) * 10) / 10,
+    session_cpu_p50:     Math.round(rand(...sessionBase.cpuP95) * rand(0.40, 0.60) * 10) / 10,
+    session_mem_p95:     Math.round(rand(...sessionBase.memMbP95) * 1024 * 1024),
+    session_mem_p50:     Math.round(rand(...sessionBase.memMbP95) * rand(0.45, 0.65) * 1024 * 1024),
+    rfx_available:          true,
+    rfx_fps_out:            Math.round(rand(...rfxBase.fps) * 10) / 10,
+    rfx_encode_ms:          Math.round(rand(...rfxBase.enc) * 10) / 10,
+    rfx_quality:            Math.round(rand(...rfxBase.qual) * 10) / 10,
+    rfx_rtt:                Math.round(rand(...rfxBase.rtt) * 10) / 10,
+    rfx_loss:               Math.round(rand(...rfxBase.loss) * 100) / 100,
+    rfx_skip_server:        Math.round(rand(...rfxBase.skipSvr) * 10) / 10,
+    rfx_skip_net:           Math.round(rand(...rfxBase.skipNet) * 10) / 10,
+    // P50 fields — FPS/Quality inverted (higher=better) so P50 > P95 per session; others lower
+    rfx_fps_out_p50:        Math.round(clamp(rand(...rfxBase.fps) * rand(1.05, 1.25), 0, 60) * 10) / 10,
+    rfx_encode_ms_p50:      Math.round(rand(...rfxBase.enc) * rand(0.45, 0.65) * 10) / 10,
+    rfx_quality_p50:        Math.round(clamp(rand(...rfxBase.qual) * rand(1.02, 1.10), 0, 100) * 10) / 10,
+    rfx_rtt_p50:            Math.round(rand(...rfxBase.rtt) * rand(0.45, 0.65) * 10) / 10,
+    rfx_loss_p50:           Math.round(rand(...rfxBase.loss) * rand(0.40, 0.60) * 100) / 100,
+    rfx_skip_server_p50:    Math.round(Math.max(0, rand(...rfxBase.skipSvr) * rand(0.40, 0.60)) * 10) / 10,
+    rfx_skip_net_p50:       Math.round(Math.max(0, rand(...rfxBase.skipNet) * rand(0.40, 0.60)) * 10) / 10,
   };
 }
 
@@ -261,6 +317,8 @@ function jitterPerf(perf) {
     const delta = v * pct;
     return Math.round(clamp(v + rand(-delta, delta), 0, 100000) * 10) / 10;
   };
+  // For byte-scale values (session_mem_p95) the 100000 clamp in j() is wrong — use this instead.
+  const jBig = (v, pct = 0.05) => Math.round(Math.max(0, v * (1 + rand(-pct, pct))));
   return {
     ...perf,
     cpu_pct:            j(perf.cpu_pct),
@@ -271,6 +329,24 @@ function jitterPerf(perf) {
     input_delay_p50_ms: j(perf.input_delay_p50_ms, 0.1),
     input_delay_p95_ms: j(perf.input_delay_p95_ms, 0.1),
     input_delay_max_ms: j(perf.input_delay_max_ms, 0.1),
+    session_cpu_p95:    Math.round(clamp(j(perf.session_cpu_p95, 0.12), 0, 100) * 10) / 10,
+    session_cpu_p50:    Math.round(clamp(j(perf.session_cpu_p50 ?? perf.session_cpu_p95 * 0.5, 0.12), 0, 100) * 10) / 10,
+    session_mem_p95:    jBig(perf.session_mem_p95, 0.05),
+    session_mem_p50:    jBig(perf.session_mem_p50 ?? perf.session_mem_p95 * 0.55, 0.05),
+    rfx_fps_out:           Math.round(clamp(j(perf.rfx_fps_out, 0.08), 0, 60) * 10) / 10,
+    rfx_encode_ms:         j(perf.rfx_encode_ms, 0.12),
+    rfx_quality:           Math.round(clamp(j(perf.rfx_quality, 0.05), 0, 100) * 10) / 10,
+    rfx_rtt:               j(perf.rfx_rtt, 0.15),
+    rfx_loss:              Math.round(clamp(j(perf.rfx_loss, 0.20), 0, 100) * 100) / 100,
+    rfx_skip_server:       Math.round(Math.max(0, j(perf.rfx_skip_server, 0.25)) * 10) / 10,
+    rfx_skip_net:          Math.round(Math.max(0, j(perf.rfx_skip_net, 0.25)) * 10) / 10,
+    rfx_fps_out_p50:       Math.round(clamp(j(perf.rfx_fps_out_p50 ?? perf.rfx_fps_out * 1.1, 0.08), 0, 60) * 10) / 10,
+    rfx_encode_ms_p50:     j(perf.rfx_encode_ms_p50 ?? perf.rfx_encode_ms * 0.55, 0.12),
+    rfx_quality_p50:       Math.round(clamp(j(perf.rfx_quality_p50 ?? perf.rfx_quality * 1.05, 0.05), 0, 100) * 10) / 10,
+    rfx_rtt_p50:           j(perf.rfx_rtt_p50 ?? perf.rfx_rtt * 0.55, 0.15),
+    rfx_loss_p50:          Math.round(clamp(j(perf.rfx_loss_p50 ?? perf.rfx_loss * 0.50, 0.20), 0, 100) * 100) / 100,
+    rfx_skip_server_p50:   Math.round(Math.max(0, j(perf.rfx_skip_server_p50 ?? perf.rfx_skip_server * 0.50, 0.25)) * 10) / 10,
+    rfx_skip_net_p50:      Math.round(Math.max(0, j(perf.rfx_skip_net_p50 ?? perf.rfx_skip_net * 0.50, 0.25)) * 10) / 10,
   };
 }
 
@@ -290,6 +366,24 @@ function spikePerf(perf) {
     tcp_retrans_sec:    Math.round(rand(30,  70)  * 10) / 10,
     disk_queue:         Math.round(rand(5.5, 9.5) * 100) / 100,
     pages_sec:          Math.round(rand(160, 400) * 10) / 10,
+    session_cpu_p95:    Math.round(rand(30, 65) * 10) / 10,
+    session_cpu_p50:    Math.round(rand(12, 35) * 10) / 10,
+    session_mem_p95:    Math.round(rand(700, 1300) * 1024 * 1024),
+    session_mem_p50:    Math.round(rand(350, 750) * 1024 * 1024),
+    rfx_fps_out:           Math.round(rand(2, 8)    * 10) / 10,
+    rfx_encode_ms:         Math.round(rand(70, 140) * 10) / 10,
+    rfx_quality:           Math.round(rand(28, 58)  * 10) / 10,
+    rfx_rtt:               Math.round(rand(90, 220) * 10) / 10,
+    rfx_loss:              Math.round(rand(5, 15)   * 100) / 100,
+    rfx_skip_server:       Math.round(rand(8, 22)   * 10) / 10,
+    rfx_skip_net:          Math.round(rand(4, 14)   * 10) / 10,
+    rfx_fps_out_p50:       Math.round(rand(4, 15)   * 10) / 10,
+    rfx_encode_ms_p50:     Math.round(rand(40, 90)  * 10) / 10,
+    rfx_quality_p50:       Math.round(rand(38, 68)  * 10) / 10,
+    rfx_rtt_p50:           Math.round(rand(60, 140) * 10) / 10,
+    rfx_loss_p50:          Math.round(rand(3, 9)    * 100) / 100,
+    rfx_skip_server_p50:   Math.round(rand(5, 14)   * 10) / 10,
+    rfx_skip_net_p50:      Math.round(rand(2, 8)    * 10) / 10,
   };
 }
 
@@ -354,16 +448,38 @@ function startEvolution() {
       if (s.status !== 'off' && s.perf) {
         const svMemPct = s.perf.mem_total_mb > 0
           ? (1 - s.perf.mem_avail_mb / s.perf.mem_total_mb) * 100 : 0;
+        const def = SERVERS.find(d => d.host === host);
         const hist = perfHistory.get(host) ?? [];
         hist.push({
-          time:        now,
-          cpu:         s.perf.cpu_pct,
-          mem:         Math.round(svMemPct * 10) / 10,
-          inputDelay:  s.perf.input_delay_p95_ms,
-          sessions:    s.sessions,
-          diskQueue:   s.perf.disk_queue,
-          tcpRetrans:  s.perf.tcp_retrans_sec,
-          pagesPerSec: s.perf.pages_sec,
+          time:                now,
+          cpu:                 s.perf.cpu_pct,
+          mem:                 Math.round(svMemPct * 10) / 10,
+          inputDelay:          s.perf.input_delay_p95_ms,
+          sessions:            s.sessions,
+          diskQueue:           s.perf.disk_queue,
+          tcpRetrans:          s.perf.tcp_retrans_sec,
+          pagesPerSec:         s.perf.pages_sec,
+          sessionsActive:      s.sessions,
+          sessionsDisconnected: s.sessionsDisconnected ?? 0,
+          maxSessions:         def?.maxSessions ?? 100,
+          sessionCpuP95:       s.perf.session_cpu_p95,
+          sessionCpuP50:       s.perf.session_cpu_p50,
+          sessionMemP95:       s.perf.session_mem_p95,
+          sessionMemP50:       s.perf.session_mem_p50,
+          rfxFpsOut:           s.perf.rfx_fps_out,
+          rfxEncodeMs:         s.perf.rfx_encode_ms,
+          rfxQuality:          s.perf.rfx_quality,
+          rfxRtt:              s.perf.rfx_rtt,
+          rfxLoss:             s.perf.rfx_loss,
+          rfxSkipServer:       s.perf.rfx_skip_server,
+          rfxSkipNet:          s.perf.rfx_skip_net,
+          rfxFpsOutP50:        s.perf.rfx_fps_out_p50,
+          rfxEncodeMsP50:      s.perf.rfx_encode_ms_p50,
+          rfxQualityP50:       s.perf.rfx_quality_p50,
+          rfxRttP50:           s.perf.rfx_rtt_p50,
+          rfxLossP50:          s.perf.rfx_loss_p50,
+          rfxSkipServerP50:    s.perf.rfx_skip_server_p50,
+          rfxSkipNetP50:       s.perf.rfx_skip_net_p50,
         });
         if (hist.length > MAX_PERF_HISTORY) hist.splice(0, hist.length - MAX_PERF_HISTORY);
         perfHistory.set(host, hist);
@@ -428,14 +544,20 @@ function serverView(host) {
   const stateDurationSeconds = s.stateChangedAt
     ? Math.round((Date.now() - new Date(s.stateChangedAt).getTime()) / 1000)
     : null;
+  const maxSessions = SERVERS.find(d => d.host === host)?.maxSessions ?? 0;
+  const sessActive = s.sessions;
+  const sessDisc = s.sessionsDisconnected ?? 0;
+  const sessTotal = sessActive + sessDisc;
   return {
     host,
     status: s.status,
     drain_mode: s.status === 'ok' ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
-    sessions: s.sessions,
-    sessions_active: s.sessions,
-    sessions_disconnected: s.sessionsDisconnected ?? 0,
-    max_sessions: SERVERS.find(d => d.host === host)?.maxSessions ?? 0,
+    sessions: sessActive,
+    sessions_active: sessActive,
+    sessions_disconnected: sessDisc,
+    total_sessions: sessTotal,
+    max_sessions: maxSessions,
+    utilization_pct: maxSessions > 0 ? Math.round(sessTotal / maxSessions * 100) : 0,
     state_duration_seconds: stateDurationSeconds,
     state_changed_at: s.stateChangedAt,
     version: s.status === 'off' ? '' : '26.100.9',

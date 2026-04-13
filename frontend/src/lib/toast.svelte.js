@@ -21,9 +21,9 @@ let items = $state([]);
  * @param {'ok'|'err'|'info'} type
  */
 function show(msg, type = 'info') {
-  const tid = ++id;
-  items = [...items, { id: tid, msg, type, dismissing: false }];
-  setTimeout(() => dismiss(tid), DURATION[type] ?? 4000);
+    const tid = ++id;
+    items = [...items, { id: tid, msg, type, dismissing: false }];
+    setTimeout(() => dismiss(tid), DURATION[type] ?? 4000);
 }
 
 /**
@@ -31,14 +31,18 @@ function show(msg, type = 'info') {
  * @param {number} tid
  */
 function dismiss(tid) {
-  items = items.map(t => t.id === tid ? { ...t, dismissing: true } : t);
-  setTimeout(() => { items = items.filter(t => t.id !== tid); }, 300);
+    items = items.map((t) => (t.id === tid ? { ...t, dismissing: true } : t));
+    setTimeout(() => {
+        items = items.filter((t) => t.id !== tid);
+    }, 300);
 }
 
 export const toast = {
-  get items() { return items; },
-  ok:   (/** @type {string} */ msg) => show(msg, 'ok'),
-  err:  (/** @type {string} */ msg) => show(msg, 'err'),
-  info: (/** @type {string} */ msg) => show(msg, 'info'),
-  dismiss,
+    get items() {
+        return items;
+    },
+    ok: (/** @type {string} */ msg) => show(msg, 'ok'),
+    err: (/** @type {string} */ msg) => show(msg, 'err'),
+    info: (/** @type {string} */ msg) => show(msg, 'info'),
+    dismiss,
 };
