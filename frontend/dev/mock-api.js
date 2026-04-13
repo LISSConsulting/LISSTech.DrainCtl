@@ -404,7 +404,7 @@ function seedHistory(host, currentStatus) {
       transition,
       transition_from: transition ? prevStatus : undefined,
       changed_by: transition && s !== 'ok' ? pick(ADMINS) : undefined,
-      version: '26.100.9',
+      version: '26.103.4',
       message: transition
         ? `Status changed: ${prevStatus} → ${s}`
         : `Check-in: ${s}`,
@@ -523,7 +523,7 @@ function startEvolution() {
           transition: true,
           transition_from: prev,
           changed_by: s.changedBy,
-          version: '26.100.9',
+          version: '26.103.4',
           message: `Status changed: ${prev} → ${s.status}`,
         });
         // Cap at 100 entries
@@ -560,7 +560,7 @@ function serverView(host) {
     utilization_pct: maxSessions > 0 ? Math.round(sessTotal / maxSessions * 100) : 0,
     state_duration_seconds: stateDurationSeconds,
     state_changed_at: s.stateChangedAt,
-    version: s.status === 'off' ? '' : '26.100.9',
+    version: s.status === 'off' ? '' : '26.103.4',
     registered_at: s.registeredAt,
     last_seen: s.status === 'off' ? isoAgo(10) : isoNow(),
     changed_by: s.changedBy,
@@ -577,7 +577,7 @@ function healthResponse() {
   const servers = allServers();
   const counts = { total: servers.length, ok: 0, grace: 0, alert: 0, off: 0 };
   for (const s of servers) counts[s.status]++;
-  return { version: '26.100.9', servers: counts };
+  return { version: '26.103.4', servers: counts };
 }
 
 // ---------------------------------------------------------------------------
