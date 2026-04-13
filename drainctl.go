@@ -7,7 +7,7 @@ package drainctl
 import "os"
 
 // Version is the library version. Overridable via ldflags.
-var Version = "26.103.3"
+var Version = "26.103.4"
 
 // ETW audit event IDs (5xxx) — routed to the Audit channel.
 // Defined here so both internal/svc and internal/dashboard can reference them.
