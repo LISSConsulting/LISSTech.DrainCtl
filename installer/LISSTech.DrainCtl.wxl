@@ -10,16 +10,34 @@
     <!-- InstallModeDlg -->
     <String Id="InstallModeDlg_Title" Value="[ProductName] Setup" />
     <String Id="InstallModeDlgTitle"
-        Value="{\WixUI_Font_Title}Install Mode and Notifications" />
+        Value="{\WixUI_Font_Title}Install Mode" />
     <String Id="InstallModeDlgDescription"
-        Value="Choose how this machine participates in monitoring." />
+        Value="Choose how this machine participates in the monitoring network." />
     <String Id="InstallModeDlgModeLabel" Value="Install mode:" />
-    <String Id="InstallModeDlgGraceLabel" Value="Grace period:" />
-    <String Id="InstallModeDlgGraceHint" Value="minutes" />
-    <String Id="InstallModeDlgWebhookLabel" Value="Webhook URL (optional):" />
-    <String Id="InstallModeDlgNtfyLabel" Value="ntfy URL (optional):" />
-    <String Id="InstallModeDlgPerfLabel" Value="Enable performance monitoring" />
-    <String Id="InstallModeDlgRfxLabel" Value="Collect RemoteFX metrics" />
+
+    <!-- MonitoringDlg -->
+    <String Id="MonitoringDlg_Title" Value="[ProductName] Setup" />
+    <String Id="MonitoringDlgTitle"
+        Value="{\WixUI_Font_Title}Monitoring Settings" />
+    <String Id="MonitoringDlgDescription"
+        Value="Configure monitoring intervals and performance collection." />
+    <String Id="MonitoringDlgGraceLabel" Value="Grace period:" />
+    <String Id="MonitoringDlgGraceHint" Value="minutes (1–1440)" />
+    <String Id="MonitoringDlgPollLabel" Value="Poll interval:" />
+    <String Id="MonitoringDlgPollHint" Value="seconds (minimum 10)" />
+    <String Id="MonitoringDlgThresholdLabel" Value="Session warning threshold:" />
+    <String Id="MonitoringDlgThresholdHint" Value="percent (0 = disabled)" />
+    <String Id="MonitoringDlgPerfLabel" Value="Enable performance monitoring" />
+    <String Id="MonitoringDlgRfxLabel" Value="Collect RemoteFX metrics" />
+
+    <!-- NotificationsDlg -->
+    <String Id="NotificationsDlg_Title" Value="[ProductName] Setup" />
+    <String Id="NotificationsDlgTitle"
+        Value="{\WixUI_Font_Title}Notification Settings" />
+    <String Id="NotificationsDlgDescription"
+        Value="Configure optional notification endpoints." />
+    <String Id="NotificationsDlgWebhookLabel" Value="Webhook URL (optional):" />
+    <String Id="NotificationsDlgNtfyLabel" Value="ntfy URL (optional):" />
 
     <!-- ModeConfigDlg (shared) -->
     <String Id="ModeConfigDlg_Title" Value="[ProductName] Setup" />
