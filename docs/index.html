@@ -5,22 +5,24 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="favicon.ico" type="image/x-icon" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-        <title>DrainCtl — Remote Desktop Services Drain Mode & Performance Monitor</title>
+        <title>DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins</title>
         <meta
             name="description"
-            content="Real-time drain mode monitoring, session tracking, and performance alerting for Windows Remote Desktop Services (RDS/RDSH). Know who disabled connections, track active sessions, monitor CPU and input delay — with a centralized dashboard for your entire farm."
+            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay across your farm — instant detection, change attribution, centralized dashboard."
         />
         <meta
             name="keywords"
-            content="Remote Desktop Services, RDSH, drain mode, session monitor, RDS monitoring, Windows Server, performance monitoring, session host, terminal services"
+            content="Remote Desktop Services monitoring, RDS drain mode, RDSH monitoring, managed service provider RDS, MSP monitoring tool, session host monitor, Windows Server RDS, terminal services monitoring, drain mode alerting"
         />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="DrainCtl — Remote Desktop Services Monitor" />
+        <meta property="og:title" content="DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins" />
         <meta
             property="og:description"
-            content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. Instant detection, change attribution, 12 alert triggers, centralized dashboard."
+            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay — instant detection, change attribution, centralized dashboard."
         />
         <meta property="og:url" content="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
         <meta
@@ -31,15 +33,36 @@
 
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DrainCtl — Remote Desktop Services Monitor" />
+        <meta name="twitter:title" content="DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins" />
         <meta
             name="twitter:description"
-            content="Real-time drain mode, session, and performance monitoring for your entire RDS farm. One service, one dashboard, instant alerts."
+            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay — instant detection, change attribution, centralized dashboard."
         />
         <meta
             name="twitter:image"
             content="https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png"
         />
+
+        <!-- Structured Data -->
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "DrainCtl",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Windows Server",
+            "description": "Remote Desktop Services monitoring for MSPs and RDSH admins. Real-time drain mode detection, session tracking, CPU and input delay alerting — centralized dashboard for your entire farm.",
+            "url": "https://lissconsulting.github.io/LISSTech.DrainCtl/",
+            "screenshot": "https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "publisher": {
+                "@type": "Organization",
+                "name": "LISS Technologies",
+                "legalName": "LISS Consulting, Corp.",
+                "url": "https://lissconsulting.github.io/LISSTech.DrainCtl/"
+            }
+        }
+        </script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -1135,7 +1158,7 @@
                 <a href="#" class="nav-brand"
                     ><img
                         src="logo.png"
-                        alt=""
+                        alt="DrainCtl logo"
                         width="24"
                         height="24"
                         style="vertical-align: middle; margin-right: 6px"
@@ -1167,7 +1190,7 @@
         <!-- Hero -->
         <section class="hero">
             <div class="wrap">
-                <img src="logo.png" alt="" width="72" height="72" style="display: block; margin: 0 auto 12px" />
+                <img src="logo.png" alt="DrainCtl" width="72" height="72" style="display: block; margin: 0 auto 12px" />
                 <h1>Remote Desktop Services<br />monitoring that <em>just works.</em></h1>
                 <p class="hero-sub">
                     DrainCtl watches every session host in your RDS farm. Drain mode changes, active sessions, CPU,
@@ -1246,7 +1269,7 @@
         <section class="section section--bordered" id="why">
             <div class="wrap">
                 <div class="section-label">Why DrainCtl</div>
-                <div class="section-title">PowerShell scripts don't call you at 2&nbsp;AM.</div>
+                <h2 class="section-title">PowerShell scripts don't call you at 2&nbsp;AM.</h2>
                 <div class="section-desc">
                     Every RDSH admin has been there: something's wrong, users are calling, and you're
                     RDP-ing into servers one at a time to find out who put what into drain mode and when.
@@ -1281,7 +1304,7 @@
         <section class="section" id="features">
             <div class="wrap">
                 <div class="section-label">Capabilities</div>
-                <div class="section-title">Complete visibility for your RDS farm.</div>
+                <h2 class="section-title">Complete visibility for your RDS farm.</h2>
                 <div class="section-desc">
                     Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything. One
                     dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.
@@ -1370,7 +1393,7 @@
         <section class="section section--shaded" id="quickstart">
             <div class="wrap">
                 <div class="section-label">Quick Start</div>
-                <div class="section-title">From download to monitoring in under&nbsp;3&nbsp;minutes.</div>
+                <h2 class="section-title">From download to monitoring in under&nbsp;3&nbsp;minutes.</h2>
                 <div class="section-desc">Three steps on the dashboard server. Session hosts discover it automatically via DNS SRV &mdash; no per-machine config.</div>
                 <div class="quickstart-steps">
                     <div class="qs-step">
@@ -1408,7 +1431,7 @@
         <section class="section" id="how">
             <div class="wrap">
                 <div class="section-label">Architecture</div>
-                <div class="section-title">Five layers. One service.</div>
+                <h2 class="section-title">Five layers. One service.</h2>
                 <div class="section-desc">
                     The service triangulates registry notifications, event log subscriptions, performance counters, and
                     safety-net polling &mdash; then routes results to the dashboard, notifications, and dual-sink
@@ -1455,7 +1478,7 @@
         <section class="section section--bordered" id="new">
             <div class="wrap">
                 <div class="section-label">Highlights</div>
-                <div class="section-title serif section-title--italic">Built for production RDSH farms.</div>
+                <h2 class="section-title serif section-title--italic">Built for production RDSH farms.</h2>
                 <div class="comic">
                     <!-- Row 1: big hero + tall side panel -->
                     <div class="comic-panel comic-hero">
@@ -1538,7 +1561,7 @@
         <section class="section" id="dashboard">
             <div class="wrap">
                 <div class="section-label">Farm Monitoring</div>
-                <div class="section-title">One dashboard for your entire RDSH farm.</div>
+                <h2 class="section-title">One dashboard for your entire RDSH farm.</h2>
                 <div class="section-desc">
                     See every server's drain state, session count, and alert history on a single page. Configure
                     notifications and thresholds once &mdash; every agent in the farm inherits them. Enable the
@@ -1612,7 +1635,7 @@
         <section class="section" id="usage">
             <div class="wrap">
                 <div class="section-label">Usage Guide</div>
-                <div class="section-title">CLI, PowerShell, or both.</div>
+                <h2 class="section-title">CLI, PowerShell, or both.</h2>
                 <div class="section-desc">
                     Every interface returns the same data. Pick the one that fits your workflow.
                 </div>
@@ -1717,7 +1740,7 @@
         <section class="section section--shaded" id="install">
             <div class="wrap wrap--wide">
                 <div class="section-label">Installation</div>
-                <div class="section-title">Three ways to install. Zero guesswork.</div>
+                <h2 class="section-title">Three ways to install. Zero guesswork.</h2>
                 <div class="section-desc">
                     Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the
                     PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a>

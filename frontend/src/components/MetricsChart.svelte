@@ -445,49 +445,47 @@
             <div class="chart-wrap">
                 <div class="chart-card">
                     <div class="load-top">
-                        <div class="load-top-left">
-                            <div class="sub-label">
-                                <Gauge size={12} strokeWidth={2.4} /> LOAD
-                                <span class="sub-label-note">· Average across fleet</span>
-                                <button
-                                    class="help-toggle"
-                                    class:active={showLoadHelp}
-                                    onclick={() => (showLoadHelp = !showLoadHelp)}
-                                    aria-label="Toggle help text"
-                                    aria-pressed={showLoadHelp}
-                                >
-                                    <HelpCircle size={11} strokeWidth={2.2} />
-                                </button>
-                            </div>
-                            {#if showLoadHelp}
-                                <p class="chart-desc">
-                                    Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
-                                    across all cores on all hosts; memory is the percentage of physical RAM in use. The
-                                    Sessions line (right axis) tracks how many users are connected fleet-wide — rising
-                                    sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
-                                    per-user cost is climbing.
-                                </p>
-                            {/if}
+                        <div class="sub-label">
+                            <Gauge size={12} strokeWidth={2.4} /> LOAD
+                            <span class="sub-label-note">· Average across fleet</span>
+                            <button
+                                class="help-toggle"
+                                class:active={showLoadHelp}
+                                onclick={() => (showLoadHelp = !showLoadHelp)}
+                                aria-label="Toggle help text"
+                                aria-pressed={showLoadHelp}
+                            >
+                                <HelpCircle size={11} strokeWidth={2.2} />
+                            </button>
                         </div>
-                        <div class="chart-toggles-stacked">
-                            {#each LOAD_SERIES as s}
-                                <button
-                                    class="chart-toggle"
-                                    class:active={s.show()}
-                                    style="--sc: {s.color}"
-                                    aria-pressed={s.show()}
-                                    onclick={s.toggle}
-                                >
-                                    {#if s.lineOnly}
-                                        <span class="t-dash" aria-hidden="true"></span>
-                                    {:else}
-                                        <span class="t-dot" aria-hidden="true"></span>
-                                    {/if}
-                                    {s.label}
-                                    {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
-                                </button>
-                            {/each}
-                        </div>
+                        {#if showLoadHelp}
+                            <p class="chart-desc">
+                                Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
+                                across all cores on all hosts; memory is the percentage of physical RAM in use. The
+                                Sessions line (right axis) tracks how many users are connected fleet-wide — rising
+                                sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
+                                per-user cost is climbing.
+                            </p>
+                        {/if}
+                    </div>
+                    <div class="chart-toggles-stacked">
+                        {#each LOAD_SERIES as s}
+                            <button
+                                class="chart-toggle"
+                                class:active={s.show()}
+                                style="--sc: {s.color}"
+                                aria-pressed={s.show()}
+                                onclick={s.toggle}
+                            >
+                                {#if s.lineOnly}
+                                    <span class="t-dash" aria-hidden="true"></span>
+                                {:else}
+                                    <span class="t-dot" aria-hidden="true"></span>
+                                {/if}
+                                {s.label}
+                                {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
+                            </button>
+                        {/each}
                     </div>
                     <div class="chart-panel">
                         <div class="load-chart-header">
@@ -780,31 +778,24 @@
         padding: 16px 18px;
     }
 
-    /* ── LOAD top row: desc left, toggles stacked right ── */
+    /* ── LOAD header + toggles stacked vertically ── */
     .load-top {
-        display: flex;
-        gap: 16px;
-        margin-bottom: 10px;
+        margin-bottom: 4px;
     }
 
-    .load-top-left {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .load-top-left .sub-label {
+    .load-top .sub-label {
         margin-bottom: 6px;
     }
 
-    .load-top-left .chart-desc {
+    .load-top .chart-desc {
         margin-bottom: 0;
     }
 
     .chart-toggles-stacked {
         display: flex;
         gap: 6px;
-        flex-shrink: 0;
-        align-self: flex-start;
+        flex-wrap: wrap;
+        margin: 12px 0 0;
     }
 
     /* ── LOAD current values — row above chart, right-aligned ── */
