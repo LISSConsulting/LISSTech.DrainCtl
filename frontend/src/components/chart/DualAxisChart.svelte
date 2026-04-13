@@ -85,7 +85,7 @@
             const last = normData[normData.length - 1];
             if (!last) return SERIES;
             return [...SERIES].sort(
-                (a, b) => /** @type {any} */ ((last)[b.key] ?? 0) - /** @type {any} */ ((last)[a.key] ?? 0),
+                (a, b) => /** @type {any} */ (last[b.key] ?? 0) - /** @type {any} */ (last[a.key] ?? 0),
             );
         })(),
     );

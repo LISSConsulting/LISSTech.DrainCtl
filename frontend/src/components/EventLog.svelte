@@ -62,13 +62,19 @@
     }
 
     /** @param {number} pct */
-    function cpuSev(pct) { return sev(pct, cpuT); }
+    function cpuSev(pct) {
+        return sev(pct, cpuT);
+    }
 
     /** @param {number} freePct — percentage FREE (event stores % free) */
-    function memSev(freePct) { return sev(100 - freePct, memT); }
+    function memSev(freePct) {
+        return sev(100 - freePct, memT);
+    }
 
     /** @param {number} ms */
-    function delaySev(ms) { return sev(ms, delayT); }
+    function delaySev(ms) {
+        return sev(ms, delayT);
+    }
 
     /**
      * Parse a raw event (string or structured object) into a display-friendly object.

@@ -294,7 +294,6 @@
             const diskQueue = deriveP95(dqVals);
             const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
 
-
             const ts = Date.now();
             appendMetricsSample({
                 time: ts,

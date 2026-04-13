@@ -178,7 +178,7 @@
             ];
             const unique = [...new Set(indices)];
             return unique.map((i) => {
-                const diff = now - (/** @type {any} */ (history[i])?.[timeKey] ?? now);
+                const diff = now - /** @type {any} */ ((history[i])?.[timeKey] ?? now);
                 const lbl =
                     i === n - 1
                         ? 'now'
@@ -522,7 +522,7 @@
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
                         )}
                         {@const diffMs =
-                            Date.now() - (/** @type {any} */ (history[displayIndex])?.[timeKey] ?? Date.now())}
+                            Date.now() - /** @type {any} */ ((history[displayIndex])?.[timeKey] ?? Date.now())}
                         {@const timeStr =
                             diffMs < 1200
                                 ? 'now'
