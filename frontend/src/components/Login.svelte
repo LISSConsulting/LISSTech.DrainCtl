@@ -1,14 +1,16 @@
 <script>
     import { toast } from '../lib/toast.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
+    import { authState } from '../lib/auth.svelte.js';
     import { KeyRound } from 'lucide-svelte';
 
     /**
-     * Called when the user submits credentials.
-     * Parent is responsible for the actual auth request and should throw on failure.
-     * @type {{ onlogin: (username: string, password: string) => Promise<void> }}
+     * @type {{
+     *   onlogin: (username: string, password: string) => Promise<void>,
+     *   autoLoginFailed?: boolean
+     * }}
      */
-    let { onlogin } = $props();
+    let { onlogin, autoLoginFailed = false } = $props();
 
     const isDark = $derived(theme.current === 'dark');
 
@@ -16,10 +18,11 @@
     let password = $state('');
     let submitting = $state(false);
 
-    // Fire once on mount — auto sign-in was attempted and failed before this
-    // component renders, so we surface it as a toast rather than inline copy.
+    // Show toast only when auto-login was attempted and failed.
     $effect(() => {
-        toast.info('Automatic sign-in failed — please enter your credentials.');
+        if (autoLoginFailed) {
+            toast.info('Automatic sign-in failed — please enter your credentials.');
+        }
     });
 
     async function handleSubmit(e) {
@@ -31,8 +34,6 @@
         submitting = true;
         try {
             await onlogin?.(username.trim(), password);
-        } catch (err) {
-            toast.err('Sign-in failed: ' + (err?.message ?? String(err)));
         } finally {
             submitting = false;
         }
@@ -105,6 +106,10 @@
                 <button type="submit" class="btn-brutal btn-signin" disabled={submitting}>
                     {submitting ? 'Signing in…' : 'Sign In'}
                 </button>
+
+                {#if authState.error && authState.error !== 'auto_login_failed' && authState.error !== 'session_expired'}
+                    <p class="form-error">{authState.error}</p>
+                {/if}
             </form>
 
             <div class="modal-divider"></div>
@@ -276,6 +281,18 @@
         cursor: not-allowed;
         transform: none !important;
         box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important;
+    }
+
+    /* ── Inline form error ────────────────────────────────────── */
+    .form-error {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        color: var(--color-red);
+        margin: 6px 0 0;
+        padding: 8px 10px;
+        background: color-mix(in srgb, var(--color-red) 8%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-red) 30%, transparent);
+        border-radius: var(--radius-default);
     }
 
     /* ── Divider ───────────────────────────────────────────────── */

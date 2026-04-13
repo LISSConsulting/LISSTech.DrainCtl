@@ -664,6 +664,24 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: { ok: true, message: 'Test notification sent (mock)' } };
   }
 
+  // POST /api/v1/auth/negotiate — always succeeds in dev mode
+  if (method === 'POST' && pathname === '/api/v1/auth/negotiate') {
+    return { status: 200, body: { username: 'DEV\\mockuser' } };
+  }
+
+  // POST /api/v1/auth/login — succeeds for any non-empty credentials
+  if (method === 'POST' && pathname === '/api/v1/auth/login') {
+    if (body && body.username && body.password) {
+      return { status: 200, body: { username: body.username } };
+    }
+    return { status: 401, body: { error: 'invalid credentials' } };
+  }
+
+  // POST /api/v1/auth/logout — always succeeds
+  if (method === 'POST' && pathname === '/api/v1/auth/logout') {
+    return { status: 200, body: { ok: true } };
+  }
+
   return null; // not handled
 }
 

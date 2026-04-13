@@ -1,11 +1,13 @@
 /**
  * api.js — Typed fetch wrappers for all DrainCtl API routes.
  *
- * The Go backend uses SSPI/Negotiate authentication; cookies are handled
- * automatically by the browser via credentials: 'include'.
+ * The Go backend uses session-cookie authentication for dashboard routes.
+ * Cookies are handled automatically by the browser via credentials: 'include'.
  *
  * All routes are at /api/v1/.
  */
+
+import { authState } from './auth.svelte.js';
 
 const BASE = '/api/v1';
 
@@ -140,6 +142,10 @@ async function apiFetch(path, options = {}) {
     }
 
     if (!response.ok) {
+        if (response.status === 401) {
+            authState.username = null;
+            authState.error = 'session_expired';
+        }
         let detail = '';
         try {
             const body = await response.json();
