@@ -14,8 +14,10 @@
         deriveP50,
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
+    import { authState, probeNegotiate, loginWithCredentials } from './lib/auth.svelte.js';
 
     import Nav from './components/Nav.svelte';
+    import Login from './components/Login.svelte';
     import Footer from './components/Footer.svelte';
     import CounterGrid from './components/CounterGrid.svelte';
     import StateBar from './components/StateBar.svelte';
@@ -413,43 +415,60 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
-    // Run immediately on mount, then every 30 seconds.
-    // untrack prevents the effect from re-triggering when refresh() updates
-    // reactive state (appState.config, appState.serverMetrics, etc.) that it
-    // reads synchronously before its first await.
+    // On mount, attempt silent SSPI auto-login unless the user explicitly logged out.
     $effect(() => {
+        if (!authState.skipProbe) {
+            untrack(() => probeNegotiate());
+        }
+    });
+
+    // Poll for fresh data every 30 seconds — only while authenticated.
+    // Cleanup cancels the interval when the user logs out or the session expires.
+    $effect(() => {
+        if (!authState.username) return;
         untrack(() => refresh());
         const interval = setInterval(refresh, 30_000);
         return () => clearInterval(interval);
     });
 </script>
 
-<Nav onconfigopen={() => (configOpen = true)} />
+{#if authState.loading}
+    <div class="auth-loading">
+        <span class="auth-spinner"></span>
+    </div>
+{:else if !authState.username}
+    <Login
+        autoLoginFailed={authState.error === 'auto_login_failed'}
+        onlogin={loginWithCredentials}
+    />
+{:else}
+    <Nav onconfigopen={() => (configOpen = true)} />
 
-<main class="main">
-    {#key appState.currentView}
-        <div in:fly={{ y: 12, duration: 120, delay: 60 }} out:fly={{ y: -6, duration: 80 }}>
-            {#if appState.currentView === 'overview'}
-                <CounterGrid />
-                <StateBar />
-                <MetricsChart />
-            {:else if appState.currentView === 'servers'}
-                <ServerTable onhistoryclick={(host) => (historyHost = host)} />
-            {:else if appState.currentView === 'events'}
-                <EventLog />
-            {/if}
-        </div>
-    {/key}
-</main>
+    <main class="main">
+        {#key appState.currentView}
+            <div in:fly={{ y: 12, duration: 120, delay: 60 }} out:fly={{ y: -6, duration: 80 }}>
+                {#if appState.currentView === 'overview'}
+                    <CounterGrid />
+                    <StateBar />
+                    <MetricsChart />
+                {:else if appState.currentView === 'servers'}
+                    <ServerTable onhistoryclick={(host) => (historyHost = host)} />
+                {:else if appState.currentView === 'events'}
+                    <EventLog />
+                {/if}
+            </div>
+        {/key}
+    </main>
 
-<Footer onrefresh={refresh} />
+    <Footer onrefresh={refresh} />
 
-{#if configOpen}
-    <ConfigModal onclose={() => (configOpen = false)} />
-{/if}
+    {#if configOpen}
+        <ConfigModal onclose={() => (configOpen = false)} />
+    {/if}
 
-{#if historyHost}
-    <HistoryModal host={historyHost} onclose={() => (historyHost = null)} />
+    {#if historyHost}
+        <HistoryModal host={historyHost} onclose={() => (historyHost = null)} />
+    {/if}
 {/if}
 
 <Toast />
@@ -461,5 +480,27 @@
         margin: 0 auto;
         padding: 28px 24px 48px;
         width: 100%;
+    }
+
+    /* ── Auth loading screen ───────────────────────────────────── */
+    .auth-loading {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .auth-spinner {
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        border: 3px solid var(--color-border);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
 </style>

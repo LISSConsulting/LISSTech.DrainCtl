@@ -171,10 +171,11 @@ var faviconPNG []byte
 
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state       *ServerState
-	cfg         dc.DashboardConfig
-	server      *http.Server
-	fingerprint string // SHA-256 fingerprint of the TLS certificate
+	state        *ServerState
+	cfg          dc.DashboardConfig
+	server       *http.Server
+	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
+	sessionStore *SessionStore // in-memory dashboard session store
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -199,8 +200,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	state := NewServerState(dataDir)
 
 	ds := &DashboardServer{
-		state: state,
-		cfg:   cfg,
+		state:        state,
+		cfg:          cfg,
+		sessionStore: NewSessionStore(ctx),
 	}
 
 	// Per-IP rate limiter: 10 req/s sustained, burst 60.
@@ -210,29 +212,48 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 
 	mux := http.NewServeMux()
 
-	// wrapAuth/wrapGroup are determined at compile time via build tags.
+	// wrapAuth is determined at compile time via build tags.
 	// Production builds (default) use SSPI Negotiate middleware.
 	// Dev builds (-tags devmode) bypass auth entirely.
 	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group) }
-	wg := func(h http.Handler) http.Handler { return wrapGroup(ctx, h, cfg.Group) }
+
+	// requireSession validates the drainctl_session cookie for dashboard routes.
+	// Dev builds treat this as a no-op.
+	rs := requireSession(ds.sessionStore)
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 
 	// Public routes — no authentication required.
 	mux.Handle("GET /api/v1/health", rlw(http.HandlerFunc(ds.handleHealth)))
 
-	// Agent routes — any authenticated domain identity.
+	// Agent routes — SSPI Negotiate authentication (machine credentials).
 	mux.Handle("POST /api/v1/register", rlw(wa(http.HandlerFunc(ds.handleRegister))))
 	mux.Handle("POST /api/v1/report", rlw(wa(http.HandlerFunc(ds.handleReport))))
 
-	// Management / UI routes — require group membership.
-	mux.Handle("GET /api/v1/history/{host}", rlw(wg(http.HandlerFunc(ds.handleHistory))))
-	mux.Handle("GET /api/v1/servers", rlw(wg(http.HandlerFunc(ds.handleServers))))
-	mux.Handle("GET /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleGetServer))))
-	mux.Handle("DELETE /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleDeleteServer))))
+	// Auth routes — create and invalidate dashboard sessions.
+	// POST /api/v1/auth/negotiate: short-circuits to 200 for existing valid sessions;
+	// otherwise runs SSPI Negotiate to create a new session.
+	mux.Handle("POST /api/v1/auth/negotiate", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie("drainctl_session"); err == nil && cookie.Value != "" {
+			if sess := ds.sessionStore.Get(cookie.Value); sess != nil {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"username": sess.Username})
+				return
+			}
+		}
+		NegotiateMiddleware(ctx, handleNegotiate(ds.sessionStore, cfg.Group)).ServeHTTP(w, r)
+	})))
+	mux.Handle("POST /api/v1/auth/login", rlw(handleLogin(ds.sessionStore, cfg.Group)))
+	mux.Handle("POST /api/v1/auth/logout", rlw(handleLogout(ds.sessionStore)))
+
+	// Management / UI routes — require a valid dashboard session cookie.
+	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
+	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
+	mux.Handle("GET /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleGetServer))))
+	mux.Handle("DELETE /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleDeleteServer))))
 	mux.Handle("GET /api/v1/notify-config", rlw(wa(http.HandlerFunc(ds.handleGetNotifyConfig))))
-	mux.Handle("PUT /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handlePutNotifyConfig))))
-	mux.Handle("POST /api/v1/notify-test", rlw(wg(http.HandlerFunc(ds.handleNotifyTest))))
+	mux.Handle("PUT /api/v1/notify-config", rlw(rs(http.HandlerFunc(ds.handlePutNotifyConfig))))
+	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
 	mux.Handle("GET /favicon.ico", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -265,7 +286,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	})))
 
 	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
-	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
+	// SPA HTML is served without authentication — the Svelte app handles the
+	// auth flow client-side via POST /api/v1/auth/negotiate and /auth/login.
+	mux.Handle("GET /", rlw(http.HandlerFunc(ds.handleUI)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 
