@@ -12,7 +12,29 @@ func wrapAuth(ctx context.Context, h http.Handler, _ string) http.Handler {
 	return NegotiateMiddleware(ctx, h)
 }
 
-// wrapGroup returns SSPI Negotiate + AD group check middleware for production builds.
-func wrapGroup(ctx context.Context, h http.Handler, group string) http.Handler {
-	return NegotiateMiddleware(ctx, RequireGroup(group, h))
+// requireSession returns middleware that validates the drainctl_session cookie
+// against the session store. Returns 401 JSON on missing or expired sessions.
+// No WWW-Authenticate header is set — prevents the browser credential dialog.
+func requireSession(store *SessionStore) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cookie, err := r.Cookie("drainctl_session")
+			if err != nil || cookie.Value == "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"session expired"}`))
+				return
+			}
+			sess := store.Get(cookie.Value)
+			if sess == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"session expired"}`))
+				return
+			}
+			info := &AuthInfo{Username: sess.Username, Groups: sess.Groups}
+			ctx := context.WithValue(r.Context(), authInfoKey, info)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
