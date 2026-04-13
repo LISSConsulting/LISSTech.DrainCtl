@@ -24,6 +24,29 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm build
+        shell: pwsh
+
+      - name: Copy frontend dist for Go embed
+        run: |
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue internal/dashboard/dist
+          Copy-Item -Recurse frontend/dist internal/dashboard/dist
+        shell: pwsh
+
       - name: Install tools
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest

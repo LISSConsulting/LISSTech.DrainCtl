@@ -83,6 +83,10 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	}
 
 	for _, target := range targets {
+		// Skip disabled targets (nil Enabled means enabled by default).
+		if target.Enabled != nil && !*target.Enabled {
+			continue
+		}
 		if target.URL == "" || !target.HasTrigger(trigger) {
 			continue
 		}
@@ -151,10 +155,14 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 }
 
 // SendTestNotification sends a test message to all configured targets.
+// Disabled targets (Enabled == false) are skipped.
 func SendTestNotification(targets []NotificationTarget) error {
 	hasTargets := false
 	for _, t := range targets {
-		if t.URL != "" {
+		if t.Enabled != nil && !*t.Enabled {
+			continue
+		}
+		if t.URL != "" || t.Type == "email" {
 			hasTargets = true
 			break
 		}
@@ -185,7 +193,10 @@ func SendTestNotification(targets []NotificationTarget) error {
 	var errs []error
 
 	for _, target := range targets {
-		if target.URL == "" {
+		if target.Enabled != nil && !*target.Enabled {
+			continue
+		}
+		if target.URL == "" && target.Type != "email" {
 			continue
 		}
 

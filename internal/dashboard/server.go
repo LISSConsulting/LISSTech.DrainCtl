@@ -4,12 +4,15 @@ package dashboard
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	_ "embed"
+	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,6 +27,110 @@ import (
 // hostnameRE matches RFC 1123 hostnames: labels of alphanumerics and hyphens
 // (hyphen not at start/end), separated by dots.
 var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
+
+// ServerView is the flattened JSON shape returned to the Svelte dashboard
+// frontend from GET /api/v1/servers and GET /api/v1/servers/{host}.
+// It unwraps ServerInfo + CheckResult so the frontend never navigates nested
+// last_result fields. Status is normalised to lowercase frontend tokens.
+type ServerView struct {
+	Host          string           `json:"host"`
+	Status        string           `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode     string           `json:"drain_mode"`
+	Sessions      int              `json:"sessions"`     // TotalSessions; 0 when unknown
+	MaxSessions   int              `json:"max_sessions"` // server capacity; 0 when unknown
+	Version       string           `json:"version"`
+	RegisteredAt  time.Time        `json:"registered_at"`
+	LastSeen      time.Time        `json:"last_seen,omitempty"`
+	ChangedBy     string           `json:"changed_by,omitempty"`
+	GraceDeadline *time.Time       `json:"grace_deadline"`
+	Perf          *dc.PerfSnapshot `json:"perf"`
+}
+
+// HistoryView is the per-entry shape returned by GET /api/v1/history/{host}.
+// It normalises CheckResult.Status to the lowercase frontend tokens so the
+// Svelte component can use the value directly as a CSS class name.
+type HistoryView struct {
+	Timestamp            time.Time          `json:"timestamp"`
+	Host                 string             `json:"host"`
+	Status               string             `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode            string             `json:"drain_mode"`
+	StateDurationSeconds *float64           `json:"state_duration_seconds"`
+	Transition           bool               `json:"transition"`
+	TransitionFrom       string             `json:"transition_from,omitempty"`
+	ChangedBy            string             `json:"changed_by,omitempty"`
+	Version              string             `json:"version"`
+	Message              string             `json:"message"`
+	Sessions             *dc.SessionSummary `json:"sessions,omitempty"`
+	Performance          *dc.PerfSnapshot   `json:"performance,omitempty"`
+}
+
+// statusToken converts a CheckResult.Status value ("Healthy"/"Grace"/"Alert")
+// to the lowercase frontend token ("ok"/"grace"/"alert"/"off").
+func statusToken(status string) string {
+	switch status {
+	case "Healthy":
+		return "ok"
+	case "Grace":
+		return "grace"
+	case "Alert":
+		return "alert"
+	default:
+		return "off"
+	}
+}
+
+// toServerView converts a stored ServerInfo into the flattened ServerView
+// the dashboard frontend expects.
+func toServerView(info ServerInfo) ServerView {
+	v := ServerView{
+		Host:         info.Hostname,
+		Status:       "off",
+		RegisteredAt: info.RegisteredAt,
+		LastSeen:     info.LastSeen,
+	}
+	r := info.LastResult
+	if r == nil {
+		return v
+	}
+	if r.Host != "" {
+		v.Host = r.Host
+	}
+	v.Status = statusToken(r.Status)
+	v.DrainMode = r.DrainModeLabel
+	v.Version = r.Version
+	v.ChangedBy = r.ChangedBy
+	v.Perf = r.Performance
+	if r.Sessions != nil {
+		v.Sessions = r.Sessions.TotalSessions
+		v.MaxSessions = r.Sessions.MaxSessions
+	}
+	// GraceDeadline: the moment when the grace window expires.
+	// Computed from StateSince + GracePeriodSeconds so the frontend can display
+	// a live countdown without knowing the raw grace period configuration.
+	if r.Status == "Grace" && r.StateSince != nil && r.GracePeriodSeconds > 0 {
+		deadline := r.StateSince.Add(time.Duration(r.GracePeriodSeconds) * time.Second)
+		v.GraceDeadline = &deadline
+	}
+	return v
+}
+
+// toHistoryView converts a CheckResult to the HistoryView with normalised status.
+func toHistoryView(r dc.CheckResult) HistoryView {
+	return HistoryView{
+		Timestamp:            r.Timestamp,
+		Host:                 r.Host,
+		Status:               statusToken(r.Status),
+		DrainMode:            r.DrainModeLabel,
+		StateDurationSeconds: r.StateDurationSeconds,
+		Transition:           r.Transition,
+		TransitionFrom:       r.TransitionFrom,
+		ChangedBy:            r.ChangedBy,
+		Version:              r.Version,
+		Message:              r.Message,
+		Sessions:             r.Sessions,
+		Performance:          r.Performance,
+	}
+}
 
 // isAuthorizedForHost checks whether the authenticated identity is allowed to
 // register or report for the given hostname.
@@ -56,8 +163,8 @@ func isAuthorizedForHost(auth *AuthInfo, hostname, adminGroup string) bool {
 	return false
 }
 
-//go:embed dashboard.html
-var dashboardHTML []byte
+//go:embed all:dist
+var distFS embed.FS
 
 //go:embed favicon.png
 var faviconPNG []byte
@@ -131,6 +238,14 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
 	})))
+
+	// Hashed static assets from Vite build — immutable caching.
+	assets, _ := fs.Sub(distFS, "dist/assets")
+	mux.Handle("GET /assets/", rlw(http.StripPrefix("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.FileServerFS(assets).ServeHTTP(w, r)
+	}))))
+
 	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
 	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
 
@@ -291,16 +406,20 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleServers returns GET /api/v1/servers as a JSON array.
+// handleServers returns GET /api/v1/servers as a JSON array of ServerView.
 func (ds *DashboardServer) handleServers(w http.ResponseWriter, r *http.Request) {
-	servers := ds.state.All()
+	infos := ds.state.All()
+	views := make([]ServerView, len(infos))
+	for i, info := range infos {
+		views[i] = toServerView(info)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(servers)
+	_ = enc.Encode(views)
 }
 
-// handleGetServer returns GET /api/v1/servers/{host} as a JSON object.
+// handleGetServer returns GET /api/v1/servers/{host} as a JSON ServerView.
 // Returns 404 if the host is not registered.
 func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
@@ -318,7 +437,7 @@ func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(info)
+	_ = enc.Encode(toServerView(*info))
 }
 
 // handleDeleteServer processes DELETE /api/v1/servers/{host}.
@@ -492,10 +611,12 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Try to decode a single target from the body.
+	// Webhook/ntfy targets are identified by a non-empty URL; email targets
+	// have no URL (they use From/To instead) so we check Type == "email".
 	var singleTarget *dc.NotificationTarget
 	if r.Body != nil && r.ContentLength > 0 {
 		var t dc.NotificationTarget
-		if err := json.NewDecoder(r.Body).Decode(&t); err == nil && t.URL != "" {
+		if err := json.NewDecoder(r.Body).Decode(&t); err == nil && t.Type != "" && (t.URL != "" || t.Type == "email") {
 			singleTarget = &t
 		}
 	}
@@ -534,11 +655,36 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleUI serves the embedded SPA.
+// handleUI serves the embedded SPA index.html.
+// It generates a per-request nonce and injects it into both the Content-Security-Policy
+// header and the theme flash-prevention inline <script> tag in index.html.
+// This removes the need for 'unsafe-inline' in script-src while still allowing
+// the one inline script that prevents a light-flash before the theme JS runs.
 func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
+	data, err := distFS.ReadFile("dist/index.html")
+	if err != nil {
+		http.Error(w, "dashboard unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate a cryptographically-random per-request nonce (128 bits).
+	var nb [16]byte
+	if _, err := rand.Read(nb[:]); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	nonce := base64.StdEncoding.EncodeToString(nb[:])
+
+	// Extend the CSP with the nonce, overriding the header set by securityMiddleware.
+	w.Header().Set("Content-Security-Policy",
+		strings.Replace(cspBase, "script-src 'self'", "script-src 'self' 'nonce-"+nonce+"'", 1))
+
+	// Inject the nonce attribute into the theme inline script.
+	html := strings.Replace(string(data), "<script>", "<script nonce=\""+nonce+"\">", 1)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(dashboardHTML)
+	_, _ = w.Write([]byte(html))
 }
 
 // staleThreshold is the maximum time since a server's last report before it is
@@ -660,25 +806,37 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	views := make([]HistoryView, len(records))
+	for i, rec := range records {
+		views[i] = toHistoryView(rec)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(records)
+	_ = enc.Encode(views)
 }
 
-// cspHeader is the Content-Security-Policy value applied to all responses.
-// The dashboard SPA uses inline scripts and styles (uPlot + app JS) and loads
-// fonts from Google Fonts CDN, so 'unsafe-inline' is required for script-src
-// and style-src. All other sources are restricted to 'self'.
-const cspHeader = "default-src 'none'; " +
-	"script-src 'unsafe-inline'; " +
-	"style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+// cspBase is the Content-Security-Policy value applied to all responses.
+// The Vite-bundled SPA uses only 'self' for scripts — no 'unsafe-inline'.
+// handleUI extends cspBase with a per-request nonce for the theme
+// flash-prevention inline script in index.html (see handleUI).
+// style-src keeps 'unsafe-inline' because Svelte components use inline style=
+// attributes for reactive styling (e.g. flex widths, dirty-state tints).
+const cspBase = "default-src 'none'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src https://fonts.gstatic.com; " +
 	"img-src 'self' data:; " +
 	"connect-src 'self'; " +
 	"frame-ancestors 'self'; " +
 	"base-uri 'self'; " +
 	"form-action 'self'"
+
+// cspHeader is the CSP applied to every response via securityMiddleware.
+// API responses and asset responses use this directly (no inline script).
+// handleUI overrides this header with a nonce-augmented version.
+const cspHeader = cspBase
 
 // securityMiddleware adds defensive HTTP security headers to all responses.
 // Cache-Control is set to no-store by default so that authenticated API

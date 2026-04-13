@@ -92,6 +92,7 @@ type NotificationTarget struct {
 	Secret        string    `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks; SMTP password for email
 	To            []string  `json:"to,omitempty"`             // email recipients
 	From          string    `json:"from,omitempty"`           // email sender
+	Enabled       *bool     `json:"enabled,omitempty"`        // nil or true = enabled (default); false = disabled
 }
 
 // HasTrigger returns true if the target subscribes to the given trigger.

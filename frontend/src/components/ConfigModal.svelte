@@ -1,0 +1,932 @@
+<script>
+    import { fetchNotifyConfig, saveNotifyConfig, sendNotifyTest } from '../lib/api.js';
+    import { appState } from '../lib/state.svelte.js';
+    import { toast } from '../lib/toast.svelte.js';
+    import NotificationTargets from './NotificationTargets.svelte';
+    import TargetEditModal from './TargetEditModal.svelte';
+    import TargetDeleteModal from './TargetDeleteModal.svelte';
+    import ConfirmDialog from './ConfirmDialog.svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
+
+    let { onclose } = $props();
+
+    let config = $state(null);
+    let original = $state(null);
+    let loading = $state(true);
+    let saving = $state(false);
+    let testing = $state(false);
+    let showConfirmClose = $state(false);
+    let closing = $state(false);
+    const CLOSE_MS = 150;
+
+    function animateClose() {
+        closing = true;
+        setTimeout(() => onclose?.(), CLOSE_MS);
+    }
+
+    // Sub-modal state (owned here so modals render outside .settings-modal)
+    let editTarget = $state(null);
+    let editIdx = $state(-1);
+    let deleteIdx = $state(-1);
+    let subModalOpen = $derived(editTarget !== null || deleteIdx >= 0);
+
+    function saveTarget(t) {
+        if (!config) return;
+        if (editIdx >= 0) {
+            config.notifications = config.notifications.map((x, i) => (i === editIdx ? t : x));
+        } else {
+            config.notifications = [...config.notifications, { ...t, id: crypto.randomUUID() }];
+        }
+        editTarget = null;
+    }
+
+    function confirmDelete() {
+        if (deleteIdx >= 0 && config) {
+            config.notifications = config.notifications.filter((_, i) => i !== deleteIdx);
+        }
+        deleteIdx = -1;
+    }
+
+    let dirty = $derived.by(() => {
+        if (!config || !original) return false;
+        return JSON.stringify(config) !== JSON.stringify(original);
+    });
+
+    $effect(() => {
+        loadConfig();
+    });
+
+    async function loadConfig() {
+        loading = true;
+        try {
+            const c = await fetchNotifyConfig();
+            config = JSON.parse(JSON.stringify(c));
+            original = JSON.parse(JSON.stringify(c));
+        } catch (e) {
+            toast.err('Failed to load config: ' + e.message);
+        } finally {
+            loading = false;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Global fire-based presets
+    // ---------------------------------------------------------------------------
+
+    const FIRE_PRESETS = [
+        {
+            level: 1,
+            label: 'Chill',
+            icon: Coffee,
+            beans: 1,
+            grace_period: 60,
+            session_warning: 90,
+            cpu_warn: 80,
+            cpu_crit: 95,
+            mem_warn: 80,
+            mem_crit: 95,
+            delay_warn: 50,
+            delay_crit: 100,
+        },
+        {
+            level: 2,
+            label: 'Anxious',
+            icon: Coffee,
+            beans: 2,
+            grace_period: 45,
+            session_warning: 80,
+            cpu_warn: 70,
+            cpu_crit: 90,
+            mem_warn: 70,
+            mem_crit: 90,
+            delay_warn: 30,
+            delay_crit: 80,
+        },
+        {
+            level: 3,
+            label: 'Twitchy',
+            icon: Coffee,
+            beans: 3,
+            grace_period: 15,
+            session_warning: 60,
+            cpu_warn: 60,
+            cpu_crit: 80,
+            mem_warn: 60,
+            mem_crit: 80,
+            delay_warn: 15,
+            delay_crit: 40,
+        },
+    ];
+
+    let activeFireLevel = $derived.by(() => {
+        if (!config) return -1;
+        const p = config.performance;
+        for (const pr of FIRE_PRESETS) {
+            if (
+                config.grace_period === pr.grace_period &&
+                config.session_warning_threshold === pr.session_warning &&
+                p?.cpu_warn_pct === pr.cpu_warn &&
+                p?.cpu_crit_pct === pr.cpu_crit &&
+                p?.mem_warn_pct === pr.mem_warn &&
+                p?.mem_crit_pct === pr.mem_crit &&
+                p?.input_delay_warn_ms === pr.delay_warn &&
+                p?.input_delay_crit_ms === pr.delay_crit
+            ) {
+                return pr.level;
+            }
+        }
+        return -1;
+    });
+
+    function applyFirePreset(preset) {
+        if (!config) return;
+        config.grace_period = preset.grace_period;
+        config.session_warning_threshold = preset.session_warning;
+        if (config.performance) {
+            config.performance.enabled = true;
+            config.performance.cpu_warn_pct = preset.cpu_warn;
+            config.performance.cpu_crit_pct = preset.cpu_crit;
+            config.performance.mem_warn_pct = preset.mem_warn;
+            config.performance.mem_crit_pct = preset.mem_crit;
+            config.performance.input_delay_warn_ms = preset.delay_warn;
+            config.performance.input_delay_crit_ms = preset.delay_crit;
+        }
+    }
+
+    let showManual = $state(false);
+
+    // ---------------------------------------------------------------------------
+    // Validation & actions
+    // ---------------------------------------------------------------------------
+
+    function validateThresholds() {
+        const p = config?.performance;
+        if (!p?.enabled) return null;
+        if (p.cpu_warn_pct > 0 && p.cpu_crit_pct > 0 && p.cpu_warn_pct >= p.cpu_crit_pct)
+            return 'CPU warn threshold must be less than crit threshold.';
+        if (p.mem_warn_pct > 0 && p.mem_crit_pct > 0 && p.mem_warn_pct >= p.mem_crit_pct)
+            return 'Memory warn threshold must be less than crit threshold.';
+        if (p.input_delay_warn_ms > 0 && p.input_delay_crit_ms > 0 && p.input_delay_warn_ms >= p.input_delay_crit_ms)
+            return 'Input Delay warn threshold must be less than crit threshold.';
+        return null;
+    }
+
+    async function save() {
+        if (!config) return;
+        const err = validateThresholds();
+        if (err) {
+            toast.err(err);
+            return;
+        }
+        saving = true;
+        try {
+            await saveNotifyConfig(config);
+            original = JSON.parse(JSON.stringify(config));
+            appState.config = JSON.parse(JSON.stringify(config));
+            toast.ok('Settings saved successfully');
+        } catch (e) {
+            toast.err('Save failed: ' + e.message);
+        } finally {
+            saving = false;
+        }
+    }
+
+    async function sendTest() {
+        testing = true;
+        try {
+            const r = await sendNotifyTest();
+            toast.ok(r.message || 'Test notification sent');
+        } catch (e) {
+            toast.err('Test failed: ' + e.message);
+        } finally {
+            testing = false;
+        }
+    }
+
+    function requestClose() {
+        if (dirty) {
+            showConfirmClose = true;
+            return;
+        }
+        animateClose();
+    }
+
+    function handleOverlayClick(e) {
+        if (e.target !== e.currentTarget) return;
+        requestClose();
+    }
+
+    $effect(() => {
+        function onKey(e) {
+            if (e.key === 'Escape') requestClose();
+            if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                if (dirty && !saving) save();
+            }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    });
+
+    const GRACE_PRESETS = [5, 10, 15, 30, 60, 120, 240];
+
+    /** @type {HTMLInputElement|null} */
+    let gracePeriodInput = $state(null);
+</script>
+
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
+<div
+    class="settings-overlay {subModalOpen ? 'sub-open' : ''} {closing ? 'closing' : ''}"
+    onclick={handleOverlayClick}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+>
+    <div class="modal-wrap">
+        <span class="modal-badge"><Settings size={20} /></span>
+        <div
+            class="settings-modal scrollbar-styled"
+            style={dirty ? 'background: color-mix(in srgb, var(--color-amber) 5%, var(--color-card));' : ''}
+        >
+            <div class="settings-title">
+                <h2 class="modal-title serif">Dashboard Configuration</h2>
+                <button class="settings-close" onclick={requestClose} aria-label="Close settings"
+                    ><X size={20} /></button
+                >
+            </div>
+
+            {#if loading}
+                <div style="text-align:center;padding:40px;color:var(--color-muted)">Loading...</div>
+            {:else if config}
+                <!-- Global Alert Sensitivity -->
+                <div class="settings-group">
+                    <div class="settings-label">Alert Sensitivity</div>
+                    <div class="fire-row">
+                        {#each FIRE_PRESETS as preset}
+                            <button
+                                class="fire-card fire-level-{preset.level} {activeFireLevel === preset.level
+                                    ? 'active'
+                                    : ''}"
+                                onclick={() => applyFirePreset(preset)}
+                            >
+                                {#if activeFireLevel === preset.level}
+                                    <span class="fire-seal fire-seal-{preset.level}"
+                                        ><Award size={20} strokeWidth={2.5} /></span
+                                    >
+                                {/if}
+                                <span class="fire-icon-wrap"
+                                    >{#each { length: preset.beans } as _}<svg
+                                            class="bean"
+                                            viewBox="0 0 20 24"
+                                            width="16"
+                                            height="19"
+                                            ><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor" /><path
+                                                d="M10 3 C8 8, 8 16, 10 21"
+                                                stroke="var(--color-surface)"
+                                                stroke-width="1.8"
+                                                fill="none"
+                                                stroke-linecap="round"
+                                            /></svg
+                                        >{/each}</span
+                                >
+                                <span class="fire-label">{preset.label}</span>
+                                <span class="fire-tagline"
+                                    >{preset.level === 1
+                                        ? 'Easy does it'
+                                        : preset.level === 2
+                                          ? 'Sleep with one eye open'
+                                          : 'No Sleep Till Brooklyn'}</span
+                                >
+                                <span class="fire-detail">
+                                    Grace {preset.grace_period}m · Sessions {preset.session_warning}%
+                                </span>
+                                <span class="fire-detail">
+                                    CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
+                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms
+                                </span>
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+
+                <button class="fire-custom-toggle" onclick={() => (showManual = !showManual)}>
+                    {#if showManual}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                    Customize settings manually
+                </button>
+
+                {#if showManual}
+                    <div class="settings-divider"></div>
+
+                    <!-- Grace Period -->
+                    <div class="settings-group">
+                        <div class="settings-label">Grace Period</div>
+                        <div class="repeat-pills">
+                            {#each GRACE_PRESETS as p}
+                                <button
+                                    class="repeat-pill {config.grace_period === p ? 'active' : ''}"
+                                    onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
+                                >
+                            {/each}
+                            <button
+                                class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period)
+                                    ? 'active'
+                                    : ''}"
+                                onclick={() => gracePeriodInput?.focus()}>Custom</button
+                            >
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <input
+                                type="number"
+                                class="settings-num"
+                                bind:value={config.grace_period}
+                                bind:this={gracePeriodInput}
+                                min="1"
+                                max="1440"
+                            />
+                            <span class="settings-num-label">minutes</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- Session Warning -->
+                    <div class="settings-group">
+                        <div class="settings-label">Session Warning Threshold</div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <input
+                                type="number"
+                                class="settings-num"
+                                bind:value={config.session_warning_threshold}
+                                min="0"
+                                max="100"
+                            />
+                            <span class="settings-num-label">% of max sessions (0 = disabled)</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- Performance Monitoring -->
+                    {#if config.performance}
+                        <div class="settings-group">
+                            <div class="settings-label">Performance Monitoring</div>
+                            <label class="settings-check">
+                                <input
+                                    type="checkbox"
+                                    bind:checked={config.performance.enabled}
+                                    disabled={config.performance.force_disabled}
+                                />
+                                Enable performance monitoring{config.performance.force_disabled
+                                    ? ' (disabled by server policy)'
+                                    : ''}
+                            </label>
+                            {#if config.performance.enabled && !config.performance.force_disabled}
+                                <div class="settings-cfg-grid" style="margin-top:8px">
+                                    <div>
+                                        <div class="settings-label">CPU Thresholds</div>
+                                        <div class="threshold-row">
+                                            <span class="settings-num-label threshold-lbl">Warn</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.cpu_warn_pct}
+                                                min="0"
+                                                max="100"
+                                            />
+                                            <span class="settings-num-label threshold-unit">%</span>
+                                            <span class="settings-num-label threshold-lbl">Crit</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.cpu_crit_pct}
+                                                min="0"
+                                                max="100"
+                                            />
+                                            <span class="settings-num-label threshold-unit">%</span>
+                                        </div>
+                                        <div class="settings-label">Memory Thresholds</div>
+                                        <div class="threshold-row">
+                                            <span class="settings-num-label threshold-lbl">Warn</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.mem_warn_pct}
+                                                min="0"
+                                                max="100"
+                                            />
+                                            <span class="settings-num-label threshold-unit">%</span>
+                                            <span class="settings-num-label threshold-lbl">Crit</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.mem_crit_pct}
+                                                min="0"
+                                                max="100"
+                                            />
+                                            <span class="settings-num-label threshold-unit">%</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="settings-label">Input Delay Thresholds</div>
+                                        <div class="threshold-row">
+                                            <span class="settings-num-label threshold-lbl">Warn</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.input_delay_warn_ms}
+                                                min="0"
+                                            />
+                                            <span class="settings-num-label threshold-unit">ms</span>
+                                            <span class="settings-num-label threshold-lbl">Crit</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.input_delay_crit_ms}
+                                                min="0"
+                                            />
+                                            <span class="settings-num-label threshold-unit">ms</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <label class="settings-check">
+                                    <input type="checkbox" bind:checked={config.performance.collect_per_session} />
+                                    Per-session CPU accounting
+                                </label>
+                                <label class="settings-check">
+                                    <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
+                                    RemoteFX monitoring
+                                </label>
+                            {/if}
+                        </div>
+                        <div class="settings-divider"></div>
+                    {/if}
+                {/if}
+
+                <div class="settings-divider"></div>
+
+                <!-- Notification Targets -->
+                <NotificationTargets bind:targets={config.notifications} bind:editTarget bind:editIdx bind:deleteIdx />
+
+                <!-- Actions bar -->
+                <div class="settings-actions-wrap">
+                    <div class="settings-actions">
+                        <button class="btn-brutal btn-test" onclick={sendTest} disabled={testing}>
+                            <Play size={14} />
+                            {testing ? 'Sending...' : 'Send Test'}
+                        </button>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn-brutal btn-save" onclick={save} disabled={saving || !dirty}>
+                                <Save size={14} />
+                                {saving ? 'Saving...' : 'Save'}
+                            </button>
+                            <button class="btn-brutal btn-secondary" onclick={requestClose}
+                                ><X size={14} /> Close</button
+                            >
+                        </div>
+                    </div>
+                </div>
+            {/if}
+        </div>
+    </div>
+</div>
+
+{#if editTarget !== null}
+    <TargetEditModal
+        target={editTarget}
+        isNew={editIdx < 0}
+        onsave={saveTarget}
+        onclose={() => {
+            editTarget = null;
+        }}
+    />
+{/if}
+
+{#if deleteIdx >= 0 && config}
+    <TargetDeleteModal
+        target={config.notifications[deleteIdx]}
+        onconfirm={confirmDelete}
+        oncancel={() => (deleteIdx = -1)}
+    />
+{/if}
+
+{#if showConfirmClose}
+    <ConfirmDialog
+        title="Unsaved Changes"
+        message="You have unsaved changes that will be lost if you close now."
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        saveLabel="Save & Close"
+        onconfirm={() => {
+            showConfirmClose = false;
+            animateClose();
+        }}
+        oncancel={() => (showConfirmClose = false)}
+        onsave={async () => {
+            showConfirmClose = false;
+            await save();
+            animateClose();
+        }}
+    />
+{/if}
+
+<style>
+    .settings-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 150;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        animation: modal-fade-in var(--anim-in-duration) var(--anim-timing);
+    }
+    .settings-overlay.closing {
+        animation: modal-fade-out var(--anim-out-duration) var(--anim-timing) forwards;
+    }
+    .settings-overlay.closing > .modal-wrap {
+        animation: modal-card-out var(--anim-out-duration) var(--anim-timing) forwards;
+    }
+    .settings-overlay.sub-open > .modal-wrap {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease-out;
+    }
+    .modal-wrap {
+        position: relative;
+        width: 860px;
+        max-width: 94vw;
+        transition: opacity 0.15s ease-out;
+        animation: modal-card-in var(--anim-in-duration) var(--anim-timing);
+    }
+    .modal-badge {
+        position: absolute;
+        top: -16px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        background: var(--color-accent);
+        color: #fff;
+        border: 3px solid var(--color-border);
+        border-radius: 50%;
+        box-shadow: 3px 3px 0 var(--color-shadow);
+        z-index: 1;
+    }
+    .settings-modal {
+        max-height: 90vh;
+        background: var(--color-card);
+        border: 4px solid var(--color-border);
+        border-radius: var(--radius-default);
+        box-shadow: 10px 10px 0 var(--color-shadow);
+        overflow-y: auto;
+        padding: 32px 36px;
+        transition: background 0.12s linear;
+    }
+    .modal-title {
+        font-family: 'Fraunces', serif;
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0;
+        text-align: center;
+        flex: 1;
+    }
+    .settings-title {
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+    }
+    .settings-close {
+        background: none;
+        border: none;
+        font-size: 1.4rem;
+        cursor: pointer;
+        color: var(--color-muted);
+        padding: 4px 8px;
+        display: flex;
+        align-items: center;
+    }
+    .settings-close:hover {
+        color: var(--color-fg);
+    }
+    .settings-group {
+        margin-bottom: 18px;
+    }
+    .settings-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-accent);
+        margin-bottom: 6px;
+    }
+    .settings-check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+    .settings-check input[type='checkbox'] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--color-accent);
+        cursor: pointer;
+    }
+    .settings-num {
+        width: 80px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        padding: 8px 12px;
+        background: var(--color-surface);
+        color: var(--color-fg);
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        outline: none;
+    }
+    .settings-num-label {
+        font-size: 0.75rem;
+        color: var(--color-muted);
+    }
+    .settings-divider {
+        height: 1px;
+        background: var(--color-border);
+        margin: 18px 0;
+        opacity: 0.4;
+    }
+    .settings-cfg-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 12px;
+    }
+    .threshold-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+    .threshold-lbl {
+        min-width: 28px;
+    }
+    .threshold-unit {
+        min-width: 16px;
+    }
+
+    /* Fire preset cards */
+    .fire-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    .fire-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        padding: 16px 12px 12px;
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        cursor: pointer;
+        transition: all 0.1s linear;
+        box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow);
+    }
+    .fire-level-1 {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-green) 14%, var(--color-surface)) 0%,
+            var(--color-surface) 70%
+        );
+    }
+    .fire-level-2 {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-amber) 20%, var(--color-surface)) 0%,
+            color-mix(in srgb, var(--color-amber) 6%, var(--color-surface)) 100%
+        );
+    }
+    .fire-level-3 {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-red) 22%, var(--color-surface)) 0%,
+            color-mix(in srgb, var(--color-red) 8%, var(--color-surface)) 100%
+        );
+    }
+    .fire-card:hover {
+        border-color: var(--color-accent);
+        transform: translate(-2px, -2px);
+        box-shadow: calc(var(--spacing-so) + 2px) calc(var(--spacing-so) + 2px) 0 var(--color-shadow);
+    }
+    .fire-card:active {
+        transform: translate(2px, 2px);
+        box-shadow: 1px 1px 0 var(--color-shadow);
+    }
+    .fire-card.active {
+        border-color: var(--color-accent);
+        border-width: 3px;
+    }
+    .fire-level-1.active {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-green) 22%, var(--color-card)) 0%,
+            var(--color-card) 70%
+        );
+    }
+    .fire-level-2.active {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-amber) 28%, var(--color-card)) 0%,
+            color-mix(in srgb, var(--color-amber) 10%, var(--color-card)) 100%
+        );
+    }
+    .fire-level-3.active {
+        background: linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--color-red) 32%, var(--color-card)) 0%,
+            color-mix(in srgb, var(--color-red) 12%, var(--color-card)) 100%
+        );
+    }
+    .fire-seal {
+        position: absolute;
+        top: -10px;
+        right: -10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        color: #fff;
+        border: 3px solid var(--color-border);
+        border-radius: 50%;
+        box-shadow: 2px 2px 0 var(--color-shadow);
+        animation: seal-pop 0.12s linear;
+    }
+    .fire-seal-1 {
+        background: var(--color-green);
+    }
+    .fire-seal-2 {
+        background: var(--color-amber);
+    }
+    .fire-seal-3 {
+        background: var(--color-red);
+    }
+    @keyframes seal-pop {
+        from {
+            transform: scale(0);
+        }
+        to {
+            transform: scale(1);
+        }
+    }
+    .fire-icon-wrap {
+        display: flex;
+        gap: 2px;
+        line-height: 1;
+        margin-bottom: 4px;
+    }
+    .fire-level-1 .fire-icon-wrap {
+        color: var(--color-green);
+    }
+    .fire-level-2 .fire-icon-wrap {
+        color: var(--color-amber);
+    }
+    .fire-level-3 .fire-icon-wrap {
+        color: var(--color-red);
+    }
+    .fire-label {
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--color-fg);
+    }
+    .fire-tagline {
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.68rem;
+        font-weight: 600;
+        font-style: italic;
+        color: var(--color-muted);
+        margin-bottom: 4px;
+    }
+    .fire-detail {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.64rem;
+        color: var(--color-muted);
+        text-align: center;
+        line-height: 1.5;
+        font-weight: 500;
+    }
+    .fire-custom-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--color-muted);
+        padding: 4px 0;
+        transition: color 0.1s linear;
+    }
+    .fire-custom-toggle:hover {
+        color: var(--color-accent);
+    }
+
+    .settings-actions-wrap {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-surface);
+    }
+    .settings-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .repeat-pills {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+    }
+    .repeat-pill {
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 5px 12px;
+        background: var(--color-card);
+        color: var(--color-muted);
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.1s linear;
+    }
+    .repeat-pill:hover {
+        border-color: var(--color-accent);
+        color: var(--color-fg);
+    }
+    .repeat-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
+    }
+    .repeat-pill--dashed {
+        border-style: dashed;
+        font-size: 0.7rem;
+    }
+    .btn-save {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--color-accent);
+        color: #fff;
+        padding: 10px 22px;
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+    .btn-save:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none !important;
+        box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important;
+    }
+    .btn-test {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--color-card);
+        color: var(--color-fg);
+        padding: 10px 22px;
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+    .btn-test:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none !important;
+        box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important;
+    }
+    .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--color-card);
+        color: var(--color-fg);
+        padding: 10px 22px;
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+</style>
