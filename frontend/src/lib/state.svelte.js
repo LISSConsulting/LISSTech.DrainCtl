@@ -531,6 +531,24 @@ export const appState = {
     get stateBarSegments() {
         return stateBarSegments;
     },
+
+    /**
+     * Handle an SSE server_update event by patching the matching server
+     * in the servers array. If the host is new, append it.
+     * @param {string} host
+     * @param {Server} serverView
+     */
+    handleSSEServerUpdate(host, serverView) {
+        const idx = servers.findIndex((s) => s.host === host);
+        if (idx >= 0) {
+            const updated = [...servers];
+            updated[idx] = serverView;
+            servers = updated;
+        } else {
+            servers = [...servers, serverView];
+        }
+        lastUpdated = Date.now();
+    },
 };
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@
 
 **Purpose**: No new project scaffolding needed — all infrastructure exists. This phase creates the single new file.
 
-- [ ] T001 Create Broker struct with Subscribe/Unsubscribe/Broadcast methods in internal/dashboard/broker.go
+- [x] T001 Create Broker struct with Subscribe/Unsubscribe/Broadcast methods in internal/dashboard/broker.go
 
 ---
 
@@ -25,9 +25,9 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Add Broker field to DashboardServer and initialize it in NewDashboardServer in internal/dashboard/server.go
-- [ ] T003 Register SSE endpoint `GET /api/v1/events` with session auth middleware in internal/dashboard/server.go
-- [ ] T004 Implement handleSSE handler (set SSE headers, subscribe, loop writing events from channel, unsubscribe on disconnect) in internal/dashboard/server.go
+- [x] T002 Add Broker field to DashboardServer and initialize it in NewDashboardServer in internal/dashboard/server.go
+- [x] T003 Register SSE endpoint `GET /api/v1/events` with session auth middleware in internal/dashboard/server.go
+- [x] T004 Implement handleSSE handler (set SSE headers, subscribe, loop writing events from channel, unsubscribe on disconnect) in internal/dashboard/server.go
 
 **Checkpoint**: SSE endpoint exists and can accept connections. No events are broadcast yet.
 
@@ -41,12 +41,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] Broadcast server_update event from handleReport after state.Update() in internal/dashboard/server.go
-- [ ] T006 [US1] Broadcast server_update event from local check path (dashState.ReportLocal) in internal/svc/handler.go or internal/dashboard/server.go
-- [ ] T007 [US1] Add EventSource connection setup on login in frontend/src/App.svelte
-- [ ] T008 [US1] Add SSE event consumer that updates appState.servers from server_update events in frontend/src/lib/state.svelte.js
-- [ ] T009 [US1] Close EventSource on logout in frontend/src/App.svelte
-- [ ] T010 [US1] Add broker and SSE handler tests in internal/dashboard/server_test.go
+- [x] T005 [US1] Broadcast server_update event from handleReport after state.Update() in internal/dashboard/server.go
+- [x] T006 [US1] Broadcast server_update event from local check path (dashState.ReportLocal) in internal/svc/handler.go or internal/dashboard/server.go
+- [x] T007 [US1] Add EventSource connection setup on login in frontend/src/App.svelte
+- [x] T008 [US1] Add SSE event consumer that updates appState.servers from server_update events in frontend/src/lib/state.svelte.js
+- [x] T009 [US1] Close EventSource on logout in frontend/src/App.svelte
+- [x] T010 [US1] Add broker and SSE handler tests in internal/dashboard/server_test.go
 
 **Checkpoint**: Server state updates stream to connected browsers in real-time. Poll fallback still runs.
 
@@ -60,9 +60,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Handle EventSource onerror — detect auth failures (401) and clear session in frontend/src/App.svelte
-- [ ] T012 [US2] Verify EventSource auto-reconnect works with session cookie in frontend/src/App.svelte
-- [ ] T013 [US2] Ensure handleSSE detects session expiry and closes connection in internal/dashboard/server.go
+- [x] T011 [US2] Handle EventSource onerror — detect auth failures (401) and clear session in frontend/src/App.svelte
+- [x] T012 [US2] Verify EventSource auto-reconnect works with session cookie in frontend/src/App.svelte
+- [x] T013 [US2] Ensure handleSSE detects session expiry and closes connection in internal/dashboard/server.go
 
 **Checkpoint**: Connection resilience verified — auto-reconnect, auth error handling, session expiry cleanup.
 
@@ -76,8 +76,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Implement non-blocking send in Broker.Broadcast with slow subscriber eviction in internal/dashboard/broker.go
-- [ ] T015 [US3] Add subscriber cleanup on channel-full eviction (log warning) in internal/dashboard/broker.go
+- [x] T014 [US3] Implement non-blocking send in Broker.Broadcast with slow subscriber eviction in internal/dashboard/broker.go
+- [x] T015 [US3] Add subscriber cleanup on channel-full eviction (log warning) in internal/dashboard/broker.go
 
 **Checkpoint**: 50 concurrent browsers supported with graceful handling of slow subscribers.
 
@@ -91,8 +91,8 @@
 
 ### Implementation for Settings Broadcast
 
-- [ ] T016 [P] Broadcast settings_update event from handlePutSettings after successful save in internal/dashboard/server.go
-- [ ] T017 [P] Add SSE event consumer for settings_update that refreshes appState.config in frontend/src/lib/state.svelte.js
+- [x] T016 [P] Broadcast settings_update event from handlePutSettings after successful save in internal/dashboard/server.go
+- [x] T017 [P] Add SSE event consumer for settings_update that refreshes appState.config in frontend/src/lib/state.svelte.js
 
 **Checkpoint**: Settings changes stream to all connected browsers.
 
@@ -102,11 +102,11 @@
 
 **Purpose**: Documentation, OpenAPI, and final validation.
 
-- [ ] T018 [P] Add /api/v1/events endpoint to OpenAPI spec in internal/dashboard/openapi.yaml
-- [ ] T019 [P] Document SSE endpoint in docs/guide.html
-- [ ] T020 Update mock-api.js with SSE simulation for dev mode in frontend/dev/mock-api.js
-- [ ] T021 Run `just lint` and `go test ./...` — fix any issues
-- [ ] T022 Manual end-to-end validation per quickstart.md scenarios
+- [x] T018 [P] Add /api/v1/events endpoint to OpenAPI spec in internal/dashboard/openapi.yaml
+- [x] T019 [P] Document SSE endpoint in docs/guide.html
+- [x] T020 Update mock-api.js with SSE simulation for dev mode in frontend/dev/mock-api.js
+- [x] T021 Run `just lint` and `go test ./...` — fix any issues
+- [x] T022 Manual end-to-end validation per quickstart.md scenarios
 
 ---
 
