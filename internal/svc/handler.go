@@ -199,10 +199,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer cancel()
 
 	// Load config from config.json (migrates from registry if needed).
+	// Validate and write back so new fields appear with defaults.
 	fullCfg, err := dc.LoadConfig()
 	if err != nil {
 		slog.Error("service=failed", "error", err)
 		return false, 1
+	}
+	fullCfg.Validate()
+	if err := dc.SaveConfig(fullCfg); err != nil {
+		slog.Warn("config normalization failed", "error", err)
 	}
 
 	cfg := fullCfg.ToServiceConfig()
