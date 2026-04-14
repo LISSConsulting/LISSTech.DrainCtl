@@ -7,25 +7,48 @@
 
 /**
  * Shared authentication state. Null username = not logged in.
- * @type {{ username: string|null, loading: boolean, error: string|null, skipProbe: boolean }}
+ * @type {{ username: string|null, loading: boolean, error: string|null }}
  */
 export const authState = $state({
     username: null,
-    /** True while an auth operation is in flight. Initialised true so the
-     *  loading indicator shows immediately on app load before the probe runs. */
+    /** True while a session check or auth operation is in flight. Initialised
+     *  true so the loading indicator shows on app load while checkSession runs. */
     loading: true,
     error: null,
-    /** Set after explicit logout to prevent App.svelte from re-probing Negotiate. */
-    skipProbe: false,
 });
 
 /**
- * Attempt silent Windows Negotiate (SSPI) auto-login.
- * Called on app load. On success sets authState.username; on failure sets
- * authState.error = 'auto_login_failed'.
+ * Check for an existing valid session on page load.
+ * Calls GET /api/v1/me — returns username if the session cookie is still valid,
+ * plain 401 otherwise. No Negotiate handshake, no Windows popup.
+ * On success sets authState.username; on failure leaves username null so the
+ * login page is shown immediately.
  */
-export async function probeNegotiate() {
+export async function checkSession() {
     authState.loading = true;
+    try {
+        const res = await fetch('/api/v1/me', { credentials: 'include' });
+        if (res.ok) {
+            const data = await res.json();
+            authState.username = data.user;
+            authState.error = null;
+        }
+        // 401 = no valid session → show login, no error state needed
+    } catch {
+        // Network error → show login
+    } finally {
+        authState.loading = false;
+    }
+}
+
+/**
+ * Initiate Windows Negotiate (SSPI/Kerberos) sign-in.
+ * Only called when the user explicitly clicks "Sign in with Windows".
+ * On success sets authState.username; on failure sets authState.error.
+ */
+export async function signInWithWindows() {
+    authState.loading = true;
+    authState.error = null;
     try {
         const res = await fetch('/api/v1/auth/negotiate', {
             method: 'POST',
@@ -36,10 +59,10 @@ export async function probeNegotiate() {
             authState.username = data.username;
             authState.error = null;
         } else {
-            authState.error = 'auto_login_failed';
+            authState.error = 'windows_auth_failed';
         }
     } catch {
-        authState.error = 'auto_login_failed';
+        authState.error = 'windows_auth_failed';
     } finally {
         authState.loading = false;
     }
@@ -80,7 +103,6 @@ export async function loginWithCredentials(username, password) {
 
 /**
  * Log out the current user.
- * Sets skipProbe = true so App.svelte shows the login form without re-probing.
  */
 export async function logout() {
     try {
@@ -94,6 +116,5 @@ export async function logout() {
         authState.username = null;
         authState.error = null;
         authState.loading = false;
-        authState.skipProbe = true;
     }
 }

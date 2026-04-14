@@ -14,7 +14,7 @@
         deriveP50,
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
-    import { authState, probeNegotiate, loginWithCredentials } from './lib/auth.svelte.js';
+    import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
 
     import Nav from './components/Nav.svelte';
@@ -47,6 +47,21 @@
 
     /** Previous server statuses keyed by hostname. Empty on first refresh → all servers emit "registered". */
     const prevStates = /** @type {Map<string, string>} */ (new Map());
+
+    /**
+     * Previous perf alert levels per host. Tracks threshold crossings so an
+     * event is emitted only when a metric enters or leaves warn/crit territory
+     * — not on every 30-second refresh while it stays elevated.
+     * @type {Map<string, {cpu: string, mem: string, delay: string}>}
+     */
+    const prevAlerts = new Map();
+
+    /** Map a getThresholdColor result to an alert level token. */
+    function colorToLevel(color) {
+        if (color === 'red') return 'crit';
+        if (color === 'amber') return 'warn';
+        return 'ok';
+    }
     /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
     function statusLabel(s) {
         return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
@@ -293,6 +308,56 @@
             prevStates.clear();
             for (const sv of servers || []) prevStates.set(sv.host, sv.status);
 
+            // Detect perf threshold crossings — emit events when a metric
+            // enters or leaves warn/crit. Only fires on transitions, not
+            // while a metric stays at the same level between refreshes.
+            const perfCfg = appState.config?.performance ?? null;
+            const cpuTh = resolveThresholds('cpu', perfCfg);
+            const memTh = resolveThresholds('mem', perfCfg);
+            const delayTh = resolveThresholds('inputDelay', perfCfg);
+
+            /** @type {Map<string, {cpu: string, mem: string, delay: string}>} */
+            const nextAlerts = new Map();
+            for (const sv of servers || []) {
+                if (!sv.perf) continue;
+                const memUsedPct =
+                    sv.perf.mem_total_mb > 0
+                        ? Math.round(((sv.perf.mem_total_mb - sv.perf.mem_avail_mb) / sv.perf.mem_total_mb) * 100)
+                        : 0;
+                const cur = {
+                    cpu: colorToLevel(getThresholdColor(sv.perf.cpu_pct, cpuTh.warn, cpuTh.crit)),
+                    mem: colorToLevel(getThresholdColor(memUsedPct, memTh.warn, memTh.crit)),
+                    delay: colorToLevel(
+                        getThresholdColor(sv.perf.input_delay_p95_ms, delayTh.warn, delayTh.crit),
+                    ),
+                };
+                const prev = prevAlerts.get(sv.host) ?? { cpu: 'ok', mem: 'ok', delay: 'ok' };
+
+                /** @type {[string, string, number, string][]} */
+                const checks = [
+                    ['cpu', 'CPU', sv.perf.cpu_pct, '%'],
+                    ['mem', 'Memory', memUsedPct, '%'],
+                    ['delay', 'Input delay P95', sv.perf.input_delay_p95_ms, 'ms'],
+                ];
+                for (const [key, label, val, unit] of checks) {
+                    if (cur[key] === prev[key]) continue;
+                    if (cur[key] === 'crit') {
+                        addEvent(
+                            serverEvent(evtTime, sv, `${label} critical — ${val.toFixed(1)}${unit}`, 'alert'),
+                        );
+                    } else if (cur[key] === 'warn') {
+                        addEvent(
+                            serverEvent(evtTime, sv, `${label} warning — ${val.toFixed(1)}${unit}`, 'grace'),
+                        );
+                    } else if (prev[key] !== 'ok') {
+                        addEvent(serverEvent(evtTime, sv, `${label} recovered`, 'ok'));
+                    }
+                }
+                nextAlerts.set(sv.host, cur);
+            }
+            prevAlerts.clear();
+            for (const [host, state] of nextAlerts) prevAlerts.set(host, state);
+
             // Compute fleet-wide P95 for health metrics — reveals outlier servers that
             // averages would smooth out. CPU and memory stay as averages (capacity planning).
             const s = appState.servers;
@@ -417,11 +482,11 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
-    // On mount, attempt silent SSPI auto-login unless the user explicitly logged out.
+    // On mount, check for an existing valid session. If the cookie is still live
+    // the user goes straight to the dashboard; otherwise the login page shows
+    // immediately — no Negotiate handshake, no Windows popup.
     $effect(() => {
-        if (!authState.skipProbe) {
-            untrack(() => probeNegotiate());
-        }
+        untrack(() => checkSession());
     });
 
     // Poll for fresh data every 30 seconds — only while authenticated.
@@ -439,10 +504,7 @@
         <span class="auth-spinner"></span>
     </div>
 {:else if !authState.username}
-    <Login
-        autoLoginFailed={authState.error === 'auto_login_failed'}
-        onlogin={loginWithCredentials}
-    />
+    <Login />
 {:else}
     <Nav onconfigopen={() => (configOpen = true)} />
 
