@@ -351,7 +351,7 @@ components:
         load_consecutive_polls:
           type: integer
           minimum: 1
-          description: "Consecutive polls required before CPU/memory alerts fire. Default 5."
+          description: "Consecutive polls required before CPU/memory alerts fire. Default 2."
         input_delay_consecutive_polls:
           type: integer
           minimum: 1

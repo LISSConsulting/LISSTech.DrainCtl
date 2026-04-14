@@ -570,7 +570,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
             <pre><code>{
   "grace_period": 60,
   "retention_days": 90,
-  "poll_interval": 300,
+  "poll_interval": 60,
   "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
   "notifications": [
     {
@@ -609,8 +609,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "input_delay_warn_ms": 50,
     "input_delay_crit_ms": 100,
     "input_delay_percentile": "p95",
-    "load_consecutive_polls": 5,
-    "input_delay_consecutive_polls": 10,
+    "load_consecutive_polls": 2,
+    "input_delay_consecutive_polls": 3,
     "collect_remotefx": false,
     "collect_per_session": true
   }
@@ -641,10 +641,10 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     </tr>
                     <tr>
                         <td><code>poll_interval</code></td>
-                        <td>300</td>
+                        <td>60</td>
                         <td>
-                            Seconds between safety-net polls. The service also uses real-time registry notifications, so
-                            this is a fallback.
+                            Seconds between polls. The service also uses real-time registry notifications for drain
+                            mode changes; this interval governs performance monitoring and session checks.
                         </td>
                     </tr>
                     <tr>
@@ -1732,40 +1732,41 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td><code>cpu_warning</code></td>
                         <td>70%</td>
-                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
                     </tr>
                     <tr>
                         <td><code>cpu_critical</code></td>
                         <td>85%</td>
-                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
                     </tr>
                     <tr>
                         <td><code>memory_warning</code></td>
                         <td>20% free</td>
-                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
                     </tr>
                     <tr>
                         <td><code>memory_critical</code></td>
                         <td>10% free</td>
-                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_warning</code></td>
                         <td>50ms</td>
-                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 10)</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_critical</code></td>
                         <td>100ms</td>
-                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 10)</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
                     </tr>
                 </tbody>
             </table>
             <p>
                 All performance triggers require consecutive breaches before firing, eliminating flap noise from
                 transient spikes. CPU and memory default to 2 consecutive polls (<code>load_consecutive_polls</code>);
-                input delay defaults to 10 (<code>input_delay_consecutive_polls</code>) because it is inherently volatile.
-                At the default 30-second sample interval, 10 polls means input delay must sustain for ~5 minutes.
+                input delay defaults to 3 (<code>input_delay_consecutive_polls</code>) because it is inherently volatile.
+                At the default 60-second poll interval, 2 polls = 2 minutes for CPU/memory and 3 polls = 3 minutes
+                for input delay.
                 Both values are configurable in the <code>performance</code> section of <code>config.json</code>.
                 Input delay is evaluated against the P95 percentile by default; set
                 <code>"input_delay_percentile": "p50"</code> for median-based thresholds.

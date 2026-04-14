@@ -28,7 +28,7 @@ const (
 	DefaultRetentionDays          = 90
 	MaxRetentionDays              = 365
 	MinRetentionDays              = 1
-	DefaultPollInterval           = 300   // seconds
+	DefaultPollInterval           = 60    // seconds
 	MaxPollInterval               = 86400 // seconds (1 day)
 	DefaultDashboardPort          = 49470
 	DefaultDashboardGroup         = "Domain Admins"
@@ -37,8 +37,8 @@ const (
 	DefaultSessionWarningThreshold = 80 // percent
 
 	DefaultSampleInterval             = 30 // seconds
-	DefaultLoadConsecutivePolls       = 5  // CPU/memory consecutive polls before trigger fires
-	DefaultInputDelayConsecutivePolls = 10 // input delay consecutive polls before trigger fires
+	DefaultLoadConsecutivePolls       = 2  // CPU/memory consecutive polls before trigger fires
+	DefaultInputDelayConsecutivePolls = 3  // input delay consecutive polls before trigger fires
 
 	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
 	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server

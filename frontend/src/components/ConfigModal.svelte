@@ -88,8 +88,8 @@
             delay_warn: 50,
             delay_crit: 100,
             delay_percentile: 'p50',
-            load_polls: 8,
-            delay_polls: 15,
+            load_polls: 3,
+            delay_polls: 4,
         },
         {
             level: 2,
@@ -105,8 +105,8 @@
             delay_warn: 30,
             delay_crit: 80,
             delay_percentile: 'p95',
-            load_polls: 5,
-            delay_polls: 10,
+            load_polls: 2,
+            delay_polls: 3,
         },
         {
             level: 3,
@@ -122,8 +122,8 @@
             delay_warn: 15,
             delay_crit: 40,
             delay_percentile: 'p95',
-            load_polls: 3,
-            delay_polls: 5,
+            load_polls: 2,
+            delay_polls: 2,
         },
     ];
 
@@ -141,8 +141,8 @@
                 p?.input_delay_warn_ms === pr.delay_warn &&
                 p?.input_delay_crit_ms === pr.delay_crit &&
                 (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
-                (p?.load_consecutive_polls || 5) === pr.load_polls &&
-                (p?.input_delay_consecutive_polls || 10) === pr.delay_polls
+                (p?.load_consecutive_polls || 2) === pr.load_polls &&
+                (p?.input_delay_consecutive_polls || 3) === pr.delay_polls
             ) {
                 return pr.level;
             }

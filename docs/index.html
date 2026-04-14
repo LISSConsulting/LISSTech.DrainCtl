@@ -1450,7 +1450,7 @@
                         <h3>Performance Counters</h3>
                         <p>
                             PDH API collects CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle.
-                            Configurable consecutive-poll thresholds (CPU/memory&nbsp;5, input delay&nbsp;10) eliminate
+                            Configurable consecutive-poll thresholds (CPU/memory&nbsp;2, input delay&nbsp;3) eliminate
                             flap noise from transient spikes.
                         </p>
                         <span class="tag">PDH + RemoteFX</span>
@@ -1695,7 +1695,7 @@
 <span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.104.14"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.104.15"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
   <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
