@@ -10,6 +10,10 @@ First-time install dialog sequence:
  - WixUI_VerifyReadyDlg
  - WixUI_DiskCostDlg
 
+Upgrade dialog sequence (WIX_UPGRADE_DETECTED):
+ - WixUI_WelcomeDlg → WixUI_VerifyReadyDlg
+ Config dialogs skipped; existing config.json + servers.json preserved.
+
 Maintenance dialog sequence:
  - WixUI_MaintenanceWelcomeDlg
  - WixUI_MaintenanceTypeDlg
@@ -51,9 +55,11 @@ Maintenance dialog sequence:
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return"
         Order="999" />
 
-      <!-- Welcome → License -->
+      <!-- Welcome → License (first install) or VerifyReady (upgrade/patch) -->
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
-        Value="LicenseAgreementDlg" Condition="NOT Installed" />
+        Value="LicenseAgreementDlg" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" Condition="WIX_UPGRADE_DETECTED" />
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
         Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
 
@@ -107,15 +113,18 @@ Maintenance dialog sequence:
       <Publish Dialog="NotificationsDlg" Control="Next" Event="NewDialog"
         Value="VerifyReadyDlg" />
 
-      <!-- VerifyReady Back: all first-install modes → NotificationsDlg -->
+      <!-- VerifyReady Back: first-install → NotificationsDlg, upgrade → Welcome -->
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
         Value="NotificationsDlg" Order="1"
-        Condition="NOT Installed" />
+        Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="MaintenanceTypeDlg" Order="2"
+        Value="WelcomeDlg" Order="2"
+        Condition="WIX_UPGRADE_DETECTED" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+        Value="MaintenanceTypeDlg" Order="3"
         Condition="Installed AND NOT PATCH" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="WelcomeDlg" Order="3"
+        Value="WelcomeDlg" Order="4"
         Condition="Installed AND PATCH" />
 
       <!-- Maintenance -->
