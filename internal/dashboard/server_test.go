@@ -1166,9 +1166,9 @@ func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testin
 	}
 }
 
-// ── handleGetNotifyConfig ─────────────────────────────────────────────────────
+// ── handleGetSettings ─────────────────────────────────────────────────────
 
-func TestHandleGetNotifyConfig_Returns200WithNotifications(t *testing.T) {
+func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		cfg := dc.DefaultConfig()
@@ -1181,8 +1181,8 @@ func TestHandleGetNotifyConfig_Returns200WithNotifications(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1213,15 +1213,15 @@ func TestHandleGetNotifyConfig_Returns200WithNotifications(t *testing.T) {
 	}
 }
 
-func TestHandleGetNotifyConfig_EmptyNotificationsReturnsEmptyArray(t *testing.T) {
+func TestHandleGetSettings_EmptyNotificationsReturnsEmptyArray(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		return dc.DefaultConfig(), nil
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1242,7 +1242,7 @@ func TestHandleGetNotifyConfig_EmptyNotificationsReturnsEmptyArray(t *testing.T)
 	}
 }
 
-func TestHandleGetNotifyConfig_NilNotificationsReturnsEmptyArray(t *testing.T) {
+func TestHandleGetSettings_NilNotificationsReturnsEmptyArray(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		cfg := dc.DefaultConfig()
@@ -1251,8 +1251,8 @@ func TestHandleGetNotifyConfig_NilNotificationsReturnsEmptyArray(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1273,22 +1273,22 @@ func TestHandleGetNotifyConfig_NilNotificationsReturnsEmptyArray(t *testing.T) {
 	}
 }
 
-func TestHandleGetNotifyConfig_LoadConfigError_Returns500(t *testing.T) {
+func TestHandleGetSettings_LoadConfigError_Returns500(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		return nil, fmt.Errorf("config file not found")
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d (load error should yield 500)", w.Code, http.StatusInternalServerError)
 	}
 }
 
-func TestHandleGetNotifyConfig_MultipleTargets(t *testing.T) {
+func TestHandleGetSettings_MultipleTargets(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		cfg := dc.DefaultConfig()
@@ -1300,8 +1300,8 @@ func TestHandleGetNotifyConfig_MultipleTargets(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1327,19 +1327,19 @@ func TestHandleGetNotifyConfig_MultipleTargets(t *testing.T) {
 	}
 }
 
-// ── handlePutNotifyConfig ─────────────────────────────────────────────────────
+// ── handlePutSettings ─────────────────────────────────────────────────────
 
-func TestHandlePutNotifyConfig_Success_Returns200(t *testing.T) {
+func TestHandlePutSettings_Success_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return nil
 	}
 
 	body := `{"notifications":[{"type":"webhook","url":"https://hooks.example.com/","triggers":["drain_on","drain_off","alert","healthy"],"repeat_minutes":0}],"session_warning_threshold":80,"grace_period":60}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
-	ds.handlePutNotifyConfig(w, r)
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1358,44 +1358,44 @@ func TestHandlePutNotifyConfig_Success_Returns200(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_InvalidJSON_Returns400(t *testing.T) {
+func TestHandlePutSettings_InvalidJSON_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return nil
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader("not json at all"))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader("not json at all"))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d (invalid JSON should be 400)", w.Code, http.StatusBadRequest)
 	}
 }
 
-func TestHandlePutNotifyConfig_UpdateError_Returns500(t *testing.T) {
+func TestHandlePutSettings_UpdateError_Returns500(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return fmt.Errorf("disk full")
 	}
 
 	body := `{"notifications":[],"session_warning_threshold":80,"grace_period":60}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d (update error should be 500)", w.Code, http.StatusInternalServerError)
 	}
 }
 
-func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T) {
+func TestHandlePutSettings_CallsUpdateWithCorrectNotifications(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, threshold *int, grace *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, threshold *int, grace *int) error {
 		capturedNotifs = notifications
 		capturedThreshold = threshold
 		capturedGrace = grace
@@ -1416,8 +1416,8 @@ func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T)
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1433,12 +1433,12 @@ func TestHandlePutNotifyConfig_CallsUpdateWithCorrectNotifications(t *testing.T)
 	}
 }
 
-func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing.T) {
+func TestHandlePutSettings_PartialUpdate_ThresholdAndGraceOmitted(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, threshold *int, grace *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, threshold *int, grace *int) error {
 		capturedThreshold = threshold
 		capturedGrace = grace
 		return nil
@@ -1447,8 +1447,8 @@ func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing
 	// Only notifications — no threshold or grace_period fields.
 	body := `{"notifications":[]}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1461,11 +1461,11 @@ func TestHandlePutNotifyConfig_PartialUpdate_ThresholdAndGraceOmitted(t *testing
 	}
 }
 
-func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
+func TestHandlePutSettings_WebhookSecretPreserved(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1481,8 +1481,8 @@ func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
 	}{Notifications: []dc.NotificationTarget{target}})
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1495,11 +1495,11 @@ func TestHandlePutNotifyConfig_WebhookSecretPreserved(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil(t *testing.T) {
+func TestHandlePutSettings_AbsentNotifications_PassedAsNil(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1511,8 +1511,8 @@ func TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil(t *testing.T) {
 	}{SessionWarningThreshold: th})
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", bytes.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -1522,18 +1522,18 @@ func TestHandlePutNotifyConfig_AbsentNotifications_PassedAsNil(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_OutOfRangeThreshold_Returns400(t *testing.T) {
+func TestHandlePutSettings_OutOfRangeThreshold_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"session_warning_threshold":150}` // > 100, invalid
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for threshold=150", w.Code)
@@ -1543,18 +1543,18 @@ func TestHandlePutNotifyConfig_OutOfRangeThreshold_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_NegativeThreshold_Returns400(t *testing.T) {
+func TestHandlePutSettings_NegativeThreshold_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"session_warning_threshold":-1}` // < 0, invalid
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for threshold=-1", w.Code)
@@ -1564,18 +1564,18 @@ func TestHandlePutNotifyConfig_NegativeThreshold_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_OutOfRangeGracePeriod_Returns400(t *testing.T) {
+func TestHandlePutSettings_OutOfRangeGracePeriod_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"grace_period":2000}` // > 1440, invalid
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for grace_period=2000", w.Code)
@@ -1585,18 +1585,18 @@ func TestHandlePutNotifyConfig_OutOfRangeGracePeriod_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_ZeroGracePeriod_Returns400(t *testing.T) {
+func TestHandlePutSettings_ZeroGracePeriod_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"grace_period":0}` // < 1, invalid
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for grace_period=0", w.Code)
@@ -1606,18 +1606,18 @@ func TestHandlePutNotifyConfig_ZeroGracePeriod_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_InvalidTargetType_Returns400(t *testing.T) {
+func TestHandlePutSettings_InvalidTargetType_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"notifications":[{"type":"sms","url":"https://example.com"}]}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for unknown target type", w.Code)
@@ -1627,18 +1627,18 @@ func TestHandlePutNotifyConfig_InvalidTargetType_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_InvalidTargetURLScheme_Returns400(t *testing.T) {
+func TestHandlePutSettings_InvalidTargetURLScheme_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"notifications":[{"type":"webhook","url":"ftp://bad-scheme.com"}]}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for ftp:// URL scheme", w.Code)
@@ -1648,18 +1648,18 @@ func TestHandlePutNotifyConfig_InvalidTargetURLScheme_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_InvalidTargetTrigger_Returns400(t *testing.T) {
+func TestHandlePutSettings_InvalidTargetTrigger_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := `{"notifications":[{"type":"webhook","url":"https://example.com","triggers":["drain_on","bogus_trigger"]}]}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for unknown trigger", w.Code)
@@ -1669,18 +1669,18 @@ func TestHandlePutNotifyConfig_InvalidTargetTrigger_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_OutOfRangeRepeatMinutes_Returns400(t *testing.T) {
+func TestHandlePutSettings_OutOfRangeRepeatMinutes_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		hookCalled = true
 		return nil
 	}
 
 	body := fmt.Sprintf(`{"notifications":[{"type":"webhook","url":"https://example.com","repeat_minutes":%d}]}`, dc.MaxRepeatMinutes+1)
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for repeat_minutes > MaxRepeatMinutes", w.Code)
@@ -1690,11 +1690,11 @@ func TestHandlePutNotifyConfig_OutOfRangeRepeatMinutes_Returns400(t *testing.T) 
 	}
 }
 
-func TestHandlePutNotifyConfig_ClearNotificationsWithEmptyArray(t *testing.T) {
+func TestHandlePutSettings_ClearNotificationsWithEmptyArray(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutNotifyConfigFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1702,8 +1702,8 @@ func TestHandlePutNotifyConfig_ClearNotificationsWithEmptyArray(t *testing.T) {
 	// An explicit empty array must clear all targets (non-nil pointer to empty slice).
 	body := `{"notifications":[]}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -1716,19 +1716,19 @@ func TestHandlePutNotifyConfig_ClearNotificationsWithEmptyArray(t *testing.T) {
 	}
 }
 
-// TestHandlePutNotifyConfig_AuthenticatedUser_Returns200 verifies that
-// handlePutNotifyConfig succeeds when the request carries SSPI auth info
+// TestHandlePutSettings_AuthenticatedUser_Returns200 verifies that
+// handlePutSettings succeeds when the request carries SSPI auth info
 // (the auth != nil branch that logs the username).
-func TestHandlePutNotifyConfig_AuthenticatedUser_Returns200(t *testing.T) {
+func TestHandlePutSettings_AuthenticatedUser_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutNotifyConfigFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error {
 		return nil
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(`{}`))
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{}`))
 	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "DOMAIN\\bob"}))
-	ds.handlePutNotifyConfig(w, r)
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -2068,13 +2068,13 @@ func TestHandleReport_ReadBodyError_Returns400(t *testing.T) {
 	}
 }
 
-func TestHandlePutNotifyConfig_ReadBodyError_Returns400(t *testing.T) {
+func TestHandlePutSettings_ReadBodyError_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", errReader{})
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", errReader{})
 
-	ds.handlePutNotifyConfig(w, r)
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
@@ -2232,14 +2232,14 @@ func TestHandleNotifyTest_NilTestFuncUsesLoadConfigFunc_LoadError(t *testing.T) 
 //
 // The following tests exercise the "else" branches in handlers that call
 // dc.LoadConfig / dc.UpdateNotifySettings directly when testLoadConfigFunc /
-// testPutNotifyConfigFunc are nil. They use t.Setenv("ProgramData", …) to
+// testPutSettingsFunc are nil. They use t.Setenv("ProgramData", …) to
 // redirect all config I/O to a temp directory so no machine-wide state is
 // affected.
 
-// TestHandleGetNotifyConfig_ProductionPathLoadsConfig exercises the
+// TestHandleGetSettings_ProductionPathLoadsConfig exercises the
 // dc.LoadConfig branch (testLoadConfigFunc == nil). A fresh config is written
 // on first access; the handler must return 200 with valid JSON.
-func TestHandleGetNotifyConfig_ProductionPathLoadsConfig(t *testing.T) {
+func TestHandleGetSettings_ProductionPathLoadsConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ProgramData", dir)
 
@@ -2247,8 +2247,8 @@ func TestHandleGetNotifyConfig_ProductionPathLoadsConfig(t *testing.T) {
 	// testLoadConfigFunc is nil — production dc.LoadConfig is used.
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/notify-config", nil)
-	ds.handleGetNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
@@ -2266,31 +2266,31 @@ func TestHandleGetNotifyConfig_ProductionPathLoadsConfig(t *testing.T) {
 	}
 }
 
-// TestHandlePutNotifyConfig_ProductionPathUpdatesConfig exercises the
-// dc.UpdateNotifySettings branch (testPutNotifyConfigFunc == nil). A valid
+// TestHandlePutSettings_ProductionPathUpdatesConfig exercises the
+// dc.UpdateNotifySettings branch (testPutSettingsFunc == nil). A valid
 // grace_period update is sent; the handler must return 200.
-func TestHandlePutNotifyConfig_ProductionPathUpdatesConfig(t *testing.T) {
+func TestHandlePutSettings_ProductionPathUpdatesConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ProgramData", dir)
 
 	ds := newTestServer(t)
-	// testPutNotifyConfigFunc is nil — production dc.UpdateNotifySettings is used.
+	// testPutSettingsFunc is nil — production dc.UpdateNotifySettings is used.
 
 	body := `{"grace_period":10}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
 }
 
-// TestHandlePutNotifyConfig_ProductionPath_UpdateError_Returns500 exercises the
-// error-return branch in the else block (testPutNotifyConfigFunc == nil). A
+// TestHandlePutSettings_ProductionPath_UpdateError_Returns500 exercises the
+// error-return branch in the else block (testPutSettingsFunc == nil). A
 // directory placed at config.json causes LoadConfig inside UpdateNotifySettings
 // to fail with a non-not-exist error, which propagates as 500.
-func TestHandlePutNotifyConfig_ProductionPath_UpdateError_Returns500(t *testing.T) {
+func TestHandlePutSettings_ProductionPath_UpdateError_Returns500(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ProgramData", dir)
 
@@ -2302,12 +2302,12 @@ func TestHandlePutNotifyConfig_ProductionPath_UpdateError_Returns500(t *testing.
 	}
 
 	ds := newTestServer(t)
-	// testPutNotifyConfigFunc is nil — production dc.UpdateNotifySettings used.
+	// testPutSettingsFunc is nil — production dc.UpdateNotifySettings used.
 
 	body := `{"grace_period":10}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/notify-config", strings.NewReader(body))
-	ds.handlePutNotifyConfig(w, r)
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500: %s", w.Code, w.Body.String())

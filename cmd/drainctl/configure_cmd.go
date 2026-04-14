@@ -98,6 +98,7 @@ and saves config.json without prompting.`,
 					"mem_crit_pct", perf.MemCritPct,
 					"input_delay_warn_ms", perf.InputDelayWarnMS,
 					"input_delay_crit_ms", perf.InputDelayCritMS,
+					"input_delay_percentile", perf.InputDelayPercentile,
 					"remotefx", perf.CollectRemoteFX,
 					"per_session", perf.CollectPerSession,
 				)
@@ -125,6 +126,9 @@ and saves config.json without prompting.`,
 	cmd.Flags().Bool("perf-enabled", false, "Enable performance monitoring (PDH counters)")
 	cmd.Flags().Bool("perf-disabled", false, "Force-disable performance monitoring (blocks dashboard override)")
 	cmd.Flags().Bool("perf-rfx", false, "Enable RemoteFX counter collection")
+	cmd.Flags().String("input-delay-percentile", "", "Input delay percentile for threshold evaluation (p50 or p95, default: p95)")
+	cmd.Flags().Int("load-consecutive-polls", 0, "Consecutive polls required for CPU/memory alerts (default: 2)")
+	cmd.Flags().Int("input-delay-consecutive-polls", 0, "Consecutive polls required for input delay alerts (default: 10)")
 	cmd.Flags().Int("memory-limit", dc.DefaultMemoryLimitMB, "Go runtime memory limit in MiB (32–4096)")
 
 	return cmd
@@ -317,6 +321,18 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	if cmd.Flags().Changed("perf-rfx") {
 		perfRFX, _ := cmd.Flags().GetBool("perf-rfx")
 		fileCfg.Performance.CollectRemoteFX = perfRFX
+	}
+	if cmd.Flags().Changed("input-delay-percentile") {
+		pct, _ := cmd.Flags().GetString("input-delay-percentile")
+		fileCfg.Performance.InputDelayPercentile = pct
+	}
+	if cmd.Flags().Changed("load-consecutive-polls") {
+		v, _ := cmd.Flags().GetInt("load-consecutive-polls")
+		fileCfg.Performance.ConsecutivePolls = v
+	}
+	if cmd.Flags().Changed("input-delay-consecutive-polls") {
+		v, _ := cmd.Flags().GetInt("input-delay-consecutive-polls")
+		fileCfg.Performance.InputDelayConsecutivePolls = v
 	}
 
 	// Upsert rather than append: running configure twice with the same URL

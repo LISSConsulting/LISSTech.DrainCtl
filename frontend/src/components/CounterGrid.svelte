@@ -11,7 +11,7 @@
 
     /**
      * Navigate to the Servers view with a specific status filter.
-     * @param {'all'|'ok'|'grace'|'alert'|'off'} filter
+     * @param {'all'|'ok'|'warning'|'grace'|'alert'|'off'} filter
      */
     function goToServers(filter) {
         appState.serverFilter = filter;
@@ -27,6 +27,10 @@
     <button class="card ctr ok" onclick={() => goToServers('ok')}>
         <div class="ctr-v">{counters.ok}</div>
         <div class="ctr-l">Healthy</div>
+    </button>
+    <button class="card ctr warning" onclick={() => goToServers('warning')}>
+        <div class="ctr-v">{counters.warning}</div>
+        <div class="ctr-l">Warning</div>
     </button>
     <button class="card ctr grace" onclick={() => goToServers('grace')}>
         <div class="ctr-v">{counters.grace}</div>
@@ -49,7 +53,7 @@
 <style>
     .counters {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(7, 1fr);
         gap: 14px;
         margin-bottom: 20px;
     }
@@ -114,6 +118,13 @@
     }
     .ctr.ok .ctr-v {
         color: var(--color-green);
+    }
+
+    .ctr.warning {
+        border-left-color: var(--color-amber);
+    }
+    .ctr.warning .ctr-v {
+        color: var(--color-amber);
     }
 
     .ctr.grace {

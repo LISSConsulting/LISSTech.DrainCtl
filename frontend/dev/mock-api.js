@@ -138,7 +138,7 @@ const perfHistory = new Map();
 const MAX_PERF_HISTORY = 60;
 
 /** Notification config (mutable via PUT). */
-let notifyConfig = {
+let mockSettings = {
   grace_period: 45,
   session_warning_threshold: 80,
   performance: {
@@ -648,14 +648,14 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: result };
   }
 
-  // GET /api/v1/notify-config
-  if (method === 'GET' && pathname === '/api/v1/notify-config') {
-    return { status: 200, body: notifyConfig };
+  // GET /api/v1/settings
+  if (method === 'GET' && pathname === '/api/v1/settings') {
+    return { status: 200, body: mockSettings };
   }
 
-  // PUT /api/v1/notify-config
-  if (method === 'PUT' && pathname === '/api/v1/notify-config') {
-    if (body) notifyConfig = body;
+  // PUT /api/v1/settings
+  if (method === 'PUT' && pathname === '/api/v1/settings') {
+    if (body) mockSettings = body;
     return { status: 200, body: { ok: true } };
   }
 

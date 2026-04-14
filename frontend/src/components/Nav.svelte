@@ -28,6 +28,7 @@
         <div class="nav-right">
             <span class="mono status-counts">
                 <span class="g">{counters.ok}</span> ok ·
+                <span class="w">{counters.warning}</span> warn ·
                 <span class="w">{counters.grace}</span> grace ·
                 <span class="a">{counters.alert}</span> alert ·
                 <span class="o">{counters.off}</span> off

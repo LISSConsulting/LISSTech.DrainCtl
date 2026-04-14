@@ -1,4 +1,4 @@
-//go:build windows && !devmode
+//go:build windows
 
 package dashboard
 

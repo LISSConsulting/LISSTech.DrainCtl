@@ -108,6 +108,12 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				}
 			}
 			setLastSent(state, target.URL, trigger, now)
+
+			// Critical supersedes warning: refresh the warning cooldown so
+			// it cannot fire independently while the critical state persists.
+			if sub := subordinateTrigger(trigger); sub != "" {
+				setLastSent(state, target.URL, sub, now)
+			}
 		}
 
 		// Dispatch to backend.
@@ -408,6 +414,21 @@ func isRepeatTrigger(t Trigger) bool {
 	return t == TriggerAlert || t == TriggerSessionWarning || perfTriggers[t]
 }
 
+// subordinateTrigger returns the lower-severity trigger that should be
+// suppressed when a critical trigger fires (e.g. cpu_critical suppresses
+// cpu_warning). Returns "" when there is no subordinate.
+func subordinateTrigger(t Trigger) Trigger {
+	switch t {
+	case TriggerCPUCritical:
+		return TriggerCPUWarning
+	case TriggerMemoryCritical:
+		return TriggerMemoryWarning
+	case TriggerInputDelayCritical:
+		return TriggerInputDelayWarning
+	}
+	return ""
+}
+
 // getLastSent returns the last time a notification was sent for a given target+trigger.
 func getLastSent(state *NotifyState, url string, trigger Trigger) time.Time {
 	switch trigger {
@@ -435,24 +456,5 @@ func setLastSent(state *NotifyState, url string, trigger Trigger, t time.Time) {
 			state.LastPerfNotify[url] = make(map[Trigger]time.Time)
 		}
 		state.LastPerfNotify[url][trigger] = t
-	}
-}
-
-// ResetPerfCooldown clears per-target cooldown entries for all performance
-// triggers that are no longer active.
-func ResetPerfCooldown(state *NotifyState, activeTriggers []Trigger) {
-	active := make(map[Trigger]bool, len(activeTriggers))
-	for _, t := range activeTriggers {
-		active[t] = true
-	}
-	for url, m := range state.LastPerfNotify {
-		for t := range m {
-			if !active[t] {
-				delete(m, t)
-			}
-		}
-		if len(m) == 0 {
-			delete(state.LastPerfNotify, url)
-		}
 	}
 }

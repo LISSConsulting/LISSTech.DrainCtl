@@ -158,9 +158,9 @@ func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult) bool 
 	return true
 }
 
-// GetNotifyConfig reads notification configuration from config.json.
-// This is the in-process equivalent of GET /api/v1/notify-config.
-func GetNotifyConfig() (*RemoteNotifyConfig, error) {
+// GetSettings reads dashboard settings from config.json.
+// This is the in-process equivalent of GET /api/v1/config.
+func GetSettings() (*RemoteSettings, error) {
 	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -169,7 +169,7 @@ func GetNotifyConfig() (*RemoteNotifyConfig, error) {
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
-	return &RemoteNotifyConfig{
+	return &RemoteSettings{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,

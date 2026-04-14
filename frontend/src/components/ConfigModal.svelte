@@ -1,5 +1,5 @@
 <script>
-    import { fetchNotifyConfig, saveNotifyConfig, sendNotifyTest } from '../lib/api.js';
+    import { fetchSettings, saveSettings, sendNotifyTest } from '../lib/api.js';
     import { appState } from '../lib/state.svelte.js';
     import { toast } from '../lib/toast.svelte.js';
     import NotificationTargets from './NotificationTargets.svelte';
@@ -59,7 +59,7 @@
     async function loadConfig() {
         loading = true;
         try {
-            const c = await fetchNotifyConfig();
+            const c = await fetchSettings();
             config = JSON.parse(JSON.stringify(c));
             original = JSON.parse(JSON.stringify(c));
         } catch (e) {
@@ -180,7 +180,7 @@
         }
         saving = true;
         try {
-            await saveNotifyConfig(config);
+            await saveSettings(config);
             original = JSON.parse(JSON.stringify(config));
             appState.config = JSON.parse(JSON.stringify(config));
             toast.ok('Settings saved successfully');

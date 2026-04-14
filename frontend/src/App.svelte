@@ -13,7 +13,7 @@
         deriveP95,
         deriveP50,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
+    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
 
@@ -62,15 +62,15 @@
         if (color === 'amber') return 'warn';
         return 'ok';
     }
-    /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
+    /** @param {'ok'|'warning'|'grace'|'alert'|'off'} s @returns {string} */
     function statusLabel(s) {
-        return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
+        return { ok: 'Healthy', warning: 'Warning', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
     }
 
     /** Map a server status to the event severity used by EventLog for colouring. */
     function statusSev(s) {
         if (s === 'alert' || s === 'off') return 'alert';
-        if (s === 'grace') return 'grace';
+        if (s === 'grace' || s === 'warning') return 'grace';
         return 'ok';
     }
 
@@ -89,7 +89,7 @@
      * @param {string} time
      * @param {import('./lib/api.js').Server} sv
      * @param {string} text
-     * @param {'ok'|'grace'|'alert'|'off'} sev
+     * @param {'ok'|'warning'|'grace'|'alert'|'off'} sev
      */
     function serverEvent(time, sv, text, sev) {
         const memUsedPct =
@@ -156,7 +156,7 @@
             const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
             const needsConfig = appState.config === null;
             const needsMetricSeed = appState.serverMetrics.size === 0;
-            if (needsConfig) calls.push(fetchNotifyConfig());
+            if (needsConfig) calls.push(fetchSettings());
             // Fetch seed history in parallel; silently ignore failures (non-mock envs
             // won't have this endpoint and should fall back to natural poll accumulation).
             const metricSeedPromise = needsMetricSeed

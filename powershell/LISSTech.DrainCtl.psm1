@@ -55,10 +55,10 @@ public static class DrainCtlNative {
     public static extern IntPtr DrainCtl_AuditSetup();
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr DrainCtl_GetNotifyConfig();
+    public static extern IntPtr DrainCtl_GetSettings();
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr DrainCtl_SetNotifyConfig(
+    public static extern IntPtr DrainCtl_SetSettings(
         [MarshalAs(UnmanagedType.LPStr)] string jsonStr);
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
@@ -434,11 +434,11 @@ function Get-RDSHDrainNotification {
     [OutputType([PSCustomObject])]
     param()
 
-    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
     $raw = Invoke-DrainCtlNative -Ptr $ptr
 
     [PSCustomObject]@{
-        PSTypeName      = 'DrainCtl.NotifyConfig'
+        PSTypeName      = 'DrainCtl.Settings'
         WebhookURL      = Get-SafeProperty $raw 'webhook_url' ''
         NtfyURL         = Get-SafeProperty $raw 'ntfy_url' ''
         OnTransition    = [bool](Get-SafeProperty $raw 'on_transition' $true)
@@ -522,7 +522,7 @@ function Set-RDSHDrainNotification {
     if ($PSBoundParameters.ContainsKey('RepeatMinutes'))    { $payload['repeat_minutes']    = $RepeatMinutes }
 
     $jsonStr = $payload | ConvertTo-Json -Compress
-    $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+    $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
     $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose 'Notification configuration updated.'
@@ -553,7 +553,7 @@ function Get-RDSHDrainNotificationTarget {
     [OutputType([PSCustomObject[]])]
     param()
 
-    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
     $raw = Invoke-DrainCtlNative -Ptr $ptr
 
     $targets = Get-SafeProperty $raw 'notifications' @()
@@ -625,7 +625,7 @@ function Add-RDSHDrainNotificationTarget {
     }
 
     # Read current config.
-    $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+    $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
     $raw = Invoke-DrainCtlNative -Ptr $ptr
     $targets = @(Get-SafeProperty $raw 'notifications' @())
 
@@ -641,7 +641,7 @@ function Add-RDSHDrainNotificationTarget {
     # Save via new format.
     $payload = @{ notifications = @($targets) }
     $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
-    $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+    $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
     $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose "Added $Type notification target: $URL"
@@ -679,7 +679,7 @@ function Remove-RDSHDrainNotificationTarget {
         }
 
         # Read current config.
-        $ptr = [DrainCtlNative]::DrainCtl_GetNotifyConfig()
+        $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
         $raw = Invoke-DrainCtlNative -Ptr $ptr
         $targets = @(Get-SafeProperty $raw 'notifications' @())
 
@@ -693,7 +693,7 @@ function Remove-RDSHDrainNotificationTarget {
         # Save via new format.
         $payload = @{ notifications = @($filtered) }
         $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
-        $ptr = [DrainCtlNative]::DrainCtl_SetNotifyConfig($jsonStr)
+        $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
         $null = Invoke-DrainCtlNative -Ptr $ptr
 
         Write-Verbose "Removed notification target: $URL"
