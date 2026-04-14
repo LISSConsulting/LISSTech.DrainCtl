@@ -5,7 +5,8 @@ package drainctl
 // PerfSnapshot holds one point-in-time performance sample.
 type PerfSnapshot struct {
 	// Host-level
-	CPUPct     float64 `json:"cpu_pct"`
+	CPUPct     float64 `json:"cpu_pct"`     // average across samples
+	CPUP95     float64 `json:"cpu_p95_pct"` // 95th percentile across samples
 	MemAvailMB float64 `json:"mem_avail_mb"`
 	MemTotalMB float64 `json:"mem_total_mb"`
 	PagesSec   float64 `json:"pages_sec"`
