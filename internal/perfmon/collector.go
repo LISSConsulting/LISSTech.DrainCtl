@@ -24,7 +24,7 @@ func getThreadID() uint32 {
 // causes PDH to skip V1 provider DLL loading.
 const (
 	// V1 host-level counters.
-	counterCPU        = `\Processor Information(_Total)\% Processor Utility`
+	counterCPU        = `\Processor Information(_Total)\% Processor Time`
 	counterMemAvail   = `\Memory\Available MBytes`
 	counterPagesSec   = `\Memory\Pages/sec`
 	counterDiskQueue  = `\PhysicalDisk(_Total)\Avg. Disk Queue Length`
