@@ -23,8 +23,9 @@ import (
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
 	return &DashboardServer{
-		state: NewServerState(t.TempDir()),
-		cfg:   dc.DashboardConfig{Group: "Domain Admins"},
+		state:  NewServerState(t.TempDir()),
+		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
+		broker: NewBroker(),
 	}
 }
 
@@ -2332,5 +2333,82 @@ func TestHandleNotifyTest_BothHooksNil_UsesProductionLoad(t *testing.T) {
 	// Fresh default config has no notification targets → 400 "no targets".
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// ── Broker tests ─────────────────────────────────────────────────────────────
+
+func TestBroker_SubscribeAndBroadcast(t *testing.T) {
+	b := NewBroker()
+	id, ch, _ := b.Subscribe()
+	defer b.Unsubscribe(id)
+
+	if b.Count() != 1 {
+		t.Fatalf("count = %d, want 1", b.Count())
+	}
+
+	b.Broadcast(SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()})
+
+	select {
+	case msg := <-ch:
+		if !bytes.Contains(msg, []byte(`"server_update"`)) {
+			t.Errorf("message missing event type: %s", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for broadcast")
+	}
+}
+
+func TestBroker_Unsubscribe(t *testing.T) {
+	b := NewBroker()
+	id, _, _ := b.Subscribe()
+	b.Unsubscribe(id)
+
+	if b.Count() != 0 {
+		t.Fatalf("count = %d after unsubscribe, want 0", b.Count())
+	}
+}
+
+func TestBroker_SlowSubscriberEvicted(t *testing.T) {
+	b := NewBroker()
+	id, ch, done := b.Subscribe()
+	_ = ch // don't read from it
+
+	// Fill the channel buffer (16 messages).
+	for i := 0; i < 17; i++ {
+		b.Broadcast(SSEEvent{Type: "server_update", Data: []byte(`{}`), Timestamp: time.Now()})
+	}
+
+	select {
+	case <-done:
+		// subscriber was evicted — correct
+	case <-time.After(time.Second):
+		t.Fatal("slow subscriber was not evicted")
+	}
+	_ = id
+
+	if b.Count() != 0 {
+		t.Fatalf("count = %d after eviction, want 0", b.Count())
+	}
+}
+
+func TestBroker_MultipleSubscribers(t *testing.T) {
+	b := NewBroker()
+	id1, ch1, _ := b.Subscribe()
+	id2, ch2, _ := b.Subscribe()
+	defer b.Unsubscribe(id1)
+	defer b.Unsubscribe(id2)
+
+	b.Broadcast(SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()})
+
+	for i, ch := range []<-chan []byte{ch1, ch2} {
+		select {
+		case msg := <-ch:
+			if !bytes.Contains(msg, []byte(`SRV01`)) {
+				t.Errorf("subscriber %d: message missing host: %s", i, msg)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("subscriber %d: timeout", i)
+		}
 	}
 }

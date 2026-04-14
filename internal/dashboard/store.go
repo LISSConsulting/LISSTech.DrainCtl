@@ -33,6 +33,9 @@ type ServerState struct {
 	servers map[string]*ServerInfo
 	history map[string][]dc.CheckResult
 	path    string
+	// OnUpdate, if non-nil, is called after a server state update with the hostname.
+	// Used by DashboardServer to broadcast SSE events.
+	OnUpdate func(hostname string)
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.
@@ -99,6 +102,10 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		buf[historyMax-1] = *result
 	}
 	s.history[hostname] = buf
+
+	if s.OnUpdate != nil {
+		s.OnUpdate(hostname)
+	}
 }
 
 // HostHistory returns the last n CheckResult records for hostname, newest first.

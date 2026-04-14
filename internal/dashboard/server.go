@@ -191,6 +191,7 @@ type DashboardServer struct {
 	server       *http.Server
 	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
 	sessionStore *SessionStore // in-memory dashboard session store
+	broker       *Broker       // SSE event broker for real-time updates
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -218,7 +219,12 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		state:        state,
 		cfg:          cfg,
 		sessionStore: NewSessionStore(ctx),
+		broker:       NewBroker(),
 	}
+
+	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
+	// triggers a server_update event to all connected browsers.
+	state.OnUpdate = ds.broadcastServerUpdate
 
 	// Per-IP rate limiter: 10 req/s sustained, burst 60.
 	// Generous enough for normal agent reporting and browser use;
@@ -302,6 +308,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	mux.Handle("GET /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handleGetSettings))))
 	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
+
+	// SSE event stream — session auth, no rate limit (long-lived connection).
+	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
 
 	// Agent config pull — machine accounts only. Same data as /settings but
 	// separate route with its own auth model (SSPI machine account, not session).
@@ -697,6 +706,9 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 	slog.Info("dashboard=settings-updated", slog.Int("event_id", dc.EvtDashboardConfigChange), "user", user)
 
+	// Broadcast settings change to connected browsers.
+	ds.broadcastSettingsUpdate()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
@@ -922,6 +934,99 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(views)
+}
+
+// broadcastServerUpdate builds a ServerView for the named host and broadcasts
+// it as a server_update SSE event.
+func (ds *DashboardServer) broadcastServerUpdate(host string) {
+	info := ds.state.Get(host)
+	if info == nil {
+		return
+	}
+	view := toServerView(*info)
+	data, err := json.Marshal(view)
+	if err != nil {
+		return
+	}
+	ds.broker.Broadcast(SSEEvent{
+		Type:      "server_update",
+		Host:      host,
+		Data:      data,
+		Timestamp: time.Now(),
+	})
+}
+
+// BroadcastServerUpdate is the exported variant for use by the service handler
+// when reporting local check results.
+func (ds *DashboardServer) BroadcastServerUpdate(host string) {
+	ds.broadcastServerUpdate(host)
+}
+
+// broadcastSettingsUpdate broadcasts the current settings to all connected browsers.
+func (ds *DashboardServer) broadcastSettingsUpdate() {
+	cfg, err := dc.LoadConfig()
+	if err != nil {
+		return
+	}
+	resp := struct {
+		Notifications           []dc.NotificationTarget `json:"notifications"`
+		SessionWarningThreshold int                     `json:"session_warning_threshold"`
+		GracePeriod             int                     `json:"grace_period"`
+		Performance             dc.PerformanceConfig    `json:"performance"`
+	}{
+		Notifications:           cfg.Notifications,
+		SessionWarningThreshold: cfg.SessionWarningThreshold,
+		GracePeriod:             cfg.GracePeriod,
+		Performance:             cfg.Performance,
+	}
+	if resp.Notifications == nil {
+		resp.Notifications = []dc.NotificationTarget{}
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	ds.broker.Broadcast(SSEEvent{
+		Type:      "settings_update",
+		Data:      data,
+		Timestamp: time.Now(),
+	})
+}
+
+// handleSSE serves the Server-Sent Events stream for real-time dashboard updates.
+func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	id, ch, done := ds.broker.Subscribe()
+	defer ds.broker.Unsubscribe(id)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
+	flusher.Flush()
+
+	slog.Info("sse: client connected", "id", id)
+	defer slog.Info("sse: client disconnected", "id", id)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-done:
+			return
+		case msg := <-ch:
+			_, err := fmt.Fprintf(w, "data: %s\n\n", msg)
+			if err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // handleSwaggerUI serves a minimal HTML page that loads Swagger UI from CDN.
