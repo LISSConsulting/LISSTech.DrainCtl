@@ -364,6 +364,8 @@
             const perfSvs = s.filter((sv) => sv.perf);
 
             const cpu = perfSvs.length ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length : 0;
+            const cpuP95Vals = perfSvs.map((sv) => sv.perf.cpu_p95_pct || sv.perf.cpu_pct || 0);
+            const cpuP95 = deriveP95(cpuP95Vals);
             const memSvs = s.filter((sv) => sv.perf?.mem_total_mb > 0);
             const memPct = memSvs.length
                 ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) /
@@ -383,6 +385,7 @@
             appendMetricsSample({
                 time: ts,
                 cpu,
+                cpuP95,
                 mem: memPct,
                 inputDelay,
                 sessions,
