@@ -433,15 +433,13 @@
                     disabled={page >= totalPages - 1}
                     onclick={() => page++}>Next →</button
                 >
-                <select
-                    class="pager-size"
-                    value={pageSize}
-                    onchange={(e) => { pageSize = parseInt(e.target.value, 10); page = 0; }}
-                >
-                    {#each PAGE_SIZES as sz}
-                        <option value={sz}>{sz} / page</option>
-                    {/each}
-                </select>
+                {#each PAGE_SIZES as sz}
+                    <button
+                        class="btn-brutal pager-pill"
+                        class:active={pageSize === sz}
+                        onclick={() => { pageSize = sz; page = 0; }}
+                    >{sz}</button>
+                {/each}
             </div>
         {/if}
     {/if}
@@ -553,16 +551,16 @@
         font-weight: 400;
         opacity: 0.6;
     }
-    .pager-size {
-        font-family: 'JetBrains Mono', monospace;
+    .pager-pill {
         font-size: 0.65rem;
         font-weight: 700;
-        padding: 4px 6px;
-        border: var(--spacing-bw) solid var(--color-border);
-        border-radius: 4px;
-        background: var(--color-card);
+        padding: 4px 10px;
         color: var(--color-muted);
-        cursor: pointer;
+    }
+    .pager-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
     }
     .empty {
         text-align: center;
