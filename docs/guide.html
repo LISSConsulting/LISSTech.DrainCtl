@@ -5,11 +5,13 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="favicon.ico" type="image/x-icon" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-        <title>DrainCtl Guide — Installation, Configuration &amp; Usage</title>
+        <title>DrainCtl Setup Guide — Install, Configure &amp; Monitor RDS for MSPs</title>
         <meta
             name="description"
-            content="Complete guide to installing, configuring, and using LISSTech DrainCtl for RDSH drain mode monitoring."
+            content="Complete setup guide for DrainCtl: install on Windows Server, configure RDSH drain mode monitoring, set up alerts for MSPs and admins, and use the CLI and dashboard."
         />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -289,7 +291,9 @@
                 border: var(--bw) solid var(--border);
                 border-radius: var(--r);
                 box-shadow: var(--so) var(--so) 0 var(--shadow);
-                transition: transform 0.1s, box-shadow 0.1s;
+                transition:
+                    transform 0.1s,
+                    box-shadow 0.1s;
                 cursor: pointer;
             }
             .btn:hover {
@@ -512,6 +516,20 @@
                 audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).
             </p>
 
+            <h3>Upgrading</h3>
+            <p>
+                Run the new MSI over an existing installation. The installer detects the previous version and
+                skips all configuration dialogs &mdash; you go straight from the welcome screen to install.
+            </p>
+            <ul>
+                <li><code>config.json</code> and <code>servers.json</code> are preserved</li>
+                <li>Configuration actions are skipped (existing settings are not overwritten)</li>
+                <li>ETW provider, Event Log permissions, and the Windows Service are re-registered</li>
+                <li>Audit trail and TLS certificates in ProgramData are preserved</li>
+                <li>The Windows Firewall rule is always maintained across upgrades</li>
+            </ul>
+            <p>Silent upgrades work the same way &mdash; just run the new MSI with <code>/qn</code>.</p>
+
             <!-- ── First Run ─────────────────────────────────────────────────────── -->
             <h2 id="first-run">2. First Run</h2>
 
@@ -552,7 +570,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
             <pre><code>{
   "grace_period": 60,
   "retention_days": 90,
-  "poll_interval": 300,
+  "poll_interval": 60,
   "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
   "notifications": [
     {
@@ -590,6 +608,9 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "mem_crit_pct": 10,
     "input_delay_warn_ms": 50,
     "input_delay_crit_ms": 100,
+    "input_delay_percentile": "p95",
+    "load_consecutive_polls": 2,
+    "input_delay_consecutive_polls": 3,
     "collect_remotefx": false,
     "collect_per_session": true
   }
@@ -609,7 +630,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td>60</td>
                         <td>
                             Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the
-                            grace period, the status is "Grace" and exit code is 0.
+                            grace period, the status is "Grace" and exit code is 0. Performance thresholds may
+                            independently promote the status to "Warning" (any warning) or "Alert" (any critical).
                         </td>
                     </tr>
                     <tr>
@@ -619,10 +641,10 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     </tr>
                     <tr>
                         <td><code>poll_interval</code></td>
-                        <td>300</td>
+                        <td>60</td>
                         <td>
-                            Seconds between safety-net polls. The service also uses real-time registry notifications, so
-                            this is a fallback.
+                            Seconds between polls. The service also uses real-time registry notifications for drain
+                            mode changes; this interval governs performance monitoring and session checks.
                         </td>
                     </tr>
                     <tr>
@@ -651,7 +673,15 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td><code>performance</code></td>
                         <td><em>see above</em></td>
                         <td>
-                            Performance monitoring settings. Set <code>enabled: true</code> to collect CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle. Thresholds default to industry baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to <code>-1</code> to disable it.
+                            Performance monitoring settings. Set <code>enabled: true</code> to collect CPU, memory, disk
+                            I/O, input delay, and RemoteFX metrics every poll cycle. Thresholds default to industry
+                            baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to
+                            <code>-1</code> to disable it. Additional fields:
+                            <code>input_delay_percentile</code> (<code>"p50"</code> or <code>"p95"</code>, default
+                            <code>"p95"</code>),
+                            <code>load_consecutive_polls</code> (CPU/memory consecutive breaches, default 2),
+                            <code>input_delay_consecutive_polls</code> (input delay consecutive breaches, default 10),
+                            <code>sample_interval_sec</code> (collection interval, default 30, range 10&ndash;300).
                         </td>
                     </tr>
                 </tbody>
@@ -753,9 +783,9 @@ drainctl sessions --format csv</code></pre>
             <pre><code># Print all settings at a glance — no prompts, no side-effects
 drainctl configure show</code></pre>
             <p>
-                Prints version, config path, grace period, poll interval, retention days,
-                session warning threshold, dashboard settings, and all notification targets.
-                Useful for confirming what is active on a machine without opening
+                Prints version, config path, grace period, poll interval, retention days, session warning threshold,
+                dashboard settings, and all notification targets. Useful for confirming what is active on a machine
+                without opening
                 <code>config.json</code> or running the interactive wizard.
             </p>
 
@@ -828,11 +858,12 @@ drainctl notify test</code></pre>
 
             <div class="callout">
                 <strong>&#x1F4A1; Flag behaviour.</strong>
-                When <code>set-webhook</code> or <code>set-ntfy</code> is called without optional flags, only the URL
-                is updated; the existing secret, triggers, and repeat interval are preserved. Pass a flag explicitly
-                to overwrite only that field. Valid trigger names:
-                <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>,
-                <code>healthy</code>, <code>session_warning</code>, <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>, <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>.
+                When <code>set-webhook</code> or <code>set-ntfy</code> is called without optional flags, only the URL is
+                updated; the existing secret, triggers, and repeat interval are preserved. Pass a flag explicitly to
+                overwrite only that field. Valid trigger names: <code>drain_on</code>, <code>drain_off</code>,
+                <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>,
+                <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>,
+                <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>.
             </div>
 
             <h3>Interactive configuration wizard</h3>
@@ -853,14 +884,13 @@ drainctl configure --mode registration --dashboard-url https://dash:49470 \
 
             <h3>Inspect current configuration</h3>
             <p>
-                To review every active setting at a glance without prompting or making changes,
-                use the read-only <code>configure show</code> subcommand:
+                To review every active setting at a glance without prompting or making changes, use the read-only
+                <code>configure show</code> subcommand:
             </p>
             <pre><code>drainctl configure show</code></pre>
             <p>
-                Output covers: version, config file path, grace period, poll interval,
-                retention days, session warning threshold, dashboard server status,
-                agent registration URL, TLS pin status, and all notification targets
+                Output covers: version, config file path, grace period, poll interval, retention days, session warning
+                threshold, dashboard server status, agent registration URL, TLS pin status, and all notification targets
                 (with HMAC signing status for webhook targets).
             </p>
 
@@ -974,9 +1004,8 @@ Get-RDSHDrainHistory -ChangesOnly |
                 Get pushed when something happens. DrainCtl supports
                 <strong>multiple notification targets</strong> &mdash; any combination of
                 <strong>webhooks</strong> (Slack, Teams, PagerDuty, custom HTTP endpoints),
-                <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics, and
-                <strong>email via SMTP</strong>. Each target has its own triggers and
-                repeat interval.
+                <strong><a href="https://ntfy.sh">ntfy.sh</a></strong> topics, and <strong>email via SMTP</strong>. Each
+                target has its own triggers and repeat interval.
             </p>
 
             <h3>Setup</h3>
@@ -1008,13 +1037,23 @@ drainctl notify status
 # Send a test to make sure it works
 drainctl notify test</code></pre>
 
-            <p>
-                Optional flags on <code>set-webhook</code> and <code>set-ntfy</code>:
-            </p>
+            <p>Optional flags on <code>set-webhook</code> and <code>set-ntfy</code>:</p>
             <ul>
-                <li><code>--secret TEXT</code> &mdash; HMAC-SHA256 signing secret sent as <code>X-DrainCtl-Signature</code> (webhook only)</li>
-                <li><code>--triggers LIST</code> &mdash; comma-separated events that fire this target; omit to keep existing value; valid names: <code>drain_on</code>, <code>drain_off</code>, <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>, <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>, <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code></li>
-                <li><code>--repeat-minutes N</code> &mdash; minimum minutes between repeated <code>alert</code> / <code>session_warning</code> notifications; <code>0</code> means once per state change (default)</li>
+                <li>
+                    <code>--secret TEXT</code> &mdash; HMAC-SHA256 signing secret sent as
+                    <code>X-DrainCtl-Signature</code> (webhook only)
+                </li>
+                <li>
+                    <code>--triggers LIST</code> &mdash; comma-separated events that fire this target; omit to keep
+                    existing value; valid names: <code>drain_on</code>, <code>drain_off</code>,
+                    <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>,
+                    <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>,
+                    <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>
+                </li>
+                <li>
+                    <code>--repeat-minutes N</code> &mdash; minimum minutes between repeated <code>alert</code> /
+                    <code>session_warning</code> notifications; <code>0</code> means once per state change (default)
+                </li>
             </ul>
             <p>
                 When a flag is omitted the existing value is preserved, so you can update a single field without
@@ -1116,9 +1155,9 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                 All three target types share the same natural-language subjects, e.g.
                 <em>"RDS01 &mdash; New remote connections disabled by DOMAIN\admin"</em>,
                 <em>"RDS01 &mdash; Remote connections disabled for 2h 15m (exceeds 1h grace period)"</em>, or
-                <em>"RDS01 &mdash; Session utilization at 85% (17/20 sessions)"</em>.
-                For webhooks the subject appears in the <code>message</code> field; for ntfy it's the notification title;
-                for email it's the Subject header and the HTML body heading.
+                <em>"RDS01 &mdash; Session utilization at 85% (17/20 sessions)"</em>. For webhooks the subject appears
+                in the <code>message</code> field; for ntfy it's the notification title; for email it's the Subject
+                header and the HTML body heading.
             </p>
 
             <p>
@@ -1149,10 +1188,9 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
   }
 }</code></pre>
             <p>
-                <code>previous_mode</code> is only present on <code>transition</code> events.
-                <code>sessions</code> is only present when session monitoring is active (see
-                <a href="#sessions">Session Tracking</a>).
-                The <code>connections_allowed</code> field is <code>false</code> when drain mode is blocking new
+                <code>previous_mode</code> is only present on <code>transition</code> events. <code>sessions</code> is
+                only present when session monitoring is active (see <a href="#sessions">Session Tracking</a>). The
+                <code>connections_allowed</code> field is <code>false</code> when drain mode is blocking new
                 connections, <code>true</code> when all connections are allowed &mdash; use this instead of parsing
                 <code>status</code> to gate automation.
             </p>
@@ -1165,9 +1203,9 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
             <h3>Email (SMTP)</h3>
             <p>
                 Email notifications via SMTP. Use <code>smtp://</code> for STARTTLS (port 587) or
-                <code>smtps://</code> for implicit TLS (port 465). Works with any SMTP relay &mdash;
-                Gmail, Mailgun, SendGrid, O365. The <code>secret</code> field is the SMTP password.
-                The <code>from</code> and <code>to</code> fields are required.
+                <code>smtps://</code> for implicit TLS (port 465). Works with any SMTP relay &mdash; Gmail, Mailgun,
+                SendGrid, O365. The <code>secret</code> field is the SMTP password. The <code>from</code> and
+                <code>to</code> fields are required.
             </p>
             <pre><code>{
   "type": "email",
@@ -1304,20 +1342,68 @@ drainctl register --auto</code></pre>
                 <code>_drainctl._tcp.&lt;domain&gt;</code> on startup when no URL is configured.
             </p>
 
-            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; margin: 20px 0">
+            <div
+                style="
+                    background: var(--surface);
+                    border: 1px solid var(--border);
+                    border-radius: var(--r);
+                    padding: 20px;
+                    margin: 20px 0;
+                "
+            >
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px">
                     <div>
-                        <label for="srv-domain" style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px">AD Domain</label>
-                        <input id="srv-domain" type="text" value="contoso.com" spellcheck="false"
-                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.85rem; background: var(--bg); color: var(--fg); box-sizing: border-box" />
+                        <label
+                            for="srv-domain"
+                            style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px"
+                            >AD Domain</label
+                        >
+                        <input
+                            id="srv-domain"
+                            type="text"
+                            value="contoso.com"
+                            spellcheck="false"
+                            style="
+                                width: 100%;
+                                padding: 6px 10px;
+                                border: 1px solid var(--border);
+                                border-radius: 4px;
+                                font-family: var(--mono);
+                                font-size: 0.85rem;
+                                background: var(--bg);
+                                color: var(--fg);
+                                box-sizing: border-box;
+                            "
+                        />
                     </div>
                     <div>
-                        <label for="srv-host" style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px">Dashboard Server FQDN</label>
-                        <input id="srv-host" type="text" value="dashboard.contoso.com" spellcheck="false"
-                            style="width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 0.85rem; background: var(--bg); color: var(--fg); box-sizing: border-box" />
+                        <label
+                            for="srv-host"
+                            style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px"
+                            >Dashboard Server FQDN</label
+                        >
+                        <input
+                            id="srv-host"
+                            type="text"
+                            value="dashboard.contoso.com"
+                            spellcheck="false"
+                            style="
+                                width: 100%;
+                                padding: 6px 10px;
+                                border: 1px solid var(--border);
+                                border-radius: 4px;
+                                font-family: var(--mono);
+                                font-size: 0.85rem;
+                                background: var(--bg);
+                                color: var(--fg);
+                                box-sizing: border-box;
+                            "
+                        />
                     </div>
                 </div>
-                <pre style="margin: 0"><code id="srv-snippet"># PowerShell &#x2014; create the SRV record in AD-integrated DNS
+                <pre
+                    style="margin: 0"
+                ><code id="srv-snippet"># PowerShell &#x2014; create the SRV record in AD-integrated DNS
 Add-DnsServerResourceRecord -ZoneName "contoso.com" `
   -Name "_drainctl._tcp" -Srv `
   -DomainName "dashboard.contoso.com" `
@@ -1325,30 +1411,48 @@ Add-DnsServerResourceRecord -ZoneName "contoso.com" `
 
 # Verify
 Resolve-DnsName -Name "_drainctl._tcp.contoso.com" -Type SRV</code></pre>
-                <button class="btn btn-fill" style="margin-top:12px" onclick="(function(b){navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);b.textContent='\u2713 Copied!';setTimeout(function(){b.innerHTML='&#128203; Copy'},1500)})(this)">
+                <button
+                    class="btn btn-fill"
+                    style="margin-top: 12px"
+                    onclick="
+                        (function (b) {
+                            navigator.clipboard.writeText(document.getElementById('srv-snippet').textContent);
+                            b.textContent = '\u2713 Copied!';
+                            setTimeout(function () {
+                                b.innerHTML = '&#128203; Copy';
+                            }, 1500);
+                        })(this)
+                    "
+                >
                     &#128203; Copy
                 </button>
             </div>
             <script>
-            (function() {
-                var domain = document.getElementById('srv-domain');
-                var host = document.getElementById('srv-host');
-                var snippet = document.getElementById('srv-snippet');
-                function update() {
-                    var d = domain.value || 'contoso.com';
-                    var h = host.value || 'dashboard.contoso.com';
-                    snippet.textContent =
-                        '# PowerShell \u2014 create the SRV record in AD-integrated DNS\n' +
-                        'Add-DnsServerResourceRecord -ZoneName "' + d + '" `\n' +
-                        '  -Name "_drainctl._tcp" -Srv `\n' +
-                        '  -DomainName "' + h + '" `\n' +
-                        '  -Port 49470 -Priority 0 -Weight 0\n\n' +
-                        '# Verify\n' +
-                        'Resolve-DnsName -Name "_drainctl._tcp.' + d + '" -Type SRV';
-                }
-                domain.addEventListener('input', update);
-                host.addEventListener('input', update);
-            })();
+                (function () {
+                    var domain = document.getElementById("srv-domain");
+                    var host = document.getElementById("srv-host");
+                    var snippet = document.getElementById("srv-snippet");
+                    function update() {
+                        var d = domain.value || "contoso.com";
+                        var h = host.value || "dashboard.contoso.com";
+                        snippet.textContent =
+                            "# PowerShell \u2014 create the SRV record in AD-integrated DNS\n" +
+                            'Add-DnsServerResourceRecord -ZoneName "' +
+                            d +
+                            '" `\n' +
+                            '  -Name "_drainctl._tcp" -Srv `\n' +
+                            '  -DomainName "' +
+                            h +
+                            '" `\n' +
+                            "  -Port 49470 -Priority 0 -Weight 0\n\n" +
+                            "# Verify\n" +
+                            'Resolve-DnsName -Name "_drainctl._tcp.' +
+                            d +
+                            '" -Type SRV';
+                    }
+                    domain.addEventListener("input", update);
+                    host.addEventListener("input", update);
+                })();
             </script>
 
             <p>
@@ -1605,45 +1709,147 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <!-- ── Performance Monitoring ──────────────────────────────────────── -->
             <h2 id="performance">10. Performance Monitoring</h2>
             <p>
-                DrainCtl collects host-level and per-session performance metrics through the Windows PDH API. Enable it with one config key:
+                DrainCtl collects host-level and per-session performance metrics through the Windows PDH API. Enable it
+                with one config key:
             </p>
             <pre><code>"performance": { "enabled": true }</code></pre>
             <p>
-                With defaults, DrainCtl collects CPU, available memory, pages/sec, disk queue length, TCP retransmits, and per-session input delay every poll cycle. Metrics appear in the dashboard, audit trail, webhook payloads, and CLI JSON output.
+                With defaults, DrainCtl collects CPU, available memory, pages/sec, disk queue length, TCP retransmits,
+                and per-session input delay every poll cycle. Metrics appear in the dashboard, audit trail, webhook
+                payloads, and CLI JSON output.
             </p>
 
             <h3>Thresholds &amp; Triggers</h3>
             <table>
                 <thead>
-                    <tr><th>Trigger</th><th>Default</th><th>Fires when</th></tr>
+                    <tr>
+                        <th>Trigger</th>
+                        <th>Default</th>
+                        <th>Fires when</th>
+                    </tr>
                 </thead>
                 <tbody>
-                    <tr><td><code>cpu_warning</code></td><td>70%</td><td>CPU &ge; threshold for 2 consecutive polls</td></tr>
-                    <tr><td><code>cpu_critical</code></td><td>85%</td><td>CPU &ge; threshold for 2 consecutive polls</td></tr>
-                    <tr><td><code>memory_warning</code></td><td>20% free</td><td>Available memory &le; threshold for 2 consecutive polls</td></tr>
-                    <tr><td><code>memory_critical</code></td><td>10% free</td><td>Available memory &le; threshold for 2 consecutive polls</td></tr>
-                    <tr><td><code>input_delay_warning</code></td><td>50ms</td><td>Input delay P95 &ge; threshold (single poll)</td></tr>
-                    <tr><td><code>input_delay_critical</code></td><td>100ms</td><td>Input delay P95 &ge; threshold (single poll)</td></tr>
+                    <tr>
+                        <td><code>cpu_warning</code></td>
+                        <td>70%</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                    </tr>
+                    <tr>
+                        <td><code>cpu_critical</code></td>
+                        <td>85%</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                    </tr>
+                    <tr>
+                        <td><code>memory_warning</code></td>
+                        <td>20% free</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                    </tr>
+                    <tr>
+                        <td><code>memory_critical</code></td>
+                        <td>10% free</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                    </tr>
+                    <tr>
+                        <td><code>input_delay_warning</code></td>
+                        <td>50ms</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
+                    </tr>
+                    <tr>
+                        <td><code>input_delay_critical</code></td>
+                        <td>100ms</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
+                    </tr>
                 </tbody>
             </table>
             <p>
-                CPU and memory triggers require two consecutive breaches to fire — this eliminates flap noise from transient spikes. Input delay fires immediately because sustained delay is felt by users at once.
+                All performance triggers require consecutive breaches before firing, eliminating flap noise from
+                transient spikes. CPU and memory default to 2 consecutive polls (<code>load_consecutive_polls</code>);
+                input delay defaults to 3 (<code>input_delay_consecutive_polls</code>) because it is inherently volatile.
+                At the default 60-second poll interval, 2 polls = 2 minutes for CPU/memory and 3 polls = 3 minutes
+                for input delay.
+                Both values are configurable in the <code>performance</code> section of <code>config.json</code>.
+                Input delay is evaluated against the P95 percentile by default; set
+                <code>"input_delay_percentile": "p50"</code> for median-based thresholds.
             </p>
-            <p>
-                Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.
-            </p>
+            <p>Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.</p>
 
             <h3>RemoteFX Counters</h3>
             <p>
-                Set <code>"collect_remotefx": true</code> to collect RemoteFX Graphics and Network counters: output FPS, encoding time, frame quality, RTT, packet loss, and skip rates. These counters are only available when the RemoteFX role is installed; absence is not an error.
+                Set <code>"collect_remotefx": true</code> to collect RemoteFX Graphics and Network counters: output FPS,
+                encoding time, frame quality, RTT, packet loss, and skip rates. These counters are only available when
+                the RemoteFX role is installed; absence is not an error.
             </p>
 
             <h3>Dashboard Display</h3>
             <p>
-                Each server card gains a collapsible Performance section showing CPU and memory gauges, input delay values, disk queue, and RemoteFX metrics (when available). Values are color-coded: green for healthy, amber at warning, red at critical.
+                Each server card gains a collapsible Performance section showing CPU and memory gauges, input delay
+                values, disk queue, and RemoteFX metrics (when available). Values are color-coded: green for healthy,
+                amber at warning, red at critical.
             </p>
             <p>
-                The state history chart gains toggle-able CPU% and Input Delay overlay lines via checkboxes in the legend.
+                The state history chart gains toggle-able CPU% and Input Delay overlay lines via checkboxes in the
+                legend.
+            </p>
+
+            <h3>Server Status Levels</h3>
+            <p>
+                The dashboard shows a composite status for each server reflecting both drain mode and performance health.
+                The worst severity wins:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Color</th>
+                        <th>Condition</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Healthy</td>
+                        <td>Green</td>
+                        <td>Drain off, no performance threshold breaches</td>
+                    </tr>
+                    <tr>
+                        <td>Warning</td>
+                        <td>Amber</td>
+                        <td>Drain off, but one or more perf metrics at warning level (CPU, memory, or input delay)</td>
+                    </tr>
+                    <tr>
+                        <td>Grace</td>
+                        <td>Amber</td>
+                        <td>Drain mode active, within configured grace period</td>
+                    </tr>
+                    <tr>
+                        <td>Alert</td>
+                        <td>Red</td>
+                        <td>Drain mode exceeded grace period, <em>or</em> any performance metric at critical level</td>
+                    </tr>
+                    <tr>
+                        <td>Offline</td>
+                        <td>Grey</td>
+                        <td>No report received in the last 10 minutes</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Notification Cooldown Model</h3>
+            <p>
+                Each notification target&rsquo;s <code>repeat_minutes</code> acts as a cooldown window. Once a
+                notification fires, the same trigger type will not fire again for that target until the interval elapses.
+                If the metric is still breaching when the interval expires, a reminder is sent.
+            </p>
+            <p>
+                Cooldowns are <strong>never reset</strong> by metric oscillation. A metric that briefly dips below
+                threshold and rises again does not produce a new notification &mdash; the original cooldown holds.
+                This prevents notification storms from volatile metrics like input delay.
+            </p>
+
+            <h3>REST API Documentation</h3>
+            <p>
+                The dashboard serves an OpenAPI 3.1 spec at
+                <code>/api/v1/openapi.yaml</code> and a Swagger UI at <code>/api/docs</code>.
+                Both are public (no authentication required).
             </p>
 
             <!-- ── RMM Integration ────────────────────────────────────────────────── -->
@@ -1722,7 +1928,10 @@ drainctl service uninstall</code></pre>
                     <strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant
                     CLI/PS responses
                 </li>
-                <li><strong>Writes</strong> to the Windows Event Log (Applications and Services Logs &gt; DrainCtl) on state changes</li>
+                <li>
+                    <strong>Writes</strong> to the Windows Event Log (Applications and Services Logs &gt; DrainCtl) on
+                    state changes
+                </li>
                 <li><strong>Sends</strong> webhook/ntfy/email notifications when configured</li>
                 <li>
                     <strong>Tracks</strong> active RDS sessions via <code>WTSEnumerateSessionsW</code> for utilization
@@ -1802,11 +2011,14 @@ drainctl service uninstall</code></pre>
                 <li><code>drainctl notify status</code> &mdash; verify URLs are set</li>
                 <li><code>drainctl notify test</code> &mdash; sends a test message</li>
                 <li>
-                    Check the DrainCtl event log for "webhook notification failed", "ntfy notification failed",
-                    or "email notification failed" warnings
+                    Check the DrainCtl event log for "webhook notification failed", "ntfy notification failed", or
+                    "email notification failed" warnings
                 </li>
                 <li>Verify network connectivity from the RDSH server to the webhook/ntfy/SMTP endpoint</li>
-                <li>For email: confirm the SMTP password is correct, the <code>from</code> address is authorized to send, and the relay allows connections from the server's IP</li>
+                <li>
+                    For email: confirm the SMTP password is correct, the <code>from</code> address is authorized to
+                    send, and the relay allows connections from the server's IP
+                </li>
             </ol>
 
             <h3>Dashboard shows "Offline" for a registered server</h3>

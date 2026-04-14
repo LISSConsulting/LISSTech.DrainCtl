@@ -1,0 +1,866 @@
+openapi: "3.1.0"
+info:
+  title: LISSTech DrainCtl Dashboard API
+  description: |
+    REST API for the LISSTech DrainCtl dashboard — monitors Remote Desktop
+    Session Host drain mode, session utilization, and server performance.
+  version: "1.0.0"
+  contact:
+    name: LISS Technologies
+    url: https://lisstech.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: /api/v1
+    description: Dashboard server (relative)
+
+tags:
+  - name: health
+    description: Public health check
+  - name: auth
+    description: Authentication (SSPI Negotiate + credential login)
+  - name: servers
+    description: Registered server state
+  - name: settings
+    description: Dashboard configuration
+  - name: agent
+    description: Machine-to-machine (agent registration and reporting)
+  - name: history
+    description: Per-server event history
+  - name: notifications
+    description: Notification target testing
+
+components:
+  securitySchemes:
+    negotiate:
+      type: http
+      scheme: negotiate
+      description: SSPI Negotiate (Kerberos/NTLM) — multi-leg handshake via Authorization header.
+    session:
+      type: apiKey
+      in: cookie
+      name: drainctl_session
+      description: Session cookie issued after successful authentication. 8-hour inactivity timeout.
+    machineSSPI:
+      type: http
+      scheme: negotiate
+      description: SSPI Negotiate restricted to machine accounts (hostname ending in `$`).
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+      required: [ok]
+
+    SessionSummary:
+      type: object
+      properties:
+        active_sessions:
+          type: integer
+        disconnected_sessions:
+          type: integer
+        total_sessions:
+          type: integer
+        max_sessions:
+          type: integer
+        utilization_pct:
+          type: integer
+          description: "Percentage of max sessions in use (0–100)."
+
+    PerfSnapshot:
+      type: object
+      properties:
+        cpu_pct:
+          type: number
+          format: double
+          description: "Average CPU utilization across samples."
+        cpu_p95_pct:
+          type: number
+          format: double
+          description: "95th percentile CPU utilization across samples."
+        mem_avail_mb:
+          type: number
+          format: double
+        mem_total_mb:
+          type: number
+          format: double
+        pages_sec:
+          type: number
+          format: double
+        disk_queue:
+          type: number
+          format: double
+        tcp_retrans_sec:
+          type: number
+          format: double
+        input_delay_p50_ms:
+          type: number
+          format: double
+        input_delay_p95_ms:
+          type: number
+          format: double
+        input_delay_max_ms:
+          type: number
+          format: double
+        session_cpu_p95_pct:
+          type: number
+          format: double
+        session_mem_p95_bytes:
+          type: number
+          format: double
+        rfx_available:
+          type: boolean
+        rfx_fps_out:
+          type: number
+          format: double
+        rfx_skip_server_sec:
+          type: number
+          format: double
+        rfx_skip_net_sec:
+          type: number
+          format: double
+        rfx_encode_ms:
+          type: number
+          format: double
+        rfx_quality_pct:
+          type: number
+          format: double
+        rfx_rtt_ms:
+          type: number
+          format: double
+        rfx_loss_pct:
+          type: number
+          format: double
+
+    CheckResult:
+      type: object
+      properties:
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        host:
+          type: string
+        drain_mode:
+          type: string
+          description: "Human-readable drain mode label."
+        drain_mode_value:
+          type: integer
+          description: "Raw TSServerDrainMode registry value."
+        grace_period_seconds:
+          type: integer
+        state_since:
+          type: string
+          format: date-time
+          nullable: true
+        state_duration_seconds:
+          type: number
+          nullable: true
+        status:
+          type: string
+          enum: [Healthy, Grace, Alert]
+        connections_allowed:
+          type: boolean
+          nullable: true
+        transition:
+          type: boolean
+        transition_from:
+          type: string
+        changed_by:
+          type: string
+        sessions:
+          $ref: "#/components/schemas/SessionSummary"
+          nullable: true
+        performance:
+          $ref: "#/components/schemas/PerfSnapshot"
+          nullable: true
+        message:
+          type: string
+        exit_code:
+          type: integer
+
+    ServerView:
+      type: object
+      properties:
+        host:
+          type: string
+        status:
+          type: string
+          enum: [ok, warning, grace, alert, "off"]
+          description: "Composite status. `warning` = perf threshold warning. `off` = no report in 10 minutes."
+        drain_mode:
+          type: string
+        sessions:
+          type: integer
+        sessions_active:
+          type: integer
+        sessions_disconnected:
+          type: integer
+        max_sessions:
+          type: integer
+        state_duration_seconds:
+          type: number
+          nullable: true
+        version:
+          type: string
+        registered_at:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        changed_by:
+          type: string
+        grace_deadline:
+          type: string
+          format: date-time
+          nullable: true
+        perf:
+          $ref: "#/components/schemas/PerfSnapshot"
+          nullable: true
+
+    HistoryView:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        host:
+          type: string
+        status:
+          type: string
+          enum: [ok, grace, alert, "off"]
+        drain_mode:
+          type: string
+        state_duration_seconds:
+          type: number
+          nullable: true
+        transition:
+          type: boolean
+        transition_from:
+          type: string
+        changed_by:
+          type: string
+        version:
+          type: string
+        message:
+          type: string
+        sessions:
+          $ref: "#/components/schemas/SessionSummary"
+          nullable: true
+        performance:
+          $ref: "#/components/schemas/PerfSnapshot"
+          nullable: true
+
+    Trigger:
+      type: string
+      enum:
+        - drain_on
+        - drain_off
+        - grace_entered
+        - alert
+        - healthy
+        - session_warning
+        - cpu_warning
+        - cpu_critical
+        - input_delay_warning
+        - input_delay_critical
+        - memory_warning
+        - memory_critical
+
+    NotificationTarget:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [webhook, ntfy, email]
+        url:
+          type: string
+          format: uri
+        triggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Trigger"
+          description: "Empty = default triggers (drain_on, drain_off, alert, healthy)."
+        repeat_minutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+          description: "0 = fire once per incident. Max 10080 (1 week)."
+        secret:
+          type: string
+          description: "HMAC-SHA256 signing secret (webhooks) or SMTP password (email)."
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+          description: "Email recipients (email type only)."
+        from:
+          type: string
+          format: email
+          description: "Email sender (email type only)."
+        enabled:
+          type: boolean
+          nullable: true
+          description: "null or true = enabled. false = disabled."
+      required: [type, url]
+
+    PerformanceConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        force_disabled:
+          type: boolean
+          description: "When true, dashboard cannot enable perf on this server."
+        cpu_warn_pct:
+          type: integer
+          description: "Default 70. Set -1 to disable."
+        cpu_crit_pct:
+          type: integer
+          description: "Default 85. Set -1 to disable."
+        mem_warn_pct:
+          type: integer
+          description: "% free memory. Default 20. Set -1 to disable."
+        mem_crit_pct:
+          type: integer
+          description: "% free memory. Default 10. Set -1 to disable."
+        input_delay_warn_ms:
+          type: integer
+          description: "Default 50. Set -1 to disable."
+        input_delay_crit_ms:
+          type: integer
+          description: "Default 100. Set -1 to disable."
+        input_delay_percentile:
+          type: string
+          enum: [p50, p95]
+          description: "Which percentile to evaluate for input delay thresholds. Default p95."
+        load_consecutive_polls:
+          type: integer
+          minimum: 1
+          description: "Consecutive polls required before CPU/memory alerts fire. Default 2."
+        input_delay_consecutive_polls:
+          type: integer
+          minimum: 1
+          description: "Consecutive polls required before input delay alerts fire. Default 10."
+        collect_remotefx:
+          type: boolean
+        collect_per_session:
+          type: boolean
+          description: "Default true."
+        sample_interval_sec:
+          type: integer
+          minimum: 10
+          maximum: 300
+          description: "Default 30."
+
+    SettingsResponse:
+      type: object
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationTarget"
+        session_warning_threshold:
+          type: integer
+          minimum: 0
+          maximum: 100
+        grace_period:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: "Minutes."
+        performance:
+          $ref: "#/components/schemas/PerformanceConfig"
+
+    SettingsUpdate:
+      type: object
+      description: "All fields are optional. Absent fields are left unchanged."
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationTarget"
+          nullable: true
+          description: "null = no change. Empty array = clear all targets."
+        session_warning_threshold:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        grace_period:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          nullable: true
+        performance:
+          $ref: "#/components/schemas/PerformanceConfig"
+          nullable: true
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Public endpoint for load balancer probes. Returns aggregate server counts.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Dashboard is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  version:
+                    type: string
+                  servers:
+                    type: integer
+                  healthy:
+                    type: integer
+                  grace:
+                    type: integer
+                  alerting:
+                    type: integer
+                  offline:
+                    type: integer
+                    description: "No report in 10 minutes."
+                  unknown:
+                    type: integer
+
+  /auth/negotiate:
+    post:
+      tags: [auth]
+      summary: SSPI Negotiate authentication
+      description: |
+        Multi-leg Kerberos/NTLM handshake. Send `Authorization: Negotiate <token>`
+        header. The server responds with `WWW-Authenticate: Negotiate <response-token>`
+        until the handshake completes. On success, a `drainctl_session` cookie is set.
+        Short-circuits to 200 if a valid session cookie is already present.
+      operationId: authNegotiate
+      security:
+        - negotiate: []
+      responses:
+        "200":
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username:
+                    type: string
+                    example: "DOMAIN\\alice"
+        "401":
+          description: Handshake in progress or failed.
+        "403":
+          description: Authenticated but not a member of the required AD group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Credential login
+      description: |
+        Validates Windows credentials via LogonUserW. Accepts `DOMAIN\user` or
+        `user@domain.com` formats. On success, a `drainctl_session` cookie is set.
+        Rate-limited to 5 req/min per IP.
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  example: "DOMAIN\\alice"
+                password:
+                  type: string
+                  format: password
+              required: [username, password]
+      responses:
+        "200":
+          description: Login successful.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username:
+                    type: string
+        "400":
+          description: Missing or malformed request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Valid credentials but not in the required AD group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout
+      description: Invalidates the session and clears the cookie. Idempotent.
+      operationId: authLogout
+      responses:
+        "200":
+          description: Logged out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /me:
+    get:
+      tags: [auth]
+      summary: Session probe
+      description: |
+        Lightweight check for client-side auth restoration. Returns the
+        authenticated username or 401 without a body. Does not set
+        WWW-Authenticate (plain fetch only).
+      operationId: getMe
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: string
+                    example: "DOMAIN\\alice"
+        "401":
+          description: Not authenticated.
+
+  /register:
+    post:
+      tags: [agent]
+      summary: Register agent
+      description: |
+        Agents register before reporting. Machine account must match the
+        hostname or be a domain admin. Hostname must be RFC 1123 compliant
+        (max 253 characters).
+      operationId: registerAgent
+      security:
+        - machineSSPI: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname:
+                  type: string
+                  example: "RDSH-01"
+              required: [hostname]
+      responses:
+        "200":
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  tls_fingerprint:
+                    type: string
+                    description: "SHA-256 fingerprint of the dashboard TLS certificate (if TLS enabled)."
+        "400":
+          description: Invalid hostname.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Machine account does not match hostname.
+
+  /report:
+    post:
+      tags: [agent]
+      summary: Report server state
+      description: |
+        Agents post periodic health check results. Host must be pre-registered.
+        Machine account must match hostname or be a domain admin. Max body 64 KB.
+      operationId: reportState
+      security:
+        - machineSSPI: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckResult"
+      responses:
+        "200":
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: Invalid payload or unregistered host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Machine account does not match hostname.
+
+  /config:
+    get:
+      tags: [agent]
+      summary: Get dashboard config (agent)
+      description: |
+        Same payload as GET /settings but accessible to machine accounts.
+        Agents use this to fetch dashboard-managed settings (thresholds,
+        notification targets, performance config).
+      operationId: getConfig
+      security:
+        - machineSSPI: []
+      responses:
+        "200":
+          description: Current settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+
+  /servers:
+    get:
+      tags: [servers]
+      summary: List all servers
+      description: Returns all registered servers with current state.
+      operationId: listServers
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Server list (empty array if none registered).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServerView"
+        "401":
+          description: Not authenticated.
+
+  /servers/{host}:
+    get:
+      tags: [servers]
+      summary: Get single server
+      description: Returns current state of a registered server.
+      operationId: getServer
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Server state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerView"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: Server not found.
+
+    delete:
+      tags: [servers]
+      summary: Remove server
+      description: Removes a server from the dashboard and its history.
+      operationId: deleteServer
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: Server not found.
+
+  /settings:
+    get:
+      tags: [settings]
+      summary: Get dashboard settings
+      description: Returns notification targets, thresholds, and performance config.
+      operationId: getSettings
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Failed to load config from disk.
+
+    put:
+      tags: [settings]
+      summary: Update dashboard settings
+      description: |
+        Atomic update. Absent fields are left unchanged. Empty notifications
+        array clears all targets. Max body 8 KB.
+      operationId: updateSettings
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Failed to save config.
+
+  /notify-test:
+    post:
+      tags: [notifications]
+      summary: Test notification
+      description: |
+        Sends a test notification. If the body contains a NotificationTarget
+        (identified by non-empty URL or type "email"), tests that single target.
+        Otherwise tests all saved targets.
+      operationId: testNotification
+      security:
+        - session: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationTarget"
+      responses:
+        "200":
+          description: Test sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: Send failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+
+  /history/{host}:
+    get:
+      tags: [history]
+      summary: Get server history
+      description: Returns the last N check results for a server, newest first.
+      operationId: getHistory
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: "Number of records to return (1–100, default 20)."
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: changes_only
+          in: query
+          description: "Set to `1` or `true` to return only state transitions."
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+      responses:
+        "200":
+          description: History records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryView"
+        "400":
+          description: Invalid limit parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: Server not found.

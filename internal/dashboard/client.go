@@ -258,34 +258,34 @@ func hostName() (string, error) {
 	return os.Hostname()
 }
 
-// RemoteNotifyConfig holds notification configuration fetched from the dashboard.
-type RemoteNotifyConfig struct {
+// RemoteSettings holds dashboard settings fetched by the service agent.
+type RemoteSettings struct {
 	Notifications           []dc.NotificationTarget `json:"notifications"`
 	SessionWarningThreshold int                     `json:"session_warning_threshold"`
 	GracePeriod             int                     `json:"grace_period"`
 	Performance             *dc.PerformanceConfig   `json:"performance,omitempty"`
 }
 
-// FetchNotifyConfig retrieves the notification configuration from the dashboard.
+// FetchSettings retrieves dashboard settings via the agent config endpoint.
 // Uses SSPI Negotiate auth and TLS pinning (same as Register/Report).
-func FetchNotifyConfig(dashboardURL string) (*RemoteNotifyConfig, error) {
-	resp, err := negotiateRequest(http.MethodGet, dashboardURL+"/api/v1/notify-config", nil)
+func FetchSettings(dashboardURL string) (*RemoteSettings, error) {
+	resp, err := negotiateRequest(http.MethodGet, dashboardURL+"/api/v1/config", nil)
 	if err != nil {
-		slog.Warn("dashboard: fetch notify config failed", "error", err)
-		return nil, fmt.Errorf("fetch notify config: %w", err)
+		slog.Warn("dashboard: fetch settings failed", "error", err)
+		return nil, fmt.Errorf("fetch settings: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		slog.Warn("dashboard: fetch notify config rejected", "status", resp.StatusCode)
-		return nil, fmt.Errorf("fetch notify config: status %d", resp.StatusCode)
+		slog.Warn("dashboard: fetch settings rejected", "status", resp.StatusCode)
+		return nil, fmt.Errorf("fetch settings: status %d", resp.StatusCode)
 	}
 
-	var cfg RemoteNotifyConfig
+	var cfg RemoteSettings
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("decode notify config: %w", err)
+		return nil, fmt.Errorf("decode settings: %w", err)
 	}
 	return &cfg, nil
 }

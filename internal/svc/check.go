@@ -205,30 +205,41 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		// Session utilization warning.
 		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 && sess.UtilizationPct >= cfg.SessionWarningThreshold {
 			triggers = append(triggers, dc.TriggerSessionWarning)
-		} else if sess != nil && sess.MaxSessions > 0 {
-			// Session data is available and utilization is below threshold — reset
-			// the per-target cooldown so the warning fires again the next time
-			// utilization climbs above the threshold.
-			// Do NOT reset when sess==nil (WTS API error) or MaxSessions==0
-			// (uncapped server): in both cases we cannot confirm utilization is
-			// safe, so keeping the cooldown avoids spurious re-notifications.
-			resetSessionWarnCooldown(notifyState, cfg)
 		}
 
 		// Performance threshold evaluation.
 		if perfSnap != nil && perfTriggerState != nil {
 			perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
-			for _, pt := range perfTriggers {
-				triggers = append(triggers, pt)
-				// Override message with performance-specific detail.
-				result.Message = perfmon.TriggerMessage(pt, perfSnap, cfg.Performance)
-			}
-			// Reset cooldowns for perf triggers that are no longer active.
-			dc.ResetPerfCooldown(notifyState, perfTriggers)
+			triggers = append(triggers, perfTriggers...)
 		}
 
+		// Dispatch notifications. For perf triggers, set the message to the
+		// trigger-specific detail so each notification carries its own context
+		// (not the last trigger's message).
+		savedMessage := result.Message
 		for _, trigger := range triggers {
+			if perfmon.IsPerfTrigger(trigger) {
+				result.Message = perfmon.TriggerMessage(trigger, perfSnap, cfg.Performance)
+			} else {
+				result.Message = savedMessage
+			}
 			dc.SendNotification(targets, notifyState, result, trigger, changedBy)
+		}
+		result.Message = savedMessage
+
+		// Promote status based on active perf triggers so the dashboard
+		// reflects overall health, not just drain mode. Done after
+		// notification dispatch to avoid firing TriggerAlert for perf issues
+		// (perf triggers already have their own specific notifications).
+		for _, trigger := range triggers {
+			switch trigger {
+			case dc.TriggerCPUCritical, dc.TriggerMemoryCritical, dc.TriggerInputDelayCritical:
+				result.Status = "Alert"
+			case dc.TriggerCPUWarning, dc.TriggerMemoryWarning, dc.TriggerInputDelayWarning:
+				if result.Status == "Healthy" {
+					result.Status = "Warning"
+				}
+			}
 		}
 	}
 
@@ -277,10 +288,10 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 	}
 }
 
-// applyRemoteConfig updates service config from dashboard-sourced notification settings.
+// applyRemoteConfig updates service config from dashboard-sourced settings.
 // Values are clamped to their valid ranges so a misconfigured or compromised dashboard
 // cannot inject out-of-range values into the service.
-func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConfig, targets *[]dc.NotificationTarget) {
+func applyRemoteConfig(remote *dashboard.RemoteSettings, cfg *dc.ServiceConfig, targets *[]dc.NotificationTarget) {
 	*targets = remote.Notifications
 	if remote.SessionWarningThreshold >= 0 {
 		t := remote.SessionWarningThreshold
@@ -301,15 +312,4 @@ func applyRemoteConfig(remote *dashboard.RemoteNotifyConfig, cfg *dc.ServiceConf
 		remote.Performance.ForceDisabled = cfg.Performance.ForceDisabled // preserve local flag
 		cfg.Performance = *remote.Performance
 	}
-}
-
-// resetSessionWarnCooldown clears per-target session-warning cooldown entries
-// when session monitoring is enabled but utilization is currently at or below
-// the threshold. This ensures the warning fires again the next time utilization
-// rises above the threshold, rather than remaining suppressed indefinitely.
-func resetSessionWarnCooldown(state *dc.NotifyState, cfg *dc.ServiceConfig) {
-	if cfg.SessionWarningThreshold <= 0 {
-		return
-	}
-	clear(state.LastSessionWarnNotify)
 }

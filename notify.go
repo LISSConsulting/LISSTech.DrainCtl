@@ -62,7 +62,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		"event":                  string(trigger),
 		"host":                   result.Host,
 		"drain_mode":             result.DrainModeLabel,
-		"status":                 result.Status,
+		"status":                 TriggerStatus(result.Status, trigger),
 		"message":                result.Message,
 		"changed_by":             changedBy,
 		"state_duration_seconds": int(stateDur),
@@ -83,6 +83,10 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	}
 
 	for _, target := range targets {
+		// Skip disabled targets (nil Enabled means enabled by default).
+		if target.Enabled != nil && !*target.Enabled {
+			continue
+		}
 		if target.URL == "" || !target.HasTrigger(trigger) {
 			continue
 		}
@@ -104,6 +108,12 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				}
 			}
 			setLastSent(state, target.URL, trigger, now)
+
+			// Critical supersedes warning: refresh the warning cooldown so
+			// it cannot fire independently while the critical state persists.
+			if sub := subordinateTrigger(trigger); sub != "" {
+				setLastSent(state, target.URL, sub, now)
+			}
 		}
 
 		// Dispatch to backend.
@@ -117,22 +127,12 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 
 		case "ntfy":
 			title := NotificationSubject(result, trigger, changedBy)
-			priority := "default"
-			tags := "white_check_mark"
-			switch result.Status {
-			case "Alert":
-				priority = "high"
-				tags = "warning"
-			case "Grace":
-				tags = "warning"
-			}
+			priority, tags := ntfyStyle(trigger)
 			ntfyMsg := result.Message
 			if trigger == TriggerSessionWarning && result.Sessions != nil {
 				sess := result.Sessions
 				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
 					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
-				priority = "default"
-				tags = "busts_in_silhouette"
 			}
 			if err := sendNtfy(target.URL, title, ntfyMsg, priority, tags); err != nil {
 				slog.Warn("ntfy notification failed", "error", err, "url", target.URL)
@@ -151,10 +151,14 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 }
 
 // SendTestNotification sends a test message to all configured targets.
+// Disabled targets (Enabled == false) are skipped.
 func SendTestNotification(targets []NotificationTarget) error {
 	hasTargets := false
 	for _, t := range targets {
-		if t.URL != "" {
+		if t.Enabled != nil && !*t.Enabled {
+			continue
+		}
+		if t.URL != "" || t.Type == "email" {
 			hasTargets = true
 			break
 		}
@@ -185,7 +189,10 @@ func SendTestNotification(targets []NotificationTarget) error {
 	var errs []error
 
 	for _, target := range targets {
-		if target.URL == "" {
+		if target.Enabled != nil && !*target.Enabled {
+			continue
+		}
+		if target.URL == "" && target.Type != "email" {
 			continue
 		}
 
@@ -319,8 +326,9 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 		}
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	case TriggerMemoryWarning, TriggerMemoryCritical:
-		if result.Performance != nil {
-			return fmt.Sprintf("%s \u2014 Available memory %.0f MB", host, result.Performance.MemAvailMB)
+		if result.Performance != nil && result.Performance.MemTotalMB > 0 {
+			usedPct := (1 - result.Performance.MemAvailMB/result.Performance.MemTotalMB) * 100
+			return fmt.Sprintf("%s \u2014 Memory at %.0f%%", host, usedPct)
 		}
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	case TriggerInputDelayWarning, TriggerInputDelayCritical:
@@ -374,6 +382,23 @@ func sendNtfy(url string, title string, message string, priority string, tags st
 	return nil
 }
 
+// ntfyStyle returns the ntfy priority and tags emoji for a given trigger.
+func ntfyStyle(trigger Trigger) (priority, tags string) {
+	switch trigger {
+	case TriggerAlert, TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
+		return "high", "warning"
+	case TriggerGraceEntered, TriggerCPUWarning, TriggerMemoryWarning,
+		TriggerInputDelayWarning, TriggerSessionWarning:
+		return "default", "warning"
+	case TriggerDrainOn:
+		return "default", "no_entry"
+	case TriggerDrainOff, TriggerHealthy:
+		return "default", "white_check_mark"
+	default:
+		return "default", "white_check_mark"
+	}
+}
+
 // perfTriggers is the set of performance-related triggers that use repeat intervals.
 var perfTriggers = map[Trigger]bool{
 	TriggerCPUWarning:         true,
@@ -387,6 +412,21 @@ var perfTriggers = map[Trigger]bool{
 // isRepeatTrigger returns true for triggers that use per-target repeat intervals.
 func isRepeatTrigger(t Trigger) bool {
 	return t == TriggerAlert || t == TriggerSessionWarning || perfTriggers[t]
+}
+
+// subordinateTrigger returns the lower-severity trigger that should be
+// suppressed when a critical trigger fires (e.g. cpu_critical suppresses
+// cpu_warning). Returns "" when there is no subordinate.
+func subordinateTrigger(t Trigger) Trigger {
+	switch t {
+	case TriggerCPUCritical:
+		return TriggerCPUWarning
+	case TriggerMemoryCritical:
+		return TriggerMemoryWarning
+	case TriggerInputDelayCritical:
+		return TriggerInputDelayWarning
+	}
+	return ""
 }
 
 // getLastSent returns the last time a notification was sent for a given target+trigger.
@@ -416,24 +456,5 @@ func setLastSent(state *NotifyState, url string, trigger Trigger, t time.Time) {
 			state.LastPerfNotify[url] = make(map[Trigger]time.Time)
 		}
 		state.LastPerfNotify[url][trigger] = t
-	}
-}
-
-// ResetPerfCooldown clears per-target cooldown entries for all performance
-// triggers that are no longer active.
-func ResetPerfCooldown(state *NotifyState, activeTriggers []Trigger) {
-	active := make(map[Trigger]bool, len(activeTriggers))
-	for _, t := range activeTriggers {
-		active[t] = true
-	}
-	for url, m := range state.LastPerfNotify {
-		for t := range m {
-			if !active[t] {
-				delete(m, t)
-			}
-		}
-		if len(m) == 0 {
-			delete(state.LastPerfNotify, url)
-		}
 	}
 }
