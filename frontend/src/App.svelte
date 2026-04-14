@@ -500,6 +500,32 @@
         const interval = setInterval(refresh, 30_000);
         return () => clearInterval(interval);
     });
+
+    // SSE: real-time event stream — supplements polling with instant updates.
+    // EventSource auto-reconnects on network errors (~3s default retry).
+    $effect(() => {
+        if (!authState.username) return;
+
+        const es = new EventSource('/api/v1/events');
+
+        es.onmessage = (e) => {
+            try {
+                const event = JSON.parse(e.data);
+                if (event.type === 'server_update' && event.host && event.data) {
+                    appState.handleSSEServerUpdate(event.host, event.data);
+                } else if (event.type === 'settings_update' && event.data) {
+                    appState.config = event.data;
+                }
+            } catch { /* ignore malformed events */ }
+        };
+
+        es.onerror = () => {
+            // EventSource auto-reconnects. If the session expired,
+            // the next poll will catch the 401 and clear auth.
+        };
+
+        return () => es.close();
+    });
 </script>
 
 {#if authState.loading}
