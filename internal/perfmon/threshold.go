@@ -19,13 +19,15 @@ type PerfTriggerState struct {
 }
 
 // ConsecutiveThreshold is the number of consecutive polls required before
-// CPU and memory triggers fire (to avoid flapping).
-const ConsecutiveThreshold = 5
+// CPU and memory triggers fire (to avoid flapping). At the default 60s
+// poll interval, 2 polls = 2 minutes of sustained breach.
+const ConsecutiveThreshold = 2
 
 // InputDelayConsecutiveThreshold is the number of consecutive polls required
 // before input delay triggers fire. Input delay is inherently volatile, so
-// a higher threshold prevents noise from borderline values (~5 min at 30s polls).
-const InputDelayConsecutiveThreshold = 10
+// a slightly higher threshold filters transient spikes. At the default 60s
+// poll interval, 3 polls = 3 minutes.
+const InputDelayConsecutiveThreshold = 3
 
 // EvaluateThresholds checks the PerfSnapshot against configured thresholds
 // and returns the set of triggers that should fire.
