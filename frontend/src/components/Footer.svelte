@@ -152,10 +152,10 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--color-muted);
-        padding: 3px 9px;
+        padding: 3px 10px;
         border-radius: var(--radius-default);
         background: var(--color-card);
-        border: 2.5px solid var(--color-border);
+        border: var(--spacing-bw) solid var(--color-border);
         box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
@@ -195,20 +195,18 @@
         border-radius: var(--radius-default);
         text-transform: uppercase;
         letter-spacing: 0.1em;
+        border: var(--spacing-bw) solid var(--color-border);
+        box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
     .connected {
         background: var(--color-green);
         color: #fff;
-        border: var(--spacing-bw) solid var(--color-border);
-        box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
     .disconnected {
         background: var(--color-red);
         color: #fff;
-        border: var(--spacing-bw) solid var(--color-border);
-        box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
     .footer-updated {
