@@ -36,14 +36,17 @@ const BASE = '/api/v1';
  * @property {string} host
  * @property {'ok'|'grace'|'alert'|'off'} status
  * @property {string} drain_mode
- * @property {number} sessions             - TotalSessions (integer)
- * @property {number} max_sessions         - Server session capacity (0 when unknown)
+ * @property {number} sessions                 - TotalSessions (integer)
+ * @property {number} sessions_active          - Active (connected) sessions
+ * @property {number} sessions_disconnected    - Disconnected sessions
+ * @property {number} max_sessions             - Server session capacity (0 when unknown)
+ * @property {number|null} state_duration_seconds - Seconds in current state (null when unknown)
  * @property {string} version
  * @property {string} registered_at
  * @property {string} last_seen
  * @property {string|null} grace_deadline
  * @property {string} changed_by
- * @property {PerfMetrics|null} perf       - null when performance monitoring is disabled
+ * @property {PerfMetrics|null} perf           - null when performance monitoring is disabled
  */
 
 /**
@@ -204,16 +207,6 @@ export async function fetchHealth() {
 export async function fetchServers() {
     const res = await apiFetch('/servers');
     return /** @type {Server[]} */ (await res.json());
-}
-
-/**
- * GET /api/v1/servers/{host}
- * @param {string} host
- * @returns {Promise<Server>}
- */
-export async function fetchServer(host) {
-    const res = await apiFetch(`/servers/${encodeURIComponent(host)}`);
-    return /** @type {Server} */ (await res.json());
 }
 
 /**

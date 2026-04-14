@@ -330,8 +330,9 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 		}
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	case TriggerMemoryWarning, TriggerMemoryCritical:
-		if result.Performance != nil {
-			return fmt.Sprintf("%s \u2014 Available memory %.0f MB", host, result.Performance.MemAvailMB)
+		if result.Performance != nil && result.Performance.MemTotalMB > 0 {
+			usedPct := (1 - result.Performance.MemAvailMB/result.Performance.MemTotalMB) * 100
+			return fmt.Sprintf("%s \u2014 Memory at %.0f%%", host, usedPct)
 		}
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	case TriggerInputDelayWarning, TriggerInputDelayCritical:

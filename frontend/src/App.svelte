@@ -15,6 +15,7 @@
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchNotifyConfig, fetchAllServerMetrics } from './lib/api.js';
     import { authState, probeNegotiate, loginWithCredentials } from './lib/auth.svelte.js';
+    import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
 
     import Nav from './components/Nav.svelte';
     import Login from './components/Login.svelte';
@@ -44,11 +45,8 @@
     // State transition tracking — detect status changes between refresh cycles
     // ---------------------------------------------------------------------------
 
-    /** Previous server statuses keyed by hostname. Populated after first refresh. */
+    /** Previous server statuses keyed by hostname. Empty on first refresh → all servers emit "registered". */
     const prevStates = /** @type {Map<string, string>} */ (new Map());
-    /** True after the first successful refresh completes. */
-    let hasRefreshed = false;
-
     /** @param {'ok'|'grace'|'alert'|'off'} s @returns {string} */
     function statusLabel(s) {
         return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
@@ -69,16 +67,37 @@
      * Build a rich structured event object for a per-server state transition.
      * Embeds the server's current drain state, perf metrics, and session counts
      * so EventLog can render a detailed snapshot inline.
+     *
+     * Event severity is promoted beyond the drain-state severity when perf
+     * metrics exceed configured thresholds — a "Healthy" drain state with
+     * critical CPU should not render as a green "everything is fine" event.
      * @param {string} time
      * @param {import('./lib/api.js').Server} sv
      * @param {string} text
      * @param {'ok'|'grace'|'alert'|'off'} sev
      */
     function serverEvent(time, sv, text, sev) {
-        const memFreePct =
+        const memUsedPct =
             sv.perf && sv.perf.mem_total_mb > 0
-                ? Math.round((sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100)
+                ? Math.round(((sv.perf.mem_total_mb - sv.perf.mem_avail_mb) / sv.perf.mem_total_mb) * 100)
                 : null;
+
+        // Promote event severity when perf metrics exceed thresholds.
+        if (sv.perf) {
+            const perfCfg = appState.config?.performance ?? null;
+            const checks = /** @type {[number|null, string][]} */ ([
+                [sv.perf.cpu_pct, 'cpu'],
+                [memUsedPct, 'mem'],
+                [sv.perf.input_delay_p95_ms, 'inputDelay'],
+            ]);
+            for (const [val, key] of checks) {
+                const t = resolveThresholds(/** @type {any} */ (key), perfCfg);
+                const color = getThresholdColor(val, t.warn, t.crit);
+                if (color === 'red') sev = 'alert';
+                else if (color === 'amber' && sev !== 'alert') sev = 'grace';
+            }
+        }
+
         return {
             time,
             host: sv.host.split('.')[0],
@@ -93,7 +112,7 @@
             sessions_disconnected: sv.sessions_disconnected ?? 0,
             sessions_max: sv.max_sessions,
             cpu_pct: sv.perf?.cpu_pct ?? null,
-            mem_free_pct: memFreePct,
+            mem_used_pct: memUsedPct,
             input_delay_p95_ms: sv.perf?.input_delay_p95_ms ?? null,
             pages_sec: sv.perf?.pages_sec ?? null,
             tcp_retrans_sec: sv.perf?.tcp_retrans_sec ?? null,
@@ -232,48 +251,47 @@
                 }
             }
 
-            // Detect and log server state transitions (skipped on first refresh so we
-            // don't flood the log with N "registered" lines when the page loads).
+            // Detect and log server state transitions.
+            // On the first refresh prevStates is empty, so every server emits a
+            // "registered" event — giving the user an initial status snapshot.
+            // Subsequent stable cycles emit nothing; transitions are always logged.
             const evtTime = new Date().toLocaleTimeString('en-US', {
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit',
                 hour12: false,
             });
-            if (hasRefreshed) {
-                const seenHosts = new Set((servers || []).map((sv) => sv.host));
-                for (const sv of servers || []) {
-                    const prev = prevStates.get(sv.host);
-                    if (prev === undefined) {
-                        addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, 'ok'));
-                    } else if (prev !== sv.status) {
-                        addEvent(
-                            serverEvent(
-                                evtTime,
-                                sv,
-                                `${statusLabel(prev)} → ${statusLabel(sv.status)}`,
-                                statusSev(sv.status),
-                            ),
-                        );
-                    }
+            const seenHosts = new Set((servers || []).map((sv) => sv.host));
+            for (const sv of servers || []) {
+                const prev = prevStates.get(sv.host);
+                if (prev === undefined) {
+                    addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, statusSev(sv.status)));
+                } else if (prev !== sv.status) {
+                    addEvent(
+                        serverEvent(
+                            evtTime,
+                            sv,
+                            `${statusLabel(prev)} → ${statusLabel(sv.status)}`,
+                            statusSev(sv.status),
+                        ),
+                    );
                 }
-                for (const host of prevStates.keys()) {
-                    if (!seenHosts.has(host)) {
-                        addEvent({
-                            time: evtTime,
-                            host: host.split('.')[0],
-                            text: 'removed from dashboard',
-                            sev: 'alert',
-                            transition: true,
-                            drain_state: 'off',
-                        });
-                    }
+            }
+            for (const host of prevStates.keys()) {
+                if (!seenHosts.has(host)) {
+                    addEvent({
+                        time: evtTime,
+                        host: host.split('.')[0],
+                        text: 'removed from dashboard',
+                        sev: 'alert',
+                        transition: true,
+                        drain_state: 'off',
+                    });
                 }
             }
             // Snapshot for next cycle.
             prevStates.clear();
             for (const sv of servers || []) prevStates.set(sv.host, sv.status);
-            hasRefreshed = true;
 
             // Compute fleet-wide P95 for health metrics — reveals outlier servers that
             // averages would smooth out. CPU and memory stay as averages (capacity planning).
@@ -374,24 +392,8 @@
                 }
             }
 
-            addEvent({
-                time: evtTime,
-                host: '',
-                text: `Refreshed — ${s.length} server(s), ${sessions} session(s)`,
-                sev: 'ok',
-                transition: false,
-                fleet_servers: s.length,
-                fleet_sessions: sessions,
-                fleet_cpu_pct: Math.round(cpu * 10) / 10,
-                fleet_mem_used_pct: Math.round(memPct * 10) / 10,
-                fleet_input_delay_p95: Math.round(inputDelay * 10) / 10,
-                fleet_pages_sec_p95: Math.round(pagesPerSec * 10) / 10,
-                fleet_tcp_retrans_p95: Math.round(tcpRetrans * 10) / 10,
-                fleet_disk_queue_p95: Math.round(diskQueue * 100) / 100,
-            });
         } catch (e) {
             appState.connected = false;
-            console.error('refresh:', e);
             addEvent({
                 time: new Date().toLocaleTimeString('en-US', {
                     hour: '2-digit',
