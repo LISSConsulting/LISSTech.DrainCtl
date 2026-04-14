@@ -87,6 +87,9 @@
             mem_crit: 95,
             delay_warn: 50,
             delay_crit: 100,
+            delay_percentile: 'p95',
+            load_polls: 8,
+            delay_polls: 15,
         },
         {
             level: 2,
@@ -101,6 +104,9 @@
             mem_crit: 90,
             delay_warn: 30,
             delay_crit: 80,
+            delay_percentile: 'p95',
+            load_polls: 5,
+            delay_polls: 10,
         },
         {
             level: 3,
@@ -115,6 +121,9 @@
             mem_crit: 80,
             delay_warn: 15,
             delay_crit: 40,
+            delay_percentile: 'p50',
+            load_polls: 3,
+            delay_polls: 5,
         },
     ];
 
@@ -130,7 +139,10 @@
                 p?.mem_warn_pct === pr.mem_warn &&
                 p?.mem_crit_pct === pr.mem_crit &&
                 p?.input_delay_warn_ms === pr.delay_warn &&
-                p?.input_delay_crit_ms === pr.delay_crit
+                p?.input_delay_crit_ms === pr.delay_crit &&
+                (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
+                (p?.load_consecutive_polls || 5) === pr.load_polls &&
+                (p?.input_delay_consecutive_polls || 10) === pr.delay_polls
             ) {
                 return pr.level;
             }
@@ -150,6 +162,9 @@
             config.performance.mem_crit_pct = preset.mem_crit;
             config.performance.input_delay_warn_ms = preset.delay_warn;
             config.performance.input_delay_crit_ms = preset.delay_crit;
+            config.performance.input_delay_percentile = preset.delay_percentile;
+            config.performance.load_consecutive_polls = preset.load_polls;
+            config.performance.input_delay_consecutive_polls = preset.delay_polls;
         }
     }
 
@@ -446,6 +461,40 @@
                                             />
                                             <span class="settings-num-label threshold-unit">ms</span>
                                         </div>
+                                        <div class="threshold-row" style="margin-top:6px">
+                                            <span class="settings-num-label threshold-lbl">Percentile</span>
+                                            <select class="settings-select" bind:value={config.performance.input_delay_percentile}>
+                                                <option value="p95">P95</option>
+                                                <option value="p50">P50</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-label" style="margin-top:10px">Alert Sensitivity (consecutive polls)</div>
+                                <div class="settings-cfg-grid">
+                                    <div class="threshold-row">
+                                        <span class="settings-num-label threshold-lbl">CPU / Memory</span>
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.load_consecutive_polls}
+                                            min="1"
+                                            max="30"
+                                            placeholder="5"
+                                        />
+                                        <span class="settings-num-label threshold-unit">polls</span>
+                                    </div>
+                                    <div class="threshold-row">
+                                        <span class="settings-num-label threshold-lbl">Input Delay</span>
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.input_delay_consecutive_polls}
+                                            min="1"
+                                            max="60"
+                                            placeholder="10"
+                                        />
+                                        <span class="settings-num-label threshold-unit">polls</span>
                                     </div>
                                 </div>
                                 <label class="settings-check">
@@ -647,6 +696,17 @@
         border: var(--spacing-bw) solid var(--color-border);
         border-radius: var(--radius-default);
         outline: none;
+    }
+    .settings-select {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 7px 10px;
+        background: var(--color-surface);
+        color: var(--color-fg);
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        cursor: pointer;
     }
     .settings-num-label {
         font-size: 0.75rem;
