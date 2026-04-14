@@ -817,6 +817,29 @@ paths:
         "401":
           description: Not authenticated.
 
+  /events:
+    get:
+      tags: [servers]
+      summary: SSE event stream
+      description: |
+        Server-Sent Events stream for real-time dashboard updates. Pushes
+        `server_update` events when agents report and `settings_update` events
+        when configuration changes. Requires a valid session cookie.
+        The browser's `EventSource` handles automatic reconnection.
+      operationId: streamEvents
+      security:
+        - session: []
+      responses:
+        "200":
+          description: SSE stream established.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Newline-delimited SSE messages. Each `data:` line contains a JSON object with `type`, `host` (for server_update), `data`, and `timestamp` fields."
+        "401":
+          description: Not authenticated.
+
   /history/{host}:
     get:
       tags: [history]
