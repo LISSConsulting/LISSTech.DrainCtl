@@ -338,14 +338,14 @@
                         <div class="repeat-pills">
                             {#each GRACE_PRESETS as p}
                                 <button
-                                    class="repeat-pill {config.grace_period === p ? 'active' : ''}"
+                                    class="btn-brutal gp-pill"
+                                    class:active={config.grace_period === p}
                                     onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
                                 >
                             {/each}
                             <button
-                                class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period)
-                                    ? 'active'
-                                    : ''}"
+                                class="btn-brutal gp-pill gp-pill--dashed"
+                                class:active={!GRACE_PRESETS.includes(config.grace_period)}
                                 onclick={() => gracePeriodInput?.focus()}>Custom</button
                             >
                         </div>
@@ -463,10 +463,16 @@
                                         </div>
                                         <div class="threshold-row" style="margin-top:6px">
                                             <span class="settings-num-label threshold-lbl">Percentile</span>
-                                            <select class="settings-select" bind:value={config.performance.input_delay_percentile}>
-                                                <option value="p95">P95</option>
-                                                <option value="p50">P50</option>
-                                            </select>
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p50'}
+                                                onclick={() => config.performance.input_delay_percentile = 'p50'}
+                                            >P50</button>
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p95'}
+                                                onclick={() => config.performance.input_delay_percentile = 'p95'}
+                                            >P95</button>
                                         </div>
                                     </div>
                                 </div>
@@ -696,17 +702,6 @@
         border: var(--spacing-bw) solid var(--color-border);
         border-radius: var(--radius-default);
         outline: none;
-    }
-    .settings-select {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.8rem;
-        font-weight: 600;
-        padding: 7px 10px;
-        background: var(--color-surface);
-        color: var(--color-fg);
-        border: var(--spacing-bw) solid var(--color-border);
-        border-radius: var(--radius-default);
-        cursor: pointer;
     }
     .settings-num-label {
         font-size: 0.75rem;
@@ -941,6 +936,21 @@
         border-color: var(--color-accent);
     }
     .repeat-pill--dashed {
+        border-style: dashed;
+        font-size: 0.7rem;
+    }
+    .gp-pill, .pctl-pill {
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 5px 12px;
+        color: var(--color-muted);
+    }
+    .gp-pill.active, .pctl-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
+    }
+    .gp-pill--dashed {
         border-style: dashed;
         font-size: 0.7rem;
     }
