@@ -1,6 +1,7 @@
 <script>
     import { appState } from '../lib/state.svelte.js';
-    import { Wifi, WifiOff, RefreshCw, Users, BookOpen } from 'lucide-svelte';
+    import { authState } from '../lib/auth.svelte.js';
+    import { Wifi, WifiOff, RefreshCw, Users, BookOpen, User } from 'lucide-svelte';
 
     let { onrefresh } = $props();
 
@@ -18,6 +19,16 @@
     const version = $derived(appState.health?.version ?? '—');
     const sessions = $derived(appState.counters.sessions);
     const servers = $derived(appState.counters.total);
+
+    // Strip DOMAIN\ prefix for display — "CORP\jsmith" → "JSMITH".
+    const displayUser = $derived(
+        authState.username
+            ? (authState.username.includes('\\')
+                ? authState.username.split('\\').pop()
+                : authState.username
+              ).toUpperCase()
+            : null,
+    );
 </script>
 
 <footer class="footer sticky">
@@ -33,6 +44,12 @@
         >
     </div>
     <div class="footer-right">
+        {#if displayUser}
+            <span class="user-pill">
+                <User size={11} strokeWidth={2.4} class="user-icon" />
+                {displayUser}
+            </span>
+        {/if}
         <span class="session-badge">
             <Users size={11} strokeWidth={2.4} />
             <span class="session-count">{sessions.toLocaleString()}</span>
@@ -123,6 +140,23 @@
         display: flex;
         align-items: center;
         gap: 10px;
+    }
+
+    .user-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-muted);
+        padding: 3px 9px;
+        border-radius: var(--radius-default);
+        background: var(--color-card);
+        border: 2.5px solid var(--color-border);
+        box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
     .session-badge {

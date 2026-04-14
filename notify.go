@@ -121,22 +121,12 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 
 		case "ntfy":
 			title := NotificationSubject(result, trigger, changedBy)
-			priority := "default"
-			tags := "white_check_mark"
-			switch result.Status {
-			case "Alert":
-				priority = "high"
-				tags = "warning"
-			case "Grace":
-				tags = "warning"
-			}
+			priority, tags := ntfyStyle(trigger)
 			ntfyMsg := result.Message
 			if trigger == TriggerSessionWarning && result.Sessions != nil {
 				sess := result.Sessions
 				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
 					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
-				priority = "default"
-				tags = "busts_in_silhouette"
 			}
 			if err := sendNtfy(target.URL, title, ntfyMsg, priority, tags); err != nil {
 				slog.Warn("ntfy notification failed", "error", err, "url", target.URL)
@@ -384,6 +374,23 @@ func sendNtfy(url string, title string, message string, priority string, tags st
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// ntfyStyle returns the ntfy priority and tags emoji for a given trigger.
+func ntfyStyle(trigger Trigger) (priority, tags string) {
+	switch trigger {
+	case TriggerAlert, TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
+		return "high", "warning"
+	case TriggerGraceEntered, TriggerCPUWarning, TriggerMemoryWarning,
+		TriggerInputDelayWarning, TriggerSessionWarning:
+		return "default", "warning"
+	case TriggerDrainOn:
+		return "default", "no_entry"
+	case TriggerDrainOff, TriggerHealthy:
+		return "default", "white_check_mark"
+	default:
+		return "default", "white_check_mark"
+	}
 }
 
 // perfTriggers is the set of performance-related triggers that use repeat intervals.

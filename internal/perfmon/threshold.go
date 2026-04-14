@@ -95,9 +95,9 @@ func TriggerMessage(trigger dc.Trigger, snap *dc.PerfSnapshot, cfg dc.Performanc
 	case dc.TriggerCPUCritical:
 		return fmt.Sprintf("CPU at %.0f%% (critical threshold: %d%%)", snap.CPUPct, resolveThreshold(cfg.CPUCritPct, 85))
 	case dc.TriggerMemoryWarning:
-		return fmt.Sprintf("Available memory %.0f MB (%.0f%% free, threshold: %d%% free)", snap.MemAvailMB, memFreePercent(snap), resolveThreshold(cfg.MemWarnPct, 20))
+		return fmt.Sprintf("Memory at %.0f%% (threshold: %d%%)", memUsedPercent(snap), 100-resolveThreshold(cfg.MemWarnPct, 20))
 	case dc.TriggerMemoryCritical:
-		return fmt.Sprintf("Available memory %.0f MB (%.0f%% free, critical threshold: %d%% free)", snap.MemAvailMB, memFreePercent(snap), resolveThreshold(cfg.MemCritPct, 10))
+		return fmt.Sprintf("Memory at %.0f%% (critical threshold: %d%%)", memUsedPercent(snap), 100-resolveThreshold(cfg.MemCritPct, 10))
 	case dc.TriggerInputDelayWarning:
 		return fmt.Sprintf("Input delay P95 %.0fms (threshold: %dms)", snap.InputDelayP95, resolveThreshold(cfg.InputDelayWarnMS, 50))
 	case dc.TriggerInputDelayCritical:
@@ -125,4 +125,9 @@ func memFreePercent(snap *dc.PerfSnapshot) float64 {
 		return 100 // can't determine — assume healthy
 	}
 	return (snap.MemAvailMB / snap.MemTotalMB) * 100
+}
+
+// memUsedPercent returns the percentage of total memory that is in use.
+func memUsedPercent(snap *dc.PerfSnapshot) float64 {
+	return 100 - memFreePercent(snap)
 }

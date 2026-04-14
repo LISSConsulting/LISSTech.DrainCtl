@@ -266,6 +266,25 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	mux.Handle("POST /api/v1/auth/login", authRLW(handleLogin(ds.sessionStore, cfg.Group)))
 	mux.Handle("POST /api/v1/auth/logout", rlw(handleLogout(ds.sessionStore)))
 
+	// GET /api/v1/me: lightweight session probe used on page load to restore an
+	// existing authenticated session without triggering a new Negotiate handshake.
+	// Returns {"user":"…"} with a valid session cookie; plain 401 otherwise.
+	// Must NOT set WWW-Authenticate — this endpoint is plain-fetch only.
+	mux.Handle("GET /api/v1/me", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("drainctl_session")
+		if err != nil || cookie.Value == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		sess := ds.sessionStore.Get(cookie.Value)
+		if sess == nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"user": sess.Username})
+	})))
+
 	// Management / UI routes — require a valid dashboard session cookie.
 	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
 	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
