@@ -155,6 +155,7 @@ const persistRfxAvailable = debounce((v) => {
  * @typedef {Object} MetricsSample
  * @property {number} time         - Unix timestamp (ms)
  * @property {number} cpu          - Average CPU % across all servers with perf data
+ * @property {number} [cpuP95]     - P95 CPU % across all servers with perf data
  * @property {number} mem          - Average memory used % across all servers with perf data
  * @property {number} inputDelay   - P95 input delay across fleet (ms)
  * @property {number} sessions     - Total sessions across all servers

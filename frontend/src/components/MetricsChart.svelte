@@ -27,8 +27,9 @@
     let showSessionHelp = $state(false);
     let showRfxHelp = $state(false);
 
-    // ── Upper chart (LOAD): CPU %, Memory %, Sessions ────────────────────────
+    // ── Upper chart (LOAD): CPU %, CPU P95, Memory %, Sessions ────────────────
     let showCpu = $state(true);
+    let showCpuP95 = $state(false);
     let showMem = $state(true);
     let showSessions = $state(true);
 
@@ -42,6 +43,17 @@
             show: () => showCpu,
             toggle: () => {
                 showCpu = !showCpu;
+            },
+        },
+        {
+            key: 'cpuP95',
+            label: 'CPU P95',
+            color: 'var(--color-amber)',
+            axis: 'left',
+            lineOnly: true,
+            show: () => showCpuP95,
+            toggle: () => {
+                showCpuP95 = !showCpuP95;
             },
         },
         {
@@ -140,10 +152,12 @@
             i,
             time: h.time,
             cpu: Math.min(h.cpu ?? 0, 100),
+            cpuP95: Math.min(h.cpuP95 ?? h.cpu ?? 0, 100),
             mem: Math.min(h.mem ?? 0, 100),
             sessions: ((h.sessions ?? 0) / sessionMax) * 100,
             raw: {
                 cpu: +(h.cpu ?? 0).toFixed(1),
+                cpuP95: +(h.cpuP95 ?? h.cpu ?? 0).toFixed(1),
                 mem: +(h.mem ?? 0).toFixed(1),
                 sessions: h.sessions ?? 0,
             },
@@ -162,6 +176,7 @@
 
     let loadVisible = $derived({
         cpu: showCpu,
+        cpuP95: showCpuP95,
         mem: showMem,
         sessions: showSessions,
     });
@@ -178,6 +193,13 @@
             color: 'var(--color-accent)',
             icon: Cpu,
             show: () => showCpu,
+        },
+        {
+            label: 'CPU P95',
+            value: displayPoint ? `${(+(displayPoint.cpuP95 ?? displayPoint.cpu)).toFixed(1)}%` : '—',
+            color: 'var(--color-amber)',
+            icon: Cpu,
+            show: () => showCpuP95,
         },
         {
             label: 'MEM',

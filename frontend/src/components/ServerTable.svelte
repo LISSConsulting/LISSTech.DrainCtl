@@ -418,8 +418,8 @@
             </table>
         </div>
 
-        {#if totalPages > 1}
-            <div class="pager">
+        <div class="pager">
+            {#if totalPages > 1}
                 <button
                     class="pager-btn btn-brutal"
                     disabled={page === 0}
@@ -433,15 +433,15 @@
                     disabled={page >= totalPages - 1}
                     onclick={() => page++}>Next →</button
                 >
-                {#each PAGE_SIZES as sz}
-                    <button
-                        class="btn-brutal pager-pill"
-                        class:active={pageSize === sz}
-                        onclick={() => { pageSize = sz; page = 0; }}
-                    >{sz}</button>
-                {/each}
-            </div>
-        {/if}
+            {/if}
+            {#each PAGE_SIZES as sz}
+                <button
+                    class="btn-brutal pager-pill"
+                    class:active={pageSize === sz}
+                    onclick={() => { pageSize = sz; page = 0; }}
+                >{sz}</button>
+            {/each}
+        </div>
     {/if}
 </div>
 
