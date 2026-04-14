@@ -28,13 +28,17 @@ const (
 	DefaultRetentionDays          = 90
 	MaxRetentionDays              = 365
 	MinRetentionDays              = 1
-	DefaultPollInterval           = 300   // seconds
+	DefaultPollInterval           = 60    // seconds
 	MaxPollInterval               = 86400 // seconds (1 day)
 	DefaultDashboardPort          = 49470
 	DefaultDashboardGroup         = "Domain Admins"
 	DefaultDashboardFetchInterval = 300 // seconds (5 minutes)
 
 	DefaultSessionWarningThreshold = 80 // percent
+
+	DefaultSampleInterval             = 30 // seconds
+	DefaultLoadConsecutivePolls       = 2  // CPU/memory consecutive polls before trigger fires
+	DefaultInputDelayConsecutivePolls = 3  // input delay consecutive polls before trigger fires
 
 	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
 	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server
@@ -113,17 +117,20 @@ func (t NotificationTarget) HasTrigger(trigger Trigger) bool {
 
 // PerformanceConfig holds performance monitoring settings.
 type PerformanceConfig struct {
-	Enabled           bool `json:"enabled"`             // default: false
-	ForceDisabled     bool `json:"force_disabled"`      // when true, dashboard cannot enable perf on this server
-	CPUWarnPct        int  `json:"cpu_warn_pct"`        // default: 70, -1=disabled
-	CPUCritPct        int  `json:"cpu_crit_pct"`        // default: 85, -1=disabled
-	MemWarnPct        int  `json:"mem_warn_pct"`        // default: 20 (% free), -1=disabled
-	MemCritPct        int  `json:"mem_crit_pct"`        // default: 10 (% free), -1=disabled
-	InputDelayWarnMS  int  `json:"input_delay_warn_ms"` // default: 50, -1=disabled
-	InputDelayCritMS  int  `json:"input_delay_crit_ms"` // default: 100, -1=disabled
-	CollectRemoteFX   bool `json:"collect_remotefx"`    // default: false
-	CollectPerSession bool `json:"collect_per_session"` // default: true
-	SampleIntervalSec int  `json:"sample_interval_sec"` // default: 30, range 10–300
+	Enabled                    bool   `json:"enabled"`                          // default: false
+	ForceDisabled              bool   `json:"force_disabled"`                   // when true, dashboard cannot enable perf on this server
+	CPUWarnPct                 int    `json:"cpu_warn_pct"`                     // default: 70, -1=disabled
+	CPUCritPct                 int    `json:"cpu_crit_pct"`                     // default: 85, -1=disabled
+	MemWarnPct                 int    `json:"mem_warn_pct"`                     // default: 20 (% free), -1=disabled
+	MemCritPct                 int    `json:"mem_crit_pct"`                     // default: 10 (% free), -1=disabled
+	InputDelayWarnMS           int    `json:"input_delay_warn_ms"`              // default: 50, -1=disabled
+	InputDelayCritMS           int    `json:"input_delay_crit_ms"`              // default: 100, -1=disabled
+	InputDelayPercentile       string `json:"input_delay_percentile,omitempty"` // "p50" or "p95" (default: "p95")
+	ConsecutivePolls           int    `json:"load_consecutive_polls"`           // CPU/memory trigger threshold (default: 5)
+	InputDelayConsecutivePolls int    `json:"input_delay_consecutive_polls"`    // input delay trigger threshold (default: 10)
+	CollectRemoteFX            bool   `json:"collect_remotefx"`                 // default: false
+	CollectPerSession          bool   `json:"collect_per_session"`              // default: true
+	SampleIntervalSec          int    `json:"sample_interval_sec"`              // default: 30, range 10–300
 }
 
 // Config is the top-level config file structure (config.json).
@@ -304,6 +311,30 @@ func (c *Config) Validate() {
 	if c.MemoryLimitMB > MaxMemoryLimitMB {
 		slog.Default().Warn("memory limit exceeds maximum, clamping", "requested", c.MemoryLimitMB, "max", MaxMemoryLimitMB)
 		c.MemoryLimitMB = MaxMemoryLimitMB
+	}
+
+	// Normalize input delay percentile.
+	switch strings.ToLower(c.Performance.InputDelayPercentile) {
+	case "p50":
+		c.Performance.InputDelayPercentile = "p50"
+	case "p95", "":
+		c.Performance.InputDelayPercentile = "p95"
+	default:
+		slog.Default().Warn("invalid input_delay_percentile, defaulting to p95",
+			"value", c.Performance.InputDelayPercentile)
+		c.Performance.InputDelayPercentile = "p95"
+	}
+
+	// Populate zero-value performance fields with their effective defaults
+	// so the config file is self-documenting after normalization.
+	if c.Performance.ConsecutivePolls == 0 {
+		c.Performance.ConsecutivePolls = DefaultLoadConsecutivePolls
+	}
+	if c.Performance.InputDelayConsecutivePolls == 0 {
+		c.Performance.InputDelayConsecutivePolls = DefaultInputDelayConsecutivePolls
+	}
+	if c.Performance.SampleIntervalSec == 0 {
+		c.Performance.SampleIntervalSec = DefaultSampleInterval
 	}
 
 	// Strip notification targets with unknown types (must be "webhook" or "ntfy").
@@ -586,7 +617,7 @@ func UpdatePerformanceConfig(perf PerformanceConfig) error {
 // UpdateNotifySettings atomically updates notification targets, session warning
 // threshold, and/or grace period in a single config load+save cycle.
 // Any nil argument is left unchanged. This is the preferred API for the
-// dashboard PUT /api/v1/notify-config handler.
+// dashboard PUT /api/v1/settings handler.
 func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int) error {
 	cfg, err := LoadConfig()
 	if err != nil {

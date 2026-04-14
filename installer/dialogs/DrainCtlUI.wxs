@@ -5,8 +5,14 @@ First-time install dialog sequence:
  - WixUI_LicenseAgreementDlg
  - InstallModeDlg          (choose standalone / dashboard / registration)
  - ModeConfigDlg            (mode-specific fields; skipped for standalone)
+ - MonitoringDlg            (grace period, poll interval, threshold, perf)
+ - NotificationsDlg         (webhook URL, ntfy URL)
  - WixUI_VerifyReadyDlg
  - WixUI_DiskCostDlg
+
+Upgrade dialog sequence (WIX_UPGRADE_DETECTED):
+ - WixUI_WelcomeDlg → WixUI_VerifyReadyDlg
+ Config dialogs skipped; existing config.json + servers.json preserved.
 
 Maintenance dialog sequence:
  - WixUI_MaintenanceWelcomeDlg
@@ -43,13 +49,17 @@ Maintenance dialog sequence:
       <DialogRef Id="ProgressDlg" />
       <DialogRef Id="ResumeDlg" />
       <DialogRef Id="UserExit" />
+      <DialogRef Id="MonitoringDlg" />
+      <DialogRef Id="NotificationsDlg" />
 
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return"
         Order="999" />
 
-      <!-- Welcome → License -->
+      <!-- Welcome → License (first install) or VerifyReady (upgrade/patch) -->
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
-        Value="LicenseAgreementDlg" Condition="NOT Installed" />
+        Value="LicenseAgreementDlg" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+        Value="VerifyReadyDlg" Condition="WIX_UPGRADE_DETECTED" />
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
         Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
 
@@ -59,7 +69,7 @@ Maintenance dialog sequence:
       <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
         Value="InstallModeDlg" Condition="LicenseAccepted = &quot;1&quot;" />
 
-      <!-- InstallMode → mode-specific config or VerifyReady -->
+      <!-- InstallMode → mode-specific config or MonitoringDlg -->
       <Publish Dialog="InstallModeDlg" Control="Back" Event="NewDialog"
         Value="LicenseAgreementDlg" />
       <Publish Dialog="InstallModeDlg" Control="Next" Event="NewDialog"
@@ -69,36 +79,52 @@ Maintenance dialog sequence:
         Value="RegistrationConfigDlg" Order="2"
         Condition="INSTALL_MODE = &quot;registration&quot;" />
       <Publish Dialog="InstallModeDlg" Control="Next" Event="NewDialog"
-        Value="VerifyReadyDlg" Order="3"
+        Value="MonitoringDlg" Order="3"
         Condition="INSTALL_MODE = &quot;standalone&quot;" />
 
-      <!-- DashboardConfig → VerifyReady -->
+      <!-- DashboardConfig → MonitoringDlg -->
       <Publish Dialog="DashboardConfigDlg" Control="Back" Event="NewDialog"
         Value="InstallModeDlg" />
       <Publish Dialog="DashboardConfigDlg" Control="Next" Event="NewDialog"
-        Value="VerifyReadyDlg" />
+        Value="MonitoringDlg" />
 
-      <!-- RegistrationConfig → VerifyReady -->
+      <!-- RegistrationConfig → MonitoringDlg -->
       <Publish Dialog="RegistrationConfigDlg" Control="Back" Event="NewDialog"
         Value="InstallModeDlg" />
       <Publish Dialog="RegistrationConfigDlg" Control="Next" Event="NewDialog"
+        Value="MonitoringDlg" />
+
+      <!-- MonitoringDlg: Back depends on mode, Next → NotificationsDlg -->
+      <Publish Dialog="MonitoringDlg" Control="Back" Event="NewDialog"
+        Value="DashboardConfigDlg" Order="1"
+        Condition="INSTALL_MODE = &quot;dashboard&quot;" />
+      <Publish Dialog="MonitoringDlg" Control="Back" Event="NewDialog"
+        Value="RegistrationConfigDlg" Order="2"
+        Condition="INSTALL_MODE = &quot;registration&quot;" />
+      <Publish Dialog="MonitoringDlg" Control="Back" Event="NewDialog"
+        Value="InstallModeDlg" Order="3"
+        Condition="INSTALL_MODE = &quot;standalone&quot;" />
+      <Publish Dialog="MonitoringDlg" Control="Next" Event="NewDialog"
+        Value="NotificationsDlg" />
+
+      <!-- NotificationsDlg: Back → MonitoringDlg, Next → VerifyReady -->
+      <Publish Dialog="NotificationsDlg" Control="Back" Event="NewDialog"
+        Value="MonitoringDlg" />
+      <Publish Dialog="NotificationsDlg" Control="Next" Event="NewDialog"
         Value="VerifyReadyDlg" />
 
-      <!-- VerifyReady Back: depends on mode -->
+      <!-- VerifyReady Back: first-install → NotificationsDlg, upgrade → Welcome -->
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="DashboardConfigDlg" Order="1"
-        Condition="NOT Installed AND INSTALL_MODE = &quot;dashboard&quot;" />
+        Value="NotificationsDlg" Order="1"
+        Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="RegistrationConfigDlg" Order="2"
-        Condition="NOT Installed AND INSTALL_MODE = &quot;registration&quot;" />
+        Value="WelcomeDlg" Order="2"
+        Condition="WIX_UPGRADE_DETECTED" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="InstallModeDlg" Order="3"
-        Condition="NOT Installed AND INSTALL_MODE = &quot;standalone&quot;" />
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="MaintenanceTypeDlg" Order="4"
+        Value="MaintenanceTypeDlg" Order="3"
         Condition="Installed AND NOT PATCH" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="WelcomeDlg" Order="5"
+        Value="WelcomeDlg" Order="4"
         Condition="Installed AND PATCH" />
 
       <!-- Maintenance -->

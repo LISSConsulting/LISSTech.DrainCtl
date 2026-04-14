@@ -1,6 +1,7 @@
 <script>
     import { appState } from '../lib/state.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
+    import { authState, logout } from '../lib/auth.svelte.js';
     import { LayoutDashboard, Server, ScrollText, Sun, Moon } from 'lucide-svelte';
 
     /** @type {{ onconfigopen: () => void }} */
@@ -27,6 +28,7 @@
         <div class="nav-right">
             <span class="mono status-counts">
                 <span class="g">{counters.ok}</span> ok ·
+                <span class="w">{counters.warning}</span> warn ·
                 <span class="w">{counters.grace}</span> grace ·
                 <span class="a">{counters.alert}</span> alert ·
                 <span class="o">{counters.off}</span> off
@@ -47,6 +49,9 @@
             {/each}
 
             <button class="btn-gear btn-brutal" onclick={onconfigopen}>CONFIG</button>
+            {#if authState.username}
+                <button class="btn-signout btn-brutal" onclick={logout}>SIGN OUT</button>
+            {/if}
             <button
                 class="btn-theme btn-brutal"
                 onclick={toggleTheme}
@@ -164,6 +169,23 @@
 
     .btn-gear:hover {
         color: var(--color-accent);
+    }
+
+    /* ── Sign Out button ──────────────────────────────────────────────────── */
+
+    .btn-signout {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        background: var(--color-card);
+        color: var(--color-muted);
+        padding: 6px 14px;
+    }
+
+    .btn-signout:hover {
+        color: var(--color-red);
     }
 
     /* ── Theme toggle ─────────────────────────────────────────────────────── */

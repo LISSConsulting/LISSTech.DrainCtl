@@ -33,17 +33,20 @@ var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]
 // It unwraps ServerInfo + CheckResult so the frontend never navigates nested
 // last_result fields. Status is normalised to lowercase frontend tokens.
 type ServerView struct {
-	Host          string           `json:"host"`
-	Status        string           `json:"status"` // "ok"/"grace"/"alert"/"off"
-	DrainMode     string           `json:"drain_mode"`
-	Sessions      int              `json:"sessions"`     // TotalSessions; 0 when unknown
-	MaxSessions   int              `json:"max_sessions"` // server capacity; 0 when unknown
-	Version       string           `json:"version"`
-	RegisteredAt  time.Time        `json:"registered_at"`
-	LastSeen      time.Time        `json:"last_seen,omitempty"`
-	ChangedBy     string           `json:"changed_by,omitempty"`
-	GraceDeadline *time.Time       `json:"grace_deadline"`
-	Perf          *dc.PerfSnapshot `json:"perf"`
+	Host                 string           `json:"host"`
+	Status               string           `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode            string           `json:"drain_mode"`
+	Sessions             int              `json:"sessions"`              // TotalSessions; 0 when unknown
+	SessionsActive       int              `json:"sessions_active"`       // connected sessions; 0 when unknown
+	SessionsDisconnected int              `json:"sessions_disconnected"` // disconnected sessions; 0 when unknown
+	MaxSessions          int              `json:"max_sessions"`          // server capacity; 0 when unknown
+	StateDurationSeconds *float64         `json:"state_duration_seconds"`
+	Version              string           `json:"version"`
+	RegisteredAt         time.Time        `json:"registered_at"`
+	LastSeen             time.Time        `json:"last_seen,omitempty"`
+	ChangedBy            string           `json:"changed_by,omitempty"`
+	GraceDeadline        *time.Time       `json:"grace_deadline"`
+	Perf                 *dc.PerfSnapshot `json:"perf"`
 }
 
 // HistoryView is the per-entry shape returned by GET /api/v1/history/{host}.
@@ -64,12 +67,14 @@ type HistoryView struct {
 	Performance          *dc.PerfSnapshot   `json:"performance,omitempty"`
 }
 
-// statusToken converts a CheckResult.Status value ("Healthy"/"Grace"/"Alert")
-// to the lowercase frontend token ("ok"/"grace"/"alert"/"off").
+// statusToken converts a CheckResult.Status value ("Healthy"/"Warning"/"Grace"/"Alert")
+// to the lowercase frontend token ("ok"/"warning"/"grace"/"alert"/"off").
 func statusToken(status string) string {
 	switch status {
 	case "Healthy":
 		return "ok"
+	case "Warning":
+		return "warning"
 	case "Grace":
 		return "grace"
 	case "Alert":
@@ -95,13 +100,20 @@ func toServerView(info ServerInfo) ServerView {
 	if r.Host != "" {
 		v.Host = r.Host
 	}
-	v.Status = statusToken(r.Status)
+	if !info.LastSeen.IsZero() && time.Since(info.LastSeen) > staleThreshold {
+		v.Status = "off"
+	} else {
+		v.Status = statusToken(r.Status)
+	}
 	v.DrainMode = r.DrainModeLabel
 	v.Version = r.Version
 	v.ChangedBy = r.ChangedBy
 	v.Perf = r.Performance
+	v.StateDurationSeconds = r.StateDurationSeconds
 	if r.Sessions != nil {
 		v.Sessions = r.Sessions.TotalSessions
+		v.SessionsActive = r.Sessions.ActiveSessions
+		v.SessionsDisconnected = r.Sessions.DisconnectedSessions
 		v.MaxSessions = r.Sessions.MaxSessions
 	}
 	// GraceDeadline: the moment when the grace window expires.
@@ -169,26 +181,30 @@ var distFS embed.FS
 //go:embed favicon.png
 var faviconPNG []byte
 
+//go:embed openapi.yaml
+var openapiSpec []byte
+
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state       *ServerState
-	cfg         dc.DashboardConfig
-	server      *http.Server
-	fingerprint string // SHA-256 fingerprint of the TLS certificate
+	state        *ServerState
+	cfg          dc.DashboardConfig
+	server       *http.Server
+	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
+	sessionStore *SessionStore // in-memory dashboard session store
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
 	testNotifyFunc func() error
 
-	// testLoadConfigFunc, if non-nil, is called by handleGetNotifyConfig instead
+	// testLoadConfigFunc, if non-nil, is called by handleGetSettings instead
 	// of dc.LoadConfig. Used in tests to avoid filesystem access.
 	testLoadConfigFunc func() (*dc.Config, error)
 
-	// testPutNotifyConfigFunc, if non-nil, is called by handlePutNotifyConfig
+	// testPutSettingsFunc, if non-nil, is called by handlePutSettings
 	// instead of dc.UpdateNotifySettings. Receives the parsed request values;
 	// nil notifications means the field was absent from the request body
 	// (no-op for that field). nil threshold/gracePeriod mean the fields were absent.
-	testPutNotifyConfigFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
+	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -199,8 +215,9 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	state := NewServerState(dataDir)
 
 	ds := &DashboardServer{
-		state: state,
-		cfg:   cfg,
+		state:        state,
+		cfg:          cfg,
+		sessionStore: NewSessionStore(ctx),
 	}
 
 	// Per-IP rate limiter: 10 req/s sustained, burst 60.
@@ -208,36 +225,100 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	// prevents runaway scripts from hammering the public health endpoint.
 	rl := newIPRateLimiter(10, 60)
 
+	// Stricter per-IP rate limiter for credential endpoints: 5 req/min sustained,
+	// burst 3. Limits brute-force to ~300 attempts/hour per IP while allowing
+	// normal use (a human retrying bad credentials a handful of times).
+	authRL := newIPRateLimiter(float64(5)/60, 3)
+
 	mux := http.NewServeMux()
 
-	// wrapAuth/wrapGroup are determined at compile time via build tags.
+	// wrapAuth is determined at compile time via build tags.
 	// Production builds (default) use SSPI Negotiate middleware.
-	// Dev builds (-tags devmode) bypass auth entirely.
+	// SSPI Negotiate auth for agent routes and session-based auth for UI routes.
 	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group) }
-	wg := func(h http.Handler) http.Handler { return wrapGroup(ctx, h, cfg.Group) }
+
+	// requireSession validates the drainctl_session cookie for dashboard routes.
+	// Dev builds treat this as a no-op.
+	rs := requireSession(ds.sessionStore)
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 
 	// Public routes — no authentication required.
 	mux.Handle("GET /api/v1/health", rlw(http.HandlerFunc(ds.handleHealth)))
 
-	// Agent routes — any authenticated domain identity.
-	mux.Handle("POST /api/v1/register", rlw(wa(http.HandlerFunc(ds.handleRegister))))
-	mux.Handle("POST /api/v1/report", rlw(wa(http.HandlerFunc(ds.handleReport))))
+	// Agent routes — SSPI Negotiate authentication restricted to machine accounts.
+	// Human domain accounts are rejected; only COMPUTERNAME$ principals may call these.
+	rma := requireMachineAccount
+	mux.Handle("POST /api/v1/register", rlw(wa(rma(http.HandlerFunc(ds.handleRegister)))))
+	mux.Handle("POST /api/v1/report", rlw(wa(rma(http.HandlerFunc(ds.handleReport)))))
 
-	// Management / UI routes — require group membership.
-	mux.Handle("GET /api/v1/history/{host}", rlw(wg(http.HandlerFunc(ds.handleHistory))))
-	mux.Handle("GET /api/v1/servers", rlw(wg(http.HandlerFunc(ds.handleServers))))
-	mux.Handle("GET /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleGetServer))))
-	mux.Handle("DELETE /api/v1/servers/{host}", rlw(wg(http.HandlerFunc(ds.handleDeleteServer))))
-	mux.Handle("GET /api/v1/notify-config", rlw(wa(http.HandlerFunc(ds.handleGetNotifyConfig))))
-	mux.Handle("PUT /api/v1/notify-config", rlw(wg(http.HandlerFunc(ds.handlePutNotifyConfig))))
-	mux.Handle("POST /api/v1/notify-test", rlw(wg(http.HandlerFunc(ds.handleNotifyTest))))
+	// Auth routes — create and invalidate dashboard sessions.
+	// POST /api/v1/auth/negotiate: short-circuits to 200 for existing valid sessions;
+	// otherwise runs SSPI Negotiate to create a new session.
+	//
+	// NegotiateMiddleware is instantiated once here so its pending-context map
+	// survives across the NTLM multi-leg handshake (Type 1 → Type 2 → Type 3).
+	// Instantiating it inside the handler would create a fresh map per request,
+	// causing the Type 3 lookup to fail with SEC_E_INVALID_TOKEN.
+	negotiateHandler := NegotiateMiddleware(ctx, handleNegotiate(ds.sessionStore, cfg.Group))
+	mux.Handle("POST /api/v1/auth/negotiate", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie("drainctl_session"); err == nil && cookie.Value != "" {
+			if sess := ds.sessionStore.Get(cookie.Value); sess != nil {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"username": sess.Username})
+				return
+			}
+		}
+		negotiateHandler.ServeHTTP(w, r)
+	})))
+	authRLW := func(h http.Handler) http.Handler { return rateLimitMiddleware(authRL, h) }
+	mux.Handle("POST /api/v1/auth/login", authRLW(handleLogin(ds.sessionStore, cfg.Group)))
+	mux.Handle("POST /api/v1/auth/logout", rlw(handleLogout(ds.sessionStore)))
+
+	// GET /api/v1/me: lightweight session probe used on page load to restore an
+	// existing authenticated session without triggering a new Negotiate handshake.
+	// Returns {"user":"…"} with a valid session cookie; plain 401 otherwise.
+	// Must NOT set WWW-Authenticate — this endpoint is plain-fetch only.
+	mux.Handle("GET /api/v1/me", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("drainctl_session")
+		if err != nil || cookie.Value == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		sess := ds.sessionStore.Get(cookie.Value)
+		if sess == nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"user": sess.Username})
+	})))
+
+	// Management / UI routes — require a valid dashboard session cookie.
+	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
+	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
+	mux.Handle("GET /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleGetServer))))
+	mux.Handle("DELETE /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleDeleteServer))))
+	mux.Handle("GET /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handleGetSettings))))
+	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
+	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
+
+	// Agent config pull — machine accounts only. Same data as /settings but
+	// separate route with its own auth model (SSPI machine account, not session).
+	mux.Handle("GET /api/v1/config", rlw(wa(rma(http.HandlerFunc(ds.handleGetSettings)))))
 	mux.Handle("GET /favicon.ico", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(faviconPNG)
 	})))
+
+	// OpenAPI spec and Swagger UI.
+	mux.Handle("GET /api/v1/openapi.yaml", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write(openapiSpec)
+	})))
+	mux.Handle("GET /api/docs", rlw(http.HandlerFunc(handleSwaggerUI)))
 
 	// Hashed static assets from Vite build — immutable caching.
 	assets, _ := fs.Sub(distFS, "dist/assets")
@@ -246,8 +327,27 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		http.FileServerFS(assets).ServeHTTP(w, r)
 	}))))
 
-	registerMockRoute(mux) // no-op in production; serves /mock.js in devmode builds
-	mux.Handle("GET /", rlw(wg(http.HandlerFunc(ds.handleUI))))
+	// Unhashed static files from Vite public/ (logo, images, etc.).
+	// Serves any file with a static extension from the dist root;
+	// everything else falls through to the SPA handler.
+	distRoot, _ := fs.Sub(distFS, "dist")
+	staticFS := http.FileServerFS(distRoot)
+	mux.Handle("GET /{file}", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("file")
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			switch strings.ToLower(name[dot:]) {
+			case ".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp", ".gif", ".webmanifest":
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+				staticFS.ServeHTTP(w, r)
+				return
+			}
+		}
+		ds.handleUI(w, r)
+	})))
+
+	// SPA HTML is served without authentication — the Svelte app handles the
+	// auth flow client-side via POST /api/v1/auth/negotiate and /auth/login.
+	mux.Handle("GET /", rlw(http.HandlerFunc(ds.handleUI)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 
@@ -255,8 +355,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	var tlsCfg *tls.Config
 	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir)
 	if err != nil {
-		slog.Warn("dashboard TLS setup failed, falling back to HTTP", "error", err)
-		tlsCfg = nil
+		return nil, fmt.Errorf("dashboard TLS setup failed: %w", err)
 	}
 
 	// Extract certificate fingerprint for the register response.
@@ -289,6 +388,10 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
+		// Route http.Server internal errors (TLS handshake failures, etc.) through
+		// slog at DEBUG so they land in the DBG ETW channel (off by default) rather
+		// than flowing via log.Default() → slog.LevelInfo → Operational channel.
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
 	}
 
 	// Start serving in background.
@@ -465,8 +568,8 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// handleGetNotifyConfig returns the current notification config as JSON.
-func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.Request) {
+// handleGetSettings returns the current dashboard settings as JSON.
+func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
 	var cfg *dc.Config
 	var err error
 	if ds.testLoadConfigFunc != nil {
@@ -502,11 +605,11 @@ func (ds *DashboardServer) handleGetNotifyConfig(w http.ResponseWriter, _ *http.
 	_ = enc.Encode(out)
 }
 
-// handlePutNotifyConfig accepts JSON and updates notification config atomically.
+// handlePutSettings accepts JSON and updates dashboard settings atomically.
 // All provided fields are written in a single config load+save cycle.
 // Absent fields (not present in the JSON body) are left unchanged; to clear
 // notifications send "notifications": [].
-func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.Request) {
+func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -566,15 +669,15 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 		}
 	}
 
-	if ds.testPutNotifyConfigFunc != nil {
-		if err := ds.testPutNotifyConfigFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
+	if ds.testPutSettingsFunc != nil {
+		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
 			slog.Error("update config failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
 		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
-			slog.Error("update notify settings failed", "error", err)
+			slog.Error("update settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -592,7 +695,7 @@ func (ds *DashboardServer) handlePutNotifyConfig(w http.ResponseWriter, r *http.
 	if auth != nil {
 		user = auth.Username
 	}
-	slog.Info("dashboard=notify-config-updated", slog.Int("event_id", dc.EvtDashboardConfigChange), "user", user)
+	slog.Info("dashboard=settings-updated", slog.Int("event_id", dc.EvtDashboardConfigChange), "user", user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -702,7 +805,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 	servers := ds.state.All()
 	now := time.Now()
 
-	healthy, grace, alerting, unknown, offline := 0, 0, 0, 0, 0
+	healthy, warning, grace, alerting, unknown, offline := 0, 0, 0, 0, 0, 0
 	for _, s := range servers {
 		if s.LastResult == nil {
 			unknown++
@@ -715,6 +818,8 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		switch s.LastResult.Status {
 		case "Healthy":
 			healthy++
+		case "Warning":
+			warning++
 		case "Alert":
 			alerting++
 		case "Grace":
@@ -729,6 +834,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Version  string `json:"version"`
 		Servers  int    `json:"servers"`
 		Healthy  int    `json:"healthy"`
+		Warning  int    `json:"warning"`
 		Grace    int    `json:"grace"`
 		Alerting int    `json:"alerting"`
 		Offline  int    `json:"offline"`
@@ -738,6 +844,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 		Version:  dc.Version,
 		Servers:  len(servers),
 		Healthy:  healthy,
+		Warning:  warning,
 		Grace:    grace,
 		Alerting: alerting,
 		Offline:  offline,
@@ -817,6 +924,43 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	_ = enc.Encode(views)
 }
 
+// handleSwaggerUI serves a minimal HTML page that loads Swagger UI from CDN.
+func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// Relaxed CSP for Swagger UI CDN resources.
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; "+
+			"script-src 'self' https://unpkg.com 'unsafe-inline'; "+
+			"style-src 'self' https://unpkg.com 'unsafe-inline'; "+
+			"img-src 'self' data: https://unpkg.com; "+
+			"connect-src 'self'; "+
+			"font-src https://unpkg.com; "+
+			"frame-ancestors 'self'; "+
+			"base-uri 'self'")
+	_, _ = io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DrainCtl API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/api/v1/openapi.yaml",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout"
+    });
+  </script>
+</body>
+</html>`)
+}
+
 // cspBase is the Content-Security-Policy value applied to all responses.
 // The Vite-bundled SPA uses only 'self' for scripts — no 'unsafe-inline'.
 // handleUI extends cspBase with a per-request nonce for the theme
@@ -840,7 +984,7 @@ const cspHeader = cspBase
 
 // securityMiddleware adds defensive HTTP security headers to all responses.
 // Cache-Control is set to no-store by default so that authenticated API
-// responses (server list, health data, notify config) are never stored in
+// responses (server list, health data, settings) are never stored in
 // browser or intermediate caches. The UI handler overrides this to no-cache,
 // and the favicon handler overrides it to public, max-age=86400.
 func securityMiddleware(next http.Handler) http.Handler {

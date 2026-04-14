@@ -33,23 +33,62 @@ type emailData struct {
 	StatusColor string
 }
 
+// TriggerStatus returns a human-readable status label for a trigger.
+// For perf and session triggers it names the alert ("CPU Warning", "Memory Critical")
+// so consumers don't show a contradictory "Healthy" on a perf notification.
+// For drain-state triggers it returns the drain status as-is.
+func TriggerStatus(drainStatus string, trigger Trigger) string {
+	switch trigger {
+	case TriggerCPUWarning:
+		return "CPU Warning"
+	case TriggerCPUCritical:
+		return "CPU Critical"
+	case TriggerMemoryWarning:
+		return "Memory Warning"
+	case TriggerMemoryCritical:
+		return "Memory Critical"
+	case TriggerInputDelayWarning:
+		return "Input Delay Warning"
+	case TriggerInputDelayCritical:
+		return "Input Delay Critical"
+	case TriggerSessionWarning:
+		return "Session Warning"
+	default:
+		return drainStatus
+	}
+}
+
+// emailStatus returns the status label and badge colour for the email template.
+func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
+	label = TriggerStatus(drainStatus, trigger)
+	// Colours: green (#2d6a4f), amber (#b5651d), red (#c1292e), blue (#4a90d9), grey (#6c757d).
+	switch trigger {
+	case TriggerCPUWarning, TriggerMemoryWarning, TriggerInputDelayWarning, TriggerSessionWarning:
+		return label, "#b5651d"
+	case TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
+		return label, "#c1292e"
+	}
+	switch drainStatus {
+	case "Healthy":
+		return label, "#2d6a4f"
+	case "Grace":
+		return label, "#b5651d"
+	case "Alert":
+		return label, "#c1292e"
+	case "Test":
+		return label, "#4a90d9"
+	default:
+		return label, "#6c757d"
+	}
+}
+
 func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, changedBy string) (string, error) {
 	dur := ""
 	if result.StateDurationSeconds != nil {
 		dur = formatDuration(time.Duration(*result.StateDurationSeconds * float64(time.Second)))
 	}
 
-	statusColor := "#6c757d"
-	switch result.Status {
-	case "Healthy":
-		statusColor = "#2d6a4f"
-	case "Grace":
-		statusColor = "#b5651d"
-	case "Alert":
-		statusColor = "#c1292e"
-	case "Test":
-		statusColor = "#4a90d9"
-	}
+	status, statusColor := emailStatus(result.Status, trigger)
 
 	cb := changedBy
 	if cb == "" {
@@ -60,7 +99,7 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		Subject:     subject,
 		Host:        result.Host,
 		Mode:        result.DrainModeLabel,
-		Status:      result.Status,
+		Status:      status,
 		Duration:    dur,
 		ChangedBy:   cb,
 		Timestamp:   result.Timestamp.Format("2006-01-02 15:04:05 MST"),
