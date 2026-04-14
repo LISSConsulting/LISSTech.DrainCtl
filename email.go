@@ -33,23 +33,51 @@ type emailData struct {
 	StatusColor string
 }
 
+// emailStatus returns the status label and badge colour for the email template.
+// For drain-state triggers the label is the drain status ("Healthy"/"Grace"/"Alert").
+// For perf and session triggers the label names the alert so the badge doesn't
+// show a contradictory green "Healthy" on a memory-critical notification.
+func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
+	// Colours: green (#2d6a4f), amber (#b5651d), red (#c1292e), blue (#4a90d9), grey (#6c757d).
+	switch trigger {
+	case TriggerCPUWarning:
+		return "CPU Warning", "#b5651d"
+	case TriggerCPUCritical:
+		return "CPU Critical", "#c1292e"
+	case TriggerMemoryWarning:
+		return "Memory Warning", "#b5651d"
+	case TriggerMemoryCritical:
+		return "Memory Critical", "#c1292e"
+	case TriggerInputDelayWarning:
+		return "Input Delay Warning", "#b5651d"
+	case TriggerInputDelayCritical:
+		return "Input Delay Critical", "#c1292e"
+	case TriggerSessionWarning:
+		return "Session Warning", "#b5651d"
+	}
+
+	// Drain-state triggers — use the drain status as-is.
+	switch drainStatus {
+	case "Healthy":
+		return drainStatus, "#2d6a4f"
+	case "Grace":
+		return drainStatus, "#b5651d"
+	case "Alert":
+		return drainStatus, "#c1292e"
+	case "Test":
+		return drainStatus, "#4a90d9"
+	default:
+		return drainStatus, "#6c757d"
+	}
+}
+
 func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, changedBy string) (string, error) {
 	dur := ""
 	if result.StateDurationSeconds != nil {
 		dur = formatDuration(time.Duration(*result.StateDurationSeconds * float64(time.Second)))
 	}
 
-	statusColor := "#6c757d"
-	switch result.Status {
-	case "Healthy":
-		statusColor = "#2d6a4f"
-	case "Grace":
-		statusColor = "#b5651d"
-	case "Alert":
-		statusColor = "#c1292e"
-	case "Test":
-		statusColor = "#4a90d9"
-	}
+	status, statusColor := emailStatus(result.Status, trigger)
 
 	cb := changedBy
 	if cb == "" {
@@ -60,7 +88,7 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		Subject:     subject,
 		Host:        result.Host,
 		Mode:        result.DrainModeLabel,
-		Status:      result.Status,
+		Status:      status,
 		Duration:    dur,
 		ChangedBy:   cb,
 		Timestamp:   result.Timestamp.Format("2006-01-02 15:04:05 MST"),
