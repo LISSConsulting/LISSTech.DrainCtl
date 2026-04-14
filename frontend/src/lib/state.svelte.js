@@ -369,19 +369,6 @@ const stateBarSegments = $derived.by(() => {
     ]);
 });
 
-const avgCpu = $derived.by(() => {
-    const perf = servers.map((s) => s.perf).filter((p) => p != null);
-    if (perf.length === 0) return 0;
-    return perf.reduce((sum, p) => sum + (p.cpu_pct || 0), 0) / perf.length;
-});
-
-const avgMem = $derived.by(() => {
-    const perf = servers.map((s) => s.perf).filter((p) => p != null && p.mem_total_mb > 0);
-    if (perf.length === 0) return 0;
-    const usedPcts = perf.map((p) => ((p.mem_total_mb - p.mem_avail_mb) / p.mem_total_mb) * 100);
-    return usedPcts.reduce((sum, v) => sum + v, 0) / usedPcts.length;
-});
-
 /** Return the P95 value from a numeric array. @param {number[]} vals */
 export function deriveP95(vals) {
     if (vals.length === 0) return 0;
@@ -396,28 +383,6 @@ export function deriveP50(vals) {
     const mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
-
-const p95InputDelay = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.input_delay_p95_ms ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95PagesPerSec = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.pages_sec ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95TcpRetrans = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.tcp_retrans_sec ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95DiskQueue = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.disk_queue ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const totalSessions = $derived.by(() => counters.sessions);
 
 // ---------------------------------------------------------------------------
 // Exported state object
@@ -557,27 +522,6 @@ export const appState = {
     },
     get stateBarSegments() {
         return stateBarSegments;
-    },
-    get avgCpu() {
-        return avgCpu;
-    },
-    get avgMem() {
-        return avgMem;
-    },
-    get p95InputDelay() {
-        return p95InputDelay;
-    },
-    get p95PagesPerSec() {
-        return p95PagesPerSec;
-    },
-    get p95TcpRetrans() {
-        return p95TcpRetrans;
-    },
-    get p95DiskQueue() {
-        return p95DiskQueue;
-    },
-    get totalSessions() {
-        return totalSessions;
     },
 };
 

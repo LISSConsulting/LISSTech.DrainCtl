@@ -33,17 +33,20 @@ var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]
 // It unwraps ServerInfo + CheckResult so the frontend never navigates nested
 // last_result fields. Status is normalised to lowercase frontend tokens.
 type ServerView struct {
-	Host          string           `json:"host"`
-	Status        string           `json:"status"` // "ok"/"grace"/"alert"/"off"
-	DrainMode     string           `json:"drain_mode"`
-	Sessions      int              `json:"sessions"`     // TotalSessions; 0 when unknown
-	MaxSessions   int              `json:"max_sessions"` // server capacity; 0 when unknown
-	Version       string           `json:"version"`
-	RegisteredAt  time.Time        `json:"registered_at"`
-	LastSeen      time.Time        `json:"last_seen,omitempty"`
-	ChangedBy     string           `json:"changed_by,omitempty"`
-	GraceDeadline *time.Time       `json:"grace_deadline"`
-	Perf          *dc.PerfSnapshot `json:"perf"`
+	Host                 string           `json:"host"`
+	Status               string           `json:"status"` // "ok"/"grace"/"alert"/"off"
+	DrainMode            string           `json:"drain_mode"`
+	Sessions             int              `json:"sessions"`              // TotalSessions; 0 when unknown
+	SessionsActive       int              `json:"sessions_active"`       // connected sessions; 0 when unknown
+	SessionsDisconnected int              `json:"sessions_disconnected"` // disconnected sessions; 0 when unknown
+	MaxSessions          int              `json:"max_sessions"`          // server capacity; 0 when unknown
+	StateDurationSeconds *float64         `json:"state_duration_seconds"`
+	Version              string           `json:"version"`
+	RegisteredAt         time.Time        `json:"registered_at"`
+	LastSeen             time.Time        `json:"last_seen,omitempty"`
+	ChangedBy            string           `json:"changed_by,omitempty"`
+	GraceDeadline        *time.Time       `json:"grace_deadline"`
+	Perf                 *dc.PerfSnapshot `json:"perf"`
 }
 
 // HistoryView is the per-entry shape returned by GET /api/v1/history/{host}.
@@ -100,8 +103,11 @@ func toServerView(info ServerInfo) ServerView {
 	v.Version = r.Version
 	v.ChangedBy = r.ChangedBy
 	v.Perf = r.Performance
+	v.StateDurationSeconds = r.StateDurationSeconds
 	if r.Sessions != nil {
 		v.Sessions = r.Sessions.TotalSessions
+		v.SessionsActive = r.Sessions.ActiveSessions
+		v.SessionsDisconnected = r.Sessions.DisconnectedSessions
 		v.MaxSessions = r.Sessions.MaxSessions
 	}
 	// GraceDeadline: the moment when the grace window expires.
@@ -210,6 +216,11 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	// prevents runaway scripts from hammering the public health endpoint.
 	rl := newIPRateLimiter(10, 60)
 
+	// Stricter per-IP rate limiter for credential endpoints: 5 req/min sustained,
+	// burst 3. Limits brute-force to ~300 attempts/hour per IP while allowing
+	// normal use (a human retrying bad credentials a handful of times).
+	authRL := newIPRateLimiter(float64(5)/60, 3)
+
 	mux := http.NewServeMux()
 
 	// wrapAuth is determined at compile time via build tags.
@@ -226,13 +237,21 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	// Public routes — no authentication required.
 	mux.Handle("GET /api/v1/health", rlw(http.HandlerFunc(ds.handleHealth)))
 
-	// Agent routes — SSPI Negotiate authentication (machine credentials).
-	mux.Handle("POST /api/v1/register", rlw(wa(http.HandlerFunc(ds.handleRegister))))
-	mux.Handle("POST /api/v1/report", rlw(wa(http.HandlerFunc(ds.handleReport))))
+	// Agent routes — SSPI Negotiate authentication restricted to machine accounts.
+	// Human domain accounts are rejected; only COMPUTERNAME$ principals may call these.
+	rma := requireMachineAccount
+	mux.Handle("POST /api/v1/register", rlw(wa(rma(http.HandlerFunc(ds.handleRegister)))))
+	mux.Handle("POST /api/v1/report", rlw(wa(rma(http.HandlerFunc(ds.handleReport)))))
 
 	// Auth routes — create and invalidate dashboard sessions.
 	// POST /api/v1/auth/negotiate: short-circuits to 200 for existing valid sessions;
 	// otherwise runs SSPI Negotiate to create a new session.
+	//
+	// NegotiateMiddleware is instantiated once here so its pending-context map
+	// survives across the NTLM multi-leg handshake (Type 1 → Type 2 → Type 3).
+	// Instantiating it inside the handler would create a fresh map per request,
+	// causing the Type 3 lookup to fail with SEC_E_INVALID_TOKEN.
+	negotiateHandler := NegotiateMiddleware(ctx, handleNegotiate(ds.sessionStore, cfg.Group))
 	mux.Handle("POST /api/v1/auth/negotiate", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cookie, err := r.Cookie("drainctl_session"); err == nil && cookie.Value != "" {
 			if sess := ds.sessionStore.Get(cookie.Value); sess != nil {
@@ -241,9 +260,10 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 				return
 			}
 		}
-		NegotiateMiddleware(ctx, handleNegotiate(ds.sessionStore, cfg.Group)).ServeHTTP(w, r)
+		negotiateHandler.ServeHTTP(w, r)
 	})))
-	mux.Handle("POST /api/v1/auth/login", rlw(handleLogin(ds.sessionStore, cfg.Group)))
+	authRLW := func(h http.Handler) http.Handler { return rateLimitMiddleware(authRL, h) }
+	mux.Handle("POST /api/v1/auth/login", authRLW(handleLogin(ds.sessionStore, cfg.Group)))
 	mux.Handle("POST /api/v1/auth/logout", rlw(handleLogout(ds.sessionStore)))
 
 	// Management / UI routes — require a valid dashboard session cookie.
@@ -251,7 +271,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
 	mux.Handle("GET /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleGetServer))))
 	mux.Handle("DELETE /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleDeleteServer))))
-	mux.Handle("GET /api/v1/notify-config", rlw(wa(http.HandlerFunc(ds.handleGetNotifyConfig))))
+	mux.Handle("GET /api/v1/notify-config", rlw(rs(http.HandlerFunc(ds.handleGetNotifyConfig))))
 	mux.Handle("PUT /api/v1/notify-config", rlw(rs(http.HandlerFunc(ds.handlePutNotifyConfig))))
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
 	mux.Handle("GET /favicon.ico", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -296,8 +316,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 	var tlsCfg *tls.Config
 	tlsCfg, err := loadOrGenerateTLS(cfg.TLSCert, cfg.TLSKey, dataDir)
 	if err != nil {
-		slog.Warn("dashboard TLS setup failed, falling back to HTTP", "error", err)
-		tlsCfg = nil
+		return nil, fmt.Errorf("dashboard TLS setup failed: %w", err)
 	}
 
 	// Extract certificate fingerprint for the register response.
@@ -330,6 +349,10 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string)
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
+		// Route http.Server internal errors (TLS handshake failures, etc.) through
+		// slog at DEBUG so they land in the DBG ETW channel (off by default) rather
+		// than flowing via log.Default() → slog.LevelInfo → Operational channel.
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
 	}
 
 	// Start serving in background.

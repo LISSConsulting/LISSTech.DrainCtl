@@ -66,15 +66,15 @@ export async function loginWithCredentials(username, password) {
         } else if (res.status === 401 || res.status === 403) {
             try {
                 const body = await res.json();
-                authState.error = body.error ?? 'invalid credentials';
+                authState.error = body.error ?? 'Wrong username or password.';
             } catch {
-                authState.error = 'invalid credentials';
+                authState.error = 'Wrong username or password.';
             }
         } else {
-            authState.error = 'service_unavailable';
+            authState.error = 'Cannot reach the server — check your connection.';
         }
     } catch {
-        authState.error = 'service_unavailable';
+        authState.error = 'Cannot reach the server — check your connection.';
     }
 }
 
