@@ -111,8 +111,8 @@ func DrainCtl_AuditSetup() *C.char {
 	return C.CString(`{"ok":true}`)
 }
 
-//export DrainCtl_GetNotifyConfig
-func DrainCtl_GetNotifyConfig() *C.char {
+//export DrainCtl_GetSettings
+func DrainCtl_GetSettings() *C.char {
 	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
@@ -156,8 +156,8 @@ func DrainCtl_GetNotifyConfig() *C.char {
 	return marshalJSON(out)
 }
 
-//export DrainCtl_SetNotifyConfig
-func DrainCtl_SetNotifyConfig(jsonStr *C.char) *C.char {
+//export DrainCtl_SetSettings
+func DrainCtl_SetSettings(jsonStr *C.char) *C.char {
 	raw := []byte(C.GoString(jsonStr))
 
 	// Peek at keys to auto-detect format.

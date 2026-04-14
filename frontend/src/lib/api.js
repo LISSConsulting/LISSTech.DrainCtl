@@ -34,7 +34,7 @@ const BASE = '/api/v1';
  *
  * @typedef {Object} Server
  * @property {string} host
- * @property {'ok'|'grace'|'alert'|'off'} status
+ * @property {'ok'|'warning'|'grace'|'alert'|'off'} status
  * @property {string} drain_mode
  * @property {number} sessions                 - TotalSessions (integer)
  * @property {number} sessions_active          - Active (connected) sessions
@@ -56,7 +56,7 @@ const BASE = '/api/v1';
  * @typedef {Object} HistoryEntry
  * @property {string} timestamp
  * @property {string} host
- * @property {'ok'|'grace'|'alert'|'off'} status  - lowercase token from the backend
+ * @property {'ok'|'warning'|'grace'|'alert'|'off'} status  - lowercase token from the backend
  * @property {string} drain_mode                   - drain mode label string from the server
  * @property {number|null} [state_duration_seconds]
  * @property {boolean} transition
@@ -95,7 +95,7 @@ const BASE = '/api/v1';
  */
 
 /**
- * @typedef {Object} NotifyConfig
+ * @typedef {Object} Settings
  * @property {number} grace_period              - grace period in minutes
  * @property {number} session_warning_threshold
  * @property {PerfMonitoringConfig} performance
@@ -262,16 +262,16 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Notify config
+// Settings
 // ---------------------------------------------------------------------------
 
 /**
- * GET /api/v1/notify-config
- * @returns {Promise<NotifyConfig>}
+ * GET /api/v1/settings
+ * @returns {Promise<Settings>}
  */
-export async function fetchNotifyConfig() {
-    const res = await apiFetch('/notify-config');
-    const cfg = /** @type {NotifyConfig} */ (await res.json());
+export async function fetchSettings() {
+    const res = await apiFetch('/settings');
+    const cfg = /** @type {Settings} */ (await res.json());
     // Go stores memory thresholds as % free; UI works in % used — always invert on load.
     // 0 means "use default" in Go; inverting it to 100 is harmless (resolveThresholds
     // checks > 0 and falls back to the default, which matches Go's behavior).
@@ -283,20 +283,20 @@ export async function fetchNotifyConfig() {
 }
 
 /**
- * PUT /api/v1/notify-config
+ * PUT /api/v1/settings
  * Returns {ok: true} on success — does NOT return the saved config.
  * Callers should treat the local config as authoritative after a successful save.
- * @param {NotifyConfig} config
+ * @param {Settings} config
  * @returns {Promise<void>}
  */
-export async function saveNotifyConfig(config) {
+export async function saveSettings(config) {
     // Deep-clone to avoid mutating the UI state, then invert mem % used → % free for Go.
     const payload = JSON.parse(JSON.stringify(config));
     if (payload.performance) {
         payload.performance.mem_warn_pct = 100 - (payload.performance.mem_warn_pct ?? 0);
         payload.performance.mem_crit_pct = 100 - (payload.performance.mem_crit_pct ?? 0);
     }
-    await apiFetch('/notify-config', {
+    await apiFetch('/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

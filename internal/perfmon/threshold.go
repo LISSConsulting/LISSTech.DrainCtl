@@ -10,15 +10,22 @@ import (
 
 // PerfTriggerState tracks consecutive-poll state for performance triggers.
 type PerfTriggerState struct {
-	CPUWarnCount int // consecutive polls CPU >= warn threshold
-	CPUCritCount int // consecutive polls CPU >= crit threshold
-	MemWarnCount int // consecutive polls mem <= warn threshold
-	MemCritCount int // consecutive polls mem <= crit threshold
+	CPUWarnCount        int // consecutive polls CPU >= warn threshold
+	CPUCritCount        int // consecutive polls CPU >= crit threshold
+	MemWarnCount        int // consecutive polls mem <= warn threshold
+	MemCritCount        int // consecutive polls mem <= crit threshold
+	InputDelayWarnCount int // consecutive polls input delay >= warn threshold
+	InputDelayCritCount int // consecutive polls input delay >= crit threshold
 }
 
 // ConsecutiveThreshold is the number of consecutive polls required before
 // CPU and memory triggers fire (to avoid flapping).
-const ConsecutiveThreshold = 2
+const ConsecutiveThreshold = 5
+
+// InputDelayConsecutiveThreshold is the number of consecutive polls required
+// before input delay triggers fire. Input delay is inherently volatile, so
+// a higher threshold prevents noise from borderline values (~5 min at 30s polls).
+const InputDelayConsecutiveThreshold = 10
 
 // EvaluateThresholds checks the PerfSnapshot against configured thresholds
 // and returns the set of triggers that should fire.
@@ -27,6 +34,9 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 	if snap == nil {
 		return nil
 	}
+
+	cpuMemPolls := resolveConsecutive(cfg.ConsecutivePolls, ConsecutiveThreshold)
+	idPolls := resolveConsecutive(cfg.InputDelayConsecutivePolls, InputDelayConsecutiveThreshold)
 
 	var triggers []dc.Trigger
 
@@ -45,9 +55,9 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 		state.CPUWarnCount = 0
 	}
 
-	if cpuCrit > 0 && state.CPUCritCount >= ConsecutiveThreshold {
+	if cpuCrit > 0 && state.CPUCritCount >= cpuMemPolls {
 		triggers = append(triggers, dc.TriggerCPUCritical)
-	} else if cpuWarn > 0 && state.CPUWarnCount >= ConsecutiveThreshold {
+	} else if cpuWarn > 0 && state.CPUWarnCount >= cpuMemPolls {
 		triggers = append(triggers, dc.TriggerCPUWarning)
 	}
 
@@ -68,23 +78,45 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 		state.MemWarnCount = 0
 	}
 
-	if memCrit > 0 && state.MemCritCount >= ConsecutiveThreshold {
+	if memCrit > 0 && state.MemCritCount >= cpuMemPolls {
 		triggers = append(triggers, dc.TriggerMemoryCritical)
-	} else if memWarn > 0 && state.MemWarnCount >= ConsecutiveThreshold {
+	} else if memWarn > 0 && state.MemWarnCount >= cpuMemPolls {
 		triggers = append(triggers, dc.TriggerMemoryWarning)
 	}
 
-	// Input delay thresholds (fire on single breach).
+	// Input delay thresholds (require consecutive polls).
 	idWarn := resolveThreshold(cfg.InputDelayWarnMS, 50)
 	idCrit := resolveThreshold(cfg.InputDelayCritMS, 100)
 
-	if idCrit > 0 && snap.InputDelayP95 >= float64(idCrit) {
+	idValue := inputDelayValue(snap, cfg)
+
+	if idCrit > 0 && idValue >= float64(idCrit) {
+		state.InputDelayCritCount++
+		state.InputDelayWarnCount++ // crit implies warn
+	} else if idWarn > 0 && idValue >= float64(idWarn) {
+		state.InputDelayCritCount = 0
+		state.InputDelayWarnCount++
+	} else {
+		state.InputDelayCritCount = 0
+		state.InputDelayWarnCount = 0
+	}
+
+	if idCrit > 0 && state.InputDelayCritCount >= idPolls {
 		triggers = append(triggers, dc.TriggerInputDelayCritical)
-	} else if idWarn > 0 && snap.InputDelayP95 >= float64(idWarn) {
+	} else if idWarn > 0 && state.InputDelayWarnCount >= idPolls {
 		triggers = append(triggers, dc.TriggerInputDelayWarning)
 	}
 
 	return triggers
+}
+
+// resolveConsecutive returns the configured consecutive-poll count,
+// falling back to defVal when configured is 0 (unset).
+func resolveConsecutive(configured, defVal int) int {
+	if configured > 0 {
+		return configured
+	}
+	return defVal
 }
 
 // TriggerMessage returns a human-readable message for a performance trigger.
@@ -99,9 +131,11 @@ func TriggerMessage(trigger dc.Trigger, snap *dc.PerfSnapshot, cfg dc.Performanc
 	case dc.TriggerMemoryCritical:
 		return fmt.Sprintf("Memory at %.0f%% (critical threshold: %d%%)", memUsedPercent(snap), 100-resolveThreshold(cfg.MemCritPct, 10))
 	case dc.TriggerInputDelayWarning:
-		return fmt.Sprintf("Input delay P95 %.0fms (threshold: %dms)", snap.InputDelayP95, resolveThreshold(cfg.InputDelayWarnMS, 50))
+		pct := inputDelayPercentileLabel(cfg)
+		return fmt.Sprintf("Input delay %s %.0fms (threshold: %dms)", pct, inputDelayValue(snap, cfg), resolveThreshold(cfg.InputDelayWarnMS, 50))
 	case dc.TriggerInputDelayCritical:
-		return fmt.Sprintf("Input delay P95 %.0fms (critical threshold: %dms)", snap.InputDelayP95, resolveThreshold(cfg.InputDelayCritMS, 100))
+		pct := inputDelayPercentileLabel(cfg)
+		return fmt.Sprintf("Input delay %s %.0fms (critical threshold: %dms)", pct, inputDelayValue(snap, cfg), resolveThreshold(cfg.InputDelayCritMS, 100))
 	default:
 		return string(trigger)
 	}
@@ -130,4 +164,31 @@ func memFreePercent(snap *dc.PerfSnapshot) float64 {
 // memUsedPercent returns the percentage of total memory that is in use.
 func memUsedPercent(snap *dc.PerfSnapshot) float64 {
 	return 100 - memFreePercent(snap)
+}
+
+// inputDelayValue returns the input delay metric based on the configured percentile.
+func inputDelayValue(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig) float64 {
+	if cfg.InputDelayPercentile == "p50" {
+		return snap.InputDelayP50
+	}
+	return snap.InputDelayP95 // default
+}
+
+// inputDelayPercentileLabel returns a display label for the configured percentile.
+func inputDelayPercentileLabel(cfg dc.PerformanceConfig) string {
+	if cfg.InputDelayPercentile == "p50" {
+		return "P50"
+	}
+	return "P95"
+}
+
+// IsPerfTrigger returns true for performance-related triggers.
+func IsPerfTrigger(t dc.Trigger) bool {
+	switch t {
+	case dc.TriggerCPUWarning, dc.TriggerCPUCritical,
+		dc.TriggerMemoryWarning, dc.TriggerMemoryCritical,
+		dc.TriggerInputDelayWarning, dc.TriggerInputDelayCritical:
+		return true
+	}
+	return false
 }

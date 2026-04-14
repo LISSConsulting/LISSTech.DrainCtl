@@ -81,7 +81,7 @@
      *
      * @param {unknown} raw
      * @returns {{
-     *   time: string, host: string, text: string, sev: 'ok'|'grace'|'alert'|'off',
+     *   time: string, host: string, text: string, sev: 'ok'|'warning'|'grace'|'alert'|'off',
      *   transition: boolean,
      *   drain_state: string|null, drain_mode: string|null,
      *   state_duration_seconds: number|null, changed_by: string,
@@ -133,7 +133,7 @@
         const time = timeMatch ? timeMatch[1] : '';
         const rest = timeMatch ? str.slice(timeMatch[0].length).trim() : str;
 
-        /** @type {'ok'|'grace'|'alert'|'off'} */
+        /** @type {'ok'|'warning'|'grace'|'alert'|'off'} */
         let sev = 'ok';
         if (/fail|error|disconnect/i.test(rest)) sev = 'alert';
         else if (/warn|grace/i.test(rest)) sev = 'grace';

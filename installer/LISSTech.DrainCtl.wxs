@@ -287,11 +287,14 @@
         </Component>
     </Fragment>
 
-    <!-- ── Firewall rule (dashboard mode only) ────────────────────────────── -->
+    <!-- ── Firewall rule ─────────────────────────────────────────────────── -->
+    <!-- Always installed — an allow rule for a closed port is a no-op.
+         Conditional install broke upgrades: INSTALL_MODE defaults to
+         "standalone" and config actions are skipped on upgrade, so the
+         condition evaluated false and the rule was removed. -->
     <Fragment>
         <Component Id="FirewallRule" Directory="BinFolder"
-            Guid="a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6"
-            Condition="INSTALL_MODE = &quot;dashboard&quot;">
+            Guid="a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6">
             <fw:FirewallException Id="DashboardTcpIn"
                 Name="Remote Desktop Drain Monitor (TCP-In)"
                 Scope="any"
