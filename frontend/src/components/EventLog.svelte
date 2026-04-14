@@ -66,9 +66,9 @@
         return sev(pct, cpuT);
     }
 
-    /** @param {number} freePct — percentage FREE (event stores % free) */
-    function memSev(freePct) {
-        return sev(100 - freePct, memT);
+    /** @param {number} usedPct — percentage USED (event stores % used) */
+    function memSev(usedPct) {
+        return sev(usedPct, memT);
     }
 
     /** @param {number} ms */
@@ -81,12 +81,12 @@
      *
      * @param {unknown} raw
      * @returns {{
-     *   time: string, host: string, text: string, sev: 'ok'|'grace'|'alert'|'off',
+     *   time: string, host: string, text: string, sev: 'ok'|'warning'|'grace'|'alert'|'off',
      *   transition: boolean,
      *   drain_state: string|null, drain_mode: string|null,
      *   state_duration_seconds: number|null, changed_by: string,
      *   sessions_active: number|null, sessions_disconnected: number|null, sessions_max: number|null,
-     *   cpu_pct: number|null, mem_free_pct: number|null, input_delay_p95_ms: number|null,
+     *   cpu_pct: number|null, mem_used_pct: number|null, input_delay_p95_ms: number|null,
      *   pages_sec: number|null, tcp_retrans_sec: number|null, disk_queue: number|null,
      *   fleet_servers: number|null, fleet_sessions: number|null,
      *   fleet_cpu_pct: number|null, fleet_mem_used_pct: number|null,
@@ -111,7 +111,7 @@
                 sessions_disconnected: e.sessions_disconnected ?? null,
                 sessions_max: e.sessions_max ?? null,
                 cpu_pct: e.cpu_pct ?? null,
-                mem_free_pct: e.mem_free_pct ?? null,
+                mem_used_pct: e.mem_used_pct ?? null,
                 input_delay_p95_ms: e.input_delay_p95_ms ?? null,
                 pages_sec: e.pages_sec ?? null,
                 tcp_retrans_sec: e.tcp_retrans_sec ?? null,
@@ -133,7 +133,7 @@
         const time = timeMatch ? timeMatch[1] : '';
         const rest = timeMatch ? str.slice(timeMatch[0].length).trim() : str;
 
-        /** @type {'ok'|'grace'|'alert'|'off'} */
+        /** @type {'ok'|'warning'|'grace'|'alert'|'off'} */
         let sev = 'ok';
         if (/fail|error|disconnect/i.test(rest)) sev = 'alert';
         else if (/warn|grace/i.test(rest)) sev = 'grace';
@@ -152,7 +152,7 @@
             sessions_disconnected: null,
             sessions_max: null,
             cpu_pct: null,
-            mem_free_pct: null,
+            mem_used_pct: null,
             input_delay_p95_ms: null,
             pages_sec: null,
             tcp_retrans_sec: null,
@@ -284,10 +284,10 @@
                                         ></span
                                     >
                                 {/if}
-                                {#if evt.mem_free_pct !== null}
+                                {#if evt.mem_used_pct !== null}
                                     <span class="det-kv"
-                                        ><span class="det-k">MEM FREE</span><span
-                                            class="det-v val-{memSev(evt.mem_free_pct)}">{evt.mem_free_pct}%</span
+                                        ><span class="det-k">MEM</span><span
+                                            class="det-v val-{memSev(evt.mem_used_pct)}">{evt.mem_used_pct}%</span
                                         ></span
                                     >
                                 {/if}
@@ -332,8 +332,8 @@
                             >
                             {#if evt.fleet_mem_used_pct !== null}
                                 <span class="det-kv"
-                                    ><span class="det-k">MEM USED</span><span
-                                        class="det-v val-{memSev(100 - evt.fleet_mem_used_pct)}"
+                                    ><span class="det-k">MEM</span><span
+                                        class="det-v val-{memSev(evt.fleet_mem_used_pct)}"
                                         >{evt.fleet_mem_used_pct}%</span
                                     ></span
                                 >

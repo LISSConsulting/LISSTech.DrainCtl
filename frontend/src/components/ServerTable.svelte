@@ -12,12 +12,14 @@
     /** @type {string|null} */
     let confirmRemoveHost = $state(null);
 
-    let expandedHost = $state(null);
+    /** @type {Set<string>} */
+    let expandedHosts = $state(new Set());
     let sortCol = $state(localStorage.getItem('drainctl-sort-col') || 'host');
     let sortDir = $state(parseInt(localStorage.getItem('drainctl-sort-dir') || '1', 10));
     let search = $state(localStorage.getItem('drainctl-search') || '');
     let page = $state(0);
-    const PAGE_SIZE = 15;
+    const PAGE_SIZES = [15, 30, 50];
+    let pageSize = $state(parseInt(localStorage.getItem('drainctl-page-size') || '15', 10));
     let removeError = $state('');
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
@@ -32,7 +34,7 @@
         return () => clearInterval(t);
     });
 
-    const STATUS_ORDER = { alert: 0, grace: 1, off: 2, ok: 3 };
+    const STATUS_ORDER = { alert: 0, warning: 1, grace: 2, off: 3, ok: 4 };
 
     /**
      * Returns a human-readable countdown string for a grace deadline ISO timestamp.
@@ -62,12 +64,12 @@
     }
 
     function statusLabel(s) {
-        return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
+        return { ok: 'Healthy', warning: 'Warning', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
     }
 
     // Counts per status for the filter pill labels ("Grace (2)").
     let statusCounts = $derived.by(() => {
-        const counts = { ok: 0, grace: 0, alert: 0, off: 0 };
+        const counts = { ok: 0, warning: 0, grace: 0, alert: 0, off: 0 };
         for (const sv of appState.servers) {
             if (sv.status in counts) counts[sv.status]++;
         }
@@ -122,7 +124,10 @@
     }
 
     function toggleRow(host) {
-        expandedHost = expandedHost === host ? null : host;
+        const next = new Set(expandedHosts);
+        if (next.has(host)) next.delete(host);
+        else next.add(host);
+        expandedHosts = next;
     }
 
     function requestRemoveServer(host) {
@@ -138,7 +143,11 @@
             await deleteServer(host);
             appState.servers = appState.servers.filter((s) => s.host !== host);
             removeServerMetrics(host);
-            if (expandedHost === host) expandedHost = null;
+            if (expandedHosts.has(host)) {
+                const next = new Set(expandedHosts);
+                next.delete(host);
+                expandedHosts = next;
+            }
         } catch (e) {
             removeError = 'Remove failed: ' + e.message;
             setTimeout(() => (removeError = ''), 5000);
@@ -204,21 +213,13 @@
         page = 0;
     });
 
-    let totalPages = $derived(Math.max(1, Math.ceil(sorted.length / PAGE_SIZE)));
-    let paged = $derived(sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
-
-    // Keep expandedHost visible: if the expanded server is still in the full sorted
-    // list but not on the current page, jump to its page.
+    // Persist page size preference.
     $effect(() => {
-        if (
-            expandedHost &&
-            !paged.some((s) => s.host === expandedHost) &&
-            sorted.some((s) => s.host === expandedHost)
-        ) {
-            const idx = sorted.findIndex((s) => s.host === expandedHost);
-            if (idx >= 0) page = Math.floor(idx / PAGE_SIZE);
-        }
+        localStorage.setItem('drainctl-page-size', String(pageSize));
     });
+
+    let totalPages = $derived(Math.max(1, Math.ceil(sorted.length / pageSize)));
+    let paged = $derived(sorted.slice(page * pageSize, (page + 1) * pageSize));
 </script>
 
 <div class="grid">
@@ -234,7 +235,7 @@
             style="max-width:300px"
         />
         <div class="filter-pills">
-            {#each ['all', 'ok', 'grace', 'alert', 'off'] as f}
+            {#each ['all', 'ok', 'warning', 'grace', 'alert', 'off'] as f}
                 {@const count = f === 'all' ? appState.servers.length : statusCounts[f]}
                 <button
                     class="filter-pill {f === 'all' ? '' : f} {appState.serverFilter === f ? 'active' : ''}"
@@ -331,11 +332,11 @@
                         {@const delayStyle = thresholdStyle(delayColor)}
                         {@const srvHistory = appState.serverMetrics.get(srv.host)}
                         <tr
-                            class="clickable {expandedHost === srv.host ? 'sel' : ''}"
+                            class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''}"
                             data-host={srv.host}
                             data-status={srv.status}
                             tabindex="0"
-                            aria-expanded={expandedHost === srv.host}
+                            aria-expanded={expandedHosts.has(srv.host)}
                             onclick={() => toggleRow(srv.host)}
                             onkeydown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -405,7 +406,7 @@
                                 </div>
                             </td>
                         </tr>
-                        {#if expandedHost === srv.host}
+                        {#if expandedHosts.has(srv.host)}
                             <tr class="detail-row">
                                 <td colspan="11">
                                     <ServerDetail server={srv} {onhistoryclick} onremove={requestRemoveServer} />
@@ -417,15 +418,12 @@
             </table>
         </div>
 
-        {#if totalPages > 1}
-            <div class="pager">
+        <div class="pager">
+            {#if totalPages > 1}
                 <button
                     class="pager-btn btn-brutal"
                     disabled={page === 0}
-                    onclick={() => {
-                        expandedHost = null;
-                        page--;
-                    }}>← Prev</button
+                    onclick={() => page--}>← Prev</button
                 >
                 <span class="pager-info"
                     >{page + 1} / {totalPages} <span class="pager-total">({sorted.length} servers)</span></span
@@ -433,13 +431,17 @@
                 <button
                     class="pager-btn btn-brutal"
                     disabled={page >= totalPages - 1}
-                    onclick={() => {
-                        expandedHost = null;
-                        page++;
-                    }}>Next →</button
+                    onclick={() => page++}>Next →</button
                 >
-            </div>
-        {/if}
+            {/if}
+            {#each PAGE_SIZES as sz}
+                <button
+                    class="btn-brutal pager-pill"
+                    class:active={pageSize === sz}
+                    onclick={() => { pageSize = sz; page = 0; }}
+                >{sz}</button>
+            {/each}
+        </div>
     {/if}
 </div>
 
@@ -549,6 +551,17 @@
         font-weight: 400;
         opacity: 0.6;
     }
+    .pager-pill {
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 4px 10px;
+        color: var(--color-muted);
+    }
+    .pager-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
+    }
     .empty {
         text-align: center;
         padding: 50px 20px;
@@ -618,6 +631,9 @@
     }
     .dot.ok {
         background: var(--color-green);
+    }
+    .dot.warning {
+        background: var(--color-amber);
     }
     .dot.grace {
         background: var(--color-amber);
@@ -716,6 +732,9 @@
     }
     .pill.ok {
         background: var(--color-green);
+    }
+    .pill.warning {
+        background: var(--color-amber);
     }
     .pill.grace {
         background: var(--color-amber);

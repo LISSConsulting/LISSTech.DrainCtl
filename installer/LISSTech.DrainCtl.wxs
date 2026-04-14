@@ -7,7 +7,8 @@
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
         Scope="perMachine">
 
-        <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
+        <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"
+            Schedule="afterInstallExecute" />
 
         <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
@@ -29,6 +30,8 @@
         <Property Id="GRACE_PERIOD" Value="60" Secure="yes" />
         <Property Id="ENABLE_PERF" Value="1" Secure="yes" />
         <Property Id="ENABLE_RFX" Value="1" Secure="yes" />
+        <Property Id="POLL_INTERVAL" Value="300" Secure="yes" />
+        <Property Id="SESSION_THRESHOLD" Value="80" Secure="yes" />
         <Property Id="AUTODISCOVER" Value="1" Secure="yes" />
 
         <!-- UI: custom wizard with install mode selection -->
@@ -62,7 +65,7 @@
             BinaryRef="Wix4UtilCA_X64" />
 
         <SetProperty Id="ConfigureNotifyAction" Before="ConfigureNotifyAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL]" />
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL] --poll-interval=[POLL_INTERVAL] --session-warning-threshold=[SESSION_THRESHOLD]" />
         <CustomAction Id="ConfigureNotifyAction"
             DllEntry="WixQuietExec"
             Execute="commit"
@@ -120,10 +123,10 @@
         <InstallExecuteSequence>
             <Custom Action="ConfigureAction"
                 After="InstallFiles"
-                Condition="NOT REMOVE" />
+                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
             <Custom Action="ConfigureNotifyAction"
                 After="ConfigureAction"
-                Condition="NOT REMOVE" />
+                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
             <Custom Action="CleanETWProvider"
                 After="ConfigureNotifyAction"
                 Condition="NOT REMOVE" />
@@ -284,11 +287,14 @@
         </Component>
     </Fragment>
 
-    <!-- ── Firewall rule (dashboard mode only) ────────────────────────────── -->
+    <!-- ── Firewall rule ─────────────────────────────────────────────────── -->
+    <!-- Always installed — an allow rule for a closed port is a no-op.
+         Conditional install broke upgrades: INSTALL_MODE defaults to
+         "standalone" and config actions are skipped on upgrade, so the
+         condition evaluated false and the rule was removed. -->
     <Fragment>
         <Component Id="FirewallRule" Directory="BinFolder"
-            Guid="a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6"
-            Condition="INSTALL_MODE = &quot;dashboard&quot;">
+            Guid="a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6">
             <fw:FirewallException Id="DashboardTcpIn"
                 Name="Remote Desktop Drain Monitor (TCP-In)"
                 Scope="any"

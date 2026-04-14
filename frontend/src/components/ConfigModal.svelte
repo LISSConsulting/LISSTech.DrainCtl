@@ -1,5 +1,5 @@
 <script>
-    import { fetchNotifyConfig, saveNotifyConfig, sendNotifyTest } from '../lib/api.js';
+    import { fetchSettings, saveSettings, sendNotifyTest } from '../lib/api.js';
     import { appState } from '../lib/state.svelte.js';
     import { toast } from '../lib/toast.svelte.js';
     import NotificationTargets from './NotificationTargets.svelte';
@@ -59,7 +59,7 @@
     async function loadConfig() {
         loading = true;
         try {
-            const c = await fetchNotifyConfig();
+            const c = await fetchSettings();
             config = JSON.parse(JSON.stringify(c));
             original = JSON.parse(JSON.stringify(c));
         } catch (e) {
@@ -87,6 +87,9 @@
             mem_crit: 95,
             delay_warn: 50,
             delay_crit: 100,
+            delay_percentile: 'p50',
+            load_polls: 3,
+            delay_polls: 4,
         },
         {
             level: 2,
@@ -101,6 +104,9 @@
             mem_crit: 90,
             delay_warn: 30,
             delay_crit: 80,
+            delay_percentile: 'p95',
+            load_polls: 2,
+            delay_polls: 3,
         },
         {
             level: 3,
@@ -115,6 +121,9 @@
             mem_crit: 80,
             delay_warn: 15,
             delay_crit: 40,
+            delay_percentile: 'p95',
+            load_polls: 2,
+            delay_polls: 2,
         },
     ];
 
@@ -130,7 +139,10 @@
                 p?.mem_warn_pct === pr.mem_warn &&
                 p?.mem_crit_pct === pr.mem_crit &&
                 p?.input_delay_warn_ms === pr.delay_warn &&
-                p?.input_delay_crit_ms === pr.delay_crit
+                p?.input_delay_crit_ms === pr.delay_crit &&
+                (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
+                (p?.load_consecutive_polls || 2) === pr.load_polls &&
+                (p?.input_delay_consecutive_polls || 3) === pr.delay_polls
             ) {
                 return pr.level;
             }
@@ -150,6 +162,9 @@
             config.performance.mem_crit_pct = preset.mem_crit;
             config.performance.input_delay_warn_ms = preset.delay_warn;
             config.performance.input_delay_crit_ms = preset.delay_crit;
+            config.performance.input_delay_percentile = preset.delay_percentile;
+            config.performance.load_consecutive_polls = preset.load_polls;
+            config.performance.input_delay_consecutive_polls = preset.delay_polls;
         }
     }
 
@@ -180,7 +195,7 @@
         }
         saving = true;
         try {
-            await saveNotifyConfig(config);
+            await saveSettings(config);
             original = JSON.parse(JSON.stringify(config));
             appState.config = JSON.parse(JSON.stringify(config));
             toast.ok('Settings saved successfully');
@@ -323,14 +338,14 @@
                         <div class="repeat-pills">
                             {#each GRACE_PRESETS as p}
                                 <button
-                                    class="repeat-pill {config.grace_period === p ? 'active' : ''}"
+                                    class="btn-brutal gp-pill"
+                                    class:active={config.grace_period === p}
                                     onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
                                 >
                             {/each}
                             <button
-                                class="repeat-pill repeat-pill--dashed {!GRACE_PRESETS.includes(config.grace_period)
-                                    ? 'active'
-                                    : ''}"
+                                class="btn-brutal gp-pill gp-pill--dashed"
+                                class:active={!GRACE_PRESETS.includes(config.grace_period)}
                                 onclick={() => gracePeriodInput?.focus()}>Custom</button
                             >
                         </div>
@@ -446,6 +461,46 @@
                                             />
                                             <span class="settings-num-label threshold-unit">ms</span>
                                         </div>
+                                        <div class="threshold-row" style="margin-top:6px">
+                                            <span class="settings-num-label threshold-lbl">Percentile</span>
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p50'}
+                                                onclick={() => config.performance.input_delay_percentile = 'p50'}
+                                            >P50</button>
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p95'}
+                                                onclick={() => config.performance.input_delay_percentile = 'p95'}
+                                            >P95</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-label" style="margin-top:10px">Alert Sensitivity (consecutive polls)</div>
+                                <div class="settings-cfg-grid">
+                                    <div class="threshold-row">
+                                        <span class="settings-num-label threshold-lbl">CPU / Memory</span>
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.load_consecutive_polls}
+                                            min="1"
+                                            max="30"
+                                            placeholder="5"
+                                        />
+                                        <span class="settings-num-label threshold-unit">polls</span>
+                                    </div>
+                                    <div class="threshold-row">
+                                        <span class="settings-num-label threshold-lbl">Input Delay</span>
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.input_delay_consecutive_polls}
+                                            min="1"
+                                            max="60"
+                                            placeholder="10"
+                                        />
+                                        <span class="settings-num-label threshold-unit">polls</span>
                                     </div>
                                 </div>
                                 <label class="settings-check">
@@ -881,6 +936,21 @@
         border-color: var(--color-accent);
     }
     .repeat-pill--dashed {
+        border-style: dashed;
+        font-size: 0.7rem;
+    }
+    .gp-pill, .pctl-pill {
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 5px 12px;
+        color: var(--color-muted);
+    }
+    .gp-pill.active, .pctl-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
+    }
+    .gp-pill--dashed {
         border-style: dashed;
         font-size: 0.7rem;
     }

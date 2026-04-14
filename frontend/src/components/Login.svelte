@@ -1,39 +1,53 @@
 <script>
     import { toast } from '../lib/toast.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
-    import { KeyRound } from 'lucide-svelte';
-
-    /**
-     * Called when the user submits credentials.
-     * Parent is responsible for the actual auth request and should throw on failure.
-     * @type {{ onlogin: (username: string, password: string) => Promise<void> }}
-     */
-    let { onlogin } = $props();
+    import { authState, signInWithWindows, loginWithCredentials } from '../lib/auth.svelte.js';
+    import { KeyRound, ShieldCheck } from 'lucide-svelte';
 
     const isDark = $derived(theme.current === 'dark');
 
     let username = $state('');
     let password = $state('');
     let submitting = $state(false);
+    let ssoLoading = $state(false);
+    let ssoError = $state('');
 
-    // Fire once on mount — auto sign-in was attempted and failed before this
-    // component renders, so we surface it as a toast rather than inline copy.
-    $effect(() => {
-        toast.info('Automatic sign-in failed — please enter your credentials.');
-    });
+    async function handleWindowsSignIn() {
+        ssoLoading = true;
+        ssoError = '';
+        try {
+            await signInWithWindows();
+            if (authState.error === 'windows_auth_failed') {
+                ssoError = 'Windows sign-in failed — you may not be on a domain-joined machine, or your account lacks access.';
+            }
+        } finally {
+            ssoLoading = false;
+        }
+    }
 
     async function handleSubmit(e) {
         e.preventDefault();
-        if (!username.trim() || !password) {
-            toast.err('Username and password are required.');
+        const u = username.trim();
+        if (!u) {
+            toast.err('Enter your username.');
+            return;
+        }
+        if (!u.includes('\\') && !u.includes('@')) {
+            toast.err('Include a domain — use DOMAIN\\username or username@domain.');
+            return;
+        }
+        if (!password) {
+            toast.err('Enter your password.');
             return;
         }
         submitting = true;
         try {
-            await onlogin?.(username.trim(), password);
-        } catch (err) {
-            toast.err('Sign-in failed: ' + (err?.message ?? String(err)));
+            await loginWithCredentials(u, password);
+            if (authState.error && authState.error !== 'windows_auth_failed') {
+                toast.err(authState.error);
+            }
         } finally {
+            password = '';
             submitting = false;
         }
     }
@@ -70,8 +84,33 @@
                 <h1 class="modal-title serif">Sign In</h1>
             </div>
 
-            <p class="modal-sub">Enter your network credentials to access the dashboard.</p>
+            <p class="modal-sub">Access the DrainCtl dashboard with your network account.</p>
 
+            <!-- ── Windows SSO ─────────────────────────────────────── -->
+            <div class="sso-section">
+                <button
+                    type="button"
+                    class="btn-brutal btn-sso"
+                    onclick={handleWindowsSignIn}
+                    disabled={ssoLoading || submitting}
+                >
+                    <ShieldCheck size={16} />
+                    {ssoLoading ? 'Signing in…' : 'Sign in with Windows'}
+                </button>
+
+                {#if ssoError}
+                    <p class="sso-error">{ssoError}</p>
+                {/if}
+            </div>
+
+            <!-- ── Divider ─────────────────────────────────────────── -->
+            <div class="or-divider">
+                <span class="or-line"></span>
+                <span class="or-label">or</span>
+                <span class="or-line"></span>
+            </div>
+
+            <!-- ── Credentials form ───────────────────────────────── -->
             <form onsubmit={handleSubmit} novalidate>
                 <div class="field">
                     <label class="settings-label" for="username">Username</label>
@@ -102,7 +141,7 @@
                     />
                 </div>
 
-                <button type="submit" class="btn-brutal btn-signin" disabled={submitting}>
+                <button type="submit" class="btn-brutal btn-signin" disabled={submitting || ssoLoading}>
                     {submitting ? 'Signing in…' : 'Sign In'}
                 </button>
             </form>
@@ -229,8 +268,77 @@
         font-size: 0.82rem;
         color: var(--color-muted);
         text-align: center;
-        margin-bottom: 28px;
+        margin-bottom: 24px;
         line-height: 1.5;
+    }
+
+    /* ── Windows SSO ───────────────────────────────────────────── */
+    .sso-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .btn-sso {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: var(--color-card);
+        color: var(--color-fg);
+        border: 3px solid var(--color-border);
+        padding: 11px 22px;
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.88rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        width: 100%;
+    }
+
+    .btn-sso:hover:not(:disabled) {
+        background: var(--color-bg);
+    }
+
+    .btn-sso:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none !important;
+        box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important;
+    }
+
+    .sso-error {
+        font-size: 0.78rem;
+        color: var(--color-alert, #c0392b);
+        line-height: 1.45;
+        margin: 0;
+        padding: 8px 10px;
+        border: 2px solid var(--color-alert, #c0392b);
+        border-radius: var(--radius-default);
+        background: color-mix(in srgb, var(--color-alert, #c0392b) 8%, transparent);
+    }
+
+    /* ── Or divider ───────────────────────────────────────────── */
+    .or-divider {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 20px 0;
+    }
+
+    .or-line {
+        flex: 1;
+        height: 1px;
+        background: var(--color-border);
+        opacity: 0.4;
+    }
+
+    .or-label {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.68rem;
+        color: var(--color-subtle);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
     }
 
     /* ── Fields ────────────────────────────────────────────────── */

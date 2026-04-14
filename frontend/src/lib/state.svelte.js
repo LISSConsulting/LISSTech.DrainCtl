@@ -148,13 +148,14 @@ const persistRfxAvailable = debounce((v) => {
 /**
  * @typedef {import('./api.js').Server} Server
  * @typedef {import('./api.js').HealthResponse} HealthResponse
- * @typedef {import('./api.js').NotifyConfig} NotifyConfig
+ * @typedef {import('./api.js').Settings} Settings
  */
 
 /**
  * @typedef {Object} MetricsSample
  * @property {number} time         - Unix timestamp (ms)
  * @property {number} cpu          - Average CPU % across all servers with perf data
+ * @property {number} [cpuP95]     - P95 CPU % across all servers with perf data
  * @property {number} mem          - Average memory used % across all servers with perf data
  * @property {number} inputDelay   - P95 input delay across fleet (ms)
  * @property {number} sessions     - Total sessions across all servers
@@ -201,7 +202,7 @@ const persistRfxAvailable = debounce((v) => {
 
 /**
  * @typedef {Object} StateBarSegment
- * @property {'ok'|'grace'|'alert'|'off'} state
+ * @property {'ok'|'warning'|'grace'|'alert'|'off'} state
  * @property {number} pct   - 0–100
  * @property {number} count
  */
@@ -210,6 +211,7 @@ const persistRfxAvailable = debounce((v) => {
  * @typedef {Object} Counters
  * @property {number} total
  * @property {number} ok
+ * @property {number} warning
  * @property {number} grace
  * @property {number} alert
  * @property {number} off
@@ -226,7 +228,7 @@ let servers = $state(/** @type {Server[]} */ (lsGet(LS_SERVERS, [])));
 /** @type {HealthResponse|null} */
 let health = $state(/** @type {HealthResponse|null} */ (lsGet(LS_HEALTH, null)));
 
-/** @type {NotifyConfig|null} */
+/** @type {Settings|null} */
 let config = $state(null);
 
 /** @type {(string|Record<string,unknown>)[]} */
@@ -248,7 +250,7 @@ let connected = $state(false);
 /** @type {'overview'|'servers'|'events'} */
 let currentView = $state('overview');
 
-/** @type {'all'|'ok'|'grace'|'alert'|'off'} */
+/** @type {'all'|'ok'|'warning'|'grace'|'alert'|'off'} */
 let serverFilter = $state('all');
 
 /** Event log host filter — set by History button to pre-filter events by host. */
@@ -326,6 +328,7 @@ $effect.root(() => {
 const counters = $derived.by(() => {
     const total = servers.length;
     let ok = 0,
+        warning = 0,
         grace = 0,
         alert = 0,
         off = 0,
@@ -335,6 +338,9 @@ const counters = $derived.by(() => {
         switch (s.status) {
             case 'ok':
                 ok++;
+                break;
+            case 'warning':
+                warning++;
                 break;
             case 'grace':
                 grace++;
@@ -347,7 +353,7 @@ const counters = $derived.by(() => {
                 break;
         }
     }
-    return { total, ok, grace, alert, off, sessions };
+    return { total, ok, warning, grace, alert, off, sessions };
 });
 
 /** @type {StateBarSegment[]} */
@@ -356,6 +362,7 @@ const stateBarSegments = $derived.by(() => {
     if (total === 0) {
         return [
             { state: 'ok', pct: 0, count: 0 },
+            { state: 'warning', pct: 0, count: 0 },
             { state: 'grace', pct: 0, count: 0 },
             { state: 'alert', pct: 0, count: 0 },
             { state: 'off', pct: 0, count: 0 },
@@ -363,23 +370,11 @@ const stateBarSegments = $derived.by(() => {
     }
     return /** @type {StateBarSegment[]} */ ([
         { state: 'ok', pct: (counters.ok / total) * 100, count: counters.ok },
+        { state: 'warning', pct: (counters.warning / total) * 100, count: counters.warning },
         { state: 'grace', pct: (counters.grace / total) * 100, count: counters.grace },
         { state: 'alert', pct: (counters.alert / total) * 100, count: counters.alert },
         { state: 'off', pct: (counters.off / total) * 100, count: counters.off },
     ]);
-});
-
-const avgCpu = $derived.by(() => {
-    const perf = servers.map((s) => s.perf).filter((p) => p != null);
-    if (perf.length === 0) return 0;
-    return perf.reduce((sum, p) => sum + (p.cpu_pct || 0), 0) / perf.length;
-});
-
-const avgMem = $derived.by(() => {
-    const perf = servers.map((s) => s.perf).filter((p) => p != null && p.mem_total_mb > 0);
-    if (perf.length === 0) return 0;
-    const usedPcts = perf.map((p) => ((p.mem_total_mb - p.mem_avail_mb) / p.mem_total_mb) * 100);
-    return usedPcts.reduce((sum, v) => sum + v, 0) / usedPcts.length;
 });
 
 /** Return the P95 value from a numeric array. @param {number[]} vals */
@@ -396,28 +391,6 @@ export function deriveP50(vals) {
     const mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
-
-const p95InputDelay = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.input_delay_p95_ms ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95PagesPerSec = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.pages_sec ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95TcpRetrans = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.tcp_retrans_sec ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const p95DiskQueue = $derived.by(() => {
-    const vals = servers.map((s) => s.perf?.disk_queue ?? null).filter((v) => v != null);
-    return deriveP95(/** @type {number[]} */ (vals));
-});
-
-const totalSessions = $derived.by(() => counters.sessions);
 
 // ---------------------------------------------------------------------------
 // Exported state object
@@ -557,27 +530,6 @@ export const appState = {
     },
     get stateBarSegments() {
         return stateBarSegments;
-    },
-    get avgCpu() {
-        return avgCpu;
-    },
-    get avgMem() {
-        return avgMem;
-    },
-    get p95InputDelay() {
-        return p95InputDelay;
-    },
-    get p95PagesPerSec() {
-        return p95PagesPerSec;
-    },
-    get p95TcpRetrans() {
-        return p95TcpRetrans;
-    },
-    get p95DiskQueue() {
-        return p95DiskQueue;
-    },
-    get totalSessions() {
-        return totalSessions;
     },
 };
 

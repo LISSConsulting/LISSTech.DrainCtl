@@ -138,7 +138,7 @@ const perfHistory = new Map();
 const MAX_PERF_HISTORY = 60;
 
 /** Notification config (mutable via PUT). */
-let notifyConfig = {
+let mockSettings = {
   grace_period: 45,
   session_warning_threshold: 80,
   performance: {
@@ -404,7 +404,7 @@ function seedHistory(host, currentStatus) {
       transition,
       transition_from: transition ? prevStatus : undefined,
       changed_by: transition && s !== 'ok' ? pick(ADMINS) : undefined,
-      version: '26.100.9',
+      version: '26.103.4',
       message: transition
         ? `Status changed: ${prevStatus} → ${s}`
         : `Check-in: ${s}`,
@@ -523,7 +523,7 @@ function startEvolution() {
           transition: true,
           transition_from: prev,
           changed_by: s.changedBy,
-          version: '26.100.9',
+          version: '26.103.4',
           message: `Status changed: ${prev} → ${s.status}`,
         });
         // Cap at 100 entries
@@ -560,7 +560,7 @@ function serverView(host) {
     utilization_pct: maxSessions > 0 ? Math.round(sessTotal / maxSessions * 100) : 0,
     state_duration_seconds: stateDurationSeconds,
     state_changed_at: s.stateChangedAt,
-    version: s.status === 'off' ? '' : '26.100.9',
+    version: s.status === 'off' ? '' : '26.103.4',
     registered_at: s.registeredAt,
     last_seen: s.status === 'off' ? isoAgo(10) : isoNow(),
     changed_by: s.changedBy,
@@ -577,7 +577,7 @@ function healthResponse() {
   const servers = allServers();
   const counts = { total: servers.length, ok: 0, grace: 0, alert: 0, off: 0 };
   for (const s of servers) counts[s.status]++;
-  return { version: '26.100.9', servers: counts };
+  return { version: '26.103.4', servers: counts };
 }
 
 // ---------------------------------------------------------------------------
@@ -648,20 +648,38 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: result };
   }
 
-  // GET /api/v1/notify-config
-  if (method === 'GET' && pathname === '/api/v1/notify-config') {
-    return { status: 200, body: notifyConfig };
+  // GET /api/v1/settings
+  if (method === 'GET' && pathname === '/api/v1/settings') {
+    return { status: 200, body: mockSettings };
   }
 
-  // PUT /api/v1/notify-config
-  if (method === 'PUT' && pathname === '/api/v1/notify-config') {
-    if (body) notifyConfig = body;
+  // PUT /api/v1/settings
+  if (method === 'PUT' && pathname === '/api/v1/settings') {
+    if (body) mockSettings = body;
     return { status: 200, body: { ok: true } };
   }
 
   // POST /api/v1/notify-test
   if (method === 'POST' && pathname === '/api/v1/notify-test') {
     return { status: 200, body: { ok: true, message: 'Test notification sent (mock)' } };
+  }
+
+  // POST /api/v1/auth/negotiate — always succeeds in dev mode
+  if (method === 'POST' && pathname === '/api/v1/auth/negotiate') {
+    return { status: 200, body: { username: 'DEV\\mockuser' } };
+  }
+
+  // POST /api/v1/auth/login — succeeds for any non-empty credentials
+  if (method === 'POST' && pathname === '/api/v1/auth/login') {
+    if (body && body.username && body.password) {
+      return { status: 200, body: { username: body.username } };
+    }
+    return { status: 401, body: { error: 'invalid credentials' } };
+  }
+
+  // POST /api/v1/auth/logout — always succeeds
+  if (method === 'POST' && pathname === '/api/v1/auth/logout') {
+    return { status: 200, body: { ok: true } };
   }
 
   return null; // not handled

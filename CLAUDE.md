@@ -1,4 +1,4 @@
-﻿# CLAUDE.md
+# CLAUDE.md
 
 ## Build
 ```
@@ -16,7 +16,7 @@ Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 - Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
 - No viper — config lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` (encoding/json)
 - Retention capped 1–365 days via `ClampRetention()`
-- Branches: `trunk` (protected) ← PR from `development`
+- Branches: `trunk` (protected) ← PR from `develop` ← feature branches
 - Pre-commit: `prek` runs gofmt, go vet, golangci-lint, gitleaks
 - Signing order: sign binaries → build MSI → sign MSI (`just release` handles this)
 

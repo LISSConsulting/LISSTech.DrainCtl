@@ -157,8 +157,7 @@
 
     /** @param {NormPoint} d @param {SeriesDef} s */
     function fmtVal(d, s) {
-        if (s.key === 'cpu') return `${d.raw.cpu}%`;
-        if (s.key === 'mem') return `${d.raw.mem}%`;
+        if (s.key in d.raw) return s.axis === 'right' ? `${d.raw[s.key]}` : `${d.raw[s.key]}%`;
         return `${d.raw.sessions}`;
     }
 </script>

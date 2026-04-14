@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sort"
 	"syscall"
 	"time"
 
@@ -24,7 +25,7 @@ func getThreadID() uint32 {
 // causes PDH to skip V1 provider DLL loading.
 const (
 	// V1 host-level counters.
-	counterCPU        = `\Processor Information(_Total)\% Processor Utility`
+	counterCPU        = `\Processor Information(_Total)\% Processor Time`
 	counterMemAvail   = `\Memory\Available MBytes`
 	counterPagesSec   = `\Memory\Pages/sec`
 	counterDiskQueue  = `\PhysicalDisk(_Total)\Avg. Disk Queue Length`
@@ -433,6 +434,14 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 			agg.RFXAvailable = true
 		}
 	}
+
+	// CPU P95 across samples.
+	cpuVals := make([]float64, len(samples))
+	for i := range samples {
+		cpuVals[i] = samples[i].CPUPct
+	}
+	sort.Float64s(cpuVals)
+	agg.CPUP95 = RoundTo(Percentile(cpuVals, 95), 1)
 
 	// Average the rate/gauge counters.
 	agg.CPUPct = RoundTo(agg.CPUPct/n, 1)
