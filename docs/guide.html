@@ -516,6 +516,20 @@
                 audit data in ProgramData is <strong>preserved</strong> (delete it manually if you want a clean slate).
             </p>
 
+            <h3>Upgrading</h3>
+            <p>
+                Run the new MSI over an existing installation. The installer detects the previous version and
+                skips all configuration dialogs &mdash; you go straight from the welcome screen to install.
+            </p>
+            <ul>
+                <li><code>config.json</code> and <code>servers.json</code> are preserved</li>
+                <li>Configuration actions are skipped (existing settings are not overwritten)</li>
+                <li>ETW provider, Event Log permissions, and the Windows Service are re-registered</li>
+                <li>Audit trail and TLS certificates in ProgramData are preserved</li>
+                <li>The Windows Firewall rule is always maintained across upgrades</li>
+            </ul>
+            <p>Silent upgrades work the same way &mdash; just run the new MSI with <code>/qn</code>.</p>
+
             <!-- ── First Run ─────────────────────────────────────────────────────── -->
             <h2 id="first-run">2. First Run</h2>
 
@@ -594,6 +608,9 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "mem_crit_pct": 10,
     "input_delay_warn_ms": 50,
     "input_delay_crit_ms": 100,
+    "input_delay_percentile": "p95",
+    "load_consecutive_polls": 5,
+    "input_delay_consecutive_polls": 10,
     "collect_remotefx": false,
     "collect_per_session": true
   }
@@ -613,7 +630,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td>60</td>
                         <td>
                             Minutes drain mode must be active before it becomes an <strong>alert</strong>. During the
-                            grace period, the status is "Grace" and exit code is 0.
+                            grace period, the status is "Grace" and exit code is 0. Performance thresholds may
+                            independently promote the status to "Warning" (any warning) or "Alert" (any critical).
                         </td>
                     </tr>
                     <tr>
@@ -658,7 +676,12 @@ Get-RDSHDrainMode | Format-List</code></pre>
                             Performance monitoring settings. Set <code>enabled: true</code> to collect CPU, memory, disk
                             I/O, input delay, and RemoteFX metrics every poll cycle. Thresholds default to industry
                             baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to
-                            <code>-1</code> to disable it.
+                            <code>-1</code> to disable it. Additional fields:
+                            <code>input_delay_percentile</code> (<code>"p50"</code> or <code>"p95"</code>, default
+                            <code>"p95"</code>),
+                            <code>load_consecutive_polls</code> (CPU/memory consecutive breaches, default 2),
+                            <code>input_delay_consecutive_polls</code> (input delay consecutive breaches, default 10),
+                            <code>sample_interval_sec</code> (collection interval, default 30, range 10&ndash;300).
                         </td>
                     </tr>
                 </tbody>
@@ -1709,38 +1732,43 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td><code>cpu_warning</code></td>
                         <td>70%</td>
-                        <td>CPU &ge; threshold for 2 consecutive polls</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
                     </tr>
                     <tr>
                         <td><code>cpu_critical</code></td>
                         <td>85%</td>
-                        <td>CPU &ge; threshold for 2 consecutive polls</td>
+                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
                     </tr>
                     <tr>
                         <td><code>memory_warning</code></td>
                         <td>20% free</td>
-                        <td>Available memory &le; threshold for 2 consecutive polls</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
                     </tr>
                     <tr>
                         <td><code>memory_critical</code></td>
                         <td>10% free</td>
-                        <td>Available memory &le; threshold for 2 consecutive polls</td>
+                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 5)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_warning</code></td>
                         <td>50ms</td>
-                        <td>Input delay P95 &ge; threshold (single poll)</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 10)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_critical</code></td>
                         <td>100ms</td>
-                        <td>Input delay P95 &ge; threshold (single poll)</td>
+                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 10)</td>
                     </tr>
                 </tbody>
             </table>
             <p>
-                CPU and memory triggers require two consecutive breaches to fire — this eliminates flap noise from
-                transient spikes. Input delay fires immediately because sustained delay is felt by users at once.
+                All performance triggers require consecutive breaches before firing, eliminating flap noise from
+                transient spikes. CPU and memory default to 2 consecutive polls (<code>load_consecutive_polls</code>);
+                input delay defaults to 10 (<code>input_delay_consecutive_polls</code>) because it is inherently volatile.
+                At the default 30-second sample interval, 10 polls means input delay must sustain for ~5 minutes.
+                Both values are configurable in the <code>performance</code> section of <code>config.json</code>.
+                Input delay is evaluated against the P95 percentile by default; set
+                <code>"input_delay_percentile": "p50"</code> for median-based thresholds.
             </p>
             <p>Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.</p>
 
@@ -1760,6 +1788,67 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 The state history chart gains toggle-able CPU% and Input Delay overlay lines via checkboxes in the
                 legend.
+            </p>
+
+            <h3>Server Status Levels</h3>
+            <p>
+                The dashboard shows a composite status for each server reflecting both drain mode and performance health.
+                The worst severity wins:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Color</th>
+                        <th>Condition</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Healthy</td>
+                        <td>Green</td>
+                        <td>Drain off, no performance threshold breaches</td>
+                    </tr>
+                    <tr>
+                        <td>Warning</td>
+                        <td>Amber</td>
+                        <td>Drain off, but one or more perf metrics at warning level (CPU, memory, or input delay)</td>
+                    </tr>
+                    <tr>
+                        <td>Grace</td>
+                        <td>Amber</td>
+                        <td>Drain mode active, within configured grace period</td>
+                    </tr>
+                    <tr>
+                        <td>Alert</td>
+                        <td>Red</td>
+                        <td>Drain mode exceeded grace period, <em>or</em> any performance metric at critical level</td>
+                    </tr>
+                    <tr>
+                        <td>Offline</td>
+                        <td>Grey</td>
+                        <td>No report received in the last 10 minutes</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Notification Cooldown Model</h3>
+            <p>
+                Each notification target&rsquo;s <code>repeat_minutes</code> acts as a cooldown window. Once a
+                notification fires, the same trigger type will not fire again for that target until the interval elapses.
+                If the metric is still breaching when the interval expires, a reminder is sent.
+            </p>
+            <p>
+                Cooldowns are <strong>never reset</strong> by metric oscillation. A metric that briefly dips below
+                threshold and rises again does not produce a new notification &mdash; the original cooldown holds.
+                This prevents notification storms from volatile metrics like input delay.
+            </p>
+
+            <h3>REST API Documentation</h3>
+            <p>
+                The dashboard serves an OpenAPI 3.1 spec at
+                <code>/api/v1/openapi.yaml</code> and a Swagger UI at <code>/api/docs</code>.
+                Both are public (no authentication required).
             </p>
 
             <!-- ── RMM Integration ────────────────────────────────────────────────── -->

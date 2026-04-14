@@ -405,7 +405,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 
-			// Periodically re-fetch notification config from dashboard.
+			// Periodically re-fetch settings from dashboard.
 			// Uses wall-clock time so the interval is independent of PollInterval
 			// changes at runtime. The interval doubles on each consecutive failure
 			// (exponential backoff) so a downed dashboard does not generate log
@@ -413,17 +413,17 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
 				lastConfigFetch = time.Now()
 				slog.Debug("dashboard config fetch", "url", dashCfg.URL)
-				var cfgRemote *dashboard.RemoteNotifyConfig
+				var cfgRemote *dashboard.RemoteSettings
 				var cfgErr error
 				if dashState != nil {
-					cfgRemote, cfgErr = dashboard.GetNotifyConfig()
+					cfgRemote, cfgErr = dashboard.GetSettings()
 				} else {
-					cfgRemote, cfgErr = dashboard.FetchNotifyConfig(dashCfg.URL)
+					cfgRemote, cfgErr = dashboard.FetchSettings(dashCfg.URL)
 				}
 				if cfgErr != nil {
 					dashConfigFailures++
 					nextIn := backoffDuration(dashCfg.FetchInterval, dashConfigFailures)
-					slog.Warn("dashboard: notify config refresh failed, using cached", "error", cfgErr, "next_retry_in", nextIn.Round(time.Minute))
+					slog.Warn("dashboard: settings refresh failed, using cached", "error", cfgErr, "next_retry_in", nextIn.Round(time.Minute))
 				} else {
 					dashConfigFailures = 0
 					useRemoteConfig = true

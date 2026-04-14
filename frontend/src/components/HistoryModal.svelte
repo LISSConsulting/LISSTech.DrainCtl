@@ -52,11 +52,11 @@
     // The API returns lowercase status values ('ok', 'grace', 'alert', 'off').
     // statusClass maps these directly to CSS class names (which match the status values).
     function statusClass(s) {
-        return { ok: 'ok', grace: 'grace', alert: 'alert', off: 'off' }[s] ?? 'off';
+        return { ok: 'ok', warning: 'warning', grace: 'grace', alert: 'alert', off: 'off' }[s] ?? 'off';
     }
 
     function statusLabel(s) {
-        return { ok: 'Healthy', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
+        return { ok: 'Healthy', warning: 'Warning', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] || s;
     }
 </script>
 
@@ -258,6 +258,9 @@
     }
     .hist-badge.ok {
         background: var(--color-green);
+    }
+    .hist-badge.warning {
+        background: var(--color-amber);
     }
     .hist-badge.grace {
         background: var(--color-amber);

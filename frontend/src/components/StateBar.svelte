@@ -42,6 +42,9 @@
     .sseg.ok {
         background: var(--color-green);
     }
+    .sseg.warning {
+        background: var(--color-amber);
+    }
     .sseg.grace {
         background: var(--color-amber);
     }

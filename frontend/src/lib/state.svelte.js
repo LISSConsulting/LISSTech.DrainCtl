@@ -148,7 +148,7 @@ const persistRfxAvailable = debounce((v) => {
 /**
  * @typedef {import('./api.js').Server} Server
  * @typedef {import('./api.js').HealthResponse} HealthResponse
- * @typedef {import('./api.js').NotifyConfig} NotifyConfig
+ * @typedef {import('./api.js').Settings} Settings
  */
 
 /**
@@ -201,7 +201,7 @@ const persistRfxAvailable = debounce((v) => {
 
 /**
  * @typedef {Object} StateBarSegment
- * @property {'ok'|'grace'|'alert'|'off'} state
+ * @property {'ok'|'warning'|'grace'|'alert'|'off'} state
  * @property {number} pct   - 0–100
  * @property {number} count
  */
@@ -210,6 +210,7 @@ const persistRfxAvailable = debounce((v) => {
  * @typedef {Object} Counters
  * @property {number} total
  * @property {number} ok
+ * @property {number} warning
  * @property {number} grace
  * @property {number} alert
  * @property {number} off
@@ -226,7 +227,7 @@ let servers = $state(/** @type {Server[]} */ (lsGet(LS_SERVERS, [])));
 /** @type {HealthResponse|null} */
 let health = $state(/** @type {HealthResponse|null} */ (lsGet(LS_HEALTH, null)));
 
-/** @type {NotifyConfig|null} */
+/** @type {Settings|null} */
 let config = $state(null);
 
 /** @type {(string|Record<string,unknown>)[]} */
@@ -248,7 +249,7 @@ let connected = $state(false);
 /** @type {'overview'|'servers'|'events'} */
 let currentView = $state('overview');
 
-/** @type {'all'|'ok'|'grace'|'alert'|'off'} */
+/** @type {'all'|'ok'|'warning'|'grace'|'alert'|'off'} */
 let serverFilter = $state('all');
 
 /** Event log host filter — set by History button to pre-filter events by host. */
@@ -326,6 +327,7 @@ $effect.root(() => {
 const counters = $derived.by(() => {
     const total = servers.length;
     let ok = 0,
+        warning = 0,
         grace = 0,
         alert = 0,
         off = 0,
@@ -335,6 +337,9 @@ const counters = $derived.by(() => {
         switch (s.status) {
             case 'ok':
                 ok++;
+                break;
+            case 'warning':
+                warning++;
                 break;
             case 'grace':
                 grace++;
@@ -347,7 +352,7 @@ const counters = $derived.by(() => {
                 break;
         }
     }
-    return { total, ok, grace, alert, off, sessions };
+    return { total, ok, warning, grace, alert, off, sessions };
 });
 
 /** @type {StateBarSegment[]} */
@@ -356,6 +361,7 @@ const stateBarSegments = $derived.by(() => {
     if (total === 0) {
         return [
             { state: 'ok', pct: 0, count: 0 },
+            { state: 'warning', pct: 0, count: 0 },
             { state: 'grace', pct: 0, count: 0 },
             { state: 'alert', pct: 0, count: 0 },
             { state: 'off', pct: 0, count: 0 },
@@ -363,6 +369,7 @@ const stateBarSegments = $derived.by(() => {
     }
     return /** @type {StateBarSegment[]} */ ([
         { state: 'ok', pct: (counters.ok / total) * 100, count: counters.ok },
+        { state: 'warning', pct: (counters.warning / total) * 100, count: counters.warning },
         { state: 'grace', pct: (counters.grace / total) * 100, count: counters.grace },
         { state: 'alert', pct: (counters.alert / total) * 100, count: counters.alert },
         { state: 'off', pct: (counters.off / total) * 100, count: counters.off },
