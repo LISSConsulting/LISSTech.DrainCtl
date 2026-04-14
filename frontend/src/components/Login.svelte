@@ -21,20 +21,33 @@
     // Show toast only when auto-login was attempted and failed.
     $effect(() => {
         if (autoLoginFailed) {
-            toast.info('Automatic sign-in failed — please enter your credentials.');
+            toast.info('Windows sign-in unavailable — enter your credentials manually.');
         }
     });
 
     async function handleSubmit(e) {
         e.preventDefault();
-        if (!username.trim() || !password) {
-            toast.err('Username and password are required.');
+        const u = username.trim();
+        if (!u) {
+            toast.err('Enter your username.');
+            return;
+        }
+        if (!u.includes('\\') && !u.includes('@')) {
+            toast.err('Include a domain — use DOMAIN\\username or username@domain.');
+            return;
+        }
+        if (!password) {
+            toast.err('Enter your password.');
             return;
         }
         submitting = true;
         try {
-            await onlogin?.(username.trim(), password);
+            await onlogin?.(u, password);
+            if (authState.error && authState.error !== 'auto_login_failed' && authState.error !== 'session_expired') {
+                toast.err(authState.error);
+            }
         } finally {
+            password = '';
             submitting = false;
         }
     }
@@ -106,10 +119,6 @@
                 <button type="submit" class="btn-brutal btn-signin" disabled={submitting}>
                     {submitting ? 'Signing in…' : 'Sign In'}
                 </button>
-
-                {#if authState.error && authState.error !== 'auto_login_failed' && authState.error !== 'session_expired'}
-                    <p class="form-error">{authState.error}</p>
-                {/if}
             </form>
 
             <div class="modal-divider"></div>
@@ -281,18 +290,6 @@
         cursor: not-allowed;
         transform: none !important;
         box-shadow: var(--spacing-so) var(--spacing-so) 0 var(--color-shadow) !important;
-    }
-
-    /* ── Inline form error ────────────────────────────────────── */
-    .form-error {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.72rem;
-        color: var(--color-red);
-        margin: 6px 0 0;
-        padding: 8px 10px;
-        background: color-mix(in srgb, var(--color-red) 8%, transparent);
-        border: 1px solid color-mix(in srgb, var(--color-red) 30%, transparent);
-        border-radius: var(--radius-default);
     }
 
     /* ── Divider ───────────────────────────────────────────────── */

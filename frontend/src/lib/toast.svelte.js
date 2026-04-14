@@ -8,6 +8,8 @@
  *   toast.info('Test notification sent');
  */
 
+import { untrack } from 'svelte';
+
 const DURATION = { ok: 4000, err: 6000, info: 4000 };
 
 let id = 0;
@@ -22,7 +24,10 @@ let items = $state([]);
  */
 function show(msg, type = 'info') {
     const tid = ++id;
-    items = [...items, { id: tid, msg, type, dismissing: false }];
+    // untrack the read of items so callers inside $effect don't accidentally
+    // subscribe the effect to items, which would cause an infinite loop when
+    // show() writes back to items.
+    items = [...untrack(() => items), { id: tid, msg, type, dismissing: false }];
     setTimeout(() => dismiss(tid), DURATION[type] ?? 4000);
 }
 

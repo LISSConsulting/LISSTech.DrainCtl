@@ -105,11 +105,14 @@ func loginLogonUser(username, password string) (*AuthInfo, error) {
 }
 
 // sessionCookie builds the drainctl_session cookie for Set-Cookie responses.
+// MaxAge is set to 8 hours to match the server-side inactivity timeout so the
+// browser does not hold a stale token after the server has already reaped it.
 func sessionCookie(token string, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     "drainctl_session",
 		Value:    token,
 		Path:     "/",
+		MaxAge:   8 * 3600,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   secure,
@@ -145,7 +148,7 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 				"user", info.Username, "group", group)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = fmt.Fprintf(w, `{"error":"access denied: not a member of %s"}`, group)
+			_, _ = w.Write([]byte(`{"error":"Access denied — your account is not authorized."}`))
 			return
 		}
 		token, err := store.Create(info)
@@ -154,6 +157,8 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		slog.Info("negotiate: session created", slog.Int("event_id", dc.EvtDashboardAccess),
+			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"username": info.Username})
@@ -188,7 +193,7 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 			slog.Warn("login: credentials rejected", "user", req.Username)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid credentials"}`))
+			_, _ = w.Write([]byte(`{"error":"Wrong username or password."}`))
 			return
 		}
 
@@ -197,7 +202,7 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 				"user", info.Username, "group", group)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = fmt.Fprintf(w, `{"error":"access denied: not a member of %s"}`, group)
+			_, _ = w.Write([]byte(`{"error":"Access denied — your account is not authorized."}`))
 			return
 		}
 
@@ -206,10 +211,12 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 			slog.Error("login: create session failed", "error", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"authentication service unavailable"}`))
+			_, _ = w.Write([]byte(`{"error":"Authentication service unavailable — try again shortly."}`))
 			return
 		}
 
+		slog.Info("login: session created", slog.Int("event_id", dc.EvtDashboardAccess),
+			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"username": info.Username})

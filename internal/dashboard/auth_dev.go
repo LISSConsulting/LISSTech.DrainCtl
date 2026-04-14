@@ -20,3 +20,6 @@ func init() {
 func requireSession(_ *SessionStore) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler { return h }
 }
+
+// requireMachineAccount is a no-op in dev builds — skips machine account check.
+func requireMachineAccount(next http.Handler) http.Handler { return next }
