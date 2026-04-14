@@ -62,7 +62,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		"event":                  string(trigger),
 		"host":                   result.Host,
 		"drain_mode":             result.DrainModeLabel,
-		"status":                 result.Status,
+		"status":                 TriggerStatus(result.Status, trigger),
 		"message":                result.Message,
 		"changed_by":             changedBy,
 		"state_duration_seconds": int(stateDur),

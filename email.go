@@ -33,41 +33,52 @@ type emailData struct {
 	StatusColor string
 }
 
-// emailStatus returns the status label and badge colour for the email template.
-// For drain-state triggers the label is the drain status ("Healthy"/"Grace"/"Alert").
-// For perf and session triggers the label names the alert so the badge doesn't
-// show a contradictory green "Healthy" on a memory-critical notification.
-func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
-	// Colours: green (#2d6a4f), amber (#b5651d), red (#c1292e), blue (#4a90d9), grey (#6c757d).
+// TriggerStatus returns a human-readable status label for a trigger.
+// For perf and session triggers it names the alert ("CPU Warning", "Memory Critical")
+// so consumers don't show a contradictory "Healthy" on a perf notification.
+// For drain-state triggers it returns the drain status as-is.
+func TriggerStatus(drainStatus string, trigger Trigger) string {
 	switch trigger {
 	case TriggerCPUWarning:
-		return "CPU Warning", "#b5651d"
+		return "CPU Warning"
 	case TriggerCPUCritical:
-		return "CPU Critical", "#c1292e"
+		return "CPU Critical"
 	case TriggerMemoryWarning:
-		return "Memory Warning", "#b5651d"
+		return "Memory Warning"
 	case TriggerMemoryCritical:
-		return "Memory Critical", "#c1292e"
+		return "Memory Critical"
 	case TriggerInputDelayWarning:
-		return "Input Delay Warning", "#b5651d"
+		return "Input Delay Warning"
 	case TriggerInputDelayCritical:
-		return "Input Delay Critical", "#c1292e"
+		return "Input Delay Critical"
 	case TriggerSessionWarning:
-		return "Session Warning", "#b5651d"
+		return "Session Warning"
+	default:
+		return drainStatus
 	}
+}
 
-	// Drain-state triggers — use the drain status as-is.
+// emailStatus returns the status label and badge colour for the email template.
+func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
+	label = TriggerStatus(drainStatus, trigger)
+	// Colours: green (#2d6a4f), amber (#b5651d), red (#c1292e), blue (#4a90d9), grey (#6c757d).
+	switch trigger {
+	case TriggerCPUWarning, TriggerMemoryWarning, TriggerInputDelayWarning, TriggerSessionWarning:
+		return label, "#b5651d"
+	case TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
+		return label, "#c1292e"
+	}
 	switch drainStatus {
 	case "Healthy":
-		return drainStatus, "#2d6a4f"
+		return label, "#2d6a4f"
 	case "Grace":
-		return drainStatus, "#b5651d"
+		return label, "#b5651d"
 	case "Alert":
-		return drainStatus, "#c1292e"
+		return label, "#c1292e"
 	case "Test":
-		return drainStatus, "#4a90d9"
+		return label, "#4a90d9"
 	default:
-		return drainStatus, "#6c757d"
+		return label, "#6c757d"
 	}
 }
 
