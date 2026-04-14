@@ -210,9 +210,7 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 		// Performance threshold evaluation.
 		if perfSnap != nil && perfTriggerState != nil {
 			perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
-			for _, pt := range perfTriggers {
-				triggers = append(triggers, pt)
-			}
+			triggers = append(triggers, perfTriggers...)
 		}
 
 		// Dispatch notifications. For perf triggers, set the message to the
