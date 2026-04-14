@@ -122,10 +122,10 @@
         <InstallExecuteSequence>
             <Custom Action="ConfigureAction"
                 After="InstallFiles"
-                Condition="NOT REMOVE" />
+                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
             <Custom Action="ConfigureNotifyAction"
                 After="ConfigureAction"
-                Condition="NOT REMOVE" />
+                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
             <Custom Action="CleanETWProvider"
                 After="ConfigureNotifyAction"
                 Condition="NOT REMOVE" />
