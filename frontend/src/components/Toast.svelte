@@ -1,17 +1,21 @@
 <script>
     import { toast } from '../lib/toast.svelte.js';
+    import { CheckCircle, XCircle, Info, Clipboard, ClipboardCheck, X } from 'lucide-svelte';
+
+    /** @type {Set<string>} */
+    let copiedIds = $state(new Set());
 
     /**
-     * Copy text to clipboard, briefly flash the button.
+     * Copy text to clipboard, briefly show check icon.
      * @param {string} text
-     * @param {HTMLButtonElement} btn
+     * @param {string} id
      */
-    async function copyText(text, btn) {
+    async function copyText(text, id) {
         try {
             await navigator.clipboard.writeText(text);
-            btn.textContent = 'Copied';
+            copiedIds = new Set([...copiedIds, id]);
             setTimeout(() => {
-                btn.textContent = 'Copy';
+                copiedIds = new Set([...copiedIds].filter((x) => x !== id));
             }, 1200);
         } catch {
             /* clipboard unavailable in some contexts */
@@ -24,11 +28,13 @@
         {#each toast.items as t (t.id)}
             <div class="toast toast-{t.type} {t.dismissing ? 'toast-out' : ''}">
                 <span class="toast-icon">
-                    {#if t.type === 'ok'}&#10003;{:else if t.type === 'err'}&#10007;{:else}&#9432;{/if}
+                    {#if t.type === 'ok'}<CheckCircle size={16} />{:else if t.type === 'err'}<XCircle size={16} />{:else}<Info size={16} />{/if}
                 </span>
                 <span class="toast-msg">{t.msg}</span>
-                <button class="toast-copy" onclick={(e) => copyText(t.msg, e.currentTarget)} aria-label="Copy message">Copy</button>
-                <button class="toast-close" onclick={() => toast.dismiss(t.id)} aria-label="Dismiss">&times;</button>
+                <button class="toast-copy" onclick={() => copyText(t.msg, t.id)} aria-label="Copy message">
+                    {#if copiedIds.has(t.id)}<ClipboardCheck size={13} />{:else}<Clipboard size={13} />{/if}
+                </button>
+                <button class="toast-close" onclick={() => toast.dismiss(t.id)} aria-label="Dismiss"><X size={14} /></button>
             </div>
         {/each}
     </div>
