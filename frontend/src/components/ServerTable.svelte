@@ -1,4 +1,5 @@
 <script>
+    import { untrack } from 'svelte';
     import { appState, removeServerMetrics } from '../lib/state.svelte.js';
     import { deleteServer } from '../lib/api.js';
     import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
@@ -28,6 +29,24 @@
     $effect(() => () => { clearTimeout(removeErrorTimer); });
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
+
+    // Prune expandedHosts when servers are removed via SSE (external deletion).
+    // When the local UI deletes a server via doRemoveServer(), expandedHosts is
+    // cleaned up there. But an SSE server_deleted event from another browser only
+    // removes the host from appState.servers — expandedHosts retains the stale
+    // entry. This effect tracks appState.servers reactively and removes any host
+    // from expandedHosts that is no longer in the server list, so that if the
+    // same hostname re-registers later it does not appear pre-expanded.
+    $effect(() => {
+        const liveHosts = new Set(appState.servers.map((s) => s.host));
+        const current = untrack(() => expandedHosts);
+        const stale = [...current].filter((h) => !liveHosts.has(h));
+        if (stale.length > 0) {
+            const next = new Set(current);
+            for (const h of stale) next.delete(h);
+            expandedHosts = next;
+        }
+    });
 
     // Reactive clock — ticks every 10 s so that relative timestamps and the
     // grace-period countdown badge stay fresh between 30-second server refreshes.

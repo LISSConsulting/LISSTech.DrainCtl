@@ -584,7 +584,7 @@
                                 second: '2-digit',
                                 hour12: false,
                             }),
-                            { host: event.host, status: 'off' },
+                            { host: event.host, status: 'off', changed_by: event.data?.changed_by ?? '' },
                             'removed from dashboard',
                             'alert',
                         ),
