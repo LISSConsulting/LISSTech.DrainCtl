@@ -591,64 +591,62 @@
                                 <div class="subsection">
                                 <div class="settings-label">Alert Sustain Window</div>
                                 <div class="settings-hint">How long a metric must breach its threshold before an alert fires.</div>
-                                <div class="settings-cfg-grid">
-                                    <div>
-                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">CPU / Memory</div>
-                                        <div class="repeat-pills">
-                                            {#each SUSTAIN_PRESETS as s}
-                                                <button
-                                                    class="btn-brutal gp-pill"
-                                                    class:active={config.performance.load_alert_delay_sec === s}
-                                                    onclick={() => (config.performance.load_alert_delay_sec = s)}>{fmtDuration(s)}</button
-                                                >
-                                            {/each}
+                                <div>
+                                    <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">CPU / Memory</div>
+                                    <div class="repeat-pills">
+                                        {#each SUSTAIN_PRESETS as s}
                                             <button
-                                                class="btn-brutal gp-pill gp-pill--dashed"
-                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.load_alert_delay_sec)}
-                                                onclick={() => loadSustainInput?.focus()}>Custom</button
+                                                class="btn-brutal gp-pill"
+                                                class:active={config.performance.load_alert_delay_sec === s}
+                                                onclick={() => (config.performance.load_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                             >
-                                        </div>
-                                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.load_alert_delay_sec}
-                                                bind:this={loadSustainInput}
-                                                min="10"
-                                                step="10"
-                                            />
-                                            <span class="settings-num-label">seconds</span>
-                                            <span class="settings-hint">({loadPolls} poll{loadPolls === 1 ? '' : 's'})</span>
-                                        </div>
+                                        {/each}
+                                        <button
+                                            class="btn-brutal gp-pill gp-pill--dashed"
+                                            class:active={!SUSTAIN_PRESETS.includes(config.performance.load_alert_delay_sec)}
+                                            onclick={() => loadSustainInput?.focus()}>Custom</button
+                                        >
                                     </div>
-                                    <div>
-                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">Input Delay</div>
-                                        <div class="repeat-pills">
-                                            {#each SUSTAIN_PRESETS as s}
-                                                <button
-                                                    class="btn-brutal gp-pill"
-                                                    class:active={config.performance.input_delay_alert_delay_sec === s}
-                                                    onclick={() => (config.performance.input_delay_alert_delay_sec = s)}>{fmtDuration(s)}</button
-                                                >
-                                            {/each}
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.load_alert_delay_sec}
+                                            bind:this={loadSustainInput}
+                                            min="10"
+                                            step="10"
+                                        />
+                                        <span class="settings-num-label">seconds</span>
+                                        <span class="settings-hint" style="margin-bottom:0">({loadPolls} poll{loadPolls === 1 ? '' : 's'})</span>
+                                    </div>
+                                </div>
+                                <div style="margin-top:20px">
+                                    <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">Input Delay</div>
+                                    <div class="repeat-pills">
+                                        {#each SUSTAIN_PRESETS as s}
                                             <button
-                                                class="btn-brutal gp-pill gp-pill--dashed"
-                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.input_delay_alert_delay_sec)}
-                                                onclick={() => delaySustainInput?.focus()}>Custom</button
+                                                class="btn-brutal gp-pill"
+                                                class:active={config.performance.input_delay_alert_delay_sec === s}
+                                                onclick={() => (config.performance.input_delay_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                             >
-                                        </div>
-                                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.input_delay_alert_delay_sec}
-                                                bind:this={delaySustainInput}
-                                                min="10"
-                                                step="10"
-                                            />
-                                            <span class="settings-num-label">seconds</span>
-                                            <span class="settings-hint">({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span>
-                                        </div>
+                                        {/each}
+                                        <button
+                                            class="btn-brutal gp-pill gp-pill--dashed"
+                                            class:active={!SUSTAIN_PRESETS.includes(config.performance.input_delay_alert_delay_sec)}
+                                            onclick={() => delaySustainInput?.focus()}>Custom</button
+                                        >
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.input_delay_alert_delay_sec}
+                                            bind:this={delaySustainInput}
+                                            min="10"
+                                            step="10"
+                                        />
+                                        <span class="settings-num-label">seconds</span>
+                                        <span class="settings-hint" style="margin-bottom:0">({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span>
                                     </div>
                                 </div>
                                 </div>
