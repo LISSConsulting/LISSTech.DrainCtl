@@ -367,7 +367,7 @@
                     <!-- 1. Agent Poll Interval -->
                     <div class="settings-group">
                         <div class="section-header"><Radio size={14} strokeWidth={2.5} /> Agent Poll Interval</div>
-                        <div class="settings-hint" style="margin-bottom:6px">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
+                        <div class="settings-hint">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
                         <div class="repeat-pills">
                             {#each [15, 30, 60, 120, 300] as p}
                                 <button
@@ -398,7 +398,7 @@
                     <!-- 2. Escalation Window -->
                     <div class="settings-group">
                         <div class="section-header"><ShieldAlert size={14} strokeWidth={2.5} /> Escalation Window</div>
-                        <div class="settings-hint" style="margin-bottom:6px">How long a server can stay in drain mode before its status escalates from Grace to Alert.</div>
+                        <div class="settings-hint">How long a server can stay in drain mode before its status escalates from Grace to Alert.</div>
                         <div class="repeat-pills">
                             {#each GRACE_PRESETS as p}
                                 <button
@@ -429,7 +429,7 @@
                     <!-- 3. Session Warning -->
                     <div class="settings-group">
                         <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
-                        <div class="settings-hint" style="margin-bottom:6px">Alert when active sessions reach this percentage of the server's capacity.</div>
+                        <div class="settings-hint">Alert when active sessions reach this percentage of the server's capacity.</div>
                         <div class="repeat-pills">
                             <button
                                 class="btn-brutal gp-pill gp-pill--off"
@@ -480,7 +480,7 @@
                                 <!-- Poll Interval -->
                                 <div class="subsection" style="margin-top:8px">
                                     <div class="settings-label">Poll Interval</div>
-                                    <div class="settings-hint" style="margin-bottom:6px">How often each server is sampled for CPU, memory, and input delay.</div>
+                                    <div class="settings-hint">How often each server is sampled for CPU, memory, and input delay.</div>
                                     <div class="repeat-pills">
                                         {#each POLL_INTERVAL_PRESETS as p}
                                             <button
@@ -511,7 +511,7 @@
                                 <!-- Thresholds -->
                                 <div class="subsection">
                                 <div class="settings-label">CPU Thresholds</div>
-                                <div class="settings-hint" style="margin-bottom:4px">Alert when CPU utilization stays above these levels.</div>
+                                <div class="settings-hint">Alert when CPU utilization stays above these levels.</div>
                                 <div class="repeat-pills">
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
@@ -531,8 +531,8 @@
                                     <span class="settings-num-label threshold-unit">%</span>
                                 </div>
 
-                                <div class="settings-label" style="margin-top:12px">Memory Thresholds</div>
-                                <div class="settings-hint" style="margin-bottom:4px">Alert when memory usage stays above these levels.</div>
+                                <div class="settings-label" style="margin-top:20px">Memory Thresholds</div>
+                                <div class="settings-hint">Alert when memory usage stays above these levels.</div>
                                 <div class="repeat-pills">
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
@@ -552,8 +552,8 @@
                                     <span class="settings-num-label threshold-unit">%</span>
                                 </div>
 
-                                <div class="settings-label" style="margin-top:12px">Input Delay Thresholds</div>
-                                <div class="settings-hint" style="margin-bottom:4px">Alert when user input latency stays above these levels.</div>
+                                <div class="settings-label" style="margin-top:20px">Input Delay Thresholds</div>
+                                <div class="settings-hint">Alert when user input latency stays above these levels.</div>
                                 <div class="repeat-pills">
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
@@ -590,7 +590,7 @@
                                 <!-- Alert Sustain Window -->
                                 <div class="subsection">
                                 <div class="settings-label">Alert Sustain Window</div>
-                                <div class="settings-hint" style="margin-bottom:6px">How long a metric must breach its threshold before an alert fires.</div>
+                                <div class="settings-hint">How long a metric must breach its threshold before an alert fires.</div>
                                 <div class="settings-cfg-grid">
                                     <div>
                                         <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">CPU / Memory</div>
@@ -827,7 +827,7 @@
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--color-accent);
-        margin-bottom: 10px;
+        margin-bottom: 2px;
         padding: 6px 0;
     }
     .subsection {
@@ -879,6 +879,7 @@
         color: var(--color-subtle);
         font-weight: normal;
         line-height: 1.5;
+        margin-bottom: 12px;
     }
     .settings-divider {
         height: 1px;
