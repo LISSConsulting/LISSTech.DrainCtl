@@ -427,8 +427,13 @@
                     <!-- 3. Session Warning -->
                     <div class="settings-group">
                         <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
-                        <div class="settings-hint" style="margin-bottom:6px">Alert when active sessions reach this percentage of the server's capacity. Set to 0 to disable.</div>
+                        <div class="settings-hint" style="margin-bottom:6px">Alert when active sessions reach this percentage of the server's capacity.</div>
                         <div style="display:flex;align-items:center;gap:8px">
+                            <button
+                                class="btn-brutal gp-pill gp-pill--off"
+                                class:active={config.session_warning_threshold === 0}
+                                onclick={() => (config.session_warning_threshold = 0)}>Off</button
+                            >
                             <input
                                 type="number"
                                 class="settings-num"
@@ -492,12 +497,17 @@
                                     <div>
                                         <div class="settings-label">CPU Thresholds</div>
                                         <div class="threshold-row">
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--off"
+                                                class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
+                                                onclick={() => { config.performance.cpu_warn_pct = -1; config.performance.cpu_crit_pct = -1; }}>Off</button
+                                            >
                                             <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.cpu_warn_pct}
-                                                min="0"
+                                                min="-1"
                                                 max="100"
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
@@ -506,19 +516,24 @@
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.cpu_crit_pct}
-                                                min="0"
+                                                min="-1"
                                                 max="100"
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
                                         </div>
                                         <div class="settings-label" style="margin-top:10px">Memory Thresholds</div>
                                         <div class="threshold-row">
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--off"
+                                                class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
+                                                onclick={() => { config.performance.mem_warn_pct = -1; config.performance.mem_crit_pct = -1; }}>Off</button
+                                            >
                                             <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.mem_warn_pct}
-                                                min="0"
+                                                min="-1"
                                                 max="100"
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
@@ -527,7 +542,7 @@
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.mem_crit_pct}
-                                                min="0"
+                                                min="-1"
                                                 max="100"
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
@@ -536,12 +551,17 @@
                                     <div>
                                         <div class="settings-label">Input Delay Thresholds</div>
                                         <div class="threshold-row">
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--off"
+                                                class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
+                                                onclick={() => { config.performance.input_delay_warn_ms = -1; config.performance.input_delay_crit_ms = -1; }}>Off</button
+                                            >
                                             <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.input_delay_warn_ms}
-                                                min="0"
+                                                min="-1"
                                             />
                                             <span class="settings-num-label threshold-unit">ms</span>
                                             <span class="settings-num-label threshold-lbl">Crit</span>
@@ -549,7 +569,7 @@
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.input_delay_crit_ms}
-                                                min="0"
+                                                min="-1"
                                             />
                                             <span class="settings-num-label threshold-unit">ms</span>
                                         </div>
@@ -1109,6 +1129,16 @@
     .gp-pill--dashed {
         border-style: dashed;
         font-size: 0.7rem;
+    }
+    .gp-pill--off {
+        font-size: 0.68rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .gp-pill--off.active {
+        background: var(--color-subtle);
+        color: var(--color-bg);
+        border-color: var(--color-subtle);
     }
     .btn-save {
         display: inline-flex;
