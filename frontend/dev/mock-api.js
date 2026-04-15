@@ -252,21 +252,24 @@ function ensureState() {
 /** Generate realistic perf metrics for a given status. */
 function genPerf(status) {
   const base = {
-    ok:    { cpu: [15, 55], mem: [40, 65], delay: [3, 15],  disk: [0.1, 1.5],  pages: [5, 45],   retrans: [0, 8]  },
-    grace: { cpu: [40, 70], mem: [55, 78], delay: [15, 40], disk: [1.0, 4.0],  pages: [30, 120], retrans: [5, 30] },
-    alert: { cpu: [65, 95], mem: [75, 95], delay: [35, 90], disk: [3.5, 8.5],  pages: [80, 350], retrans: [20, 75] },
+    ok:      { cpu: [15, 55], mem: [40, 65], delay: [3,   15],  disk: [0.1, 1.5],  pages: [5,  45],   retrans: [0,  8]  },
+    warning: { cpu: [68, 82], mem: [74, 84], delay: [95, 145],  disk: [1.5, 3.5],  pages: [20,  80],  retrans: [3, 18]  },
+    grace:   { cpu: [40, 70], mem: [55, 78], delay: [15,  40],  disk: [1.0, 4.0],  pages: [30, 120],  retrans: [5, 30]  },
+    alert:   { cpu: [65, 95], mem: [75, 95], delay: [35,  90],  disk: [3.5, 8.5],  pages: [80, 350],  retrans: [20, 75] },
   }[status] ?? { cpu: [15, 55], mem: [40, 65], delay: [3, 15], disk: [0.1, 1.5], pages: [5, 45], retrans: [0, 8] };
 
   const sessionBase = {
-    ok:    { cpuP95: [1,  12], memMbP95: [200, 500] },
-    grace: { cpuP95: [5,  20], memMbP95: [300, 600] },
-    alert: { cpuP95: [12, 35], memMbP95: [450, 850] },
+    ok:      { cpuP95: [1,  12], memMbP95: [200, 500] },
+    warning: { cpuP95: [4,  16], memMbP95: [260, 560] },
+    grace:   { cpuP95: [5,  20], memMbP95: [300, 600] },
+    alert:   { cpuP95: [12, 35], memMbP95: [450, 850] },
   }[status] ?? { cpuP95: [1, 12], memMbP95: [200, 500] };
 
   const rfxBase = {
-    ok:    { fps: [20, 30], enc: [5,  15], qual: [85, 99], rtt: [10, 40], loss: [0.0, 0.8], skipSvr: [0.0, 1.0], skipNet: [0.0, 0.5] },
-    grace: { fps: [14, 24], enc: [12, 30], qual: [72, 88], rtt: [25, 65], loss: [0.3, 2.5], skipSvr: [0.2, 3.0], skipNet: [0.1, 1.5] },
-    alert: { fps: [7,  18], enc: [25, 60], qual: [52, 78], rtt: [40, 90], loss: [1.0, 7.0], skipSvr: [2.0, 8.0], skipNet: [0.5, 4.0] },
+    ok:      { fps: [20, 30], enc: [5,  15], qual: [85, 99], rtt: [10, 40], loss: [0.0, 0.8], skipSvr: [0.0, 1.0], skipNet: [0.0, 0.5] },
+    warning: { fps: [16, 26], enc: [10, 22], qual: [78, 93], rtt: [18, 52], loss: [0.1, 1.5], skipSvr: [0.1, 2.0], skipNet: [0.0, 0.8] },
+    grace:   { fps: [14, 24], enc: [12, 30], qual: [72, 88], rtt: [25, 65], loss: [0.3, 2.5], skipSvr: [0.2, 3.0], skipNet: [0.1, 1.5] },
+    alert:   { fps: [7,  18], enc: [25, 60], qual: [52, 78], rtt: [40, 90], loss: [1.0, 7.0], skipSvr: [2.0, 8.0], skipNet: [0.5, 4.0] },
   }[status] ?? { fps: [20, 30], enc: [5, 15], qual: [85, 99], rtt: [10, 40], loss: [0, 0.8], skipSvr: [0, 1], skipNet: [0, 0.5] };
 
   const cpu = rand(...base.cpu);
@@ -390,7 +393,7 @@ function spikePerf(perf) {
 /** Seed a history ring buffer with plausible past entries. */
 function seedHistory(host, currentStatus) {
   const entries = [];
-  const statuses = ['ok', 'grace', 'alert', 'ok', 'ok'];
+  const statuses = ['ok', 'warning', 'grace', 'alert', 'ok', 'ok'];
   let prevStatus = 'ok';
   for (let i = 20; i >= 1; i--) {
     const s = i === 1 ? currentStatus : pick(statuses);
@@ -399,11 +402,11 @@ function seedHistory(host, currentStatus) {
       timestamp: isoAgo(i * 30),
       host,
       status: s,
-      drain_mode: s === 'ok' ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
+      drain_mode: (s === 'ok' || s === 'warning') ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
       state_duration_seconds: randInt(120, 7200),
       transition,
       transition_from: transition ? prevStatus : undefined,
-      changed_by: transition && s !== 'ok' ? pick(ADMINS) : undefined,
+      changed_by: transition && s !== 'ok' && s !== 'warning' ? pick(ADMINS) : undefined,
       version: '26.103.4',
       message: transition
         ? `Status changed: ${prevStatus} → ${s}`
@@ -520,14 +523,15 @@ function startEvolution() {
       // Occasional status transition (~5% chance per tick per server)
       if (Math.random() < 0.05) {
         const transitions = {
-          ok:    ['grace'],
-          grace: ['ok', 'alert'],
-          alert: ['grace', 'off'],
-          off:   ['ok'],
+          ok:      ['grace', 'warning'],
+          warning: ['ok', 'alert'],
+          grace:   ['ok', 'alert'],
+          alert:   ['grace', 'off'],
+          off:     ['ok'],
         };
         const prev = s.status;
         s.status = pick(transitions[prev] ?? ['ok']);
-        s.changedBy = s.status === 'ok' ? '' : pick(ADMINS);
+        s.changedBy = (s.status === 'ok' || s.status === 'warning') ? '' : pick(ADMINS);
         s.graceDeadline = s.status === 'grace' ? isoFuture(randInt(10, 45)) : null;
         s.stateChangedAt = isoNow();
         s.perf = s.status === 'off' ? null : genPerf(s.status);
@@ -544,7 +548,7 @@ function startEvolution() {
           timestamp: isoNow(),
           host,
           status: s.status,
-          drain_mode: s.status === 'ok' ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
+          drain_mode: (s.status === 'ok' || s.status === 'warning') ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
           state_duration_seconds: randInt(60, 3600),
           transition: true,
           transition_from: prev,
@@ -580,7 +584,7 @@ function serverView(host) {
   return {
     host,
     status: s.status,
-    drain_mode: s.status === 'ok' ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
+    drain_mode: (s.status === 'ok' || s.status === 'warning') ? 'ALLOW_ALL_CONNECTIONS' : 'ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS',
     sessions: sessActive,
     sessions_active: sessActive,
     sessions_disconnected: sessDisc,
@@ -604,8 +608,10 @@ function allServers() {
 
 function healthResponse() {
   const servers = allServers();
-  const counts = { total: servers.length, ok: 0, grace: 0, alert: 0, off: 0 };
-  for (const s of servers) counts[s.status]++;
+  const counts = { total: servers.length, ok: 0, warning: 0, grace: 0, alert: 0, off: 0 };
+  for (const s of servers) {
+    if (s.status in counts) counts[s.status]++;
+  }
   return { version: '26.103.4', servers: counts };
 }
 
