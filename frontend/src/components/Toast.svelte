@@ -89,11 +89,11 @@
     }
 
     .toast-ok {
-        --border-dim: #dccbb4;
-        --border-bright: #b87843;
-        background: #fdf6f0;
-        color: #5c3820;
-        box-shadow: 4px 4px 0 #a89480;
+        --border-dim: #b8ccbe;
+        --border-bright: #5d8a6e;
+        background: #f0f7f2;
+        color: #2a4a34;
+        box-shadow: 4px 4px 0 #8aa894;
     }
     .toast-err {
         --border-dim: #d8bcc0;
@@ -111,11 +111,11 @@
     }
 
     :global([data-theme='dark']) .toast-ok {
-        --border-dim: #584838;
-        --border-bright: #d89858;
-        background: #382818;
-        color: #e0ccb0;
-        box-shadow: 4px 4px 0 #1c1810;
+        --border-dim: #3a5844;
+        --border-bright: #78b08a;
+        background: #1c3024;
+        color: #b4d4be;
+        box-shadow: 4px 4px 0 #101c14;
     }
     :global([data-theme='dark']) .toast-err {
         --border-dim: #583040;
