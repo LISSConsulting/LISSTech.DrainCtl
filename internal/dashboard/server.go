@@ -797,6 +797,19 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Resolve redacted secrets — if the browser sent the sentinel, look up
+	// the real secret from the saved config so the test uses actual credentials.
+	if singleTarget != nil && singleTarget.Secret == dc.SecretRedacted {
+		if cfg, loadErr := dc.LoadConfig(); loadErr == nil {
+			for _, saved := range cfg.Notifications {
+				if saved.Type == singleTarget.Type && saved.URL == singleTarget.URL {
+					singleTarget.Secret = saved.Secret
+					break
+				}
+			}
+		}
+	}
+
 	var err error
 	if singleTarget != nil {
 		slog.Info("dashboard=notify-test-target", "user", user, "type", singleTarget.Type, "url", singleTarget.URL)

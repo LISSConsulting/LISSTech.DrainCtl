@@ -253,13 +253,17 @@
             const failed = results.filter((r) => r.status === 'rejected');
             if (failed.length === 0) {
                 toast.ok(`Test sent to ${targets.length} target${targets.length > 1 ? 's' : ''}`);
-            } else if (failed.length === results.length) {
-                toast.err('All test notifications failed. Check target URLs and credentials.');
             } else {
-                toast.err(`${failed.length} of ${targets.length} targets failed.`);
+                // Surface the actual error details (DNS, timeout, auth, etc.)
+                const details = failed.map((r) => {
+                    const detail = r.reason?.detail || r.reason?.message || String(r.reason);
+                    return detail;
+                });
+                const unique = [...new Set(details)];
+                toast.err(`${failed.length} of ${targets.length} failed: ${unique.join('; ')}`);
             }
         } catch (e) {
-            toast.err('Test failed: ' + (e?.message ?? String(e)));
+            toast.err('Test failed: ' + (e?.detail ?? e?.message ?? String(e)));
         } finally {
             testing = false;
         }
