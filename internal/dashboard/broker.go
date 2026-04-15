@@ -12,7 +12,7 @@ import (
 
 // SSEEvent is a single event broadcast to all connected browsers.
 type SSEEvent struct {
-	Type      string          `json:"type"` // "server_update" or "settings_update"
+	Type      string          `json:"type"` // "server_update", "server_deleted", or "settings_update"
 	Host      string          `json:"host,omitempty"`
 	Data      json.RawMessage `json:"data"`
 	Timestamp time.Time       `json:"timestamp"`

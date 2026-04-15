@@ -431,8 +431,8 @@ const sseClients = new Set();
 /**
  * Broadcast a DrainCtl SSE event to all connected clients.
  * Silently ignores clients whose connections have already closed.
- * @param {'server_update'|'settings_update'} type
- * @param {object} data
+ * @param {'server_update'|'server_deleted'|'settings_update'} type
+ * @param {object|null} data
  * @param {string} [host]
  */
 function broadcastSSE(type, data, host) {
@@ -668,6 +668,7 @@ function handleRequest(method, pathname, body, query = {}) {
   if (method === 'DELETE' && serverMatch) {
     state.delete(serverMatch.host);
     history.delete(serverMatch.host);
+    broadcastSSE('server_deleted', null, serverMatch.host);
     return { status: 204, body: null };
   }
 
