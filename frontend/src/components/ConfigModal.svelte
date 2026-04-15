@@ -60,8 +60,8 @@
         loading = true;
         try {
             const c = await fetchSettings();
-            config = structuredClone(c);
-            original = structuredClone(c);
+            config = JSON.parse(JSON.stringify(c));
+            original = JSON.parse(JSON.stringify(c));
         } catch (e) {
             toast.err('Failed to load config: ' + e.message);
         } finally {
@@ -196,8 +196,8 @@
         saving = true;
         try {
             await saveSettings(config);
-            original = structuredClone(config);
-            appState.config = structuredClone(config);
+            original = JSON.parse(JSON.stringify(config));
+            appState.config = JSON.parse(JSON.stringify(config));
             toast.ok('Settings saved successfully');
         } catch (e) {
             toast.err('Save failed: ' + e.message);
