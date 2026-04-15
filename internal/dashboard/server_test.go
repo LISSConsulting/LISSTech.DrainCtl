@@ -2338,6 +2338,15 @@ func TestHandleNotifyTest_BothHooksNil_UsesProductionLoad(t *testing.T) {
 
 // ── Broker tests ─────────────────────────────────────────────────────────────
 
+func mustMarshalTest(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestBroker_SubscribeAndBroadcast(t *testing.T) {
 	b := NewBroker()
 	id, ch, _, err := b.Subscribe()
@@ -2350,7 +2359,7 @@ func TestBroker_SubscribeAndBroadcast(t *testing.T) {
 		t.Fatalf("count = %d, want 1", b.Count())
 	}
 
-	b.Broadcast(SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()})
+	b.Broadcast(mustMarshalTest(t, SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()}))
 
 	select {
 	case msg := <-ch:
@@ -2379,7 +2388,7 @@ func TestBroker_SlowSubscriberEvicted(t *testing.T) {
 
 	// Fill the channel buffer (16 messages).
 	for i := 0; i < 17; i++ {
-		b.Broadcast(SSEEvent{Type: "server_update", Data: []byte(`{}`), Timestamp: time.Now()})
+		b.Broadcast(mustMarshalTest(t, SSEEvent{Type: "server_update", Data: []byte(`{}`), Timestamp: time.Now()}))
 	}
 
 	select {
@@ -2402,7 +2411,7 @@ func TestBroker_MultipleSubscribers(t *testing.T) {
 	defer b.Unsubscribe(id1)
 	defer b.Unsubscribe(id2)
 
-	b.Broadcast(SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()})
+	b.Broadcast(mustMarshalTest(t, SSEEvent{Type: "server_update", Host: "SRV01", Data: []byte(`{}`), Timestamp: time.Now()}))
 
 	for i, ch := range []<-chan []byte{ch1, ch2} {
 		select {
