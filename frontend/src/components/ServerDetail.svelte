@@ -358,26 +358,26 @@
             <div class="d-kv-row">
                 <span class="d-kv-k">Duration</span><span class="d-kv-v">{dur(server.state_duration_seconds)}</span>
             </div>
-            {#if gracePeriodSec != null}
+            {#if (server.status === 'grace' || server.status === 'alert') && gracePeriodSec != null}
                 <div class="d-kv-row">
                     <span class="d-kv-k">Grace Period</span><span class="d-kv-v"
                         >{Math.round(gracePeriodSec / 60)}m</span
                     >
                 </div>
-            {/if}
-            {#if graceLeft != null && graceLeft > 0}
-                <div class="d-kv-row">
-                    <span class="d-kv-k">Grace Left</span><span class="d-kv-v" style="color:var(--color-amber)"
-                        >{dur(graceLeft)}</span
-                    >
-                </div>
-            {/if}
-            {#if graceExceeded != null && graceExceeded > 0}
-                <div class="d-kv-row">
-                    <span class="d-kv-k">Grace Exceeded</span><span class="d-kv-v" style="color:var(--color-red)"
-                        >{dur(graceExceeded)} ago</span
-                    >
-                </div>
+                {#if graceLeft != null && graceLeft > 0}
+                    <div class="d-kv-row">
+                        <span class="d-kv-k">Grace Left</span><span class="d-kv-v" style="color:var(--color-amber)"
+                            >{dur(graceLeft)}</span
+                        >
+                    </div>
+                {/if}
+                {#if graceExceeded != null && graceExceeded > 0}
+                    <div class="d-kv-row">
+                        <span class="d-kv-k">Grace Exceeded</span><span class="d-kv-v" style="color:var(--color-red)"
+                            >{dur(graceExceeded)} ago</span
+                        >
+                    </div>
+                {/if}
             {/if}
             <div class="d-kv-row">
                 <span class="d-kv-k">Changed By</span><span class="d-kv-v">{server.changed_by || '—'}</span>
