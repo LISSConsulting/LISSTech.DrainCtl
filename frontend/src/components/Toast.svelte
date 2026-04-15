@@ -59,7 +59,7 @@
         align-items: center;
         gap: 10px;
         padding: 13px 16px;
-        border: 3px solid;
+        border: 2px solid;
         border-radius: var(--radius-default);
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.78rem;
