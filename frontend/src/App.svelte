@@ -7,6 +7,7 @@
         addEvent,
         appendMetricsSample,
         appendServerMetricsSample,
+        removeServerMetrics,
         seedServerMetrics,
         appendSessionSample,
         appendRfxSample,
@@ -569,6 +570,25 @@
                             pagesPerSec: sv.perf.pages_sec ?? 0,
                         });
                     }
+                } else if (event.type === 'server_deleted' && event.host) {
+                    // Server removed via REST API — update the list immediately so
+                    // operators see it disappear without waiting for the next poll cycle.
+                    appState.handleSSEServerDeleted(event.host);
+                    removeServerMetrics(event.host);
+                    prevStates.delete(event.host);
+                    addEvent(
+                        serverEvent(
+                            new Date().toLocaleTimeString('en-US', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: false,
+                            }),
+                            { host: event.host, status: 'off' },
+                            'removed from dashboard',
+                            'alert',
+                        ),
+                    );
                 } else if (event.type === 'settings_update' && event.data) {
                     // Go stores memory thresholds as % free; UI works in % used —
                     // apply the same inversion that fetchSettings() does on REST load.

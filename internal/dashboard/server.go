@@ -480,6 +480,7 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 
 	ds.state.Register(req.Hostname)
 	slog.Info("dashboard=register", slog.Int("event_id", dc.EvtServerRegistered), "host", req.Hostname, "user", user)
+	ds.broadcastServerUpdate(req.Hostname)
 
 	resp := struct {
 		OK             bool   `json:"ok"`
@@ -584,6 +585,7 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 		user = auth.Username
 	}
 	slog.Info("dashboard=removed", slog.Int("event_id", dc.EvtServerRemoved), "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
+	ds.broadcastServerDeleted(host)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -979,6 +981,21 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 // when reporting local check results.
 func (ds *DashboardServer) BroadcastServerUpdate(host string) {
 	ds.broadcastServerUpdate(host)
+}
+
+// broadcastServerDeleted broadcasts a server_deleted SSE event so connected
+// browsers remove the host from their list immediately instead of waiting for
+// the next 30-second poll cycle.
+func (ds *DashboardServer) broadcastServerDeleted(host string) {
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "server_deleted",
+		Host:      host,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		return
+	}
+	ds.broker.Broadcast(payload)
 }
 
 // broadcastSettingsUpdate broadcasts the current settings to all connected browsers.
