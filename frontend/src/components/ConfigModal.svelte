@@ -273,6 +273,8 @@
     /** @type {HTMLInputElement|null} */
     let pollIntervalInput = $state(null);
     /** @type {HTMLInputElement|null} */
+    let pollIntervalAgentInput = $state(null);
+    /** @type {HTMLInputElement|null} */
     let loadSustainInput = $state(null);
     /** @type {HTMLInputElement|null} */
     let delaySustainInput = $state(null);
@@ -405,6 +407,39 @@
                                 max="100"
                             />
                             <span class="settings-num-label">% of max sessions (0 = disabled)</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- Agent Poll Interval -->
+                    <div class="settings-group">
+                        <div class="settings-label">Agent Poll Interval</div>
+                        <div class="settings-hint" style="margin-bottom:6px">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
+                        <div class="repeat-pills">
+                            {#each [15, 30, 60, 120, 300] as p}
+                                <button
+                                    class="btn-brutal gp-pill"
+                                    class:active={config.poll_interval === p}
+                                    onclick={() => (config.poll_interval = p)}>{p < 60 ? p + 's' : p / 60 + 'm'}</button
+                                >
+                            {/each}
+                            <button
+                                class="btn-brutal gp-pill gp-pill--dashed"
+                                class:active={![15, 30, 60, 120, 300].includes(config.poll_interval)}
+                                onclick={() => pollIntervalAgentInput?.focus()}>Custom</button
+                            >
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                            <input
+                                type="number"
+                                class="settings-num"
+                                bind:value={config.poll_interval}
+                                bind:this={pollIntervalAgentInput}
+                                min="10"
+                                max="86400"
+                            />
+                            <span class="settings-num-label">seconds (10–86400)</span>
                         </div>
                     </div>
 

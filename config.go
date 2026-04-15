@@ -672,10 +672,10 @@ func UpdatePerformanceConfig(perf PerformanceConfig) error {
 }
 
 // UpdateNotifySettings atomically updates notification targets, session warning
-// threshold, and/or grace period in a single config load+save cycle.
+// threshold, grace period, and/or poll interval in a single config load+save cycle.
 // Any nil argument is left unchanged. This is the preferred API for the
 // dashboard PUT /api/v1/settings handler.
-func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int) error {
+func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -694,6 +694,12 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 			return fmt.Errorf("grace period must be 1-1440 minutes, got %d", *gracePeriod)
 		}
 		cfg.GracePeriod = *gracePeriod
+	}
+	if pollInterval != nil {
+		if *pollInterval < 10 || *pollInterval > MaxPollInterval {
+			return fmt.Errorf("poll interval must be 10-%d seconds, got %d", MaxPollInterval, *pollInterval)
+		}
+		cfg.PollInterval = *pollInterval
 	}
 	cfg.Validate()
 	return saveConfigToFile(cfg)
