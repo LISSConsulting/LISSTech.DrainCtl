@@ -366,6 +366,7 @@
                     <!-- Grace Period -->
                     <div class="settings-group">
                         <div class="settings-label">Grace Period</div>
+                        <div class="settings-hint" style="margin-bottom:6px">How long after drain mode is enabled before the server status escalates to Alert.</div>
                         <div class="repeat-pills">
                             {#each GRACE_PRESETS as p}
                                 <button
@@ -398,6 +399,7 @@
                     <!-- Session Warning -->
                     <div class="settings-group">
                         <div class="settings-label">Session Warning Threshold</div>
+                        <div class="settings-hint" style="margin-bottom:6px">Fires a session_warning alert when utilization exceeds this percentage of max sessions.</div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <input
                                 type="number"
