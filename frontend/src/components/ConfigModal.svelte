@@ -270,6 +270,12 @@
 
     /** @type {HTMLInputElement|null} */
     let gracePeriodInput = $state(null);
+    /** @type {HTMLInputElement|null} */
+    let pollIntervalInput = $state(null);
+    /** @type {HTMLInputElement|null} */
+    let loadSustainInput = $state(null);
+    /** @type {HTMLInputElement|null} */
+    let delaySustainInput = $state(null);
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_interactive_supports_focus -->
@@ -431,12 +437,18 @@
                                                 onclick={() => (config.performance.sample_interval_sec = p)}>{p}s</button
                                             >
                                         {/each}
+                                        <button
+                                            class="btn-brutal gp-pill gp-pill--dashed"
+                                            class:active={!POLL_INTERVAL_PRESETS.includes(config.performance.sample_interval_sec)}
+                                            onclick={() => pollIntervalInput?.focus()}>Custom</button
+                                        >
                                     </div>
                                     <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                                         <input
                                             type="number"
                                             class="settings-num"
                                             bind:value={config.performance.sample_interval_sec}
+                                            bind:this={pollIntervalInput}
                                             min="10"
                                             max="300"
                                         />
@@ -544,12 +556,18 @@
                                                     onclick={() => (config.performance.load_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                                 >
                                             {/each}
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--dashed"
+                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.load_alert_delay_sec)}
+                                                onclick={() => loadSustainInput?.focus()}>Custom</button
+                                            >
                                         </div>
                                         <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                                             <input
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.load_alert_delay_sec}
+                                                bind:this={loadSustainInput}
                                                 min="10"
                                                 step="10"
                                             />
@@ -567,12 +585,18 @@
                                                     onclick={() => (config.performance.input_delay_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                                 >
                                             {/each}
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--dashed"
+                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.input_delay_alert_delay_sec)}
+                                                onclick={() => delaySustainInput?.focus()}>Custom</button
+                                            >
                                         </div>
                                         <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                                             <input
                                                 type="number"
                                                 class="settings-num"
                                                 bind:value={config.performance.input_delay_alert_delay_sec}
+                                                bind:this={delaySustainInput}
                                                 min="10"
                                                 step="10"
                                             />
