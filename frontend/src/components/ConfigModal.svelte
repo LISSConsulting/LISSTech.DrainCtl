@@ -827,7 +827,7 @@
         color: var(--color-fg);
     }
     .settings-group {
-        margin-bottom: 30px;
+        margin-bottom: 22px;
     }
     .section-header {
         display: flex;
@@ -887,7 +887,7 @@
     }
     .settings-hint {
         font-size: 0.72rem;
-        color: var(--color-subtle);
+        color: var(--color-muted);
         font-weight: normal;
         line-height: 1.5;
         margin-bottom: 12px;
@@ -1129,6 +1129,7 @@
         font-weight: 600;
         padding: 5px 12px;
         color: var(--color-muted);
+        background: var(--color-card);
         box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 20%, transparent);
     }
     .gp-pill:hover, .pctl-pill:hover {
