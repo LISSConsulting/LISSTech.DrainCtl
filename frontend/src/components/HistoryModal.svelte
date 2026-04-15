@@ -1,6 +1,6 @@
 <script>
     import { fetchHistory } from '../lib/api.js';
-    import { formatTs, dur, modeLabel } from '../lib/utils.js';
+    import { formatTs, dur } from '../lib/utils.js';
     import { Clock, X, ArrowRightLeft, CircleDot } from 'lucide-svelte';
 
     let { host, onclose } = $props();
@@ -98,7 +98,10 @@
                     {#if loading}
                         <div class="hist-empty">Loading...</div>
                     {:else if error}
-                        <div class="hist-empty err">Error: {error}</div>
+                        <div class="hist-empty err">
+                            <span>Error: {error}</span>
+                            <button class="btn-brutal retry-btn" onclick={() => loadHistory(changesOnly)}>Retry</button>
+                        </div>
                     {:else if !entries.length}
                         <div class="hist-empty">No history recorded yet.</div>
                     {:else}
@@ -207,6 +210,10 @@
         flex: 1;
     }
     .hist-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
         text-align: center;
         padding: 32px;
         color: var(--color-subtle);
@@ -215,6 +222,12 @@
     }
     .hist-empty.err {
         color: var(--color-red);
+    }
+    .retry-btn {
+        font-size: 0.72rem;
+        padding: 4px 14px;
+        background: var(--color-surface);
+        color: var(--color-fg);
     }
     .hist-entry {
         display: flex;
