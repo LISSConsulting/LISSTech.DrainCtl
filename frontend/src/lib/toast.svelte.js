@@ -40,7 +40,7 @@ function dismiss(tid) {
     items = items.map((t) => (t.id === tid ? { ...t, dismissing: true } : t));
     setTimeout(() => {
         items = items.filter((t) => t.id !== tid);
-    }, 450);
+    }, 300);
 }
 
 export const toast = {
