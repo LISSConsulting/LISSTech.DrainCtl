@@ -683,6 +683,7 @@
     .spark-cell {
         position: relative;
         overflow: hidden;
+        border-left: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
     }
     .muted {
         color: var(--color-muted);
