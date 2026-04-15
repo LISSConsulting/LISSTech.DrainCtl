@@ -2,9 +2,12 @@
     import { toast } from '../lib/toast.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
     import { authState, signInWithWindows, loginWithCredentials } from '../lib/auth.svelte.js';
-    import { KeyRound, ShieldCheck } from 'lucide-svelte';
+    import { KeyRound, Sun, Moon, Monitor } from 'lucide-svelte';
 
-    const isDark = $derived(theme.resolved === 'dark');
+    const pref = $derived(theme.preference);
+    const themeLabel = $derived(
+        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode'
+    );
 
     let username = $state('');
     let password = $state('');
@@ -64,8 +67,11 @@
             <button
                 class="btn-theme btn-brutal"
                 onclick={toggleTheme}
-                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>{isDark ? '☀' : '☽'}</button
+                aria-label={themeLabel}
+                title={themeLabel}
             >
+                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon size={15} strokeWidth={2.4} />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
+            </button>
         </div>
     </div>
 </nav>
@@ -94,7 +100,9 @@
                     onclick={handleWindowsSignIn}
                     disabled={ssoLoading || submitting}
                 >
-                    <ShieldCheck size={16} />
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M0 2.3l6.5-.9v6.3H0zm7.3-1L16 0v7.7H7.3zM16 8.4v7.7l-8.7-1.2V8.4zM6.5 14.7L0 13.8V8.4h6.5z"/>
+                    </svg>
                     {ssoLoading ? 'Signing in…' : 'Sign in with Windows'}
                 </button>
 

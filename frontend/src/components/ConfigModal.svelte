@@ -88,8 +88,8 @@
             delay_warn: 50,
             delay_crit: 100,
             delay_percentile: 'p50',
-            load_polls: 3,
-            delay_polls: 4,
+            load_sustain_sec: 90,
+            delay_sustain_sec: 120,
         },
         {
             level: 2,
@@ -105,8 +105,8 @@
             delay_warn: 30,
             delay_crit: 80,
             delay_percentile: 'p95',
-            load_polls: 2,
-            delay_polls: 3,
+            load_sustain_sec: 60,
+            delay_sustain_sec: 90,
         },
         {
             level: 3,
@@ -122,15 +122,54 @@
             delay_warn: 15,
             delay_crit: 40,
             delay_percentile: 'p95',
-            load_polls: 2,
-            delay_polls: 2,
+            load_sustain_sec: 60,
+            delay_sustain_sec: 60,
         },
     ];
+
+    const POLL_INTERVAL_PRESETS = [10, 15, 30, 60, 120];
+    const SUSTAIN_PRESETS = [60, 120, 300, 600, 900]; // seconds
+
+    // ---------------------------------------------------------------------------
+    // Sustain window — derived duration state (seconds)
+    // On load: polls × interval → duration.  On save: ceil(duration / interval) → polls.
+    // ---------------------------------------------------------------------------
+
+    let loadSustainSec = $state(60);
+    let delaySustainSec = $state(90);
+
+    // Sync sustain durations from config when config loads or resets
+    $effect(() => {
+        if (!config?.performance) return;
+        const interval = config.performance.sample_interval_sec || 30;
+        const lp = config.performance.load_consecutive_polls || 2;
+        const dp = config.performance.input_delay_consecutive_polls || 3;
+        loadSustainSec = lp * interval;
+        delaySustainSec = dp * interval;
+    });
+
+    /** Format seconds as a human-readable label. */
+    function fmtDuration(sec) {
+        if (sec < 60) return sec + 's';
+        if (sec % 60 === 0) return (sec / 60) + 'm';
+        return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+    }
+
+    /** Compute consecutive polls from sustain duration and interval. */
+    function sustainToPolls(sustainSec, intervalSec) {
+        return Math.max(1, Math.ceil(sustainSec / (intervalSec || 30)));
+    }
+
+    let loadPolls = $derived(sustainToPolls(loadSustainSec, config?.performance?.sample_interval_sec));
+    let delayPolls = $derived(sustainToPolls(delaySustainSec, config?.performance?.sample_interval_sec));
 
     let activeFireLevel = $derived.by(() => {
         if (!config) return -1;
         const p = config.performance;
+        const interval = p?.sample_interval_sec || 30;
         for (const pr of FIRE_PRESETS) {
+            const actualLoadSustain = (p?.load_consecutive_polls || 2) * interval;
+            const actualDelaySustain = (p?.input_delay_consecutive_polls || 3) * interval;
             if (
                 config.grace_period === pr.grace_period &&
                 config.session_warning_threshold === pr.session_warning &&
@@ -141,8 +180,8 @@
                 p?.input_delay_warn_ms === pr.delay_warn &&
                 p?.input_delay_crit_ms === pr.delay_crit &&
                 (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
-                (p?.load_consecutive_polls || 2) === pr.load_polls &&
-                (p?.input_delay_consecutive_polls || 3) === pr.delay_polls
+                actualLoadSustain === pr.load_sustain_sec &&
+                actualDelaySustain === pr.delay_sustain_sec
             ) {
                 return pr.level;
             }
@@ -155,6 +194,7 @@
         config.grace_period = preset.grace_period;
         config.session_warning_threshold = preset.session_warning;
         if (config.performance) {
+            const interval = config.performance.sample_interval_sec || 30;
             config.performance.enabled = true;
             config.performance.cpu_warn_pct = preset.cpu_warn;
             config.performance.cpu_crit_pct = preset.cpu_crit;
@@ -163,8 +203,10 @@
             config.performance.input_delay_warn_ms = preset.delay_warn;
             config.performance.input_delay_crit_ms = preset.delay_crit;
             config.performance.input_delay_percentile = preset.delay_percentile;
-            config.performance.load_consecutive_polls = preset.load_polls;
-            config.performance.input_delay_consecutive_polls = preset.delay_polls;
+            config.performance.load_consecutive_polls = sustainToPolls(preset.load_sustain_sec, interval);
+            config.performance.input_delay_consecutive_polls = sustainToPolls(preset.delay_sustain_sec, interval);
+            loadSustainSec = preset.load_sustain_sec;
+            delaySustainSec = preset.delay_sustain_sec;
         }
     }
 
@@ -192,6 +234,11 @@
         if (err) {
             toast.err(err);
             return;
+        }
+        // Write computed poll counts from sustain durations before saving.
+        if (config.performance?.enabled) {
+            config.performance.load_consecutive_polls = loadPolls;
+            config.performance.input_delay_consecutive_polls = delayPolls;
         }
         saving = true;
         try {
@@ -317,7 +364,7 @@
                                 </span>
                                 <span class="fire-detail">
                                     CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
-                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms
+                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms · Sustain {fmtDuration(preset.load_sustain_sec)}/{fmtDuration(preset.delay_sustain_sec)}
                                 </span>
                             </button>
                         {/each}
@@ -396,7 +443,35 @@
                                     : ''}
                             </label>
                             {#if config.performance.enabled && !config.performance.force_disabled}
-                                <div class="settings-cfg-grid" style="margin-top:8px">
+                                <!-- Poll Interval -->
+                                <div style="margin-top:8px">
+                                    <div class="settings-label">Poll Interval</div>
+                                    <div class="settings-hint" style="margin-bottom:6px">How often each server is sampled for CPU, memory, and input delay.</div>
+                                    <div class="repeat-pills">
+                                        {#each POLL_INTERVAL_PRESETS as p}
+                                            <button
+                                                class="btn-brutal gp-pill"
+                                                class:active={config.performance.sample_interval_sec === p}
+                                                onclick={() => (config.performance.sample_interval_sec = p)}>{p}s</button
+                                            >
+                                        {/each}
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                        <input
+                                            type="number"
+                                            class="settings-num"
+                                            bind:value={config.performance.sample_interval_sec}
+                                            min="10"
+                                            max="300"
+                                        />
+                                        <span class="settings-num-label">seconds (10–300)</span>
+                                    </div>
+                                </div>
+
+                                <div class="settings-divider" style="margin:12px 0"></div>
+
+                                <!-- Thresholds — 2-column grid -->
+                                <div class="settings-cfg-grid">
                                     <div>
                                         <div class="settings-label">CPU Thresholds</div>
                                         <div class="threshold-row">
@@ -419,7 +494,7 @@
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
                                         </div>
-                                        <div class="settings-label">Memory Thresholds</div>
+                                        <div class="settings-label" style="margin-top:10px">Memory Thresholds</div>
                                         <div class="threshold-row">
                                             <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
@@ -461,7 +536,7 @@
                                             />
                                             <span class="settings-num-label threshold-unit">ms</span>
                                         </div>
-                                        <div class="threshold-row" style="margin-top:6px">
+                                        <div class="threshold-row" style="margin-top:12px">
                                             <span class="settings-num-label threshold-lbl">Percentile</span>
                                             <button
                                                 class="btn-brutal pctl-pill"
@@ -476,41 +551,71 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="settings-label" style="margin-top:10px">Alert Sensitivity (consecutive polls)</div>
+
+                                <div class="settings-divider" style="margin:12px 0"></div>
+
+                                <!-- Alert Sustain Window -->
+                                <div class="settings-label">Alert Sustain Window</div>
+                                <div class="settings-hint" style="margin-bottom:6px">How long a metric must breach its threshold before an alert fires.</div>
                                 <div class="settings-cfg-grid">
-                                    <div class="threshold-row">
-                                        <span class="settings-num-label threshold-lbl">CPU / Memory</span>
-                                        <input
-                                            type="number"
-                                            class="settings-num"
-                                            bind:value={config.performance.load_consecutive_polls}
-                                            min="1"
-                                            max="30"
-                                            placeholder="5"
-                                        />
-                                        <span class="settings-num-label threshold-unit">polls</span>
+                                    <div>
+                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">CPU / Memory</div>
+                                        <div class="repeat-pills">
+                                            {#each SUSTAIN_PRESETS as s}
+                                                <button
+                                                    class="btn-brutal gp-pill"
+                                                    class:active={loadSustainSec === s}
+                                                    onclick={() => (loadSustainSec = s)}>{fmtDuration(s)}</button
+                                                >
+                                            {/each}
+                                        </div>
+                                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={loadSustainSec}
+                                                min="10"
+                                                step="10"
+                                            />
+                                            <span class="settings-num-label">seconds</span>
+                                            <span class="settings-hint">({loadPolls} poll{loadPolls === 1 ? '' : 's'})</span>
+                                        </div>
                                     </div>
-                                    <div class="threshold-row">
-                                        <span class="settings-num-label threshold-lbl">Input Delay</span>
-                                        <input
-                                            type="number"
-                                            class="settings-num"
-                                            bind:value={config.performance.input_delay_consecutive_polls}
-                                            min="1"
-                                            max="60"
-                                            placeholder="10"
-                                        />
-                                        <span class="settings-num-label threshold-unit">polls</span>
+                                    <div>
+                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">Input Delay</div>
+                                        <div class="repeat-pills">
+                                            {#each SUSTAIN_PRESETS as s}
+                                                <button
+                                                    class="btn-brutal gp-pill"
+                                                    class:active={delaySustainSec === s}
+                                                    onclick={() => (delaySustainSec = s)}>{fmtDuration(s)}</button
+                                                >
+                                            {/each}
+                                        </div>
+                                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={delaySustainSec}
+                                                min="10"
+                                                step="10"
+                                            />
+                                            <span class="settings-num-label">seconds</span>
+                                            <span class="settings-hint">({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <label class="settings-check">
-                                    <input type="checkbox" bind:checked={config.performance.collect_per_session} />
-                                    Per-session CPU accounting
-                                </label>
-                                <label class="settings-check">
-                                    <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
-                                    RemoteFX monitoring
-                                </label>
+
+                                <div style="margin-top:10px">
+                                    <label class="settings-check">
+                                        <input type="checkbox" bind:checked={config.performance.collect_per_session} />
+                                        Per-session CPU accounting
+                                    </label>
+                                    <label class="settings-check">
+                                        <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
+                                        RemoteFX monitoring
+                                    </label>
+                                </div>
                             {/if}
                         </div>
                         <div class="settings-divider"></div>
@@ -706,6 +811,11 @@
     .settings-num-label {
         font-size: 0.75rem;
         color: var(--color-muted);
+    }
+    .settings-hint {
+        font-size: 0.72rem;
+        color: var(--color-subtle);
+        font-weight: normal;
     }
     .settings-divider {
         height: 1px;
