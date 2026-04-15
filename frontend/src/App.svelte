@@ -598,6 +598,18 @@
                         cfg.performance.mem_crit_pct = 100 - (cfg.performance.mem_crit_pct ?? 0);
                     }
                     appState.config = cfg;
+                    addEvent({
+                        time: new Date().toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false,
+                        }),
+                        host: '',
+                        text: 'settings updated',
+                        sev: 'ok',
+                        transition: false,
+                    });
                 }
             } catch (e) { console.warn('[SSE] malformed event, ignored:', e); }
         };
