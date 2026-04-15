@@ -526,19 +526,45 @@
                     // Also keep prevStates current so the poll doesn't re-log the same
                     // transition as a duplicate.
                     const prevStatus = prevStates.get(event.host);
-                    if (prevStatus !== undefined && prevStatus !== sv.status) {
-                        const evtTime = new Date().toLocaleTimeString('en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                            hour12: false,
-                        });
+                    const evtTime = new Date().toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false,
+                    });
+                    if (prevStatus === undefined) {
+                        // Brand-new server appearing via SSE — log "registered" so the
+                        // event log captures the first appearance instead of being silent.
+                        // Without this, prevStates would be pre-set before the poll cycle
+                        // runs, so the poll would also skip the "registered" log entry.
+                        addEvent(
+                            serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, statusSev(sv.status)),
+                        );
+                    } else if (prevStatus !== sv.status) {
                         addEvent(
                             serverEvent(evtTime, sv, `${statusLabel(prevStatus)} → ${statusLabel(sv.status)}`, statusSev(sv.status)),
                         );
                     }
                     if (sv.status) prevStates.set(event.host, sv.status);
                     appState.handleSSEServerUpdate(event.host, sv);
+                    // Feed per-server sparkline ring buffer so ServerDetail charts
+                    // update in real-time instead of waiting for the next 30-second poll.
+                    if (sv.perf) {
+                        const svMemPct =
+                            sv.perf.mem_total_mb > 0
+                                ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
+                                : 0;
+                        appendServerMetricsSample(sv.host, {
+                            time: Date.now(),
+                            cpu: sv.perf.cpu_pct,
+                            mem: svMemPct,
+                            inputDelay: sv.perf.input_delay_p95_ms,
+                            sessions: sv.sessions ?? 0,
+                            diskQueue: sv.perf.disk_queue ?? 0,
+                            tcpRetrans: sv.perf.tcp_retrans_sec ?? 0,
+                            pagesPerSec: sv.perf.pages_sec ?? 0,
+                        });
+                    }
                 } else if (event.type === 'settings_update' && event.data) {
                     // Go stores memory thresholds as % free; UI works in % used —
                     // apply the same inversion that fetchSettings() does on REST load.
