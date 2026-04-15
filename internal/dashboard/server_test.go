@@ -2564,6 +2564,61 @@ func TestHandleSSE_SendsKeepalive(t *testing.T) {
 	}
 }
 
+// TestHandleSSE_ClosesOnSessionExpiry verifies that the SSE handler closes the
+// stream within sseSessionCheckInterval after the session is deleted (e.g.
+// after logout from another tab or admin revocation).
+func TestHandleSSE_ClosesOnSessionExpiry(t *testing.T) {
+	orig := sseSessionCheckInterval
+	sseSessionCheckInterval = 50 * time.Millisecond
+	t.Cleanup(func() { sseSessionCheckInterval = orig })
+
+	ds := newTestServer(t)
+	// Attach a real session store — newTestServer omits it by default since
+	// most tests call handlers directly without authentication middleware.
+	storeCtx, storeCancel := context.WithCancel(context.Background())
+	t.Cleanup(storeCancel)
+	ds.sessionStore = NewSessionStore(storeCtx)
+
+	// Create a real session in the store and attach the token as a cookie.
+	token, err := ds.sessionStore.Create(&AuthInfo{Username: "testuser"})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
+	r.AddCookie(&http.Cookie{Name: "drainctl_session", Value: token})
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		ds.handleSSE(w, r)
+	}()
+
+	// Wait for the handler to subscribe.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && ds.broker.Count() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if ds.broker.Count() == 0 {
+		t.Fatal("handler did not subscribe within 1s")
+	}
+
+	// Delete the session — simulates logout or admin revocation.
+	ds.sessionStore.Delete(token)
+
+	// Handler must close within a few check intervals.
+	select {
+	case <-handlerDone:
+		// expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleSSE did not close after session was deleted")
+	}
+}
+
 // TestHandleReport_BroadcastsSSEUpdate verifies the end-to-end SSE wiring:
 // handleReport → state.Update() → state.OnUpdate → broker.Broadcast() delivers
 // a server_update event to a connected subscriber.
