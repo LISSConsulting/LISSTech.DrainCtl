@@ -2704,6 +2704,79 @@ func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
 	}
 }
 
+// TestHandleRegister_BroadcastsSSEServerUpdate verifies that a successful
+// POST /api/v1/register broadcasts a server_update event to connected browsers
+// so they can display the new server without waiting for the next poll cycle.
+func TestHandleRegister_BroadcastsSSEServerUpdate(t *testing.T) {
+	ds := newTestServer(t)
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	body := []byte(`{"hostname":"NEW01"}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", bytes.NewReader(body))
+	ds.handleRegister(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handleRegister status = %d, want 200", w.Code)
+	}
+
+	select {
+	case msg := <-ch:
+		if !bytes.Contains(msg, []byte(`"server_update"`)) {
+			t.Errorf("broadcast missing server_update type: %s", msg)
+		}
+		if !bytes.Contains(msg, []byte(`NEW01`)) {
+			t.Errorf("broadcast missing host NEW01: %s", msg)
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast after handleRegister")
+	}
+}
+
+// TestHandleDeleteServer_BroadcastsSSEServerDeleted verifies that a successful
+// DELETE /api/v1/servers/{host} broadcasts a server_deleted event so connected
+// browsers remove the server from their list immediately.
+func TestHandleDeleteServer_BroadcastsSSEServerDeleted(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("OLD01")
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/servers/OLD01", nil)
+	r.SetPathValue("host", "OLD01")
+	ds.handleDeleteServer(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handleDeleteServer status = %d, want 200", w.Code)
+	}
+
+	select {
+	case msg := <-ch:
+		if !bytes.Contains(msg, []byte(`"server_deleted"`)) {
+			t.Errorf("broadcast missing server_deleted type: %s", msg)
+		}
+		if !bytes.Contains(msg, []byte(`OLD01`)) {
+			t.Errorf("broadcast missing host OLD01: %s", msg)
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast after handleDeleteServer")
+	}
+}
+
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	state := NewServerState(t.TempDir())
 	state.Register("SRV01")

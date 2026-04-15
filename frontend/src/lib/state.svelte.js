@@ -566,6 +566,15 @@ export const appState = {
         }
         lastUpdated = new Date();
     },
+
+    /**
+     * Remove a server from the list when a server_deleted SSE event arrives.
+     * @param {string} host
+     */
+    handleSSEServerDeleted(host) {
+        servers = servers.filter((s) => s.host !== host);
+        lastUpdated = new Date();
+    },
 };
 
 // ---------------------------------------------------------------------------
