@@ -127,8 +127,8 @@ and saves config.json without prompting.`,
 	cmd.Flags().Bool("perf-disabled", false, "Force-disable performance monitoring (blocks dashboard override)")
 	cmd.Flags().Bool("perf-rfx", false, "Enable RemoteFX counter collection")
 	cmd.Flags().String("input-delay-percentile", "", "Input delay percentile for threshold evaluation (p50 or p95, default: p95)")
-	cmd.Flags().Int("load-consecutive-polls", 0, "Consecutive polls required for CPU/memory alerts (default: 2)")
-	cmd.Flags().Int("input-delay-consecutive-polls", 0, "Consecutive polls required for input delay alerts (default: 10)")
+	cmd.Flags().Int("load-alert-delay", 0, "Seconds CPU/memory must breach before alert fires (default: 60)")
+	cmd.Flags().Int("input-delay-alert-delay", 0, "Seconds input delay must breach before alert fires (default: 90)")
 	cmd.Flags().Int("memory-limit", dc.DefaultMemoryLimitMB, "Go runtime memory limit in MiB (32–4096)")
 
 	return cmd
@@ -326,13 +326,13 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 		pct, _ := cmd.Flags().GetString("input-delay-percentile")
 		fileCfg.Performance.InputDelayPercentile = pct
 	}
-	if cmd.Flags().Changed("load-consecutive-polls") {
-		v, _ := cmd.Flags().GetInt("load-consecutive-polls")
-		fileCfg.Performance.ConsecutivePolls = v
+	if cmd.Flags().Changed("load-alert-delay") {
+		v, _ := cmd.Flags().GetInt("load-alert-delay")
+		fileCfg.Performance.LoadAlertDelaySec = v
 	}
-	if cmd.Flags().Changed("input-delay-consecutive-polls") {
-		v, _ := cmd.Flags().GetInt("input-delay-consecutive-polls")
-		fileCfg.Performance.InputDelayConsecutivePolls = v
+	if cmd.Flags().Changed("input-delay-alert-delay") {
+		v, _ := cmd.Flags().GetInt("input-delay-alert-delay")
+		fileCfg.Performance.InputDelayAlertDelaySec = v
 	}
 
 	// Upsert rather than append: running configure twice with the same URL

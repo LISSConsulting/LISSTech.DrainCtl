@@ -18,16 +18,13 @@ type PerfTriggerState struct {
 	InputDelayCritCount int // consecutive polls input delay >= crit threshold
 }
 
-// ConsecutiveThreshold is the number of consecutive polls required before
-// CPU and memory triggers fire (to avoid flapping). At the default 60s
-// poll interval, 2 polls = 2 minutes of sustained breach.
-const ConsecutiveThreshold = 2
-
-// InputDelayConsecutiveThreshold is the number of consecutive polls required
-// before input delay triggers fire. Input delay is inherently volatile, so
-// a slightly higher threshold filters transient spikes. At the default 60s
-// poll interval, 3 polls = 3 minutes.
-const InputDelayConsecutiveThreshold = 3
+// ceilDiv returns ⌈a/b⌉ for positive integers.
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return 1
+	}
+	return (a + b - 1) / b
+}
 
 // EvaluateThresholds checks the PerfSnapshot against configured thresholds
 // and returns the set of triggers that should fire.
@@ -37,12 +34,13 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 		return nil
 	}
 
-	// Compute consecutive poll counts from duration fields.
-	// Config.Validate() keeps ConsecutivePolls in sync with LoadAlertDelaySec,
-	// so either path produces the same result.  Prefer the duration fields
-	// when set, falling back to legacy poll fields for backward compatibility.
-	cpuMemPolls := resolveConsecutive(cfg.ConsecutivePolls, ConsecutiveThreshold)
-	idPolls := resolveConsecutive(cfg.InputDelayConsecutivePolls, InputDelayConsecutiveThreshold)
+	// Compute consecutive poll counts from duration / interval.
+	interval := cfg.SampleIntervalSec
+	if interval <= 0 {
+		interval = dc.DefaultSampleInterval
+	}
+	cpuMemPolls := ceilDiv(resolveThreshold(cfg.LoadAlertDelaySec, dc.DefaultLoadAlertDelaySec), interval)
+	idPolls := ceilDiv(resolveThreshold(cfg.InputDelayAlertDelaySec, dc.DefaultInputDelayAlertDelaySec), interval)
 
 	var triggers []dc.Trigger
 
@@ -114,15 +112,6 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 	}
 
 	return triggers
-}
-
-// resolveConsecutive returns the configured consecutive-poll count,
-// falling back to defVal when configured is 0 (unset).
-func resolveConsecutive(configured, defVal int) int {
-	if configured > 0 {
-		return configured
-	}
-	return defVal
 }
 
 // TriggerMessage returns a human-readable message for a performance trigger.

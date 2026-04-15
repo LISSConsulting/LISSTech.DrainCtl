@@ -38,10 +38,10 @@ export const TRIGGER_LABELS = {
 };
 
 /** Repeat interval options (minutes). */
-export const REPEAT_OPTIONS = [0, 15, 60, 240, 480];
+export const REPEAT_OPTIONS = [1440, 15, 60, 240, 480];
 
 /** Human-readable labels for repeat intervals (minutes → label). */
-export const REPEAT_MAP = { 0: 'Once', 15: '15m', 60: '1h', 240: '4h', 480: '8h' };
+export const REPEAT_MAP = { 1440: '1/day', 15: '15m', 60: '1h', 240: '4h', 480: '8h' };
 
 /**
  * Returns the display label for a repeat interval in minutes.
