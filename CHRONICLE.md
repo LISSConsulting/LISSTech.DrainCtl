@@ -46,6 +46,9 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Bug Fixes
 
+- `App.svelte` SSE `server_update` handler now detects status transitions immediately and emits event-log entries in real time — previously the event log lagged up to 30 seconds behind visual state changes because transition detection only ran in the polling `refresh()` cycle; `prevStates` is also updated on each SSE event so the subsequent poll cycle does not duplicate the same transition entry
+- `App.svelte` SSE `settings_update` handler now applies the same memory-threshold inversion (`mem_warn_pct = 100 - raw`) that `fetchSettings()` applies on REST load; previously the raw Go "% free" value was stored directly in `appState.config`, causing threshold gauges to display incorrect colors until the next manual page refresh after any in-session settings change
+
 - `frontend/dev/mock-api.js` had no handler for `GET /api/v1/events` — the Vite middleware returned `null` → Vite served a 404 → EventSource retried the SSE connection forever in dev mode, causing the footer to always show "CONNECTED" instead of "LIVE"; fixed by adding a proper streaming SSE handler in `configureServer` that sets `text/event-stream` headers, tracks active connections in an `sseClients` Set, sends 25-second keepalive comments, cleans up on disconnect, broadcasts `server_update` events when `startEvolution()` fires a status transition, and broadcasts `settings_update` when `PUT /api/v1/settings` is called
 - `internal/dashboard/server_test.go` had no HTTP-level test for `handleSSE` — only the broker itself was covered; added `TestHandleSSE_DeliversBroadcastedEvent` (verifies `Content-Type: text/event-stream` header and `data:` frame delivery after a broker broadcast) and `TestHandleSSE_TooManySubscribers` (verifies 429 when the subscriber cap is reached)
 
