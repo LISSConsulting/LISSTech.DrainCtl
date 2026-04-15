@@ -80,29 +80,41 @@ func (b *Broker) Unsubscribe(id string) {
 	}
 }
 
-// Broadcast sends a message to all subscribers. Slow subscribers whose
-// channel buffer is full are evicted to prevent blocking.
-func (b *Broker) Broadcast(event SSEEvent) {
-	payload, err := json.Marshal(event)
-	if err != nil {
-		slog.Warn("sse: marshal event failed", "error", err)
-		return
+// Broadcast sends a pre-marshaled payload to all subscribers. Slow subscribers
+// whose channel buffer is full are evicted. The lock is held only to snapshot
+// the subscriber list; channel sends happen outside the lock.
+func (b *Broker) Broadcast(payload []byte) {
+	// Snapshot subscribers under read lock.
+	b.mu.RLock()
+	snapshot := make([]*subscriber, 0, len(b.subscribers))
+	for _, sub := range b.subscribers {
+		snapshot = append(snapshot, sub)
 	}
+	b.mu.RUnlock()
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	for id, sub := range b.subscribers {
+	// Send outside the lock — no contention with Subscribe/Unsubscribe.
+	var evict []*subscriber
+	for _, sub := range snapshot {
 		select {
 		case sub.ch <- payload:
 			// delivered
 		default:
-			// channel full — evict slow subscriber
-			slog.Warn("sse: evicting slow subscriber", "id", id)
-			close(sub.done)
-			close(sub.ch)
-			delete(b.subscribers, id)
+			evict = append(evict, sub)
 		}
+	}
+
+	// Evict slow subscribers under write lock.
+	if len(evict) > 0 {
+		b.mu.Lock()
+		for _, sub := range evict {
+			if _, ok := b.subscribers[sub.id]; ok {
+				slog.Warn("sse: evicting slow subscriber", "id", sub.id)
+				close(sub.done)
+				close(sub.ch)
+				delete(b.subscribers, sub.id)
+			}
+		}
+		b.mu.Unlock()
 	}
 }
 

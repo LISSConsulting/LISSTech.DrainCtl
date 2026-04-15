@@ -55,8 +55,11 @@
             <span class="session-count">{sessions.toLocaleString()}</span>
             <span class="session-label">sessions · {servers} servers</span>
         </span>
-        <span class="status-pill {appState.connected ? 'connected' : 'disconnected'}">
-            {#if appState.connected}
+        <span class="status-pill {appState.connected ? (appState.sseConnected ? 'live' : 'connected') : 'disconnected'}">
+            {#if appState.connected && appState.sseConnected}
+                <Wifi size={11} strokeWidth={2.4} />
+                LIVE
+            {:else if appState.connected}
                 <Wifi size={11} strokeWidth={2.4} />
                 CONNECTED
             {:else}
@@ -199,8 +202,13 @@
         box-shadow: 2px 2px 0 var(--color-shadow);
     }
 
-    .connected {
+    .live {
         background: var(--color-green);
+        color: #fff;
+    }
+
+    .connected {
+        background: var(--color-amber);
         color: #fff;
     }
 
