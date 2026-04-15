@@ -1182,9 +1182,24 @@
             }
             .liss-fact p { font-size: 0.88rem; color: rgba(253, 248, 246, 0.65); line-height: 1.6; }
             @media (prefers-color-scheme: dark) {
-                .liss-body { color: rgba(17, 10, 10, 0.72); }
-                .liss-fact { border-color: rgba(17, 10, 10, 0.15); background: rgba(17, 10, 10, 0.05); }
-                .liss-fact p { color: rgba(17, 10, 10, 0.65); }
+                .liss-section {
+                    background: var(--card);
+                    color: var(--fg);
+                }
+                .liss-tagline { color: var(--fg); }
+                .liss-body { color: var(--muted); }
+                .liss-fact {
+                    border-color: var(--border);
+                    background: var(--surface);
+                    box-shadow: var(--so) var(--so) 0 var(--shadow);
+                }
+                .liss-fact p { color: var(--muted); }
+                .btn-liss {
+                    box-shadow: var(--so) var(--so) 0 var(--shadow);
+                }
+                .btn-liss:hover {
+                    box-shadow: calc(var(--so) + 2px) calc(var(--so) + 2px) 0 var(--shadow);
+                }
             }
             @media (max-width: 768px) {
                 .liss-inner { grid-template-columns: 1fr; gap: 40px; }
