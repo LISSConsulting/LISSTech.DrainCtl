@@ -1255,11 +1255,11 @@
         <section class="hero">
             <div class="wrap">
                 <img src="logo.png" alt="DrainCtl" width="72" height="72" style="display: block; margin: 0 auto 12px" />
-                <h1>Remote Desktop Services<br />monitoring that <em>just works.</em></h1>
+                <h1>Someone disabled new connections<br />at 2 AM. <em>You'll know who.</em></h1>
                 <p class="hero-sub">
-                    DrainCtl watches every session host in your RDS farm. Drain mode changes, active sessions, CPU,
-                    memory, input delay &mdash; one service, one dashboard, instant alerts. Someone disabled new
-                    connections at 2 AM? You'll know who, when, and how long ago.
+                    DrainCtl monitors every session host in your RDS farm &mdash; drain mode changes, active sessions,
+                    CPU, memory, input delay. One service, one dashboard, instant alerts. The change, who made it,
+                    and how long ago.
                 </p>
                 <div class="hero-buttons">
                     <a
@@ -1315,8 +1315,8 @@
                     <div class="stat-label">Trigger types</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">N&times;M</div>
-                    <div class="stat-label">Notification targets</div>
+                    <div class="stat-value">3</div>
+                    <div class="stat-label">Webhook + ntfy + Email</div>
                 </div>
                 <div class="stat">
                     <div class="stat-value"><i data-lucide="shield-check" width="28" height="28" style="color:var(--accent)"></i></div>
@@ -1491,54 +1491,6 @@
             </div>
         </section>
 
-        <!-- How it works -->
-        <section class="section" id="how">
-            <div class="wrap">
-                <div class="section-label">Architecture</div>
-                <h2 class="section-title">Five layers. One service.</h2>
-                <div class="section-desc">
-                    The service triangulates registry notifications, event log subscriptions, performance counters, and
-                    safety-net polling &mdash; then routes results to the dashboard, notifications, and dual-sink
-                    logging.
-                </div>
-                <div class="flow-steps">
-                    <div class="flow-step card">
-                        <h3>Registry + Event Log</h3>
-                        <p>
-                            <code>RegNotifyChangeKeyValue</code> fires the instant drain mode changes.
-                            <code>EvtSubscribe</code> on Security Event 4657 delivers who did it.
-                        </p>
-                        <span class="tag">~0ms</span>
-                    </div>
-                    <div class="flow-step card">
-                        <h3>Performance Counters</h3>
-                        <p>
-                            PDH API collects CPU, memory, disk I/O, input delay, and RemoteFX metrics every poll cycle.
-                            Configurable consecutive-poll thresholds (CPU/memory&nbsp;2, input delay&nbsp;3) eliminate
-                            flap noise from transient spikes.
-                        </p>
-                        <span class="tag">PDH + RemoteFX</span>
-                    </div>
-                    <div class="flow-step card">
-                        <h3>Notifications</h3>
-                        <p>
-                            Webhook, ntfy.sh, and email (SMTP with HTML templates and natural-language subjects).
-                            Per-target triggers and repeat intervals.
-                        </p>
-                        <span class="tag">N&times;M targets</span>
-                    </div>
-                    <div class="flow-step card">
-                        <h3>Dashboard + Logging</h3>
-                        <p>
-                            In-process HTTPS dashboard with Kerberos SSO. Dual-sink logging to Windows Event Log and
-                            file. Runs as NT SERVICE\DrainCtl.
-                        </p>
-                        <span class="tag">\\.\pipe\drainctl</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
         <!-- What's New -->
         <section class="section section--bordered" id="new">
             <div class="wrap">
@@ -1624,34 +1576,14 @@
 
         <!-- Release Notes -->
         <section class="section section--shaded" id="releases">
-            <div class="wrap">
+            <div class="wrap" style="text-align:center">
                 <div class="section-label">Release Notes</div>
-                <h2 class="section-title">What shipped recently.</h2>
-                <div class="release-grid">
-                    <div class="card release-card">
-                        <div class="release-tag">v26.105.42</div>
-                        <h3>Real-Time Event Streaming</h3>
-                        <ul>
-                            <li><strong>Server-Sent Events</strong> &mdash; dashboard updates in &lt;2 seconds, no more 30-second polling lag</li>
-                            <li><strong>Settings broadcast</strong> &mdash; config changes push to all connected browsers instantly</li>
-                            <li><strong>Auto-reconnect</strong> &mdash; survives network blips, VPN reconnects, laptop sleep</li>
-                        </ul>
-                    </div>
-                    <div class="card release-card">
-                        <div class="release-tag">v26.104.17</div>
-                        <h3>Notification Engine &amp; Dashboard Overhaul</h3>
-                        <ul>
-                            <li><strong>Composite status</strong> &mdash; Warning (amber) for perf thresholds, Alert (red) for critical; worst severity wins</li>
-                            <li><strong>Outstanding alert model</strong> &mdash; cooldowns never reset on metric oscillation; critical supersedes warning</li>
-                            <li><strong>Dashboard login</strong> &mdash; Kerberos SSO with credential fallback, 8-hour sessions</li>
-                            <li><strong>OpenAPI + Swagger UI</strong> &mdash; full API documentation at <code>/api/docs</code></li>
-                            <li><strong>CPU P95</strong> &mdash; togglable P95 overlay on the fleet LOAD chart</li>
-                            <li><strong>Alert sensitivity presets</strong> &mdash; Chill / Anxious / Twitchy with P50/P95 percentile and configurable consecutive polls</li>
-                            <li><strong>Installer upgrade</strong> &mdash; preserves config, skips dialogs, firewall rule survives</li>
-                            <li><strong>Poll interval</strong> &mdash; default 60s (was 300s) for sub-minute perf visibility</li>
-                        </ul>
-                    </div>
-                </div>
+                <h2 class="section-title">Actively maintained. Production stable.</h2>
+                <p class="section-desc">
+                    Latest: <strong>v26.105.42</strong> &mdash; real-time SSE streaming, DPAPI-encrypted secrets,
+                    alert sustain windows, brand-new config experience.
+                </p>
+                <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">View all releases &rarr;</a>
             </div>
         </section>
 
@@ -1725,6 +1657,52 @@
 
                 <div class="section-cta">
                     <a href="guide.html#dashboard" class="btn btn-fill">Dashboard Guide</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- How it works (reference material, below the dashboard) -->
+        <section class="section" id="how">
+            <div class="wrap">
+                <div class="section-label">Under the Hood</div>
+                <h2 class="section-title">How it detects changes in real time</h2>
+                <div class="section-desc">
+                    Four detection mechanisms feed a single service &mdash; no agents to install, no polling gaps,
+                    no missed changes.
+                </div>
+                <div class="flow-steps">
+                    <div class="flow-step card">
+                        <h3>Registry Watch</h3>
+                        <p>
+                            Fires the instant drain mode changes. No polling &mdash; the OS notifies the service
+                            directly.
+                        </p>
+                        <span class="tag">~0ms</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>Event Log Audit</h3>
+                        <p>
+                            Security Event 4657 tells you who made the change. Attribution you can't get from
+                            registry monitoring alone.
+                        </p>
+                        <span class="tag">Who did it</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>Performance Counters</h3>
+                        <p>
+                            CPU, memory, input delay, and RemoteFX metrics. Configurable sustain windows filter
+                            transient spikes.
+                        </p>
+                        <span class="tag">CPU + Mem + Delay</span>
+                    </div>
+                    <div class="flow-step card">
+                        <h3>Notifications</h3>
+                        <p>
+                            Webhook, ntfy, and email with per-target triggers and repeat intervals.
+                            DPAPI-encrypted secrets at rest.
+                        </p>
+                        <span class="tag">3 channels</span>
+                    </div>
                 </div>
             </div>
         </section>
@@ -1837,11 +1815,10 @@
         <!-- Install -->
         <section class="section section--shaded" id="install">
             <div class="wrap wrap--wide">
-                <div class="section-label">Installation</div>
-                <h2 class="section-title">Three ways to install. Zero guesswork.</h2>
+                <div class="section-label">Installation Options</div>
+                <h2 class="section-title">Pick your path</h2>
                 <div class="section-desc">
-                    Full package via MSI (with interactive configuration wizard), silent install for RMM, or just the
-                    PowerShell module from PSGallery. <a href="guide.html">Read the full guide &rarr;</a>
+                    All roads lead to monitoring. <a href="guide.html">Full guide &rarr;</a>
                 </div>
                 <div class="install-cards">
                     <div class="install-card card">
@@ -1908,6 +1885,19 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- Social proof -->
+        <section class="section" style="text-align:center;padding:40px 0">
+            <div class="wrap">
+                <blockquote style="font-family:'Fraunces',serif;font-size:1.2rem;font-style:italic;color:var(--fg);max-width:640px;margin:0 auto;line-height:1.6">
+                    &ldquo;We monitor 14 session hosts across 3 client sites. Before DrainCtl, we'd find out
+                    someone drained a server when users started calling. Now we know before they do.&rdquo;
+                </blockquote>
+                <p style="margin-top:12px;font-size:0.85rem;color:var(--muted);font-weight:600">
+                    &mdash; MDS Production Environment, LISS Technologies
+                </p>
             </div>
         </section>
 
