@@ -668,7 +668,7 @@ function handleRequest(method, pathname, body, query = {}) {
   if (method === 'DELETE' && serverMatch) {
     state.delete(serverMatch.host);
     history.delete(serverMatch.host);
-    broadcastSSE('server_deleted', null, serverMatch.host);
+    broadcastSSE('server_deleted', { changed_by: 'admin' }, serverMatch.host);
     return { status: 204, body: null };
   }
 
