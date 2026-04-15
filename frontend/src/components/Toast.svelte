@@ -89,47 +89,47 @@
     }
 
     .toast-ok {
-        --border-dim: #c0d8ca;
-        --border-bright: #2d8a54;
-        background: #e8f5ee;
-        color: #1e4d30;
-        box-shadow: 4px 4px 0 #92b09e;
+        --border-dim: #d4c8a8;
+        --border-bright: #8a7828;
+        background: #faf4e4;
+        color: #4a3e18;
+        box-shadow: 4px 4px 0 #a09060;
     }
     .toast-err {
-        --border-dim: #d8c0c4;
-        --border-bright: #b84858;
-        background: #fce8ed;
-        color: #6b1e2e;
-        box-shadow: 4px 4px 0 #a88892;
+        --border-dim: #d8bcc0;
+        --border-bright: #a3475b;
+        background: #faeae8;
+        color: #5c2028;
+        box-shadow: 4px 4px 0 #a08088;
     }
     .toast-info {
-        --border-dim: #d8ccb0;
-        --border-bright: #aa8820;
-        background: #fdf3e0;
-        color: #5c3820;
-        box-shadow: 4px 4px 0 #a09470;
+        --border-dim: #d0c4a8;
+        --border-bright: #987828;
+        background: #f8f0e0;
+        color: #4a3818;
+        box-shadow: 4px 4px 0 #988860;
     }
 
     :global([data-theme='dark']) .toast-ok {
-        --border-dim: #3a6848;
-        --border-bright: #4cd888;
-        background: #1a4028;
-        color: #b4dcc6;
-        box-shadow: 4px 4px 0 #0c1c10;
+        --border-dim: #504020;
+        --border-bright: #d8b840;
+        background: #302810;
+        color: #e0d0a0;
+        box-shadow: 4px 4px 0 #18140a;
     }
     :global([data-theme='dark']) .toast-err {
-        --border-dim: #6a3848;
-        --border-bright: #e87888;
-        background: #501a28;
-        color: #e4c4cc;
-        box-shadow: 4px 4px 0 #1c080e;
+        --border-dim: #583040;
+        --border-bright: #c8607a;
+        background: #381820;
+        color: #e0b8c0;
+        box-shadow: 4px 4px 0 #1c0c10;
     }
     :global([data-theme='dark']) .toast-info {
-        --border-dim: #685028;
-        --border-bright: #e0b038;
-        background: #483018;
-        color: #dccca8;
-        box-shadow: 4px 4px 0 #181008;
+        --border-dim: #483818;
+        --border-bright: #c8a030;
+        background: #302410;
+        color: #d8c498;
+        box-shadow: 4px 4px 0 #181408;
     }
 
     .toast-out {
