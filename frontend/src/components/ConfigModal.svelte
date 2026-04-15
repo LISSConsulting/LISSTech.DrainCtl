@@ -131,22 +131,9 @@
     const SUSTAIN_PRESETS = [60, 120, 300, 600, 900]; // seconds
 
     // ---------------------------------------------------------------------------
-    // Sustain window — derived duration state (seconds)
-    // On load: polls × interval → duration.  On save: ceil(duration / interval) → polls.
+    // Sustain window — bound directly to config.performance.load_alert_delay_sec
+    // and input_delay_alert_delay_sec.  Backend computes consecutive polls.
     // ---------------------------------------------------------------------------
-
-    let loadSustainSec = $state(60);
-    let delaySustainSec = $state(90);
-
-    // Sync sustain durations from config when config loads or resets
-    $effect(() => {
-        if (!config?.performance) return;
-        const interval = config.performance.sample_interval_sec || 30;
-        const lp = config.performance.load_consecutive_polls || 2;
-        const dp = config.performance.input_delay_consecutive_polls || 3;
-        loadSustainSec = lp * interval;
-        delaySustainSec = dp * interval;
-    });
 
     /** Format seconds as a human-readable label. */
     function fmtDuration(sec) {
@@ -155,21 +142,18 @@
         return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
     }
 
-    /** Compute consecutive polls from sustain duration and interval. */
+    /** Compute consecutive polls from sustain duration and interval (display only). */
     function sustainToPolls(sustainSec, intervalSec) {
         return Math.max(1, Math.ceil(sustainSec / (intervalSec || 30)));
     }
 
-    let loadPolls = $derived(sustainToPolls(loadSustainSec, config?.performance?.sample_interval_sec));
-    let delayPolls = $derived(sustainToPolls(delaySustainSec, config?.performance?.sample_interval_sec));
+    let loadPolls = $derived(sustainToPolls(config?.performance?.load_alert_delay_sec || 60, config?.performance?.sample_interval_sec));
+    let delayPolls = $derived(sustainToPolls(config?.performance?.input_delay_alert_delay_sec || 90, config?.performance?.sample_interval_sec));
 
     let activeFireLevel = $derived.by(() => {
         if (!config) return -1;
         const p = config.performance;
-        const interval = p?.sample_interval_sec || 30;
         for (const pr of FIRE_PRESETS) {
-            const actualLoadSustain = (p?.load_consecutive_polls || 2) * interval;
-            const actualDelaySustain = (p?.input_delay_consecutive_polls || 3) * interval;
             if (
                 config.grace_period === pr.grace_period &&
                 config.session_warning_threshold === pr.session_warning &&
@@ -180,8 +164,8 @@
                 p?.input_delay_warn_ms === pr.delay_warn &&
                 p?.input_delay_crit_ms === pr.delay_crit &&
                 (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
-                actualLoadSustain === pr.load_sustain_sec &&
-                actualDelaySustain === pr.delay_sustain_sec
+                (p?.load_alert_delay_sec || 60) === pr.load_sustain_sec &&
+                (p?.input_delay_alert_delay_sec || 90) === pr.delay_sustain_sec
             ) {
                 return pr.level;
             }
@@ -194,7 +178,6 @@
         config.grace_period = preset.grace_period;
         config.session_warning_threshold = preset.session_warning;
         if (config.performance) {
-            const interval = config.performance.sample_interval_sec || 30;
             config.performance.enabled = true;
             config.performance.cpu_warn_pct = preset.cpu_warn;
             config.performance.cpu_crit_pct = preset.cpu_crit;
@@ -203,10 +186,8 @@
             config.performance.input_delay_warn_ms = preset.delay_warn;
             config.performance.input_delay_crit_ms = preset.delay_crit;
             config.performance.input_delay_percentile = preset.delay_percentile;
-            config.performance.load_consecutive_polls = sustainToPolls(preset.load_sustain_sec, interval);
-            config.performance.input_delay_consecutive_polls = sustainToPolls(preset.delay_sustain_sec, interval);
-            loadSustainSec = preset.load_sustain_sec;
-            delaySustainSec = preset.delay_sustain_sec;
+            config.performance.load_alert_delay_sec = preset.load_sustain_sec;
+            config.performance.input_delay_alert_delay_sec = preset.delay_sustain_sec;
         }
     }
 
@@ -234,11 +215,6 @@
         if (err) {
             toast.err(err);
             return;
-        }
-        // Write computed poll counts from sustain durations before saving.
-        if (config.performance?.enabled) {
-            config.performance.load_consecutive_polls = loadPolls;
-            config.performance.input_delay_consecutive_polls = delayPolls;
         }
         saving = true;
         try {
@@ -564,8 +540,8 @@
                                             {#each SUSTAIN_PRESETS as s}
                                                 <button
                                                     class="btn-brutal gp-pill"
-                                                    class:active={loadSustainSec === s}
-                                                    onclick={() => (loadSustainSec = s)}>{fmtDuration(s)}</button
+                                                    class:active={config.performance.load_alert_delay_sec === s}
+                                                    onclick={() => (config.performance.load_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                                 >
                                             {/each}
                                         </div>
@@ -573,7 +549,7 @@
                                             <input
                                                 type="number"
                                                 class="settings-num"
-                                                bind:value={loadSustainSec}
+                                                bind:value={config.performance.load_alert_delay_sec}
                                                 min="10"
                                                 step="10"
                                             />
@@ -587,8 +563,8 @@
                                             {#each SUSTAIN_PRESETS as s}
                                                 <button
                                                     class="btn-brutal gp-pill"
-                                                    class:active={delaySustainSec === s}
-                                                    onclick={() => (delaySustainSec = s)}>{fmtDuration(s)}</button
+                                                    class:active={config.performance.input_delay_alert_delay_sec === s}
+                                                    onclick={() => (config.performance.input_delay_alert_delay_sec = s)}>{fmtDuration(s)}</button
                                                 >
                                             {/each}
                                         </div>
@@ -596,7 +572,7 @@
                                             <input
                                                 type="number"
                                                 class="settings-num"
-                                                bind:value={delaySustainSec}
+                                                bind:value={config.performance.input_delay_alert_delay_sec}
                                                 min="10"
                                                 step="10"
                                             />

@@ -37,8 +37,10 @@ const (
 	DefaultSessionWarningThreshold = 80 // percent
 
 	DefaultSampleInterval             = 30 // seconds
-	DefaultLoadConsecutivePolls       = 2  // CPU/memory consecutive polls before trigger fires
-	DefaultInputDelayConsecutivePolls = 3  // input delay consecutive polls before trigger fires
+	DefaultLoadConsecutivePolls       = 2  // DEPRECATED: CPU/memory consecutive polls before trigger fires
+	DefaultInputDelayConsecutivePolls = 3  // DEPRECATED: input delay consecutive polls before trigger fires
+	DefaultLoadAlertDelaySec          = 60 // seconds — CPU/memory alert sustain window
+	DefaultInputDelayAlertDelaySec    = 90 // seconds — input delay alert sustain window
 
 	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
 	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server
@@ -126,8 +128,10 @@ type PerformanceConfig struct {
 	InputDelayWarnMS           int    `json:"input_delay_warn_ms"`              // default: 50, -1=disabled
 	InputDelayCritMS           int    `json:"input_delay_crit_ms"`              // default: 100, -1=disabled
 	InputDelayPercentile       string `json:"input_delay_percentile,omitempty"` // "p50" or "p95" (default: "p95")
-	ConsecutivePolls           int    `json:"load_consecutive_polls"`           // CPU/memory trigger threshold (default: 5)
-	InputDelayConsecutivePolls int    `json:"input_delay_consecutive_polls"`    // input delay trigger threshold (default: 10)
+	ConsecutivePolls           int    `json:"load_consecutive_polls"`           // DEPRECATED: use LoadAlertDelaySec
+	InputDelayConsecutivePolls int    `json:"input_delay_consecutive_polls"`    // DEPRECATED: use InputDelayAlertDelaySec
+	LoadAlertDelaySec          int    `json:"load_alert_delay_sec"`             // seconds before CPU/memory alert fires (default: 60)
+	InputDelayAlertDelaySec    int    `json:"input_delay_alert_delay_sec"`      // seconds before input delay alert fires (default: 90)
 	CollectRemoteFX            bool   `json:"collect_remotefx"`                 // default: false
 	CollectPerSession          bool   `json:"collect_per_session"`              // default: true
 	SampleIntervalSec          int    `json:"sample_interval_sec"`              // default: 30, range 10–300
@@ -327,15 +331,39 @@ func (c *Config) Validate() {
 
 	// Populate zero-value performance fields with their effective defaults
 	// so the config file is self-documenting after normalization.
-	if c.Performance.ConsecutivePolls == 0 {
-		c.Performance.ConsecutivePolls = DefaultLoadConsecutivePolls
-	}
-	if c.Performance.InputDelayConsecutivePolls == 0 {
-		c.Performance.InputDelayConsecutivePolls = DefaultInputDelayConsecutivePolls
-	}
 	if c.Performance.SampleIntervalSec == 0 {
 		c.Performance.SampleIntervalSec = DefaultSampleInterval
 	}
+	if c.Performance.SampleIntervalSec < 10 {
+		c.Performance.SampleIntervalSec = 10
+	}
+	if c.Performance.SampleIntervalSec > 300 {
+		c.Performance.SampleIntervalSec = 300
+	}
+
+	// Migrate legacy consecutive_polls → duration fields.
+	// If the new duration field is unset but the old poll field is set,
+	// compute duration = polls × interval.  Then always compute polls
+	// from duration so they stay in sync.
+	interval := c.Performance.SampleIntervalSec
+	if c.Performance.LoadAlertDelaySec == 0 {
+		polls := c.Performance.ConsecutivePolls
+		if polls == 0 {
+			polls = DefaultLoadConsecutivePolls
+		}
+		c.Performance.LoadAlertDelaySec = polls * interval
+	}
+	if c.Performance.InputDelayAlertDelaySec == 0 {
+		polls := c.Performance.InputDelayConsecutivePolls
+		if polls == 0 {
+			polls = DefaultInputDelayConsecutivePolls
+		}
+		c.Performance.InputDelayAlertDelaySec = polls * interval
+	}
+
+	// Keep legacy poll fields in sync (computed from duration / interval).
+	c.Performance.ConsecutivePolls = ceilDiv(c.Performance.LoadAlertDelaySec, interval)
+	c.Performance.InputDelayConsecutivePolls = ceilDiv(c.Performance.InputDelayAlertDelaySec, interval)
 
 	// Strip notification targets with unknown types (must be "webhook" or "ntfy").
 	// A target with an unrecognised type would silently never fire — reject it early.
@@ -404,6 +432,14 @@ func (c *Config) Validate() {
 			t.URL = ""
 		}
 	}
+}
+
+// ceilDiv returns ⌈a/b⌉ for positive integers.
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return 1
+	}
+	return (a + b - 1) / b
 }
 
 // ClampRetention enforces the retention boundary (1-365 days). Values

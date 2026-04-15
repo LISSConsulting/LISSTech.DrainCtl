@@ -37,6 +37,10 @@ func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *
 		return nil
 	}
 
+	// Compute consecutive poll counts from duration fields.
+	// Config.Validate() keeps ConsecutivePolls in sync with LoadAlertDelaySec,
+	// so either path produces the same result.  Prefer the duration fields
+	// when set, falling back to legacy poll fields for backward compatibility.
 	cpuMemPolls := resolveConsecutive(cfg.ConsecutivePolls, ConsecutiveThreshold)
 	idPolls := resolveConsecutive(cfg.InputDelayConsecutivePolls, InputDelayConsecutiveThreshold)
 

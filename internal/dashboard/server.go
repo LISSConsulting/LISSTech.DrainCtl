@@ -693,6 +693,21 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	if in.Performance != nil {
+		if in.Performance.SampleIntervalSec != 0 && (in.Performance.SampleIntervalSec < 10 || in.Performance.SampleIntervalSec > 300) {
+			http.Error(w, "sample_interval_sec must be 10–300", http.StatusBadRequest)
+			return
+		}
+		if in.Performance.LoadAlertDelaySec < 0 {
+			http.Error(w, "load_alert_delay_sec must be non-negative", http.StatusBadRequest)
+			return
+		}
+		if in.Performance.InputDelayAlertDelaySec < 0 {
+			http.Error(w, "input_delay_alert_delay_sec must be non-negative", http.StatusBadRequest)
+			return
+		}
+	}
+
 	if ds.testPutSettingsFunc != nil {
 		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
 			slog.Error("update config failed (test hook)", "error", err)
