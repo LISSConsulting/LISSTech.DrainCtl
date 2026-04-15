@@ -506,6 +506,12 @@
         return () => {
             clearInterval(interval);
             document.removeEventListener('visibilitychange', onVisible);
+            // Reset transition-tracking maps so the next login sees every server
+            // as "new" and emits fresh "registered" events. Without this, re-login
+            // without a page reload silently skips "registered" for servers whose
+            // status hasn't changed since the last session.
+            prevStates.clear();
+            prevAlerts.clear();
         };
     });
 

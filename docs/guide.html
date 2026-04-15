@@ -1868,11 +1868,12 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <ul>
                 <li><strong>Endpoint</strong>: <code>GET /api/v1/events</code> (requires session cookie)</li>
-                <li><strong>Event types</strong>: <code>server_update</code> (agent reports, local checks)
-                    and <code>settings_update</code> (config changes)</li>
+                <li><strong>Event types</strong>: <code>server_update</code> (agent reports, local checks),
+                    <code>server_deleted</code> (server removed via dashboard), and
+                    <code>settings_update</code> (config changes)</li>
                 <li><strong>Reconnection</strong>: automatic (~3 seconds, handled by the browser&rsquo;s EventSource API)</li>
                 <li><strong>Fallback</strong>: the existing periodic poll continues as a full-sync safety net</li>
-                <li><strong>Capacity</strong>: 50+ concurrent browser sessions with &lt;1 MB memory per subscriber</li>
+                <li><strong>Capacity</strong>: up to 100 concurrent browser sessions with &lt;1 MB memory per subscriber</li>
             </ul>
 
             <h3>Dashboard UI Features</h3>
