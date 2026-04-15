@@ -1119,6 +1119,11 @@
             }
             .dash-panel.active { display: block; }
             .dash-panel img { width: 100%; display: block; }
+            .dash-img--dark { display: none; }
+            @media (prefers-color-scheme: dark) {
+                .dash-img--light { display: none; }
+                .dash-img--dark { display: block; }
+            }
             .dash-placeholder { padding: 56px 32px; background: var(--surface); text-align: center; }
             .dash-placeholder-icon { font-size: 2.8rem; margin-bottom: 14px; }
             .dash-placeholder h4 {
@@ -1183,7 +1188,7 @@
             .liss-fact p { font-size: 0.88rem; color: rgba(253, 248, 246, 0.65); line-height: 1.6; }
             @media (prefers-color-scheme: dark) {
                 .liss-section {
-                    background: var(--card);
+                    background: var(--surface);
                     color: var(--fg);
                 }
                 .liss-tagline { color: var(--fg); }
@@ -1667,28 +1672,20 @@
                         <button class="dash-tab" onclick="showDashTab(3)">Config</button>
                     </div>
                     <div class="dash-panel active" id="dash0">
-                        <picture>
-                            <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)" />
-                            <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard — Overview, farm summary with metrics chart and per-server health cards" />
-                        </picture>
+                        <img class="dash-img--light" src="dashboard-screenshot.png" alt="DrainCtl Dashboard — Overview" />
+                        <img class="dash-img--dark" src="dashboard-screenshot-dark.png" alt="DrainCtl Dashboard — Overview (dark)" />
                     </div>
                     <div class="dash-panel" id="dash1">
-                        <picture>
-                            <source srcset="dashboard-screenshot-servers-dark.png" media="(prefers-color-scheme: dark)" />
-                            <img src="dashboard-screenshot-servers.png" alt="DrainCtl Dashboard — Servers list with drain state, sessions, CPU, memory, input delay per host" />
-                        </picture>
+                        <img class="dash-img--light" src="dashboard-screenshot-servers.png" alt="DrainCtl Dashboard — Servers" />
+                        <img class="dash-img--dark" src="dashboard-screenshot-servers-dark.png" alt="DrainCtl Dashboard — Servers (dark)" />
                     </div>
                     <div class="dash-panel" id="dash2">
-                        <picture>
-                            <source srcset="dashboard-screenshot-events-dark.png" media="(prefers-color-scheme: dark)" />
-                            <img src="dashboard-screenshot-events.png" alt="DrainCtl Dashboard — Event log with drain mode changes, attribution, and performance alerts" />
-                        </picture>
+                        <img class="dash-img--light" src="dashboard-screenshot-events.png" alt="DrainCtl Dashboard — Events" />
+                        <img class="dash-img--dark" src="dashboard-screenshot-events-dark.png" alt="DrainCtl Dashboard — Events (dark)" />
                     </div>
                     <div class="dash-panel" id="dash3">
-                        <picture>
-                            <source srcset="dashboard-screenshot-config-dark.png" media="(prefers-color-scheme: dark)" />
-                            <img src="dashboard-screenshot-config.png" alt="DrainCtl Dashboard — Configuration modal with alert presets and notification targets" />
-                        </picture>
+                        <img class="dash-img--light" src="dashboard-screenshot-config.png" alt="DrainCtl Dashboard — Config" />
+                        <img class="dash-img--dark" src="dashboard-screenshot-config-dark.png" alt="DrainCtl Dashboard — Config (dark)" />
                     </div>
                 </div>
 
