@@ -11,6 +11,7 @@
 import { untrack } from 'svelte';
 
 const DURATION = { ok: 6000, err: 10000, info: 6000 };
+const MAX_TOASTS = 3;
 
 let id = 0;
 
@@ -28,6 +29,12 @@ function show(msg, type = 'info') {
     // untrack the read of items so callers inside $effect don't accidentally
     // subscribe the effect to items, which would cause an infinite loop when
     // show() writes back to items.
+    const current = untrack(() => items);
+    // Evict oldest if at capacity
+    if (current.filter((t) => !t.dismissing).length >= MAX_TOASTS) {
+        const oldest = current.find((t) => !t.dismissing);
+        if (oldest) dismiss(oldest.id);
+    }
     items = [...untrack(() => items), { id: tid, msg, type, dismissing: false, duration }];
     setTimeout(() => dismiss(tid), duration);
 }
