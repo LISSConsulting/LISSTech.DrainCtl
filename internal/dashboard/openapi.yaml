@@ -399,14 +399,6 @@ components:
           type: string
           enum: [p50, p95]
           description: "Which percentile to evaluate for input delay thresholds. Default p95."
-        load_consecutive_polls:
-          type: integer
-          minimum: 1
-          description: "DEPRECATED — computed from load_alert_delay_sec / sample_interval_sec."
-        input_delay_consecutive_polls:
-          type: integer
-          minimum: 1
-          description: "DEPRECATED — computed from input_delay_alert_delay_sec / sample_interval_sec."
         load_alert_delay_sec:
           type: integer
           minimum: 0
