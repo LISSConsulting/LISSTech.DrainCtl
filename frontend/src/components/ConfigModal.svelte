@@ -212,11 +212,11 @@
         const p = config?.performance;
         if (!p?.enabled) return null;
         if (p.cpu_warn_pct > 0 && p.cpu_crit_pct > 0 && p.cpu_warn_pct >= p.cpu_crit_pct)
-            return 'CPU warn threshold must be less than crit threshold.';
+            return 'CPU warn threshold must be less than crit';
         if (p.mem_warn_pct > 0 && p.mem_crit_pct > 0 && p.mem_warn_pct >= p.mem_crit_pct)
-            return 'Memory warn threshold must be less than crit threshold.';
+            return 'Memory warn threshold must be less than crit';
         if (p.input_delay_warn_ms > 0 && p.input_delay_crit_ms > 0 && p.input_delay_warn_ms >= p.input_delay_crit_ms)
-            return 'Input Delay warn threshold must be less than crit threshold.';
+            return 'Input Delay warn threshold must be less than crit';
         return null;
     }
 
@@ -232,7 +232,7 @@
             await saveSettings(config);
             original = JSON.parse(JSON.stringify(config));
             appState.config = JSON.parse(JSON.stringify(config));
-            toast.ok('Settings saved successfully');
+            toast.ok('Settings saved');
         } catch (e) {
             toast.err('Save failed: ' + e.message);
         } finally {
@@ -243,7 +243,7 @@
     async function sendTest() {
         const targets = config?.notifications?.filter((t) => t.url || t.type === 'email');
         if (!targets?.length) {
-            toast.err('No notification targets configured.');
+            toast.err('No notification targets configured');
             return;
         }
         testing = true;
