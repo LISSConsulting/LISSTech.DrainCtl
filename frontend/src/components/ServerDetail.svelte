@@ -358,7 +358,7 @@
             <div class="d-kv-row">
                 <span class="d-kv-k">Duration</span><span class="d-kv-v">{dur(server.state_duration_seconds)}</span>
             </div>
-            {#if (server.status === 'grace' || server.status === 'alert') && gracePeriodSec != null}
+            {#if server.drain_mode && server.drain_mode !== 'ALLOW_ALL_CONNECTIONS' && gracePeriodSec != null}
                 <div class="d-kv-row">
                     <span class="d-kv-k">Grace Period</span><span class="d-kv-v"
                         >{Math.round(gracePeriodSec / 60)}m</span
