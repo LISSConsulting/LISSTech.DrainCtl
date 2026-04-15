@@ -1,6 +1,6 @@
 <script>
     import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
-    import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight, Search } from 'lucide-svelte';
+    import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight, Search, Bell } from 'lucide-svelte';
 
     let {
         targets = $bindable([]),
@@ -61,7 +61,7 @@
 
 <div class="settings-group">
     <div class="tgt-header">
-        <div class="settings-label" style="margin-bottom:0">Notification Targets</div>
+        <div class="section-header" style="margin-bottom:0"><Bell size={14} strokeWidth={2.5} /> Notification Targets</div>
         <div class="tgt-search-wrap" style={targets?.length > PAGE_SIZE ? '' : 'visibility:hidden'}>
             <Search size={13} />
             <input class="tgt-search" type="search" placeholder="Filter targets..." bind:value={search} />
@@ -161,7 +161,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
     }
     .tgt-search-wrap {
         display: flex;
@@ -421,14 +421,18 @@
         white-space: nowrap;
     }
     .settings-group {
-        margin-bottom: 18px;
+        margin-bottom: 30px;
     }
-    .settings-label {
-        font-size: 0.75rem;
-        font-weight: 700;
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+        font-weight: 800;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         color: var(--color-accent);
-        margin-bottom: 6px;
+        margin-bottom: 10px;
+        padding: 6px 0;
     }
 </style>

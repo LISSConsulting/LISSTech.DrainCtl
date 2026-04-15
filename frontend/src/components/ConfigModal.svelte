@@ -668,8 +668,6 @@
                     {/if}
                 {/if}
 
-                <div class="settings-divider"></div>
-
                 <!-- Notification Targets -->
                 <NotificationTargets bind:targets={config.notifications} bind:editTarget bind:editIdx bind:deleteIdx />
 
@@ -818,7 +816,7 @@
         color: var(--color-fg);
     }
     .settings-group {
-        margin-bottom: 24px;
+        margin-bottom: 30px;
     }
     .section-header {
         display: flex;
@@ -829,13 +827,14 @@
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--color-accent);
-        margin-bottom: 8px;
-        padding: 4px 0;
+        margin-bottom: 10px;
+        padding: 6px 0;
     }
     .subsection {
         border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
         padding-left: 14px;
-        margin-top: 14px;
+        margin-top: 18px;
+        padding-bottom: 4px;
     }
     .settings-label {
         font-size: 0.75rem;
@@ -843,13 +842,13 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--color-accent);
-        margin-bottom: 6px;
+        margin-bottom: 8px;
     }
     .settings-check {
         display: flex;
         align-items: center;
         gap: 10px;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
         cursor: pointer;
         font-size: 0.85rem;
         font-weight: 600;
@@ -1085,7 +1084,7 @@
     .repeat-pills {
         display: flex;
         gap: 7px;
-        margin-bottom: 10px;
+        margin-bottom: 12px;
         flex-wrap: wrap;
     }
     .repeat-pill {
