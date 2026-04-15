@@ -607,24 +607,43 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		return
 	}
 
-	notifications := cfg.Notifications
-	if notifications == nil {
-		notifications = []dc.NotificationTarget{}
+	// Build write-only view of notification targets — secret is never returned,
+	// only a has_secret boolean so the frontend knows one exists.
+	type targetView struct {
+		Type          string       `json:"type"`
+		URL           string       `json:"url"`
+		Triggers      []dc.Trigger `json:"triggers"`
+		RepeatMinutes int          `json:"repeat_minutes,omitempty"`
+		HasSecret     bool         `json:"has_secret"`
+		To            []string     `json:"to,omitempty"`
+		From          string       `json:"from,omitempty"`
+		Enabled       *bool        `json:"enabled,omitempty"`
 	}
-	// Redact secrets — browsers must never see plaintext secrets.
-	for i := range notifications {
-		if notifications[i].Secret != "" {
-			notifications[i].Secret = dc.SecretRedacted
+	targets := cfg.Notifications
+	if targets == nil {
+		targets = []dc.NotificationTarget{}
+	}
+	views := make([]targetView, len(targets))
+	for i, t := range targets {
+		views[i] = targetView{
+			Type:          t.Type,
+			URL:           t.URL,
+			Triggers:      t.Triggers,
+			RepeatMinutes: t.RepeatMinutes,
+			HasSecret:     t.Secret != "",
+			To:            t.To,
+			From:          t.From,
+			Enabled:       t.Enabled,
 		}
 	}
 	out := struct {
-		Notifications           []dc.NotificationTarget `json:"notifications"`
-		SessionWarningThreshold int                     `json:"session_warning_threshold"`
-		GracePeriod             int                     `json:"grace_period"`
-		PollInterval            int                     `json:"poll_interval"`
-		Performance             dc.PerformanceConfig    `json:"performance"`
+		Notifications           []targetView         `json:"notifications"`
+		SessionWarningThreshold int                  `json:"session_warning_threshold"`
+		GracePeriod             int                  `json:"grace_period"`
+		PollInterval            int                  `json:"poll_interval"`
+		Performance             dc.PerformanceConfig `json:"performance"`
 	}{
-		Notifications:           notifications,
+		Notifications:           views,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
@@ -721,8 +740,9 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Preserve existing secrets when the browser sends back the redacted sentinel.
-	// Match by URL+type since targets don't have stable IDs on the backend.
+	// Secrets are write-only: the GET response never includes them.
+	// Empty string = "don't change" → preserve existing secret from disk.
+	// Non-empty string = new secret (will be DPAPI-encrypted by Validate).
 	if in.Notifications != nil {
 		existing, err := dc.LoadConfig()
 		if err == nil {
@@ -732,7 +752,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 			}
 			for i := range *in.Notifications {
 				t := &(*in.Notifications)[i]
-				if t.Secret == dc.SecretRedacted {
+				if t.Secret == "" {
 					t.Secret = secretMap[t.Type+"\x00"+t.URL]
 				}
 			}
@@ -797,9 +817,9 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Resolve redacted secrets — if the browser sent the sentinel, look up
-	// the real secret from the saved config so the test uses actual credentials.
-	if singleTarget != nil && singleTarget.Secret == dc.SecretRedacted {
+	// Secrets are write-only — the browser never has them. If the secret
+	// field is empty, look up the saved secret so the test uses real credentials.
+	if singleTarget != nil && singleTarget.Secret == "" {
 		if cfg, loadErr := dc.LoadConfig(); loadErr == nil {
 			for _, saved := range cfg.Notifications {
 				if saved.Type == singleTarget.Type && saved.URL == singleTarget.URL {

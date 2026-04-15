@@ -6,18 +6,16 @@
 
     let { target, isNew, onsave, onclose } = $props();
 
-    const SECRET_SENTINEL = '••••••••';
-
     // Local working copy — snapshot taken at open time; later mutations only touch `t`.
     // Use JSON round-trip instead of structuredClone to avoid Svelte 5 proxy issues.
     // svelte-ignore state_referenced_locally
     let t = $state(JSON.parse(JSON.stringify(target)));
 
-    // Track whether the secret was set on load (server sends sentinel for existing secrets).
-    // This is a one-time snapshot, not reactive — intentionally not $state.
-    const secretWasSet = t.secret === SECRET_SENTINEL;
-    // Clear the sentinel so the password input shows empty with a placeholder.
-    if (secretWasSet) t.secret = '';
+    // Secrets are write-only — the API returns has_secret but never the actual value.
+    // Track whether a secret existed so we can show the right placeholder.
+    const secretWasSet = !!t.has_secret;
+    // Secret field is always empty from the API; user types a new value or leaves blank.
+    t.secret = '';
 
     let testing = $state(false);
 
@@ -70,11 +68,7 @@
             toast.err(err);
             return;
         }
-        // If the secret was set on load and the user didn't type a new one,
-        // send the sentinel back so the backend preserves the existing secret.
-        if (secretWasSet && !t.secret) {
-            t.secret = SECRET_SENTINEL;
-        }
+        // Empty secret = "preserve existing" on the backend. Non-empty = new secret.
         onsave?.(t);
         toast.ok(isNew ? 'Target added' : 'Target updated');
     }
@@ -87,13 +81,9 @@
         }
         testing = true;
         try {
-            // Send sentinel if user didn't change the secret, so backend
-            // resolves the real credential for SMTP auth / webhook HMAC.
-            const payload = JSON.parse(JSON.stringify(t));
-            if (secretWasSet && !payload.secret) {
-                payload.secret = SECRET_SENTINEL;
-            }
-            const r = await sendNotifyTest(payload);
+            // Empty secret = backend looks up saved credential for SMTP auth / webhook HMAC.
+            // Non-empty = user typed a new secret, test with that.
+            const r = await sendNotifyTest(t);
             toast.ok(r.message || 'Test sent');
         } catch (e) {
             toast.err(e?.detail ?? e?.message ?? String(e));
