@@ -111,25 +111,25 @@
     }
 
     :global([data-theme='dark']) .toast-ok {
-        --border-dim: #284838;
+        --border-dim: #3a6848;
         --border-bright: #4cd888;
         background: #1a4028;
         color: #b4dcc6;
-        box-shadow: 4px 4px 0 #10281a;
+        box-shadow: 4px 4px 0 #0c1c10;
     }
     :global([data-theme='dark']) .toast-err {
-        --border-dim: #502030;
+        --border-dim: #6a3848;
         --border-bright: #e87888;
         background: #501a28;
         color: #e4c4cc;
-        box-shadow: 4px 4px 0 #280c14;
+        box-shadow: 4px 4px 0 #1c080e;
     }
     :global([data-theme='dark']) .toast-info {
-        --border-dim: #483418;
+        --border-dim: #685028;
         --border-bright: #e0b038;
         background: #483018;
         color: #dccca8;
-        box-shadow: 4px 4px 0 #281c0c;
+        box-shadow: 4px 4px 0 #181008;
     }
 
     .toast-out {
