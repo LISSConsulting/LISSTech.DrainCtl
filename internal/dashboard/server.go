@@ -32,6 +32,13 @@ var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]
 // Exported as a package-level var so tests can shorten it without rebuilding.
 var sseKeepaliveInterval = 25 * time.Second
 
+// sseSessionCheckInterval is how often handleSSE revalidates the session cookie.
+// When a session is deleted (logout from another tab, admin revocation) the SSE
+// stream is terminated within this window so the browser reconnects and receives
+// a 401 instead of continuing to receive events for a dead session.
+// Exported as a package-level var so tests can shorten it without rebuilding.
+var sseSessionCheckInterval = 5 * time.Minute
+
 // ServerView is the flattened JSON shape returned to the Svelte dashboard
 // frontend from GET /api/v1/servers and GET /api/v1/servers/{host}.
 // It unwraps ServerInfo + CheckResult so the frontend never navigates nested
@@ -1032,6 +1039,16 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{})
 
+	// Capture the session token for periodic revalidation below.
+	// requireSession has already validated it; we keep it so we can
+	// close the stream promptly when the session is deleted or expires
+	// (e.g. logout from another tab, admin session revocation).
+	// Empty string when no cookie is present (tests, dev mode).
+	var sessionToken string
+	if cookie, err := r.Cookie("drainctl_session"); err == nil {
+		sessionToken = cookie.Value
+	}
+
 	id, ch, done, err := ds.broker.Subscribe()
 	if err != nil {
 		http.Error(w, "too many connections", http.StatusTooManyRequests)
@@ -1055,12 +1072,25 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
+	// Session revalidation: check the session store periodically so that a
+	// deleted or expired session terminates the stream within
+	// sseSessionCheckInterval rather than persisting until the TCP connection
+	// drops. The browser then reconnects and receives a 401 immediately.
+	// Skipped when sessionToken is empty (test requests, dev mode).
+	sessionCheck := time.NewTicker(sseSessionCheckInterval)
+	defer sessionCheck.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-done:
 			return
+		case <-sessionCheck.C:
+			if sessionToken != "" && ds.sessionStore.Get(sessionToken) == nil {
+				slog.Info("sse: closing stream — session expired or deleted", "id", id)
+				return
+			}
 		case <-keepalive.C:
 			_, err := fmt.Fprintf(w, ": keepalive\n\n")
 			if err != nil {
