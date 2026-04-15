@@ -1,18 +1,23 @@
 /**
- * theme.js — Light/dark theme management.
+ * theme.js — Light/dark/system theme management.
  *
- * Theme is persisted to localStorage under the key 'drainctl-theme'.
- * The active theme is reflected on document.documentElement.dataset.theme,
- * which Tailwind CSS v4 can target via the [data-theme] attribute selector.
+ * Theme preference is persisted to localStorage under 'drainctl-theme'.
+ * Values: 'light', 'dark', or 'system' (follows OS preference).
+ * The resolved theme is applied to document.documentElement.dataset.theme.
  */
 
 const STORAGE_KEY = 'drainctl-theme';
 
 // ---------------------------------------------------------------------------
-// Reactive state (Svelte 5 rune — valid in .js modules compiled by Vite/Svelte)
+// Reactive state
 // ---------------------------------------------------------------------------
 
-export const theme = $state({ current: /** @type {'light'|'dark'} */ ('light') });
+export const theme = $state({
+    /** @type {'light'|'dark'|'system'} */
+    preference: 'system',
+    /** @type {'light'|'dark'} */
+    resolved: 'light',
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,13 +35,14 @@ function systemPreference() {
 }
 
 /**
- * Apply a theme to the DOM and update the reactive variable.
- * @param {'light'|'dark'} theme
+ * Resolve and apply the theme to the DOM.
+ * @param {'light'|'dark'|'system'} preference
  */
-function applyTheme(value) {
-    theme.current = value;
+function applyTheme(preference) {
+    theme.preference = preference;
+    theme.resolved = preference === 'system' ? systemPreference() : preference;
     if (typeof document !== 'undefined') {
-        document.documentElement.dataset.theme = value;
+        document.documentElement.dataset.theme = theme.resolved;
     }
 }
 
@@ -46,37 +52,38 @@ function applyTheme(value) {
 
 /**
  * Initialise the theme on page load.
- *
- * Priority order:
- *   1. localStorage value (user's explicit previous choice)
- *   2. OS prefers-color-scheme
- *   3. 'light' fallback
- *
- * Call once from your root component's onMount or main entry point.
+ * Priority: localStorage → 'system' (which reads OS preference).
  */
 export function initTheme() {
-    /** @type {'light'|'dark'} */
-    let resolved = 'light';
+    /** @type {'light'|'dark'|'system'} */
+    let pref = 'system';
 
     if (typeof localStorage !== 'undefined') {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored === 'light' || stored === 'dark') {
-            resolved = stored;
-        } else {
-            resolved = systemPreference();
+        if (stored === 'light' || stored === 'dark' || stored === 'system') {
+            pref = stored;
         }
-    } else {
-        resolved = systemPreference();
     }
 
-    applyTheme(resolved);
+    applyTheme(pref);
+
+    // Listen for OS preference changes when in system mode.
+    if (typeof window !== 'undefined') {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (theme.preference === 'system') {
+                applyTheme('system');
+            }
+        });
+    }
 }
 
 /**
- * Toggle between light and dark, persist to localStorage, and update the DOM.
+ * Cycle through light → dark → system.
  */
 export function toggleTheme() {
-    const next = theme.current === 'dark' ? 'light' : 'dark';
+    const order = ['light', 'dark', 'system'];
+    const idx = order.indexOf(theme.preference);
+    const next = order[(idx + 1) % order.length];
     if (typeof localStorage !== 'undefined') {
         localStorage.setItem(STORAGE_KEY, next);
     }

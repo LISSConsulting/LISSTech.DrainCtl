@@ -2340,7 +2340,10 @@ func TestHandleNotifyTest_BothHooksNil_UsesProductionLoad(t *testing.T) {
 
 func TestBroker_SubscribeAndBroadcast(t *testing.T) {
 	b := NewBroker()
-	id, ch, _ := b.Subscribe()
+	id, ch, _, err := b.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer b.Unsubscribe(id)
 
 	if b.Count() != 1 {
@@ -2361,7 +2364,7 @@ func TestBroker_SubscribeAndBroadcast(t *testing.T) {
 
 func TestBroker_Unsubscribe(t *testing.T) {
 	b := NewBroker()
-	id, _, _ := b.Subscribe()
+	id, _, _, _ := b.Subscribe()
 	b.Unsubscribe(id)
 
 	if b.Count() != 0 {
@@ -2371,7 +2374,7 @@ func TestBroker_Unsubscribe(t *testing.T) {
 
 func TestBroker_SlowSubscriberEvicted(t *testing.T) {
 	b := NewBroker()
-	id, ch, done := b.Subscribe()
+	id, ch, done, _ := b.Subscribe()
 	_ = ch // don't read from it
 
 	// Fill the channel buffer (16 messages).
@@ -2394,8 +2397,8 @@ func TestBroker_SlowSubscriberEvicted(t *testing.T) {
 
 func TestBroker_MultipleSubscribers(t *testing.T) {
 	b := NewBroker()
-	id1, ch1, _ := b.Subscribe()
-	id2, ch2, _ := b.Subscribe()
+	id1, ch1, _, _ := b.Subscribe()
+	id2, ch2, _, _ := b.Subscribe()
 	defer b.Unsubscribe(id1)
 	defer b.Unsubscribe(id2)
 
@@ -2410,5 +2413,49 @@ func TestBroker_MultipleSubscribers(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("subscriber %d: timeout", i)
 		}
+	}
+}
+
+func TestBroker_SubscriberCap(t *testing.T) {
+	b := NewBroker()
+	for i := 0; i < maxSubscribers; i++ {
+		_, _, _, err := b.Subscribe()
+		if err != nil {
+			t.Fatalf("subscribe %d failed: %v", i, err)
+		}
+	}
+	_, _, _, err := b.Subscribe()
+	if err != ErrTooManySubscribers {
+		t.Fatalf("expected ErrTooManySubscribers, got %v", err)
+	}
+}
+
+func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
+	state := NewServerState(t.TempDir())
+	state.Register("SRV01")
+
+	// Wire OnUpdate to call state.Get() — the exact pattern that caused
+	// the production deadlock (commit d9bf821). If the lock is not released
+	// before calling OnUpdate, this test hangs (detected by timeout).
+	called := make(chan string, 1)
+	state.OnUpdate = func(hostname string) {
+		// This calls state.mu.RLock — deadlocks if Update still holds the write lock.
+		info := state.Get(hostname)
+		if info == nil {
+			t.Error("Get returned nil for registered host inside OnUpdate")
+		}
+		called <- hostname
+	}
+
+	result := &dc.CheckResult{Host: "SRV01", Status: "Healthy"}
+	state.Update("SRV01", result)
+
+	select {
+	case host := <-called:
+		if host != "SRV01" {
+			t.Errorf("OnUpdate called with %q, want SRV01", host)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnUpdate was not called — possible deadlock")
 	}
 }

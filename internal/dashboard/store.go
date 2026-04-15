@@ -88,25 +88,27 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 // and appends the result to the per-host history ring (capped at historyMax).
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	s.mu.Lock()
-	if info, ok := s.servers[hostname]; ok {
-		info.LastResult = result
-		info.LastSeen = time.Now()
+	_, registered := s.servers[hostname]
+	if registered {
+		s.servers[hostname].LastResult = result
+		s.servers[hostname].LastSeen = time.Now()
 		s.save()
+
+		buf := s.history[hostname]
+		if len(buf) < historyMax {
+			buf = append(buf, *result)
+		} else {
+			copy(buf, buf[1:])
+			buf[historyMax-1] = *result
+		}
+		s.history[hostname] = buf
 	}
-	buf := s.history[hostname]
-	if len(buf) < historyMax {
-		buf = append(buf, *result)
-	} else {
-		copy(buf, buf[1:])
-		buf[historyMax-1] = *result
-	}
-	s.history[hostname] = buf
 	cb := s.OnUpdate
 	s.mu.Unlock()
 
 	// Callback AFTER releasing the lock — broadcastServerUpdate calls
 	// state.Get() which needs RLock. Calling it under Lock is a deadlock.
-	if cb != nil {
+	if registered && cb != nil {
 		cb(hostname)
 	}
 }

@@ -2,13 +2,17 @@
     import { appState } from '../lib/state.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
     import { authState, logout } from '../lib/auth.svelte.js';
-    import { LayoutDashboard, Server, ScrollText, Sun, Moon } from 'lucide-svelte';
+    import { LayoutDashboard, Server, ScrollText, Sun, Moon, Monitor } from 'lucide-svelte';
 
     /** @type {{ onconfigopen: () => void }} */
     let { onconfigopen } = $props();
 
     const counters = $derived(appState.counters);
-    const isDark = $derived(theme.current === 'dark');
+    const pref = $derived(theme.preference);
+    const isDark = $derived(theme.resolved === 'dark');
+    const themeLabel = $derived(
+        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode'
+    );
 
     /** @type {Array<{id: 'overview'|'servers'|'events', label: string, icon: any}>} */
     const TABS = [
@@ -55,9 +59,10 @@
             <button
                 class="btn-theme btn-brutal"
                 onclick={toggleTheme}
-                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                aria-label={themeLabel}
+                title={themeLabel}
             >
-                {#if isDark}<Sun size={15} strokeWidth={2.4} />{:else}<Moon size={15} strokeWidth={2.4} />{/if}
+                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon size={15} strokeWidth={2.4} />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
             </button>
         </div>
     </div>
