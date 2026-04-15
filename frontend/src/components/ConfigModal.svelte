@@ -133,8 +133,8 @@
         },
     ];
 
-    const POLL_INTERVAL_PRESETS = [10, 15, 30, 60, 120];
-    const SUSTAIN_PRESETS = [60, 120, 300, 600, 900]; // seconds
+    const POLL_INTERVAL_PRESETS = [15, 30, 60];
+    const SUSTAIN_PRESETS = [30, 60, 90, 120]; // seconds
 
     // ---------------------------------------------------------------------------
     // Sustain window — bound directly to config.performance.load_alert_delay_sec
@@ -276,7 +276,7 @@
         return () => document.removeEventListener('keydown', onKey);
     });
 
-    const GRACE_PRESETS = [5, 10, 15, 30, 60, 120, 240];
+    const GRACE_PRESETS = [15, 30, 60];
 
     /** @type {HTMLInputElement|null} */
     let gracePeriodInput = $state(null);
@@ -382,7 +382,7 @@
                         <div class="section-header"><Radio size={14} strokeWidth={2.5} /> Agent Poll Interval</div>
                         <div class="settings-hint">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
                         <div class="repeat-pills">
-                            {#each [15, 30, 60, 120, 300] as p}
+                            {#each [15, 30, 60] as p}
                                 <button
                                     class="btn-brutal gp-pill"
                                     class:active={config.poll_interval === p}
@@ -391,7 +391,7 @@
                             {/each}
                             <button
                                 class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={![15, 30, 60, 120, 300].includes(config.poll_interval)}
+                                class:active={![15, 30, 60].includes(config.poll_interval)}
                                 onclick={() => pollIntervalAgentInput?.focus()}>Custom</button
                             >
                         </div>
@@ -449,7 +449,7 @@
                                 class:active={config.session_warning_threshold === 0}
                                 onclick={() => (config.session_warning_threshold = 0)}>Off</button
                             >
-                            {#each [60, 70, 80, 90, 95] as p}
+                            {#each [70, 80, 90] as p}
                                 <button
                                     class="btn-brutal gp-pill"
                                     class:active={config.session_warning_threshold === p}
@@ -458,7 +458,7 @@
                             {/each}
                             <button
                                 class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={config.session_warning_threshold > 0 && ![60, 70, 80, 90, 95].includes(config.session_warning_threshold)}
+                                class:active={config.session_warning_threshold > 0 && ![70, 80, 90].includes(config.session_warning_threshold)}
                                 onclick={() => sessionWarnInput?.focus()}>Custom</button
                             >
                         </div>
@@ -529,7 +529,7 @@
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
                                         onclick={() => { config.performance.cpu_warn_pct = -1; config.performance.cpu_crit_pct = -1; }}>Off</button>
-                                    {#each [[60,80],[70,85],[70,90],[80,95]] as [w,c]}
+                                    {#each [[60,80],[70,90],[80,95]] as [w,c]}
                                         <button class="btn-brutal gp-pill"
                                             class:active={config.performance.cpu_warn_pct === w && config.performance.cpu_crit_pct === c}
                                             onclick={() => { config.performance.cpu_warn_pct = w; config.performance.cpu_crit_pct = c; }}>{w}/{c}%</button>
@@ -550,7 +550,7 @@
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
                                         onclick={() => { config.performance.mem_warn_pct = -1; config.performance.mem_crit_pct = -1; }}>Off</button>
-                                    {#each [[70,85],[75,90],[80,90],[80,95]] as [w,c]}
+                                    {#each [[65,85],[75,90],[80,95]] as [w,c]}
                                         <button class="btn-brutal gp-pill"
                                             class:active={config.performance.mem_warn_pct === w && config.performance.mem_crit_pct === c}
                                             onclick={() => { config.performance.mem_warn_pct = w; config.performance.mem_crit_pct = c; }}>{w}/{c}%</button>
@@ -571,7 +571,7 @@
                                     <button class="btn-brutal gp-pill gp-pill--off"
                                         class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
                                         onclick={() => { config.performance.input_delay_warn_ms = -1; config.performance.input_delay_crit_ms = -1; }}>Off</button>
-                                    {#each [[30,80],[50,100],[75,150],[100,200]] as [w,c]}
+                                    {#each [[25,60],[50,100],[75,150]] as [w,c]}
                                         <button class="btn-brutal gp-pill"
                                             class:active={config.performance.input_delay_warn_ms === w && config.performance.input_delay_crit_ms === c}
                                             onclick={() => { config.performance.input_delay_warn_ms = w; config.performance.input_delay_crit_ms = c; }}>{w}/{c}ms</button>
