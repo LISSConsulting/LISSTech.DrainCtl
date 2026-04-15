@@ -10,10 +10,19 @@ import (
 
 func defaultPerfCfg() dc.PerformanceConfig {
 	return dc.PerformanceConfig{
-		Enabled:           true,
-		CollectPerSession: true,
+		Enabled:                 true,
+		CollectPerSession:       true,
+		SampleIntervalSec:       dc.DefaultSampleInterval,
+		LoadAlertDelaySec:       dc.DefaultLoadAlertDelaySec,
+		InputDelayAlertDelaySec: dc.DefaultInputDelayAlertDelaySec,
 	}
 }
+
+// Default consecutive poll counts derived from duration / interval.
+var (
+	defaultLoadPolls  = ceilDiv(dc.DefaultLoadAlertDelaySec, dc.DefaultSampleInterval)       // 2
+	defaultDelayPolls = ceilDiv(dc.DefaultInputDelayAlertDelaySec, dc.DefaultSampleInterval) // 3
+)
 
 func hasTrigger(triggers []dc.Trigger, want dc.Trigger) bool {
 	for _, t := range triggers {
@@ -31,16 +40,16 @@ func TestCPUWarning_RequiresConsecutivePolls(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{CPUPct: 75, MemTotalMB: 16000, MemAvailMB: 10000}
-	for i := 0; i < ConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultLoadPolls-1; i++ {
 		triggers := EvaluateThresholds(snap, cfg, state)
 		if hasTrigger(triggers, dc.TriggerCPUWarning) {
-			t.Errorf("CPU warning should not fire on poll %d (threshold=%d)", i+1, ConsecutiveThreshold)
+			t.Errorf("CPU warning should not fire on poll %d (threshold=%d)", i+1, defaultLoadPolls)
 		}
 	}
 
 	triggers := EvaluateThresholds(snap, cfg, state)
 	if !hasTrigger(triggers, dc.TriggerCPUWarning) {
-		t.Errorf("CPU warning should fire on poll %d", ConsecutiveThreshold)
+		t.Errorf("CPU warning should fire on poll %d", defaultLoadPolls)
 	}
 }
 
@@ -66,7 +75,7 @@ func TestCPUCritical_OverridesWarning(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{CPUPct: 90, MemTotalMB: 16000, MemAvailMB: 10000}
-	for i := 0; i < ConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultLoadPolls-1; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)
@@ -86,16 +95,16 @@ func TestMemoryWarning_RequiresConsecutivePolls(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{MemTotalMB: 16000, MemAvailMB: 2400}
-	for i := 0; i < ConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultLoadPolls-1; i++ {
 		triggers := EvaluateThresholds(snap, cfg, state)
 		if hasTrigger(triggers, dc.TriggerMemoryWarning) {
-			t.Errorf("Memory warning should not fire on poll %d (threshold=%d)", i+1, ConsecutiveThreshold)
+			t.Errorf("Memory warning should not fire on poll %d (threshold=%d)", i+1, defaultLoadPolls)
 		}
 	}
 
 	triggers := EvaluateThresholds(snap, cfg, state)
 	if !hasTrigger(triggers, dc.TriggerMemoryWarning) {
-		t.Errorf("Memory warning should fire on poll %d", ConsecutiveThreshold)
+		t.Errorf("Memory warning should fire on poll %d", defaultLoadPolls)
 	}
 }
 
@@ -104,7 +113,7 @@ func TestMemoryCritical_FivePercentFree(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{MemTotalMB: 16000, MemAvailMB: 800}
-	for i := 0; i < ConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultLoadPolls-1; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)
@@ -135,18 +144,18 @@ func TestInputDelayWarning_RequiresConsecutivePolls(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{InputDelayP95: 60, MemTotalMB: 16000, MemAvailMB: 10000}
 
-	// Should NOT fire before reaching InputDelayConsecutiveThreshold.
-	for i := 0; i < InputDelayConsecutiveThreshold-1; i++ {
+	// Should NOT fire before reaching defaultDelayPolls.
+	for i := 0; i < defaultDelayPolls-1; i++ {
 		triggers := EvaluateThresholds(snap, cfg, state)
 		if hasTrigger(triggers, dc.TriggerInputDelayWarning) {
-			t.Errorf("Input delay warning should not fire on poll %d (threshold=%d)", i+1, InputDelayConsecutiveThreshold)
+			t.Errorf("Input delay warning should not fire on poll %d (threshold=%d)", i+1, defaultDelayPolls)
 		}
 	}
 
 	// Should fire on the Nth consecutive poll.
 	triggers := EvaluateThresholds(snap, cfg, state)
 	if !hasTrigger(triggers, dc.TriggerInputDelayWarning) {
-		t.Errorf("Input delay warning should fire on poll %d", InputDelayConsecutiveThreshold)
+		t.Errorf("Input delay warning should fire on poll %d", defaultDelayPolls)
 	}
 }
 
@@ -172,7 +181,7 @@ func TestInputDelayCritical_OverridesWarning(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{InputDelayP95: 120, MemTotalMB: 16000, MemAvailMB: 10000}
-	for i := 0; i < InputDelayConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultDelayPolls-1; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state) // Nth poll — fires
@@ -209,7 +218,7 @@ func TestInputDelay_P50Evaluation(t *testing.T) {
 		MemTotalMB:    16000,
 		MemAvailMB:    10000,
 	}
-	for i := 0; i < InputDelayConsecutiveThreshold; i++ {
+	for i := 0; i < defaultDelayPolls; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)
@@ -230,7 +239,7 @@ func TestInputDelay_P95IsDefault(t *testing.T) {
 		MemTotalMB:    16000,
 		MemAvailMB:    10000,
 	}
-	for i := 0; i < InputDelayConsecutiveThreshold; i++ {
+	for i := 0; i < defaultDelayPolls; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)
@@ -249,7 +258,7 @@ func TestDisabledThreshold_NegativeOne(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{CPUPct: 99, MemTotalMB: 16000, MemAvailMB: 10000}
-	for i := 0; i < ConsecutiveThreshold; i++ {
+	for i := 0; i < defaultLoadPolls; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)
@@ -268,7 +277,7 @@ func TestCustomThresholds(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{CPUPct: 55, MemTotalMB: 16000, MemAvailMB: 10000}
-	for i := 0; i < ConsecutiveThreshold-1; i++ {
+	for i := 0; i < defaultLoadPolls-1; i++ {
 		EvaluateThresholds(snap, cfg, state)
 	}
 	triggers := EvaluateThresholds(snap, cfg, state)

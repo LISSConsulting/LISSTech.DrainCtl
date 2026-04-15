@@ -36,11 +36,9 @@ const (
 
 	DefaultSessionWarningThreshold = 80 // percent
 
-	DefaultSampleInterval             = 30 // seconds
-	DefaultLoadConsecutivePolls       = 2  // DEPRECATED: CPU/memory consecutive polls before trigger fires
-	DefaultInputDelayConsecutivePolls = 3  // DEPRECATED: input delay consecutive polls before trigger fires
-	DefaultLoadAlertDelaySec          = 60 // seconds — CPU/memory alert sustain window
-	DefaultInputDelayAlertDelaySec    = 90 // seconds — input delay alert sustain window
+	DefaultSampleInterval          = 30 // seconds
+	DefaultLoadAlertDelaySec       = 60 // seconds — CPU/memory alert sustain window
+	DefaultInputDelayAlertDelaySec = 90 // seconds — input delay alert sustain window
 
 	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
 	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server
@@ -119,22 +117,20 @@ func (t NotificationTarget) HasTrigger(trigger Trigger) bool {
 
 // PerformanceConfig holds performance monitoring settings.
 type PerformanceConfig struct {
-	Enabled                    bool   `json:"enabled"`                          // default: false
-	ForceDisabled              bool   `json:"force_disabled"`                   // when true, dashboard cannot enable perf on this server
-	CPUWarnPct                 int    `json:"cpu_warn_pct"`                     // default: 70, -1=disabled
-	CPUCritPct                 int    `json:"cpu_crit_pct"`                     // default: 85, -1=disabled
-	MemWarnPct                 int    `json:"mem_warn_pct"`                     // default: 20 (% free), -1=disabled
-	MemCritPct                 int    `json:"mem_crit_pct"`                     // default: 10 (% free), -1=disabled
-	InputDelayWarnMS           int    `json:"input_delay_warn_ms"`              // default: 50, -1=disabled
-	InputDelayCritMS           int    `json:"input_delay_crit_ms"`              // default: 100, -1=disabled
-	InputDelayPercentile       string `json:"input_delay_percentile,omitempty"` // "p50" or "p95" (default: "p95")
-	ConsecutivePolls           int    `json:"load_consecutive_polls"`           // DEPRECATED: use LoadAlertDelaySec
-	InputDelayConsecutivePolls int    `json:"input_delay_consecutive_polls"`    // DEPRECATED: use InputDelayAlertDelaySec
-	LoadAlertDelaySec          int    `json:"load_alert_delay_sec"`             // seconds before CPU/memory alert fires (default: 60)
-	InputDelayAlertDelaySec    int    `json:"input_delay_alert_delay_sec"`      // seconds before input delay alert fires (default: 90)
-	CollectRemoteFX            bool   `json:"collect_remotefx"`                 // default: false
-	CollectPerSession          bool   `json:"collect_per_session"`              // default: true
-	SampleIntervalSec          int    `json:"sample_interval_sec"`              // default: 30, range 10–300
+	Enabled                 bool   `json:"enabled"`                          // default: false
+	ForceDisabled           bool   `json:"force_disabled"`                   // when true, dashboard cannot enable perf on this server
+	CPUWarnPct              int    `json:"cpu_warn_pct"`                     // default: 70, -1=disabled
+	CPUCritPct              int    `json:"cpu_crit_pct"`                     // default: 85, -1=disabled
+	MemWarnPct              int    `json:"mem_warn_pct"`                     // default: 20 (% free), -1=disabled
+	MemCritPct              int    `json:"mem_crit_pct"`                     // default: 10 (% free), -1=disabled
+	InputDelayWarnMS        int    `json:"input_delay_warn_ms"`              // default: 50, -1=disabled
+	InputDelayCritMS        int    `json:"input_delay_crit_ms"`              // default: 100, -1=disabled
+	InputDelayPercentile    string `json:"input_delay_percentile,omitempty"` // "p50" or "p95" (default: "p95")
+	LoadAlertDelaySec       int    `json:"load_alert_delay_sec"`             // seconds before CPU/memory alert fires (default: 60)
+	InputDelayAlertDelaySec int    `json:"input_delay_alert_delay_sec"`      // seconds before input delay alert fires (default: 90)
+	CollectRemoteFX         bool   `json:"collect_remotefx"`                 // default: false
+	CollectPerSession       bool   `json:"collect_per_session"`              // default: true
+	SampleIntervalSec       int    `json:"sample_interval_sec"`              // default: 30, range 10–300
 }
 
 // Config is the top-level config file structure (config.json).
@@ -341,29 +337,12 @@ func (c *Config) Validate() {
 		c.Performance.SampleIntervalSec = 300
 	}
 
-	// Migrate legacy consecutive_polls → duration fields.
-	// If the new duration field is unset but the old poll field is set,
-	// compute duration = polls × interval.  Then always compute polls
-	// from duration so they stay in sync.
-	interval := c.Performance.SampleIntervalSec
 	if c.Performance.LoadAlertDelaySec == 0 {
-		polls := c.Performance.ConsecutivePolls
-		if polls == 0 {
-			polls = DefaultLoadConsecutivePolls
-		}
-		c.Performance.LoadAlertDelaySec = polls * interval
+		c.Performance.LoadAlertDelaySec = DefaultLoadAlertDelaySec
 	}
 	if c.Performance.InputDelayAlertDelaySec == 0 {
-		polls := c.Performance.InputDelayConsecutivePolls
-		if polls == 0 {
-			polls = DefaultInputDelayConsecutivePolls
-		}
-		c.Performance.InputDelayAlertDelaySec = polls * interval
+		c.Performance.InputDelayAlertDelaySec = DefaultInputDelayAlertDelaySec
 	}
-
-	// Keep legacy poll fields in sync (computed from duration / interval).
-	c.Performance.ConsecutivePolls = ceilDiv(c.Performance.LoadAlertDelaySec, interval)
-	c.Performance.InputDelayConsecutivePolls = ceilDiv(c.Performance.InputDelayAlertDelaySec, interval)
 
 	// Strip notification targets with unknown types (must be "webhook" or "ntfy").
 	// A target with an unrecognised type would silently never fire — reject it early.
@@ -432,14 +411,6 @@ func (c *Config) Validate() {
 			t.URL = ""
 		}
 	}
-}
-
-// ceilDiv returns ⌈a/b⌉ for positive integers.
-func ceilDiv(a, b int) int {
-	if b <= 0 {
-		return 1
-	}
-	return (a + b - 1) / b
 }
 
 // ClampRetention enforces the retention boundary (1-365 days). Values
