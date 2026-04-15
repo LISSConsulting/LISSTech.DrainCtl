@@ -493,12 +493,20 @@
     });
 
     // Poll for fresh data every 30 seconds — only while authenticated.
-    // Cleanup cancels the interval when the user logs out or the session expires.
+    // Also trigger a full sync when the tab regains focus (SSE events may
+    // have been missed or throttled while the tab was backgrounded).
     $effect(() => {
         if (!authState.username) return;
         untrack(() => refresh());
         const interval = setInterval(refresh, 30_000);
-        return () => clearInterval(interval);
+        const onFocus = () => { untrack(() => refresh()); };
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) onFocus();
+        });
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onFocus);
+        };
     });
 
     // SSE: real-time event stream — supplements polling with instant updates.
@@ -507,6 +515,8 @@
         if (!authState.username) return;
 
         const es = new EventSource('/api/v1/events');
+
+        es.onopen = () => { appState.sseConnected = true; };
 
         es.onmessage = (e) => {
             try {
@@ -520,11 +530,15 @@
         };
 
         es.onerror = () => {
+            appState.sseConnected = false;
             // EventSource auto-reconnects. If the session expired,
             // the next poll will catch the 401 and clear auth.
         };
 
-        return () => es.close();
+        return () => {
+            es.close();
+            appState.sseConnected = false;
+        };
     });
 </script>
 

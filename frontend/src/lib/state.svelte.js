@@ -246,6 +246,7 @@ let serverMetrics = $state(lsGetServerMetrics());
 
 // UI state
 let connected = $state(false);
+let sseConnected = $state(false);
 
 /** @type {'overview'|'servers'|'events'} */
 let currentView = $state('overview');
@@ -452,6 +453,13 @@ export const appState = {
     },
     set connected(v) {
         connected = v;
+    },
+
+    get sseConnected() {
+        return sseConnected;
+    },
+    set sseConnected(v) {
+        sseConnected = v;
     },
 
     get currentView() {

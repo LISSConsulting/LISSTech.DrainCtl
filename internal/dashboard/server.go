@@ -936,6 +936,12 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request)
 	_ = enc.Encode(views)
 }
 
+// mustMarshal marshals v to JSON, returning nil on error (caller checks SSEEvent marshal).
+func mustMarshal(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
 // broadcastServerUpdate builds a ServerView for the named host and broadcasts
 // it as a server_update SSE event.
 func (ds *DashboardServer) broadcastServerUpdate(host string) {
@@ -944,16 +950,16 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 		return
 	}
 	view := toServerView(*info)
-	data, err := json.Marshal(view)
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "server_update",
+		Host:      host,
+		Data:      mustMarshal(view),
+		Timestamp: time.Now(),
+	})
 	if err != nil {
 		return
 	}
-	ds.broker.Broadcast(SSEEvent{
-		Type:      "server_update",
-		Host:      host,
-		Data:      data,
-		Timestamp: time.Now(),
-	})
+	ds.broker.Broadcast(payload)
 }
 
 // BroadcastServerUpdate is the exported variant for use by the service handler
@@ -989,15 +995,15 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 	if resp.Notifications == nil {
 		resp.Notifications = []dc.NotificationTarget{}
 	}
-	data, err := json.Marshal(resp)
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "settings_update",
+		Data:      mustMarshal(resp),
+		Timestamp: time.Now(),
+	})
 	if err != nil {
 		return
 	}
-	ds.broker.Broadcast(SSEEvent{
-		Type:      "settings_update",
-		Data:      data,
-		Timestamp: time.Now(),
-	})
+	ds.broker.Broadcast(payload)
 }
 
 // handleSSE serves the Server-Sent Events stream for real-time dashboard updates.

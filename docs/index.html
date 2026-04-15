@@ -1181,6 +1181,11 @@
                 margin-bottom: 6px;
             }
             .liss-fact p { font-size: 0.88rem; color: rgba(253, 248, 246, 0.65); line-height: 1.6; }
+            @media (prefers-color-scheme: dark) {
+                .liss-body { color: rgba(17, 10, 10, 0.72); }
+                .liss-fact { border-color: rgba(17, 10, 10, 0.15); background: rgba(17, 10, 10, 0.05); }
+                .liss-fact p { color: rgba(17, 10, 10, 0.65); }
+            }
             @media (max-width: 768px) {
                 .liss-inner { grid-template-columns: 1fr; gap: 40px; }
                 .liss-tagline { font-size: 1.6rem; }
@@ -1602,7 +1607,7 @@
                 <h2 class="section-title">What shipped recently.</h2>
                 <div class="release-grid">
                     <div class="card release-card">
-                        <div class="release-tag">v26.104.18</div>
+                        <div class="release-tag">v26.104.21</div>
                         <h3>Real-Time Event Streaming</h3>
                         <ul>
                             <li><strong>Server-Sent Events</strong> &mdash; dashboard updates in &lt;2 seconds, no more 30-second polling lag</li>
@@ -1642,24 +1647,23 @@
                 <div class="dash-gallery">
                     <div class="dash-gallery-tabs">
                         <button class="dash-tab active" onclick="showDashTab(0)">Overview</button>
-                        <button class="dash-tab" onclick="showDashTab(1)">Dark Mode</button>
-                        <button class="dash-tab" onclick="showDashTab(2)">Servers</button>
-                        <button class="dash-tab" onclick="showDashTab(3)">Events</button>
-                        <button class="dash-tab" onclick="showDashTab(4)">Config</button>
+                        <button class="dash-tab" onclick="showDashTab(1)">Servers</button>
+                        <button class="dash-tab" onclick="showDashTab(2)">Events</button>
+                        <button class="dash-tab" onclick="showDashTab(3)">Config</button>
                     </div>
                     <div class="dash-panel active" id="dash0">
-                        <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard — Overview, farm summary with metrics chart and per-server health cards" />
+                        <picture>
+                            <source srcset="dashboard-screenshot-dark.png" media="(prefers-color-scheme: dark)" />
+                            <img src="dashboard-screenshot.png" alt="DrainCtl Dashboard — Overview, farm summary with metrics chart and per-server health cards" />
+                        </picture>
                     </div>
                     <div class="dash-panel" id="dash1">
-                        <img src="dashboard-screenshot-dark.png" alt="DrainCtl Dashboard — dark mode overview" />
-                    </div>
-                    <div class="dash-panel" id="dash2">
                         <img src="dashboard-screenshot-servers.png" alt="DrainCtl Dashboard — Servers list with drain state, sessions, CPU, memory, input delay per host" />
                     </div>
-                    <div class="dash-panel" id="dash3">
+                    <div class="dash-panel" id="dash2">
                         <img src="dashboard-screenshot-events.png" alt="DrainCtl Dashboard — Event log with drain mode changes, attribution, and performance alerts" />
                     </div>
-                    <div class="dash-panel" id="dash4">
+                    <div class="dash-panel" id="dash3">
                         <img src="dashboard-screenshot-config.png" alt="DrainCtl Dashboard — Configuration modal with alert presets and notification targets" />
                     </div>
                 </div>
@@ -1703,7 +1707,7 @@
         </section>
 
         <!-- Usage Guide -->
-        <section class="section" id="usage">
+        <section class="section section--bordered" id="usage">
             <div class="wrap">
                 <div class="section-label">Usage Guide</div>
                 <h2 class="section-title">CLI, PowerShell, or both.</h2>
@@ -1765,7 +1769,7 @@
 <span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.104.18"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.104.21"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
   <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
