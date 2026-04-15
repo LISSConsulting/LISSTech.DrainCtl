@@ -403,10 +403,10 @@
             const totalDisconnected = s.reduce((a, sv) => a + (sv.sessions_disconnected ?? 0), 0);
             const totalAll = totalActive + totalDisconnected;
             const totalMax = s.reduce((a, sv) => a + (sv.max_sessions ?? 0), 0);
-            const scpuVals = perfSvs.map((sv) => sv.perf.session_cpu_p95 ?? null).filter((v) => v != null);
-            const smemVals = perfSvs.map((sv) => sv.perf.session_mem_p95 ?? null).filter((v) => v != null);
-            const scpuP50Vals = perfSvs.map((sv) => sv.perf.session_cpu_p50 ?? null).filter((v) => v != null);
-            const smemP50Vals = perfSvs.map((sv) => sv.perf.session_mem_p50 ?? null).filter((v) => v != null);
+            const scpuVals = perfSvs.map((sv) => sv.perf.session_cpu_p95_pct ?? null).filter((v) => v != null);
+            const smemVals = perfSvs.map((sv) => sv.perf.session_mem_p95_bytes ?? null).filter((v) => v != null);
+            const scpuP50Vals = perfSvs.map((sv) => sv.perf.session_cpu_p50_pct ?? null).filter((v) => v != null);
+            const smemP50Vals = perfSvs.map((sv) => sv.perf.session_mem_p50_bytes ?? null).filter((v) => v != null);
             appendSessionSample({
                 ts,
                 active: totalActive,
@@ -427,18 +427,18 @@
                     ts,
                     fpsOut: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_fps_out ?? 0)),
                     encodeMs: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_encode_ms ?? 0)),
-                    quality: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_quality ?? 0)),
-                    rtt: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_rtt ?? 0)),
-                    loss: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_loss ?? 0)),
-                    skipServer: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_server ?? 0)),
-                    skipNet: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_net ?? 0)),
+                    quality: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_quality_pct ?? 0)),
+                    rtt: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_rtt_ms ?? 0)),
+                    loss: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_loss_pct ?? 0)),
+                    skipServer: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_server_sec ?? 0)),
+                    skipNet: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_net_sec ?? 0)),
                     fpsOutP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_fps_out_p50 ?? 0)),
                     encodeMsP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_encode_ms_p50 ?? 0)),
-                    qualityP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_quality_p50 ?? 0)),
-                    rttP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_rtt_p50 ?? 0)),
-                    lossP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_loss_p50 ?? 0)),
-                    skipServerP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_server_p50 ?? 0)),
-                    skipNetP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_net_p50 ?? 0)),
+                    qualityP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_quality_pct_p50 ?? 0)),
+                    rttP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_rtt_ms_p50 ?? 0)),
+                    lossP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_loss_pct_p50 ?? 0)),
+                    skipServerP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_server_sec_p50 ?? 0)),
+                    skipNetP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_net_sec_p50 ?? 0)),
                 });
             }
 
