@@ -974,7 +974,13 @@ func (ds *DashboardServer) BroadcastServerUpdate(host string) {
 
 // broadcastSettingsUpdate broadcasts the current settings to all connected browsers.
 func (ds *DashboardServer) broadcastSettingsUpdate() {
-	cfg, err := dc.LoadConfig()
+	var cfg *dc.Config
+	var err error
+	if ds.testLoadConfigFunc != nil {
+		cfg, err = ds.testLoadConfigFunc()
+	} else {
+		cfg, err = dc.LoadConfig()
+	}
 	if err != nil {
 		return
 	}

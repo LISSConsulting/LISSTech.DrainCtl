@@ -2564,6 +2564,91 @@ func TestHandleSSE_SendsKeepalive(t *testing.T) {
 	}
 }
 
+// TestHandleReport_BroadcastsSSEUpdate verifies the end-to-end SSE wiring:
+// handleReport → state.Update() → state.OnUpdate → broker.Broadcast() delivers
+// a server_update event to a connected subscriber.
+func TestHandleReport_BroadcastsSSEUpdate(t *testing.T) {
+	ds := newTestServer(t)
+
+	// Wire the SSE broadcast exactly as StartDashboard does in production.
+	ds.state.OnUpdate = ds.broadcastServerUpdate
+
+	ds.state.Register("SRV01")
+
+	// Subscribe before the report arrives.
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	result := dc.CheckResult{Host: "SRV01", Status: "Healthy"}
+	body, _ := json.Marshal(result)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+	ds.handleReport(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handleReport status = %d, want 200", w.Code)
+	}
+
+	select {
+	case msg := <-ch:
+		if !bytes.Contains(msg, []byte(`"server_update"`)) {
+			t.Errorf("broadcast missing server_update type: %s", msg)
+		}
+		if !bytes.Contains(msg, []byte(`SRV01`)) {
+			t.Errorf("broadcast missing host SRV01: %s", msg)
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast after handleReport")
+	}
+}
+
+// TestHandlePutSettings_BroadcastsSSESettingsUpdate verifies that a successful
+// PUT /api/v1/settings broadcasts a settings_update event to connected browsers.
+func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
+	ds := newTestServer(t)
+
+	// Inject no-op update and a config loader so broadcastSettingsUpdate succeeds.
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int) error { return nil }
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		return &dc.Config{
+			GracePeriod:             10,
+			SessionWarningThreshold: 80,
+			Notifications:           []dc.NotificationTarget{},
+		}, nil
+	}
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	body := []byte(`{"grace_period":10}`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handlePutSettings status = %d, want 200", w.Code)
+	}
+
+	select {
+	case msg := <-ch:
+		if !bytes.Contains(msg, []byte(`"settings_update"`)) {
+			t.Errorf("broadcast missing settings_update type: %s", msg)
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast after handlePutSettings")
+	}
+}
+
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	state := NewServerState(t.TempDir())
 	state.Register("SRV01")
