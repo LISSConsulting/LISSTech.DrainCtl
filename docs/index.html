@@ -1119,11 +1119,11 @@
                 overflow: hidden;
             }
             .dash-panel.active { display: block; }
-            .dash-panel img { width: 100%; display: block; }
-            .dash-img--dark { display: none; }
+            .dash-panel img { width: 100%; }
+            .dash-panel img.dash-img--dark { display: none; }
             @media (prefers-color-scheme: dark) {
-                .dash-img--light { display: none; }
-                .dash-img--dark { display: block; }
+                .dash-panel img.dash-img--light { display: none; }
+                .dash-panel img.dash-img--dark { display: block; }
             }
             .dash-placeholder { padding: 56px 32px; background: var(--surface); text-align: center; }
             .dash-placeholder-icon { font-size: 2.8rem; margin-bottom: 14px; }
