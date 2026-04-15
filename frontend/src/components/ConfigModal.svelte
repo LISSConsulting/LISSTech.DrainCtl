@@ -6,7 +6,7 @@
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award } from 'lucide-svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity } from 'lucide-svelte';
 
     let { onclose } = $props();
 
@@ -344,7 +344,7 @@
                                           : 'No Sleep Till Brooklyn'}</span
                                 >
                                 <span class="fire-detail">
-                                    Grace {preset.grace_period}m · Sessions {preset.session_warning}%
+                                    Escalation {preset.grace_period}m · Sessions {preset.session_warning}%
                                 </span>
                                 <span class="fire-detail">
                                     CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
@@ -363,60 +363,9 @@
                 {#if showManual}
                     <div class="settings-divider"></div>
 
-                    <!-- Grace Period -->
+                    <!-- 1. Agent Poll Interval -->
                     <div class="settings-group">
-                        <div class="settings-label">Grace Period</div>
-                        <div class="settings-hint" style="margin-bottom:6px">How long after drain mode is enabled before the server status escalates to Alert.</div>
-                        <div class="repeat-pills">
-                            {#each GRACE_PRESETS as p}
-                                <button
-                                    class="btn-brutal gp-pill"
-                                    class:active={config.grace_period === p}
-                                    onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
-                                >
-                            {/each}
-                            <button
-                                class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={!GRACE_PRESETS.includes(config.grace_period)}
-                                onclick={() => gracePeriodInput?.focus()}>Custom</button
-                            >
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px">
-                            <input
-                                type="number"
-                                class="settings-num"
-                                bind:value={config.grace_period}
-                                bind:this={gracePeriodInput}
-                                min="1"
-                                max="1440"
-                            />
-                            <span class="settings-num-label">minutes</span>
-                        </div>
-                    </div>
-
-                    <div class="settings-divider"></div>
-
-                    <!-- Session Warning -->
-                    <div class="settings-group">
-                        <div class="settings-label">Session Warning Threshold</div>
-                        <div class="settings-hint" style="margin-bottom:6px">Fires a session_warning alert when utilization exceeds this percentage of max sessions.</div>
-                        <div style="display:flex;align-items:center;gap:8px">
-                            <input
-                                type="number"
-                                class="settings-num"
-                                bind:value={config.session_warning_threshold}
-                                min="0"
-                                max="100"
-                            />
-                            <span class="settings-num-label">% of max sessions (0 = disabled)</span>
-                        </div>
-                    </div>
-
-                    <div class="settings-divider"></div>
-
-                    <!-- Agent Poll Interval -->
-                    <div class="settings-group">
-                        <div class="settings-label">Agent Poll Interval</div>
+                        <div class="section-header"><Radio size={14} strokeWidth={2.5} /> Agent Poll Interval</div>
                         <div class="settings-hint" style="margin-bottom:6px">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
                         <div class="repeat-pills">
                             {#each [15, 30, 60, 120, 300] as p}
@@ -447,10 +396,61 @@
 
                     <div class="settings-divider"></div>
 
-                    <!-- Performance Monitoring -->
+                    <!-- 2. Escalation Window -->
+                    <div class="settings-group">
+                        <div class="section-header"><ShieldAlert size={14} strokeWidth={2.5} /> Escalation Window</div>
+                        <div class="settings-hint" style="margin-bottom:6px">How long a server can stay in drain mode before its status escalates from Grace to Alert.</div>
+                        <div class="repeat-pills">
+                            {#each GRACE_PRESETS as p}
+                                <button
+                                    class="btn-brutal gp-pill"
+                                    class:active={config.grace_period === p}
+                                    onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
+                                >
+                            {/each}
+                            <button
+                                class="btn-brutal gp-pill gp-pill--dashed"
+                                class:active={!GRACE_PRESETS.includes(config.grace_period)}
+                                onclick={() => gracePeriodInput?.focus()}>Custom</button
+                            >
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <input
+                                type="number"
+                                class="settings-num"
+                                bind:value={config.grace_period}
+                                bind:this={gracePeriodInput}
+                                min="1"
+                                max="1440"
+                            />
+                            <span class="settings-num-label">minutes</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- 3. Session Warning -->
+                    <div class="settings-group">
+                        <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
+                        <div class="settings-hint" style="margin-bottom:6px">Fires a session_warning alert when utilization exceeds this percentage of max sessions.</div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <input
+                                type="number"
+                                class="settings-num"
+                                bind:value={config.session_warning_threshold}
+                                min="0"
+                                max="100"
+                            />
+                            <span class="settings-num-label">% of max sessions (0 = disabled)</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- 4. Performance Monitoring -->
                     {#if config.performance}
                         <div class="settings-group">
-                            <div class="settings-label">Performance Monitoring</div>
+                            <div class="section-header"><Activity size={14} strokeWidth={2.5} /> Performance Monitoring</div>
                             <label class="settings-check">
                                 <input
                                     type="checkbox"
@@ -809,6 +809,19 @@
     }
     .settings-group {
         margin-bottom: 18px;
+    }
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--color-accent);
+        margin-bottom: 6px;
+        padding: 4px 0;
+        border-bottom: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
     }
     .settings-label {
         font-size: 0.75rem;
