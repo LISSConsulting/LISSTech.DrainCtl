@@ -133,7 +133,7 @@
     }
 
     .toast-out {
-        animation: toast-slam-out 0.12s cubic-bezier(0.6, 0, 1, 0.8) forwards;
+        animation: toast-twinkle-out 0.4s ease-out forwards;
     }
 
     .toast-icon {
@@ -195,14 +195,31 @@
             transform: translateX(0) scale(1);
         }
     }
-    @keyframes toast-slam-out {
+    @keyframes toast-twinkle-out {
         0% {
             opacity: 1;
-            transform: translateX(0);
+            transform: scale(1);
+            filter: brightness(1);
+        }
+        30% {
+            opacity: 1;
+            transform: scale(1.03);
+            filter: brightness(1.6);
+        }
+        60% {
+            opacity: 0.8;
+            transform: scale(0.95);
+            filter: brightness(1.2);
+        }
+        80% {
+            opacity: 0.3;
+            transform: scale(0.5);
+            filter: brightness(2);
         }
         100% {
             opacity: 0;
-            transform: translateX(60px) scale(0.95);
+            transform: scale(0);
+            filter: brightness(3);
         }
     }
 </style>
