@@ -594,7 +594,6 @@
                                 </div>
                             {/if}
                         </div>
-                        <div class="settings-divider"></div>
                     {/if}
                 {/if}
 
