@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,10 +32,61 @@ func TestEmailTemplateRenders(t *testing.T) {
 	if html == "" {
 		t.Fatal("empty HTML")
 	}
-	for _, want := range []string{"RDS01", "Alert", "Drain Active", "#a3475b", "LISS Technologies"} {
+	for _, want := range []string{"RDS01", "Alert", "Drain Active", "#9e2a3b", "LISS Technologies"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("HTML missing %q", want)
 		}
+	}
+}
+
+func TestEmailWriteEML(t *testing.T) {
+	if os.Getenv("WRITE_EML") == "" {
+		t.Skip("set WRITE_EML=1 to generate test .eml file")
+	}
+
+	dur := 300.0
+	result := &CheckResult{
+		Host:                 "RDS01",
+		Status:               "Alert",
+		DrainModeLabel:       "Drain Active",
+		GracePeriodSeconds:   3600,
+		StateDurationSeconds: &dur,
+		Timestamp:            time.Now(),
+		Message:              "Drain mode active for 5m. Sessions are being redirected to RDS02.",
+	}
+	subject := "RDS01 — Alert: drain active"
+	html, err := renderEmailHTML(result, subject, TriggerAlert, `CONTOSO\admin`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var eml bytes.Buffer
+	eml.WriteString("From: drainctl@example.com\r\n")
+	eml.WriteString("To: test@example.com\r\n")
+	eml.WriteString("Subject: " + subject + "\r\n")
+	eml.WriteString("MIME-Version: 1.0\r\n")
+	eml.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	eml.WriteString("X-Mailer: DrainCtl/" + Version + "\r\n")
+	eml.WriteString("\r\n")
+	eml.WriteString(html)
+
+	path := "test_email.eml"
+	if err := os.WriteFile(path, eml.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wrote %s (%d bytes) — double-click to open in Outlook", path, eml.Len())
+
+	// Also send to Mailpit if reachable.
+	target := NotificationTarget{
+		Type: "email",
+		URL:  "smtp://127.0.0.1:1025",
+		To:   []string{"test@example.com"},
+		From: "drainctl@example.com",
+	}
+	if err := sendEmail(target, result, TriggerAlert, `CONTOSO\admin`); err != nil {
+		t.Logf("mailpit send failed (not running?): %v", err)
+	} else {
+		t.Log("sent to Mailpit — check http://127.0.0.1:8025")
 	}
 }
 
