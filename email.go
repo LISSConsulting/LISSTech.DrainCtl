@@ -25,12 +25,14 @@ type emailData struct {
 	Host        string
 	Mode        string
 	Status      string
-	Duration    string
-	ChangedBy   string
+	Duration    string // drain-state duration (omitted for perf/session triggers)
+	GracePeriod string // grace period (only for drain-state triggers)
+	ChangedBy   string // who changed drain state (omitted for perf/session triggers)
 	Timestamp   string
 	Message     string
 	Trigger     string
 	StatusColor string
+	IsDrain     bool // true for drain-state triggers, controls which detail rows render
 }
 
 // TriggerStatus returns a human-readable status label for a trigger.
@@ -83,16 +85,23 @@ func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
 }
 
 func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, changedBy string) (string, error) {
-	dur := ""
-	if result.StateDurationSeconds != nil {
-		dur = formatDuration(time.Duration(*result.StateDurationSeconds * float64(time.Second)))
-	}
-
 	status, statusColor := emailStatus(result.Status, trigger)
 
-	cb := changedBy
-	if cb == "" {
-		cb = "\u2014" // em dash
+	isDrain := !perfTriggers[trigger] && trigger != TriggerSessionWarning
+
+	dur := ""
+	grace := ""
+	cb := "\u2014" // em dash
+	if isDrain {
+		if result.StateDurationSeconds != nil {
+			dur = formatDuration(time.Duration(*result.StateDurationSeconds * float64(time.Second)))
+		}
+		if result.GracePeriodSeconds > 0 {
+			grace = formatDuration(time.Duration(result.GracePeriodSeconds) * time.Second)
+		}
+		if changedBy != "" {
+			cb = changedBy
+		}
 	}
 
 	data := emailData{
@@ -101,11 +110,13 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		Mode:        result.DrainModeLabel,
 		Status:      status,
 		Duration:    dur,
+		GracePeriod: grace,
 		ChangedBy:   cb,
 		Timestamp:   result.Timestamp.Format("2006-01-02 15:04:05 MST"),
 		Message:     result.Message,
 		Trigger:     string(trigger),
 		StatusColor: statusColor,
+		IsDrain:     isDrain,
 	}
 
 	var buf bytes.Buffer
