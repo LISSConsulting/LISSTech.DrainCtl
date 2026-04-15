@@ -515,7 +515,10 @@
 
         const es = new EventSource('/api/v1/events');
 
-        es.onopen = () => { appState.sseConnected = true; };
+        es.onopen = () => {
+            appState.sseConnected = true;
+            appState.sseReconnecting = false;
+        };
 
         es.onmessage = (e) => {
             try {
@@ -581,9 +584,15 @@
 
         es.onerror = () => {
             appState.sseConnected = false;
-            // If the connection was permanently closed (e.g. 401 from expired
-            // session), stop reconnecting and trigger an immediate session check.
-            if (es.readyState === EventSource.CLOSED) {
+            if (es.readyState === EventSource.CONNECTING) {
+                // Transient error — EventSource will auto-retry. Show reconnecting
+                // indicator in the footer so operators can distinguish "no SSE yet"
+                // from "SSE dropped and is recovering".
+                appState.sseReconnecting = true;
+            } else {
+                // Permanently closed (e.g. 401 session expiry) — stop reconnecting
+                // and trigger an immediate session check.
+                appState.sseReconnecting = false;
                 es.close();
                 untrack(() => refresh());
             }
@@ -592,6 +601,7 @@
         return () => {
             es.close();
             appState.sseConnected = false;
+            appState.sseReconnecting = false;
         };
     });
 </script>
