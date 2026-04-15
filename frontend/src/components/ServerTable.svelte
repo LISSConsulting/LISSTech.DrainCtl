@@ -307,25 +307,25 @@
                         <th>Since</th>
                         <th
                             onclick={() => sort('sessions')}
-                            class="sortable"
+                            class="sortable spark-col"
                             aria-sort={sortCol === 'sessions' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('cpu')}
-                            class="sortable"
+                            class="sortable spark-col"
                             aria-sort={sortCol === 'cpu' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('mem')}
-                            class="sortable"
+                            class="sortable spark-col"
                             aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >MEM {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('delay')}
-                            class="sortable"
+                            class="sortable spark-col"
                             aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
@@ -678,6 +678,10 @@
     }
     .mono {
         font-family: 'JetBrains Mono', monospace;
+    }
+    /* Equal-width sparkline columns */
+    .spark-col {
+        width: 10%;
     }
     /* Cells that carry a sparkline background — SVG is position:absolute inside */
     .spark-cell {
