@@ -2526,6 +2526,44 @@ func TestHandleSSE_TooManySubscribers(t *testing.T) {
 	}
 }
 
+// TestHandleSSE_SendsKeepalive verifies that the handler emits ": keepalive"
+// SSE comments on the configured interval when no events are broadcast.
+// A short interval is injected via sseKeepaliveInterval to avoid a 25-second
+// wall-clock wait in CI.
+func TestHandleSSE_SendsKeepalive(t *testing.T) {
+	orig := sseKeepaliveInterval
+	sseKeepaliveInterval = 50 * time.Millisecond
+	t.Cleanup(func() { sseKeepaliveInterval = orig })
+
+	ds := newTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		ds.handleSSE(w, r)
+	}()
+
+	// Wait long enough for at least one keepalive tick.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleSSE did not return after context cancellation")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, ": keepalive") {
+		t.Errorf("SSE body missing keepalive comment; got %q", body)
+	}
+}
+
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	state := NewServerState(t.TempDir())
 	state.Register("SRV01")
