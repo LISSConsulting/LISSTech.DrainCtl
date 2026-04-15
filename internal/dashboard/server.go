@@ -28,6 +28,10 @@ import (
 // (hyphen not at start/end), separated by dots.
 var hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
 
+// sseKeepaliveInterval is the period between SSE keepalive comments.
+// Exported as a package-level var so tests can shorten it without rebuilding.
+var sseKeepaliveInterval = 25 * time.Second
+
 // ServerView is the flattened JSON shape returned to the Svelte dashboard
 // frontend from GET /api/v1/servers and GET /api/v1/servers/{host}.
 // It unwraps ServerInfo + CheckResult so the frontend never navigates nested
@@ -1036,12 +1040,25 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	slog.Info("sse: client connected", "id", id)
 	defer slog.Info("sse: client disconnected", "id", id)
 
+	// Keepalive: emit an SSE comment every sseKeepaliveInterval so intermediate
+	// proxies and firewalls (which typically have a 30–60 s idle-connection
+	// timeout) do not silently drop the stream. An SSE comment (": …\n\n") is
+	// invisible to the browser's EventSource API but resets TCP idle timers.
+	keepalive := time.NewTicker(sseKeepaliveInterval)
+	defer keepalive.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-done:
 			return
+		case <-keepalive.C:
+			_, err := fmt.Fprintf(w, ": keepalive\n\n")
+			if err != nil {
+				return
+			}
+			flusher.Flush()
 		case msg := <-ch:
 			_, err := fmt.Fprintf(w, "data: %s\n\n", msg)
 			if err != nil {
