@@ -136,8 +136,8 @@
                 config.session_warning_threshold === pr.session_warning &&
                 p?.cpu_warn_pct === pr.cpu_warn &&
                 p?.cpu_crit_pct === pr.cpu_crit &&
-                p?.mem_warn_pct === 100 - pr.mem_warn &&
-                p?.mem_crit_pct === 100 - pr.mem_crit &&
+                p?.mem_warn_pct === pr.mem_warn &&
+                p?.mem_crit_pct === pr.mem_crit &&
                 p?.input_delay_warn_ms === pr.delay_warn &&
                 p?.input_delay_crit_ms === pr.delay_crit &&
                 (p?.input_delay_percentile || 'p95') === pr.delay_percentile &&
@@ -158,8 +158,8 @@
             config.performance.enabled = true;
             config.performance.cpu_warn_pct = preset.cpu_warn;
             config.performance.cpu_crit_pct = preset.cpu_crit;
-            config.performance.mem_warn_pct = 100 - preset.mem_warn;
-            config.performance.mem_crit_pct = 100 - preset.mem_crit;
+            config.performance.mem_warn_pct = preset.mem_warn;
+            config.performance.mem_crit_pct = preset.mem_crit;
             config.performance.input_delay_warn_ms = preset.delay_warn;
             config.performance.input_delay_crit_ms = preset.delay_crit;
             config.performance.input_delay_percentile = preset.delay_percentile;
@@ -179,8 +179,8 @@
         if (!p?.enabled) return null;
         if (p.cpu_warn_pct > 0 && p.cpu_crit_pct > 0 && p.cpu_warn_pct >= p.cpu_crit_pct)
             return 'CPU warn threshold must be less than crit threshold.';
-        if (p.mem_warn_pct > 0 && p.mem_crit_pct > 0 && p.mem_warn_pct <= p.mem_crit_pct)
-            return 'Memory warn (% free) must be greater than crit — lower % free means more pressure.';
+        if (p.mem_warn_pct > 0 && p.mem_crit_pct > 0 && p.mem_warn_pct >= p.mem_crit_pct)
+            return 'Memory warn threshold must be less than crit threshold.';
         if (p.input_delay_warn_ms > 0 && p.input_delay_crit_ms > 0 && p.input_delay_warn_ms >= p.input_delay_crit_ms)
             return 'Input Delay warn threshold must be less than crit threshold.';
         return null;
@@ -316,7 +316,7 @@
                                     Grace {preset.grace_period}m · Sessions {preset.session_warning}%
                                 </span>
                                 <span class="fire-detail">
-                                    CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}% used
+                                    CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
                                     · Delay {preset.delay_warn}/{preset.delay_crit}ms
                                 </span>
                             </button>
@@ -419,7 +419,7 @@
                                             />
                                             <span class="settings-num-label threshold-unit">%</span>
                                         </div>
-                                        <div class="settings-label">Memory Thresholds <span class="threshold-hint">(% free — lower = more pressure)</span></div>
+                                        <div class="settings-label">Memory Thresholds</div>
                                         <div class="threshold-row">
                                             <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
@@ -429,7 +429,7 @@
                                                 min="0"
                                                 max="100"
                                             />
-                                            <span class="settings-num-label threshold-unit">% free</span>
+                                            <span class="settings-num-label threshold-unit">%</span>
                                             <span class="settings-num-label threshold-lbl">Crit</span>
                                             <input
                                                 type="number"
@@ -438,7 +438,7 @@
                                                 min="0"
                                                 max="100"
                                             />
-                                            <span class="settings-num-label threshold-unit">% free</span>
+                                            <span class="settings-num-label threshold-unit">%</span>
                                         </div>
                                     </div>
                                     <div>
@@ -730,11 +730,6 @@
     }
     .threshold-unit {
         min-width: 16px;
-    }
-    .threshold-hint {
-        font-size: 0.78em;
-        opacity: 0.65;
-        font-weight: normal;
     }
 
     /* Fire preset cards */
