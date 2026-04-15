@@ -4,6 +4,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Security
 
+- `mock-api.js` `PUT /api/v1/settings` broadcast included HMAC keys and other notification secrets in the `settings_update` SSE payload — the real backend's `broadcastSettingsUpdate` has always stripped secrets before broadcasting, but the mock had no equivalent guard, so operators running dev mode could observe secrets in the browser's SSE event stream; fixed by redacting `secret` fields in the `settings_update` broadcast to match the production behaviour; `TestBroadcastSettingsUpdate_SecretsStripped` added to `server_test.go` to lock in the invariant: creates a config with non-empty webhook and ntfy secrets, calls `broadcastSettingsUpdate` directly, and asserts the broadcast payload contains neither secret value
+
 - `handleSSE` in `internal/dashboard/server.go` never re-validated the session after the initial connection — if a user logged out from another tab or an admin deleted a session, the SSE stream continued delivering real-time server and settings events indefinitely until the TCP connection dropped; fixed by adding `sseSessionCheckInterval` (5 min, overridable in tests) and a `sessionCheck` ticker that calls `ds.sessionStore.Get(token)` on each tick; when the session is missing the stream is closed immediately so the browser reconnects and receives a 401; `sseSessionCheckInterval` follows the same test-override pattern as `sseKeepaliveInterval`; `TestHandleSSE_ClosesOnSessionExpiry` covers the full path: creates a real session, starts the SSE stream, deletes the session, and asserts the handler returns within 2 s
 
 ## Bug Fixes
@@ -165,6 +167,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - Dashboard: delegated event handlers (no inline `onclick`), XSS escaping, client-side URL validation
 
 ## Code Quality
+
+- `openapi.yaml` `PerfSnapshot` schema was missing 9 P50 fields present in `perf.go` and `api.js` JSDoc since the original perfmon work (`session_cpu_p50_pct`, `session_mem_p50_bytes`, `rfx_fps_out_p50`, `rfx_skip_server_sec_p50`, `rfx_skip_net_sec_p50`, `rfx_encode_ms_p50`, `rfx_quality_pct_p50`, `rfx_rtt_ms_p50`, `rfx_loss_pct_p50`); all P95/P50 rfx fields and `rfx_available` also gain `description` strings; `/events` endpoint description rewritten to document all three event types (`server_update`, `server_deleted`, `settings_update`) with their exact `data` payload shapes, the 5-minute session revalidation interval, the 25-second keepalive comment, and the guarantee that `secret` fields are always empty in `settings_update` broadcasts
 
 - `broadcastSettingsUpdate` in `server.go` now honours the `testLoadConfigFunc` injection — previously it called `dc.LoadConfig()` directly so the settings broadcast was untestable in isolation; added `TestHandleReport_BroadcastsSSEUpdate` and `TestHandlePutSettings_BroadcastsSSESettingsUpdate` to verify the end-to-end SSE wiring (`handleReport` → `state.OnUpdate` → `broker.Broadcast` and `handlePutSettings` → `broadcastSettingsUpdate` → `broker.Broadcast`); added missing `429` response to `/events` in `openapi.yaml`
 
