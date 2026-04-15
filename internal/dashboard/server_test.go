@@ -1320,8 +1320,25 @@ func TestHandleGetSettings_MultipleTargets(t *testing.T) {
 	if resp.Notifications[0].Type != "webhook" {
 		t.Errorf("notifications[0].type = %q, want webhook", resp.Notifications[0].Type)
 	}
-	if resp.Notifications[0].Secret != dc.SecretRedacted {
-		t.Errorf("notifications[0].secret = %q, want redacted sentinel", resp.Notifications[0].Secret)
+	// Secret is write-only — never returned. Check has_secret instead.
+	var rawResp struct {
+		Notifications []struct {
+			HasSecret bool   `json:"has_secret"`
+			Secret    string `json:"secret"`
+		} `json:"notifications"`
+	}
+	// Re-request to get raw JSON
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w2, r2)
+	if err := json.NewDecoder(w2.Body).Decode(&rawResp); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if !rawResp.Notifications[0].HasSecret {
+		t.Error("notifications[0].has_secret should be true")
+	}
+	if rawResp.Notifications[0].Secret != "" {
+		t.Errorf("notifications[0].secret should be empty (write-only), got %q", rawResp.Notifications[0].Secret)
 	}
 	if resp.Notifications[1].Type != "ntfy" {
 		t.Errorf("notifications[1].type = %q, want ntfy", resp.Notifications[1].Type)
