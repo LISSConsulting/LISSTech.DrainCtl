@@ -5,7 +5,7 @@
     import { appState } from '../lib/state.svelte.js';
     import { rel, dur, modeLabel, formatTs } from '../lib/utils.js';
 
-    let { server, onhistoryclick = undefined, onremove = undefined } = $props();
+    let { server, now = Date.now(), onhistoryclick = undefined, onremove = undefined } = $props();
 
     let perf = $derived(server.perf || {});
     let memPct = $derived(perf.mem_total_mb > 0 ? (1 - perf.mem_avail_mb / perf.mem_total_mb) * 100 : 0);
@@ -68,14 +68,14 @@
     );
 
     // Last seen staleness color
-    function lastSeenColor(iso) {
+    function lastSeenColor(iso, _now) {
         if (!iso) return 'var(--color-subtle)';
-        const secAgo = (Date.now() - new Date(iso).getTime()) / 1000;
+        const secAgo = (_now - new Date(iso).getTime()) / 1000;
         if (secAgo < 120) return 'var(--color-green)';
         if (secAgo < 300) return 'var(--color-amber)';
         return 'var(--color-red)';
     }
-    let lsColor = $derived(lastSeenColor(server.last_seen));
+    let lsColor = $derived(lastSeenColor(server.last_seen, now));
 
     // State Since formatting — use formatTs for locale-aware local time display
     let stateSinceStr = $derived(server.state_changed_at ? formatTs(server.state_changed_at) : '—');
@@ -388,7 +388,7 @@
 
         <div class="d-kv-row">
             <span class="d-kv-k">Last Seen</span><span class="d-kv-v" style="color:{lsColor}"
-                >{rel(server.last_seen)}</span
+                >{rel(server.last_seen, now)}</span
             >
         </div>
         <div class="d-kv-row">
