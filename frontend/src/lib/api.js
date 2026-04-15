@@ -61,6 +61,7 @@ const BASE = '/api/v1';
  * @property {number} sessions_disconnected    - Disconnected sessions
  * @property {number} max_sessions             - Server session capacity (0 when unknown)
  * @property {number|null} state_duration_seconds - Seconds in current state (null when unknown)
+ * @property {string|null} state_changed_at        - ISO timestamp when current state began (null when unknown)
  * @property {string} version
  * @property {string} registered_at
  * @property {string} last_seen

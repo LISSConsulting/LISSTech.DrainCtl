@@ -45,6 +45,7 @@ type ServerView struct {
 	SessionsDisconnected int              `json:"sessions_disconnected"` // disconnected sessions; 0 when unknown
 	MaxSessions          int              `json:"max_sessions"`          // server capacity; 0 when unknown
 	StateDurationSeconds *float64         `json:"state_duration_seconds"`
+	StateChangedAt       *time.Time       `json:"state_changed_at,omitempty"` // when the current state began
 	Version              string           `json:"version"`
 	RegisteredAt         time.Time        `json:"registered_at"`
 	LastSeen             time.Time        `json:"last_seen,omitempty"`
@@ -114,6 +115,7 @@ func toServerView(info ServerInfo) ServerView {
 	v.ChangedBy = r.ChangedBy
 	v.Perf = r.Performance
 	v.StateDurationSeconds = r.StateDurationSeconds
+	v.StateChangedAt = r.StateSince
 	if r.Sessions != nil {
 		v.Sessions = r.Sessions.TotalSessions
 		v.SessionsActive = r.Sessions.ActiveSessions

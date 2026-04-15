@@ -10,6 +10,11 @@
     let error = $state('');
     let changesOnly = $state(false);
 
+    // Sequence counter — incremented on each fetch; only the latest call's
+    // results are applied, preventing stale-result overwrites if changesOnly
+    // is toggled while a previous fetch is still in flight.
+    let fetchSeq = 0;
+
     $effect(() => {
         if (!host) return;
         // Read changesOnly inside the effect so toggling it triggers a re-fetch.
@@ -18,14 +23,16 @@
     });
 
     async function loadHistory(co = false) {
+        const mySeq = ++fetchSeq;
         loading = true;
         error = '';
         try {
-            entries = (await fetchHistory(host, 100, co)) || [];
+            const result = (await fetchHistory(host, 100, co)) || [];
+            if (mySeq === fetchSeq) entries = result;
         } catch (e) {
-            error = e?.message ?? String(e);
+            if (mySeq === fetchSeq) error = e?.message ?? String(e);
         } finally {
-            loading = false;
+            if (mySeq === fetchSeq) loading = false;
         }
     }
 
