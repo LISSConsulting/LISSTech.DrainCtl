@@ -827,8 +827,8 @@
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--color-accent);
-        margin-bottom: 2px;
-        padding: 6px 0;
+        margin-bottom: 0;
+        padding: 6px 0 2px;
     }
     .subsection {
         border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
