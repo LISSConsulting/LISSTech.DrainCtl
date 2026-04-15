@@ -968,13 +968,20 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 	if err != nil {
 		return
 	}
+	// Strip secrets before broadcasting — webhook HMAC keys and SMTP
+	// passwords must never be sent over the event stream.
+	redacted := make([]dc.NotificationTarget, len(cfg.Notifications))
+	copy(redacted, cfg.Notifications)
+	for i := range redacted {
+		redacted[i].Secret = ""
+	}
 	resp := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
 		Performance             dc.PerformanceConfig    `json:"performance"`
 	}{
-		Notifications:           cfg.Notifications,
+		Notifications:           redacted,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		Performance:             cfg.Performance,
@@ -1007,7 +1014,11 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{})
 
-	id, ch, done := ds.broker.Subscribe()
+	id, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		http.Error(w, "too many connections", http.StatusTooManyRequests)
+		return
+	}
 	defer ds.broker.Unsubscribe(id)
 
 	w.Header().Set("Content-Type", "text/event-stream")
