@@ -818,7 +818,7 @@
         color: var(--color-fg);
     }
     .settings-group {
-        margin-bottom: 18px;
+        margin-bottom: 24px;
     }
     .section-header {
         display: flex;
@@ -829,13 +829,13 @@
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--color-accent);
-        margin-bottom: 6px;
+        margin-bottom: 8px;
         padding: 4px 0;
     }
     .subsection {
         border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
         padding-left: 14px;
-        margin-top: 10px;
+        margin-top: 14px;
     }
     .settings-label {
         font-size: 0.75rem;
@@ -879,6 +879,7 @@
         font-size: 0.72rem;
         color: var(--color-subtle);
         font-weight: normal;
+        line-height: 1.5;
     }
     .settings-divider {
         height: 1px;
@@ -1083,7 +1084,7 @@
     }
     .repeat-pills {
         display: flex;
-        gap: 6px;
+        gap: 7px;
         margin-bottom: 10px;
         flex-wrap: wrap;
     }
@@ -1117,11 +1118,19 @@
         font-weight: 600;
         padding: 5px 12px;
         color: var(--color-muted);
+        box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 20%, transparent);
+    }
+    .gp-pill:hover, .pctl-pill:hover {
+        box-shadow: 3px 3px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
+    }
+    .gp-pill:active, .pctl-pill:active {
+        box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-accent) 15%, transparent);
     }
     .gp-pill.active, .pctl-pill.active {
         background: var(--color-accent);
         color: #fff;
         border-color: var(--color-accent);
+        box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
     }
     .gp-pill--dashed {
         border-style: dashed;
