@@ -241,12 +241,25 @@
     }
 
     async function sendTest() {
+        const targets = config?.notifications?.filter((t) => t.url || t.type === 'email');
+        if (!targets?.length) {
+            toast.err('No notification targets configured.');
+            return;
+        }
         testing = true;
         try {
-            const r = await sendNotifyTest();
-            toast.ok(r.message || 'Test notification sent');
+            // Test each target individually using the unsaved config — no need to save first.
+            const results = await Promise.allSettled(targets.map((t) => sendNotifyTest(t)));
+            const failed = results.filter((r) => r.status === 'rejected');
+            if (failed.length === 0) {
+                toast.ok(`Test sent to ${targets.length} target${targets.length > 1 ? 's' : ''}`);
+            } else if (failed.length === results.length) {
+                toast.err('All test notifications failed. Check target URLs and credentials.');
+            } else {
+                toast.err(`${failed.length} of ${targets.length} targets failed.`);
+            }
         } catch (e) {
-            toast.err('Test failed: ' + e.message);
+            toast.err('Test failed: ' + (e?.message ?? String(e)));
         } finally {
             testing = false;
         }
