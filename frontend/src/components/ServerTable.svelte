@@ -23,6 +23,9 @@
     let removeError = $state('');
     /** @type {ReturnType<typeof setTimeout>|null} */
     let removeErrorTimer = null;
+    // Clear the error-dismiss timer on component destroy so it never fires on
+    // an unmounted instance (e.g. navigating away while a remove was in flight).
+    $effect(() => () => { clearTimeout(removeErrorTimer); });
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
 
@@ -234,6 +237,7 @@
             class="srv-search settings-input"
             type="search"
             placeholder="Filter by hostname..."
+            aria-label="Filter servers by hostname"
             bind:value={search}
             style="max-width:300px"
         />
@@ -500,6 +504,11 @@
         background: var(--color-green);
         color: #fff;
         border-color: var(--color-green);
+    }
+    .filter-pill.warning.active {
+        background: var(--color-amber);
+        color: #fff;
+        border-color: var(--color-amber);
     }
     .filter-pill.grace.active {
         background: var(--color-amber);
