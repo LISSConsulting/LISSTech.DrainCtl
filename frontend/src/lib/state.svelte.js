@@ -547,7 +547,7 @@ export const appState = {
         } else {
             servers = [...servers, serverView];
         }
-        lastUpdated = Date.now();
+        lastUpdated = new Date();
     },
 };
 
