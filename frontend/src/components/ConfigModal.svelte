@@ -79,16 +79,18 @@
             label: 'Chill',
             icon: Coffee,
             beans: 1,
+            poll_interval: 60,
+            sample_interval: 60,
             grace_period: 60,
             session_warning: 90,
             cpu_warn: 80,
             cpu_crit: 95,
             mem_warn: 80,
             mem_crit: 95,
-            delay_warn: 50,
-            delay_crit: 100,
+            delay_warn: 75,
+            delay_crit: 150,
             delay_percentile: 'p50',
-            load_sustain_sec: 90,
+            load_sustain_sec: 120,
             delay_sustain_sec: 120,
         },
         {
@@ -96,14 +98,16 @@
             label: 'Anxious',
             icon: Coffee,
             beans: 2,
-            grace_period: 45,
+            poll_interval: 30,
+            sample_interval: 30,
+            grace_period: 30,
             session_warning: 80,
             cpu_warn: 70,
             cpu_crit: 90,
-            mem_warn: 70,
+            mem_warn: 75,
             mem_crit: 90,
-            delay_warn: 30,
-            delay_crit: 80,
+            delay_warn: 50,
+            delay_crit: 100,
             delay_percentile: 'p95',
             load_sustain_sec: 60,
             delay_sustain_sec: 90,
@@ -113,16 +117,18 @@
             label: 'Twitchy',
             icon: Coffee,
             beans: 3,
+            poll_interval: 15,
+            sample_interval: 15,
             grace_period: 15,
-            session_warning: 60,
+            session_warning: 70,
             cpu_warn: 60,
             cpu_crit: 80,
-            mem_warn: 60,
-            mem_crit: 80,
-            delay_warn: 15,
-            delay_crit: 40,
+            mem_warn: 65,
+            mem_crit: 85,
+            delay_warn: 25,
+            delay_crit: 60,
             delay_percentile: 'p95',
-            load_sustain_sec: 60,
+            load_sustain_sec: 30,
             delay_sustain_sec: 60,
         },
     ];
@@ -155,8 +161,10 @@
         const p = config.performance;
         for (const pr of FIRE_PRESETS) {
             if (
+                config.poll_interval === pr.poll_interval &&
                 config.grace_period === pr.grace_period &&
                 config.session_warning_threshold === pr.session_warning &&
+                (p?.sample_interval_sec || 30) === pr.sample_interval &&
                 p?.cpu_warn_pct === pr.cpu_warn &&
                 p?.cpu_crit_pct === pr.cpu_crit &&
                 p?.mem_warn_pct === pr.mem_warn &&
@@ -175,10 +183,12 @@
 
     function applyFirePreset(preset) {
         if (!config) return;
+        config.poll_interval = preset.poll_interval;
         config.grace_period = preset.grace_period;
         config.session_warning_threshold = preset.session_warning;
         if (config.performance) {
             config.performance.enabled = true;
+            config.performance.sample_interval_sec = preset.sample_interval;
             config.performance.cpu_warn_pct = preset.cpu_warn;
             config.performance.cpu_crit_pct = preset.cpu_crit;
             config.performance.mem_warn_pct = preset.mem_warn;
@@ -346,11 +356,14 @@
                                           : 'No Sleep Till Brooklyn'}</span
                                 >
                                 <span class="fire-detail">
-                                    Escalation {preset.grace_period}m · Sessions {preset.session_warning}%
+                                    Poll {preset.poll_interval}s · Escalation {preset.grace_period}m · Sessions {preset.session_warning}%
                                 </span>
                                 <span class="fire-detail">
                                     CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
-                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms · Sustain {fmtDuration(preset.load_sustain_sec)}/{fmtDuration(preset.delay_sustain_sec)}
+                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms ({preset.delay_percentile.toUpperCase()})
+                                </span>
+                                <span class="fire-detail">
+                                    Sustain {fmtDuration(preset.load_sustain_sec)} / {fmtDuration(preset.delay_sustain_sec)}
                                 </span>
                             </button>
                         {/each}
