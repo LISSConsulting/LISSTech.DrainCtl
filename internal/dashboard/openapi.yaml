@@ -116,32 +116,78 @@ components:
         session_cpu_p95_pct:
           type: number
           format: double
+          description: "Per-session CPU P95 % (omitted when zero)."
+        session_cpu_p50_pct:
+          type: number
+          format: double
+          description: "Per-session CPU P50 % (omitted when zero)."
         session_mem_p95_bytes:
           type: number
           format: double
+          description: "Per-session working set P95 in bytes (omitted when zero)."
+        session_mem_p50_bytes:
+          type: number
+          format: double
+          description: "Per-session working set P50 in bytes (omitted when zero)."
         rfx_available:
           type: boolean
+          description: "True when RemoteFX counters were collected this poll cycle."
         rfx_fps_out:
           type: number
           format: double
+          description: "RemoteFX output FPS P95."
+        rfx_fps_out_p50:
+          type: number
+          format: double
+          description: "RemoteFX output FPS P50."
         rfx_skip_server_sec:
           type: number
           format: double
+          description: "RemoteFX frames skipped/sec (server) P95."
+        rfx_skip_server_sec_p50:
+          type: number
+          format: double
+          description: "RemoteFX frames skipped/sec (server) P50."
         rfx_skip_net_sec:
           type: number
           format: double
+          description: "RemoteFX frames skipped/sec (network) P95."
+        rfx_skip_net_sec_p50:
+          type: number
+          format: double
+          description: "RemoteFX frames skipped/sec (network) P50."
         rfx_encode_ms:
           type: number
           format: double
+          description: "RemoteFX encode time P95 (ms)."
+        rfx_encode_ms_p50:
+          type: number
+          format: double
+          description: "RemoteFX encode time P50 (ms)."
         rfx_quality_pct:
           type: number
           format: double
+          description: "RemoteFX frame quality P95 %."
+        rfx_quality_pct_p50:
+          type: number
+          format: double
+          description: "RemoteFX frame quality P50 %."
         rfx_rtt_ms:
           type: number
           format: double
+          description: "RemoteFX TCP round-trip time P95 (ms)."
+        rfx_rtt_ms_p50:
+          type: number
+          format: double
+          description: "RemoteFX TCP round-trip time P50 (ms)."
         rfx_loss_pct:
           type: number
           format: double
+          description: "RemoteFX loss rate P95 %."
+        rfx_loss_pct_p50:
+          type: number
+          format: double
+          description: "RemoteFX loss rate P50 %."
 
     CheckResult:
       type: object
@@ -827,10 +873,44 @@ paths:
       tags: [servers]
       summary: SSE event stream
       description: |
-        Server-Sent Events stream for real-time dashboard updates. Pushes
-        `server_update` events when agents report and `settings_update` events
-        when configuration changes. Requires a valid session cookie.
-        The browser's `EventSource` handles automatic reconnection.
+        Server-Sent Events stream for real-time dashboard updates. Requires a
+        valid session cookie. The browser's `EventSource` handles automatic
+        reconnection; the server re-validates the session every 5 minutes and
+        closes the stream if the session has expired.
+
+        Keepalive comments (`: keepalive`) are sent every 25 seconds to prevent
+        intermediate proxies from closing idle connections.
+
+        Each `data:` line is a JSON-encoded `SSEEvent` object:
+
+        ```json
+        { "type": "<event-type>", "host": "<hostname>", "data": <payload>, "timestamp": "<RFC3339>" }
+        ```
+
+        ### Event types
+
+        **`server_update`** — emitted when a server reports its state. `host`
+        is set. `data` is a `ServerView` object (same shape as
+        `GET /api/v1/servers` array elements).
+
+        **`server_deleted`** — emitted when a server is removed from the
+        dashboard. `host` is set. `data` is:
+        ```json
+        { "changed_by": "<username>" }
+        ```
+
+        **`settings_update`** — emitted when configuration is saved via
+        `PUT /api/v1/settings`. `host` is empty. `data` is:
+        ```json
+        {
+          "notifications": [ ...NotificationTarget... ],
+          "session_warning_threshold": 80,
+          "grace_period": 15,
+          "performance": { ...PerformanceConfig... }
+        }
+        ```
+        Note: `secret` fields inside `notifications` are always empty strings
+        in this broadcast — secrets are never transmitted over the event stream.
       operationId: streamEvents
       security:
         - session: []
@@ -841,7 +921,9 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: "Newline-delimited SSE messages. Each `data:` line contains a JSON object with `type`, `host` (for server_update), `data`, and `timestamp` fields."
+                description: >
+                  Newline-delimited SSE messages. See endpoint description for
+                  event type shapes.
         "401":
           description: Not authenticated.
         "429":
