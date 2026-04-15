@@ -2439,6 +2439,93 @@ func TestBroker_SubscriberCap(t *testing.T) {
 	}
 }
 
+// TestHandleSSE_DeliversBroadcastedEvent verifies the full SSE pipeline:
+// headers are set correctly and a broadcast event is delivered to the HTTP body.
+func TestHandleSSE_DeliversBroadcastedEvent(t *testing.T) {
+	ds := newTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
+
+	// Run handleSSE in a goroutine — it blocks until the context is cancelled.
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		ds.handleSSE(w, r)
+	}()
+
+	// Give the handler time to subscribe before we broadcast.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && ds.broker.Count() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if ds.broker.Count() == 0 {
+		t.Fatal("handler did not subscribe within 1s")
+	}
+
+	// Broadcast an event and let the handler write it.
+	payload := mustMarshalTest(t, SSEEvent{
+		Type:      "server_update",
+		Host:      "SRV01",
+		Data:      json.RawMessage(`{}`),
+		Timestamp: time.Now(),
+	})
+	ds.broker.Broadcast(payload)
+
+	// Give the handler time to write the event.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the context to stop the handler.
+	cancel()
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleSSE did not return after context cancellation")
+	}
+
+	// Verify SSE headers.
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	// Verify the event payload was written in SSE format.
+	body := w.Body.String()
+	if !strings.Contains(body, "data:") {
+		t.Errorf("SSE body missing data: prefix; got %q", body)
+	}
+	if !strings.Contains(body, "server_update") {
+		t.Errorf("SSE body missing event type; got %q", body)
+	}
+	if !strings.Contains(body, "SRV01") {
+		t.Errorf("SSE body missing host; got %q", body)
+	}
+}
+
+// TestHandleSSE_TooManySubscribers verifies that the endpoint returns 429
+// when the broker subscriber cap is reached.
+func TestHandleSSE_TooManySubscribers(t *testing.T) {
+	ds := newTestServer(t)
+
+	// Fill the broker to the cap.
+	for i := 0; i < maxSubscribers; i++ {
+		_, _, _, err := ds.broker.Subscribe()
+		if err != nil {
+			t.Fatalf("subscribe %d: %v", i, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	ds.handleSSE(w, r)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", w.Code)
+	}
+}
+
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	state := NewServerState(t.TempDir())
 	state.Register("SRV01")
