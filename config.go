@@ -3,6 +3,7 @@
 package drainctl
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -50,6 +51,14 @@ const (
 	MaxRepeatMinutes = 10080 // 1 week
 
 	configMutexName = `Global\DrainCtlConfig`
+
+	// dpapiPrefix marks a secret as DPAPI-encrypted in config.json.
+	dpapiPrefix = "dpapi:"
+
+	// SecretRedacted is the sentinel value sent to browsers in place of
+	// actual secrets.  If the dashboard receives this value back on save,
+	// it preserves the existing secret rather than overwriting it.
+	SecretRedacted = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 )
 
 // ── Trigger type ──────────────────────────────────────────────────────────
@@ -411,6 +420,46 @@ func (c *Config) Validate() {
 			t.URL = ""
 		}
 	}
+
+	// DPAPI-encrypt any plaintext secrets before writing to disk.
+	for i := range c.Notifications {
+		s := c.Notifications[i].Secret
+		if s == "" || strings.HasPrefix(s, dpapiPrefix) || s == SecretRedacted {
+			continue
+		}
+		ct, err := DPAPIEncrypt([]byte(s))
+		if err != nil {
+			slog.Default().Warn("failed to DPAPI-encrypt secret, storing plaintext", "error", err)
+			continue
+		}
+		c.Notifications[i].Secret = dpapiPrefix + base64.StdEncoding.EncodeToString(ct)
+	}
+}
+
+// DecryptSecrets replaces DPAPI-encrypted secrets with their plaintext values
+// so the in-memory Config is ready for use by notification senders.
+// Call after Validate() when the config will be used at runtime (not when
+// preparing to write it back to disk).
+func (c *Config) DecryptSecrets() {
+	for i := range c.Notifications {
+		s := c.Notifications[i].Secret
+		if !strings.HasPrefix(s, dpapiPrefix) {
+			continue
+		}
+		ct, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, dpapiPrefix))
+		if err != nil {
+			slog.Default().Warn("failed to base64-decode secret", "error", err)
+			c.Notifications[i].Secret = ""
+			continue
+		}
+		pt, err := DPAPIDecrypt(ct)
+		if err != nil {
+			slog.Default().Warn("failed to DPAPI-decrypt secret", "error", err)
+			c.Notifications[i].Secret = ""
+			continue
+		}
+		c.Notifications[i].Secret = string(pt)
+	}
 }
 
 // ClampRetention enforces the retention boundary (1-365 days). Values
@@ -441,6 +490,7 @@ func LoadConfig() (*Config, error) {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		cfg.Validate()
+		cfg.DecryptSecrets()
 		return cfg, nil
 	}
 
@@ -784,6 +834,7 @@ func MigrateFromRegistry() (*Config, error) {
 	}
 
 	slog.Default().Info("config migrated from registry to config.json", "path", DefaultConfigPath())
+	cfg.DecryptSecrets()
 	return cfg, nil
 }
 
