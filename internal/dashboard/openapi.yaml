@@ -213,6 +213,11 @@ components:
         state_duration_seconds:
           type: number
           nullable: true
+        state_changed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "ISO timestamp when the current state began."
         version:
           type: string
         registered_at:
