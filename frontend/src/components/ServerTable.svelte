@@ -15,12 +15,14 @@
     /** @type {Set<string>} */
     let expandedHosts = $state(new Set());
     let sortCol = $state(localStorage.getItem('drainctl-sort-col') || 'host');
-    let sortDir = $state(parseInt(localStorage.getItem('drainctl-sort-dir') || '1', 10));
+    let sortDir = $state(parseInt(localStorage.getItem('drainctl-sort-dir') ?? '1', 10) || 1);
     let search = $state(localStorage.getItem('drainctl-search') || '');
     let page = $state(0);
     const PAGE_SIZES = [15, 30, 50];
-    let pageSize = $state(parseInt(localStorage.getItem('drainctl-page-size') || '15', 10));
+    let pageSize = $state(parseInt(localStorage.getItem('drainctl-page-size') ?? '15', 10) || 15);
     let removeError = $state('');
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    let removeErrorTimer = null;
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
 
@@ -150,7 +152,8 @@
             }
         } catch (e) {
             removeError = 'Remove failed: ' + (e?.message ?? String(e));
-            setTimeout(() => (removeError = ''), 5000);
+            clearTimeout(removeErrorTimer);
+            removeErrorTimer = setTimeout(() => (removeError = ''), 5000);
         } finally {
             const next = new Set(removingHosts);
             next.delete(host);

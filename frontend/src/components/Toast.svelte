@@ -27,7 +27,7 @@
                     {#if t.type === 'ok'}&#10003;{:else if t.type === 'err'}&#10007;{:else}&#9432;{/if}
                 </span>
                 <span class="toast-msg">{t.msg}</span>
-                <button class="toast-copy" onclick={(e) => copyText(t.msg, e.currentTarget)}>Copy</button>
+                <button class="toast-copy" onclick={(e) => copyText(t.msg, e.currentTarget)} aria-label="Copy message">Copy</button>
                 <button class="toast-close" onclick={() => toast.dismiss(t.id)} aria-label="Dismiss">&times;</button>
             </div>
         {/each}

@@ -247,6 +247,8 @@ let serverMetrics = $state(lsGetServerMetrics());
 // UI state
 let connected = $state(false);
 let sseConnected = $state(false);
+/** True while EventSource is in CONNECTING state after a transient error. */
+let sseReconnecting = $state(false);
 
 /** @type {'overview'|'servers'|'events'} */
 let currentView = $state('overview');
@@ -460,6 +462,13 @@ export const appState = {
     },
     set sseConnected(v) {
         sseConnected = v;
+    },
+
+    get sseReconnecting() {
+        return sseReconnecting;
+    },
+    set sseReconnecting(v) {
+        sseReconnecting = v;
     },
 
     get currentView() {
