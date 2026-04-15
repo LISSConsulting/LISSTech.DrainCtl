@@ -58,10 +58,10 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 12px 14px;
-        border: var(--spacing-bw) solid var(--color-border);
+        padding: 13px 16px;
+        border: none;
         border-radius: var(--radius-default);
-        box-shadow: 5px 5px 0 var(--color-shadow);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.78rem;
         font-weight: 600;
@@ -70,19 +70,16 @@
     }
 
     .toast-ok {
-        background: color-mix(in srgb, var(--color-green) 12%, var(--color-card));
-        border-color: var(--color-green);
-        color: var(--color-green);
+        background: linear-gradient(135deg, #1a4d2e, #2d6a4f);
+        color: #b8e6cc;
     }
     .toast-err {
-        background: color-mix(in srgb, var(--color-red) 12%, var(--color-card));
-        border-color: var(--color-red);
-        color: var(--color-red);
+        background: linear-gradient(135deg, #6b1a2a, #a3475b);
+        color: #f5d0d8;
     }
     .toast-info {
-        background: color-mix(in srgb, var(--color-accent) 10%, var(--color-card));
-        border-color: var(--color-accent);
-        color: var(--color-accent);
+        background: linear-gradient(135deg, #5c3a1e, #8b6914);
+        color: #f5e6c8;
     }
 
     .toast-out {
@@ -103,22 +100,20 @@
 
     .toast-copy {
         flex-shrink: 0;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.65rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 3px 8px;
-        border: 1.5px solid currentColor;
+        padding: 4px;
+        border: none;
         border-radius: 4px;
-        background: transparent;
+        background: rgba(255, 255, 255, 0.1);
         color: inherit;
         cursor: pointer;
         opacity: 0.7;
-        transition: opacity 0.1s linear;
+        transition: opacity 0.1s, background 0.1s;
+        display: flex;
+        align-items: center;
     }
     .toast-copy:hover {
         opacity: 1;
+        background: rgba(255, 255, 255, 0.2);
     }
 
     .toast-close {
