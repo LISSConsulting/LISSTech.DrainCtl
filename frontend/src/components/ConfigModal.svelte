@@ -275,6 +275,8 @@
     /** @type {HTMLInputElement|null} */
     let pollIntervalAgentInput = $state(null);
     /** @type {HTMLInputElement|null} */
+    let sessionWarnInput = $state(null);
+    /** @type {HTMLInputElement|null} */
     let loadSustainInput = $state(null);
     /** @type {HTMLInputElement|null} */
     let delaySustainInput = $state(null);
@@ -428,16 +430,31 @@
                     <div class="settings-group">
                         <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
                         <div class="settings-hint" style="margin-bottom:6px">Alert when active sessions reach this percentage of the server's capacity.</div>
-                        <div style="display:flex;align-items:center;gap:8px">
+                        <div class="repeat-pills">
                             <button
                                 class="btn-brutal gp-pill gp-pill--off"
                                 class:active={config.session_warning_threshold === 0}
                                 onclick={() => (config.session_warning_threshold = 0)}>Off</button
                             >
+                            {#each [60, 70, 80, 90, 95] as p}
+                                <button
+                                    class="btn-brutal gp-pill"
+                                    class:active={config.session_warning_threshold === p}
+                                    onclick={() => (config.session_warning_threshold = p)}>{p}%</button
+                                >
+                            {/each}
+                            <button
+                                class="btn-brutal gp-pill gp-pill--dashed"
+                                class:active={config.session_warning_threshold > 0 && ![60, 70, 80, 90, 95].includes(config.session_warning_threshold)}
+                                onclick={() => sessionWarnInput?.focus()}>Custom</button
+                            >
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                             <input
                                 type="number"
                                 class="settings-num"
                                 bind:value={config.session_warning_threshold}
+                                bind:this={sessionWarnInput}
                                 min="0"
                                 max="100"
                             />
@@ -491,102 +508,82 @@
                                     </div>
                                 </div>
 
-                                <!-- Thresholds — 2-column grid -->
+                                <!-- Thresholds -->
                                 <div class="subsection">
-                                <div class="settings-cfg-grid">
-                                    <div>
-                                        <div class="settings-label">CPU Thresholds</div>
-                                        <div class="threshold-row">
-                                            <button
-                                                class="btn-brutal gp-pill gp-pill--off"
-                                                class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
-                                                onclick={() => { config.performance.cpu_warn_pct = -1; config.performance.cpu_crit_pct = -1; }}>Off</button
-                                            >
-                                            <span class="settings-num-label threshold-lbl">Warn</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.cpu_warn_pct}
-                                                min="-1"
-                                                max="100"
-                                            />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                            <span class="settings-num-label threshold-lbl">Crit</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.cpu_crit_pct}
-                                                min="-1"
-                                                max="100"
-                                            />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                        </div>
-                                        <div class="settings-label" style="margin-top:10px">Memory Thresholds</div>
-                                        <div class="threshold-row">
-                                            <button
-                                                class="btn-brutal gp-pill gp-pill--off"
-                                                class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
-                                                onclick={() => { config.performance.mem_warn_pct = -1; config.performance.mem_crit_pct = -1; }}>Off</button
-                                            >
-                                            <span class="settings-num-label threshold-lbl">Warn</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.mem_warn_pct}
-                                                min="-1"
-                                                max="100"
-                                            />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                            <span class="settings-num-label threshold-lbl">Crit</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.mem_crit_pct}
-                                                min="-1"
-                                                max="100"
-                                            />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div class="settings-label">Input Delay Thresholds</div>
-                                        <div class="threshold-row">
-                                            <button
-                                                class="btn-brutal gp-pill gp-pill--off"
-                                                class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
-                                                onclick={() => { config.performance.input_delay_warn_ms = -1; config.performance.input_delay_crit_ms = -1; }}>Off</button
-                                            >
-                                            <span class="settings-num-label threshold-lbl">Warn</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.input_delay_warn_ms}
-                                                min="-1"
-                                            />
-                                            <span class="settings-num-label threshold-unit">ms</span>
-                                            <span class="settings-num-label threshold-lbl">Crit</span>
-                                            <input
-                                                type="number"
-                                                class="settings-num"
-                                                bind:value={config.performance.input_delay_crit_ms}
-                                                min="-1"
-                                            />
-                                            <span class="settings-num-label threshold-unit">ms</span>
-                                        </div>
-                                        <div class="threshold-row" style="margin-top:12px">
-                                            <span class="settings-num-label threshold-lbl">Percentile</span>
-                                            <button
-                                                class="btn-brutal pctl-pill"
-                                                class:active={config.performance.input_delay_percentile === 'p50'}
-                                                onclick={() => config.performance.input_delay_percentile = 'p50'}
-                                            >P50</button>
-                                            <button
-                                                class="btn-brutal pctl-pill"
-                                                class:active={config.performance.input_delay_percentile === 'p95'}
-                                                onclick={() => config.performance.input_delay_percentile = 'p95'}
-                                            >P95</button>
-                                        </div>
-                                    </div>
+                                <div class="settings-label">CPU Thresholds</div>
+                                <div class="settings-hint" style="margin-bottom:4px">Alert when CPU utilization stays above these levels.</div>
+                                <div class="repeat-pills">
+                                    <button class="btn-brutal gp-pill gp-pill--off"
+                                        class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
+                                        onclick={() => { config.performance.cpu_warn_pct = -1; config.performance.cpu_crit_pct = -1; }}>Off</button>
+                                    {#each [[60,80],[70,85],[70,90],[80,95]] as [w,c]}
+                                        <button class="btn-brutal gp-pill"
+                                            class:active={config.performance.cpu_warn_pct === w && config.performance.cpu_crit_pct === c}
+                                            onclick={() => { config.performance.cpu_warn_pct = w; config.performance.cpu_crit_pct = c; }}>{w}/{c}%</button>
+                                    {/each}
+                                </div>
+                                <div class="threshold-row" style="margin-top:4px">
+                                    <span class="settings-num-label threshold-lbl">Warn</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.cpu_warn_pct} min="-1" max="100" />
+                                    <span class="settings-num-label threshold-unit">%</span>
+                                    <span class="settings-num-label threshold-lbl">Crit</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.cpu_crit_pct} min="-1" max="100" />
+                                    <span class="settings-num-label threshold-unit">%</span>
+                                </div>
+
+                                <div class="settings-label" style="margin-top:12px">Memory Thresholds</div>
+                                <div class="settings-hint" style="margin-bottom:4px">Alert when memory usage stays above these levels.</div>
+                                <div class="repeat-pills">
+                                    <button class="btn-brutal gp-pill gp-pill--off"
+                                        class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
+                                        onclick={() => { config.performance.mem_warn_pct = -1; config.performance.mem_crit_pct = -1; }}>Off</button>
+                                    {#each [[70,85],[75,90],[80,90],[80,95]] as [w,c]}
+                                        <button class="btn-brutal gp-pill"
+                                            class:active={config.performance.mem_warn_pct === w && config.performance.mem_crit_pct === c}
+                                            onclick={() => { config.performance.mem_warn_pct = w; config.performance.mem_crit_pct = c; }}>{w}/{c}%</button>
+                                    {/each}
+                                </div>
+                                <div class="threshold-row" style="margin-top:4px">
+                                    <span class="settings-num-label threshold-lbl">Warn</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.mem_warn_pct} min="-1" max="100" />
+                                    <span class="settings-num-label threshold-unit">%</span>
+                                    <span class="settings-num-label threshold-lbl">Crit</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.mem_crit_pct} min="-1" max="100" />
+                                    <span class="settings-num-label threshold-unit">%</span>
+                                </div>
+
+                                <div class="settings-label" style="margin-top:12px">Input Delay Thresholds</div>
+                                <div class="settings-hint" style="margin-bottom:4px">Alert when user input latency stays above these levels.</div>
+                                <div class="repeat-pills">
+                                    <button class="btn-brutal gp-pill gp-pill--off"
+                                        class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
+                                        onclick={() => { config.performance.input_delay_warn_ms = -1; config.performance.input_delay_crit_ms = -1; }}>Off</button>
+                                    {#each [[30,80],[50,100],[75,150],[100,200]] as [w,c]}
+                                        <button class="btn-brutal gp-pill"
+                                            class:active={config.performance.input_delay_warn_ms === w && config.performance.input_delay_crit_ms === c}
+                                            onclick={() => { config.performance.input_delay_warn_ms = w; config.performance.input_delay_crit_ms = c; }}>{w}/{c}ms</button>
+                                    {/each}
+                                </div>
+                                <div class="threshold-row" style="margin-top:4px">
+                                    <span class="settings-num-label threshold-lbl">Warn</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.input_delay_warn_ms} min="-1" />
+                                    <span class="settings-num-label threshold-unit">ms</span>
+                                    <span class="settings-num-label threshold-lbl">Crit</span>
+                                    <input type="number" class="settings-num" bind:value={config.performance.input_delay_crit_ms} min="-1" />
+                                    <span class="settings-num-label threshold-unit">ms</span>
+                                </div>
+                                <div class="threshold-row" style="margin-top:8px">
+                                    <span class="settings-num-label threshold-lbl">Percentile</span>
+                                    <button
+                                        class="btn-brutal pctl-pill"
+                                        class:active={config.performance.input_delay_percentile === 'p50'}
+                                        onclick={() => config.performance.input_delay_percentile = 'p50'}
+                                    >P50</button>
+                                    <button
+                                        class="btn-brutal pctl-pill"
+                                        class:active={config.performance.input_delay_percentile === 'p95'}
+                                        onclick={() => config.performance.input_delay_percentile = 'p95'}
+                                    >P95</button>
                                 </div>
                                 </div>
 
