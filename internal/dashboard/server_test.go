@@ -2820,6 +2820,47 @@ func TestHandleDeleteServer_BroadcastsSSEServerDeleted(t *testing.T) {
 	}
 }
 
+// ── isAuthorizedForHost ───────────────────────────────────────────────────────
+
+func TestIsAuthorizedForHost(t *testing.T) {
+	const group = "Domain Admins"
+
+	tests := []struct {
+		name     string
+		auth     *AuthInfo
+		hostname string
+		want     bool
+	}{
+		// nil guard
+		{name: "nil auth", auth: nil, hostname: "SRV01", want: false},
+
+		// Machine accounts — only allowed for their own host
+		{name: "machine account no domain matches", auth: &AuthInfo{Username: "SRV01$"}, hostname: "SRV01", want: true},
+		{name: "machine account no domain case insensitive", auth: &AuthInfo{Username: "srv01$"}, hostname: "SRV01", want: true},
+		{name: "machine account with domain matches", auth: &AuthInfo{Username: `CONTOSO\SRV01$`}, hostname: "SRV01", want: true},
+		{name: "machine account with domain case insensitive", auth: &AuthInfo{Username: `CONTOSO\srv01$`}, hostname: "SRV01", want: true},
+		{name: "machine account wrong host rejected", auth: &AuthInfo{Username: `CONTOSO\SRV02$`}, hostname: "SRV01", want: false},
+		{name: "machine account no domain wrong host", auth: &AuthInfo{Username: "SRV02$"}, hostname: "SRV01", want: false},
+
+		// Non-machine accounts — must be member of admin group
+		{name: "non-machine in group allowed", auth: &AuthInfo{Username: "alice", Groups: []string{group}}, hostname: "SRV01", want: true},
+		{name: "non-machine in group case insensitive", auth: &AuthInfo{Username: "alice", Groups: []string{"domain admins"}}, hostname: "SRV01", want: true},
+		{name: "non-machine in domain-prefixed group", auth: &AuthInfo{Username: "alice", Groups: []string{`CONTOSO\Domain Admins`}}, hostname: "SRV01", want: true},
+		{name: "non-machine domain-prefixed group case insensitive", auth: &AuthInfo{Username: "alice", Groups: []string{`CONTOSO\domain admins`}}, hostname: "SRV01", want: true},
+		{name: "non-machine not in group rejected", auth: &AuthInfo{Username: "alice", Groups: []string{"Users"}}, hostname: "SRV01", want: false},
+		{name: "non-machine empty groups rejected", auth: &AuthInfo{Username: "alice", Groups: nil}, hostname: "SRV01", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isAuthorizedForHost(tc.auth, tc.hostname, group)
+			if got != tc.want {
+				t.Errorf("isAuthorizedForHost(%v, %q, %q) = %v, want %v", tc.auth, tc.hostname, group, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	state := NewServerState(t.TempDir())
 	state.Register("SRV01")
