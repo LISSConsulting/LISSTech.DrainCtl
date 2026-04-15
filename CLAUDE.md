@@ -20,6 +20,10 @@ Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 - Pre-commit: `prek` runs gofmt, go vet, golangci-lint, gitleaks
 - Signing order: sign binaries → build MSI → sign MSI (`just release` handles this)
 
+## Gotchas
+- **No `structuredClone()` on Svelte 5 state** — `$state` objects are Proxies; `structuredClone()` throws. Use `JSON.parse(JSON.stringify(...))` to deep-clone reactive state.
+- **Memory thresholds: Go stores % free, UI works in % used** — `api.js` `fetchSettings()`/`saveSettings()` handles the inversion. Do NOT invert a second time in components; ConfigModal, presets, and validation all operate in % used space.
+
 ## Architecture
 Root package = public API. `cmd/drainctl/` = CLI (cobra). `cmd/cshared/` = DLL (P/Invoke).
 Service uses `RegNotifyChangeKeyValue` + `EvtSubscribe` + poll ticker + config file watcher.
