@@ -698,7 +698,12 @@ function handleRequest(method, pathname, body, query = {}) {
   if (method === 'PUT' && pathname === '/api/v1/settings') {
     if (body) {
       mockSettings = body;
-      broadcastSSE('settings_update', mockSettings);
+      // Strip secrets before broadcast — mirrors the real backend's broadcastSettingsUpdate
+      const redacted = {
+        ...mockSettings,
+        notifications: (mockSettings.notifications || []).map(n => ({ ...n, secret: '' })),
+      };
+      broadcastSSE('settings_update', redacted);
     }
     return { status: 200, body: { ok: true } };
   }
