@@ -355,9 +355,11 @@
             <div class="d-kv-row">
                 <span class="d-kv-k">State Since</span><span class="d-kv-v">{stateSinceStr}</span>
             </div>
-            <div class="d-kv-row">
-                <span class="d-kv-k">Duration</span><span class="d-kv-v">{dur(server.state_duration_seconds)}</span>
-            </div>
+            {#if server.drain_mode && server.drain_mode !== 'ALLOW_ALL_CONNECTIONS'}
+                <div class="d-kv-row">
+                    <span class="d-kv-k">Draining For</span><span class="d-kv-v">{dur(server.state_duration_seconds)}</span>
+                </div>
+            {/if}
             {#if server.drain_mode && server.drain_mode !== 'ALLOW_ALL_CONNECTIONS' && gracePeriodSec != null}
                 <div class="d-kv-row">
                     <span class="d-kv-k">Grace Period</span><span class="d-kv-v"
