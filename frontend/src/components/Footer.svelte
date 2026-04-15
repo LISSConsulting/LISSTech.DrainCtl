@@ -55,10 +55,13 @@
             <span class="session-count">{sessions.toLocaleString()}</span>
             <span class="session-label">sessions · {servers} servers</span>
         </span>
-        <span class="status-pill {appState.connected ? (appState.sseConnected ? 'live' : 'connected') : 'disconnected'}">
+        <span class="status-pill {appState.connected ? (appState.sseConnected ? 'live' : appState.sseReconnecting ? 'reconnecting' : 'connected') : 'disconnected'}">
             {#if appState.connected && appState.sseConnected}
                 <Wifi size={11} strokeWidth={2.4} />
                 LIVE
+            {:else if appState.connected && appState.sseReconnecting}
+                <Wifi size={11} strokeWidth={2.4} />
+                RECONNECTING
             {:else if appState.connected}
                 <Wifi size={11} strokeWidth={2.4} />
                 CONNECTED
@@ -216,6 +219,17 @@
     .connected {
         background: var(--color-amber);
         color: #fff;
+    }
+
+    .reconnecting {
+        background: var(--color-amber);
+        color: #fff;
+        animation: blink 1s step-start infinite;
+    }
+
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
     }
 
     .disconnected {
