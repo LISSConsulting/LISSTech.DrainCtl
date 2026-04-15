@@ -2704,6 +2704,49 @@ func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
 	}
 }
 
+// TestBroadcastSettingsUpdate_SecretsStripped verifies that webhook HMAC keys
+// and other secrets are never included in the settings_update SSE broadcast.
+// The real backend stores secrets in config.json but must not transmit them
+// over the event stream to connected browsers.
+func TestBroadcastSettingsUpdate_SecretsStripped(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		return &dc.Config{
+			GracePeriod:             15,
+			SessionWarningThreshold: 80,
+			Notifications: []dc.NotificationTarget{
+				{Type: "webhook", URL: "https://hook.example.com/", Secret: "top-secret-hmac-key", Triggers: dc.DefaultTriggers},
+				{Type: "ntfy", URL: "https://ntfy.example.com/alerts", Secret: "ntfy-token", Triggers: dc.DefaultTriggers},
+			},
+		}, nil
+	}
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	ds.broadcastSettingsUpdate()
+
+	select {
+	case msg := <-ch:
+		if bytes.Contains(msg, []byte("top-secret-hmac-key")) {
+			t.Errorf("broadcast contains webhook secret; got: %s", msg)
+		}
+		if bytes.Contains(msg, []byte("ntfy-token")) {
+			t.Errorf("broadcast contains ntfy secret; got: %s", msg)
+		}
+		if !bytes.Contains(msg, []byte(`"settings_update"`)) {
+			t.Errorf("broadcast missing settings_update type: %s", msg)
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast")
+	}
+}
+
 // TestHandleRegister_BroadcastsSSEServerUpdate verifies that a successful
 // POST /api/v1/register broadcasts a server_update event to connected browsers
 // so they can display the new server without waiting for the next poll cycle.
