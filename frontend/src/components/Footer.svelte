@@ -3,7 +3,7 @@
     import { authState } from '../lib/auth.svelte.js';
     import { Wifi, WifiOff, RefreshCw, Users, BookOpen, User } from 'lucide-svelte';
 
-    let { onrefresh } = $props();
+    let { onrefresh, refreshing = false } = $props();
 
     const lastUpdatedStr = $derived(
         appState.lastUpdated
@@ -69,8 +69,14 @@
         </span>
         <span class="footer-updated">{lastUpdatedStr}</span>
         {#if onrefresh}
-            <button class="btn-brutal footer-refresh" onclick={onrefresh} aria-label="Refresh now">
-                <RefreshCw size={12} strokeWidth={2.4} />
+            <button
+                class="btn-brutal footer-refresh"
+                onclick={onrefresh}
+                aria-label="Refresh now"
+                aria-busy={refreshing}
+                disabled={refreshing}
+            >
+                <span class={refreshing ? 'spin' : ''}><RefreshCw size={12} strokeWidth={2.4} /></span>
             </button>
         {/if}
     </div>
@@ -233,5 +239,22 @@
 
     .footer-refresh:hover {
         color: var(--color-fg);
+    }
+
+    .footer-refresh:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: 2px 2px 0 var(--color-shadow);
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    .spin {
+        display: inline-flex;
+        animation: spin 0.7s linear infinite;
     }
 </style>
