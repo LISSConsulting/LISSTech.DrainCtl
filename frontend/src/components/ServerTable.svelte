@@ -619,13 +619,13 @@
         letter-spacing: 0.5px;
         color: var(--color-muted);
         text-align: left;
-        padding: 8px 12px;
+        padding: 8px 8px;
         border-bottom: var(--spacing-bw) solid var(--color-border);
         white-space: nowrap;
         background: var(--color-card);
     }
     table.srv-tbl td {
-        padding: 9px 12px;
+        padding: 9px 8px;
         border-bottom: 1px solid var(--color-border);
         vertical-align: middle;
         color: var(--color-fg);
