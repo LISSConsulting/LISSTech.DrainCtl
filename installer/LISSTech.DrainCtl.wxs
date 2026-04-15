@@ -12,6 +12,10 @@
 
         <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+        <Property Id="ARPHELPLINK" Value="https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html" />
+        <Property Id="ARPURLINFOABOUT" Value="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
+        <Property Id="ARPURLUPDATEINFO" Value="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" />
+        <Property Id="ARPCOMMENTS" Value="Remote Desktop Session Host drain mode monitoring with real-time dashboard, performance alerts, and multi-target notifications." />
 
         <SetProperty Id="MSIRMSHUTDOWN" Value="2" Before="InstallValidate"
             Sequence="execute" Condition="REMOVE=&quot;ALL&quot;" />

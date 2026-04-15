@@ -9,7 +9,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue)
-![Version](https://img.shields.io/badge/Version-26.104.17-green)
+![Version](https://img.shields.io/badge/Version-26.104.18-green)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
 Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, maintains a 90-day audit trail, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
@@ -47,7 +47,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | 🕵️ **Change attribution** | `EvtSubscribe` on Event ID 4657 -- knows exactly *who* ran `chglogon /drain` |
 | 🖥️ **Windows Service** | Runs as `DrainCtl` with auto-start; poll ticker as safety net in case events are lost |
 | ⚡ **Named pipe IPC** | CLI and PowerShell get answers in <1 ms via `\\.\pipe\drainctl` -- no file I/O |
-| 📊 **N-central ready** | Exit codes + structured stdout slot directly into AMP threshold monitoring |
+| 📊 **RMM ready** | Exit codes + structured stdout integrate with any RMM that supports script monitors |
 | 🐚 **PowerShell native** | `Get-RDSHDrainMode`, `Test-RDSHDrainMode`, `Get-RDSHDrainHistory` -- pipeline-friendly |
 | 📡 **Multi-target notifications** | N webhooks + M ntfy.sh + email (SMTP) -- each target gets its own triggers and repeat cadence |
 | 🎯 **Granular triggers** | 12 trigger types: `drain_on`, `drain_off`, `alert`, `healthy`, `session_warning`, `cpu_warning`, `cpu_critical`, and more |
@@ -65,7 +65,7 @@ graph TB
     subgraph SVC["DrainCtl Windows Service"]
         RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
         EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
-        POLL["Poll Ticker 5 min"] -->|"safety net"| CHECK
+        POLL["Poll Ticker 60s"] -->|"safety net"| CHECK
         CFG["config.json Watcher (RDCW+poll)"] -->|"config changed"| RELOAD["ReloadConfig()"]
         CHECK --> SESS["WTS Session Enum"]
         SESS --> STORE["MemAuditStore"]
@@ -81,7 +81,7 @@ graph TB
 
     CLI["drainctl.exe"] -->|"pipe"| PIPE
     PS["PowerShell Module"] -->|"pipe"| PIPE
-    NC["N-central AMP"] --> CLI
+    RMM["RMM / Script Monitor"] --> CLI
 
     CLI -.->|"fallback"| REG["Registry"]
     PS -.->|"fallback"| REG

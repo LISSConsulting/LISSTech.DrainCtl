@@ -841,6 +841,42 @@
                 grid-template-columns: repeat(3, 1fr);
                 gap: 18px;
             }
+            .release-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 18px;
+            }
+            @media (max-width: 700px) {
+                .release-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+            .release-card {
+                padding: 24px 28px;
+            }
+            .release-card h3 {
+                font-family: 'Work Sans', sans-serif;
+                font-size: 1.05rem;
+                margin: 0 0 12px;
+            }
+            .release-card ul {
+                margin: 0;
+                padding-left: 18px;
+                font-size: 0.88rem;
+                line-height: 1.7;
+            }
+            .release-tag {
+                display: inline-block;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.7rem;
+                font-weight: 700;
+                padding: 3px 10px;
+                margin-bottom: 10px;
+                background: var(--color-accent);
+                color: #fff;
+                border-radius: 4px;
+                letter-spacing: 0.04em;
+            }
             .install-cta {
                 margin-top: auto;
                 padding-top: 16px;
@@ -1178,6 +1214,7 @@
                     <li><a href="#why">Why</a></li>
                     <li><a href="#features">Features</a></li>
                     <li><a href="#quickstart">Quick Start</a></li>
+                    <li><a href="#releases">Releases</a></li>
                     <li><a href="#dashboard">Dashboard</a></li>
                     <li><a href="#usage">Usage</a></li>
                     <li><a href="#install">Install</a></li>
@@ -1558,6 +1595,39 @@
             </div>
         </section>
 
+        <!-- Release Notes -->
+        <section class="section section--shaded" id="releases">
+            <div class="wrap">
+                <div class="section-label">Release Notes</div>
+                <h2 class="section-title">What shipped recently.</h2>
+                <div class="release-grid">
+                    <div class="card release-card">
+                        <div class="release-tag">v26.104.18</div>
+                        <h3>Real-Time Event Streaming</h3>
+                        <ul>
+                            <li><strong>Server-Sent Events</strong> &mdash; dashboard updates in &lt;2 seconds, no more 30-second polling lag</li>
+                            <li><strong>Settings broadcast</strong> &mdash; config changes push to all connected browsers instantly</li>
+                            <li><strong>Auto-reconnect</strong> &mdash; survives network blips, VPN reconnects, laptop sleep</li>
+                        </ul>
+                    </div>
+                    <div class="card release-card">
+                        <div class="release-tag">v26.104.17</div>
+                        <h3>Notification Engine &amp; Dashboard Overhaul</h3>
+                        <ul>
+                            <li><strong>Composite status</strong> &mdash; Warning (amber) for perf thresholds, Alert (red) for critical; worst severity wins</li>
+                            <li><strong>Outstanding alert model</strong> &mdash; cooldowns never reset on metric oscillation; critical supersedes warning</li>
+                            <li><strong>Dashboard login</strong> &mdash; Kerberos SSO with credential fallback, 8-hour sessions</li>
+                            <li><strong>OpenAPI + Swagger UI</strong> &mdash; full API documentation at <code>/api/docs</code></li>
+                            <li><strong>CPU P95</strong> &mdash; togglable P95 overlay on the fleet LOAD chart</li>
+                            <li><strong>Alert sensitivity presets</strong> &mdash; Chill / Anxious / Twitchy with P50/P95 percentile and configurable consecutive polls</li>
+                            <li><strong>Installer upgrade</strong> &mdash; preserves config, skips dialogs, firewall rule survives</li>
+                            <li><strong>Poll interval</strong> &mdash; default 60s (was 300s) for sub-minute perf visibility</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Dashboard -->
         <section class="section" id="dashboard">
             <div class="wrap">
@@ -1606,14 +1676,14 @@
                     <div class="feature card">
                         <div class="icon">&#128274;</div>
                         <h3>Secure by Default</h3>
-                        <p>Auto TLS, Kerberos SSO, certificate pinning, HSTS. No passwords, no login page.</p>
+                        <p>Auto TLS, Kerberos SSO or credential login, certificate pinning, HSTS. Session-based auth with 8-hour timeout.</p>
                     </div>
                     <div class="feature card">
                         <div class="icon">&#128200;</div>
                         <h3>Live Monitoring</h3>
                         <p>
-                            State history chart, session gauges, event log, and multi-target notification editor &mdash;
-                            all in one page.
+                            Real-time updates via Server-Sent Events. State charts, session gauges, CPU P95 overlay,
+                            event log, and notification editor &mdash; all in one page.
                         </p>
                     </div>
                     <div class="feature card">
@@ -1695,7 +1765,7 @@
 <span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.104.17"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.104.18"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
   <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
