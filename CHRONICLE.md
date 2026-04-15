@@ -2,6 +2,11 @@
 
 Cumulative changelog for DrainCtl (Roams #1-99).
 
+## Bug Fixes
+
+- `ServerTable.svelte` CPU cell used `srv.perf.cpu_pct.toFixed(1)` — crashes with `TypeError` if `cpu_pct` is absent from the perf snapshot (e.g., a backend field temporarily missing during a rolling deploy); changed to `srv.perf?.cpu_pct != null ? ... : '—'` guard; Input Delay cell rendered `'—ms'` when the field was null because the `'ms'` suffix was unconditionally appended regardless of whether a value was present — changed to append the unit only when a measurement exists; `removeServer()` error handler used `e.message` which is `undefined` when the thrown value is not an `Error` instance (e.g., a plain string from a network failure); fixed to `e?.message ?? String(e)`
+- `EventLog.svelte` lacked a CSS rule for `.det-badge.state-warning` — a server-update event with `drain_state='warning'` rendered the drain-state badge completely unstyled (no background, default text color) instead of amber, inconsistent with every other state badge; added the missing amber rule matching the `state-grace` convention; fleet-metric display values in the periodic-refresh branch were rendered without `.toFixed()` calls (e.g., `{evt.fleet_cpu_pct}%` instead of `{evt.fleet_cpu_pct.toFixed(1)}%`), inconsistent with per-server metric formatting — all six fleet metric values now use `.toFixed(1)` or `.toFixed(2)` to match the precision used in the per-server event detail rows
+
 ## Features
 
 - `EventLog.svelte` expanded overlay now uses `color-mix(in srgb, var(--color-code-fg) …%, transparent)` for all text and border colors instead of hard-coded hex values (`#c0a0a0`, `#efe0e0`, `#d4baba`, `#f0b8c8`); the log panel will adapt correctly if `--color-code-bg`/`--color-code-fg` ever diverge between themes; `Nav.svelte` theme toggle, `ConfigModal.svelte` close button, and `HistoryModal.svelte` close button gain `aria-label` attributes so screen readers announce "Switch to dark mode", "Close settings", and "Close history" instead of reading bare Unicode glyphs; `ServerTable.svelte` remove button adds a `removingHosts` Set guard — the button is disabled (shows "…") while the DELETE request is in flight, preventing duplicate API calls from rapid double-clicks
