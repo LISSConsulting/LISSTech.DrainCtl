@@ -26,7 +26,7 @@
 {#if toast.items.length > 0}
     <div class="toast-container" aria-live="polite">
         {#each toast.items as t (t.id)}
-            <div class="toast toast-{t.type} {t.dismissing ? 'toast-out' : ''}">
+            <div class="toast toast-{t.type} {t.dismissing ? 'toast-out' : ''}" style="--duration:{t.duration}ms">
                 <span class="toast-icon">
                     {#if t.type === 'ok'}<CheckCircle size={16} />{:else if t.type === 'err'}<XCircle size={16} />{:else}<Info size={16} />{/if}
                 </span>
@@ -53,55 +53,87 @@
         pointer-events: none;
     }
 
+    @property --countdown {
+        syntax: '<percentage>';
+        initial-value: 100%;
+        inherits: false;
+    }
+
     .toast {
         pointer-events: auto;
         display: flex;
         align-items: center;
         gap: 10px;
         padding: 13px 16px;
-        border: 3px solid;
+        border: 3px solid var(--border-dim);
         border-radius: var(--radius-default);
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.78rem;
         font-weight: 600;
         line-height: 1.4;
+        position: relative;
+        overflow: hidden;
         animation: toast-slam-in 0.15s cubic-bezier(0.2, 0, 0, 1);
     }
 
+    /* Bright border overlay — recedes like a snake's tail as time runs out */
+    .toast::after {
+        content: '';
+        position: absolute;
+        inset: -3px;
+        border: 3px solid var(--border-bright);
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-mask: conic-gradient(from 0deg, #000 var(--countdown), transparent var(--countdown));
+        mask: conic-gradient(from 0deg, #000 var(--countdown), transparent var(--countdown));
+        animation: border-countdown var(--duration) linear forwards;
+    }
+
+    @keyframes border-countdown {
+        from { --countdown: 100%; }
+        to { --countdown: 0%; }
+    }
+
     .toast-ok {
+        --border-dim: #a0c4b0;
+        --border-bright: #2d6a4f;
         background: #e8f5ee;
-        border-color: #2d6a4f;
         color: #1a4d2e;
         box-shadow: 4px 4px 0 #b8d4c6;
     }
     .toast-err {
+        --border-dim: #c4a0aa;
+        --border-bright: #a3475b;
         background: #fce8ed;
-        border-color: #a3475b;
         color: #6b1a2a;
         box-shadow: 4px 4px 0 #d4a0ad;
     }
     .toast-info {
+        --border-dim: #c4b89a;
+        --border-bright: #8b6914;
         background: #fdf3e0;
-        border-color: #8b6914;
         color: #5c3a1e;
         box-shadow: 4px 4px 0 #d4c4a0;
     }
 
     :global([data-theme='dark']) .toast-ok {
+        --border-dim: #1a3d28;
+        --border-bright: #4ae68c;
         background: #1a4d2e;
-        border-color: #2d6a4f;
         color: #b8e6cc;
         box-shadow: 4px 4px 0 #143d24;
     }
     :global([data-theme='dark']) .toast-err {
+        --border-dim: #4a1a28;
+        --border-bright: #f08090;
         background: #6b1a2a;
-        border-color: #a3475b;
         color: #f5d0d8;
         box-shadow: 4px 4px 0 #4a1220;
     }
     :global([data-theme='dark']) .toast-info {
+        --border-dim: #3d2810;
+        --border-bright: #e6b830;
         background: #5c3a1e;
-        border-color: #8b6914;
         color: #f5e6c8;
         box-shadow: 4px 4px 0 #3d2810;
     }
