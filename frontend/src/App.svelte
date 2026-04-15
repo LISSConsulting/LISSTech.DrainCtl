@@ -205,6 +205,7 @@
                         fleetHistory.push({
                             time: slices[0].time,
                             cpu: avgCpu,
+                            cpuP95: deriveP95(slices.map((s) => s.cpuP95 ?? 0)),
                             mem: avgMem,
                             sessions: totalSess,
                             inputDelay: deriveP95(idV),

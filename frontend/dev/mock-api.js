@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.5';
+export const MOCK_VERSION = '3.6';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -191,6 +191,7 @@ function seedPerfHistory(host, status, initSessions) {
     samples.push({
       time:               now - i * 30_000,
       cpu:                p.cpu_pct,
+      cpuP95:             p.cpu_p95_pct,
       mem:                Math.round(svMemPct * 10) / 10,
       inputDelay:         p.input_delay_p95_ms,
       sessions:           jitterSessions,
@@ -282,6 +283,7 @@ function genPerf(status) {
 
   return {
     cpu_pct:             Math.round(cpu * 10) / 10,
+    cpu_p95_pct:         Math.round(Math.min(100, cpu * rand(1.05, 1.30)) * 10) / 10,
     mem_avail_mb:        memAvailMb,
     mem_total_mb:        memTotalMb,
     pages_sec:           Math.round(rand(...base.pages) * 10) / 10,
@@ -325,6 +327,7 @@ function jitterPerf(perf) {
   return {
     ...perf,
     cpu_pct:                 j(perf.cpu_pct),
+    cpu_p95_pct:             Math.round(Math.min(100, j(perf.cpu_p95_pct ?? perf.cpu_pct * 1.15)) * 10) / 10,
     mem_avail_mb:            Math.round(j(perf.mem_avail_mb, 0.03)),
     pages_sec:               j(perf.pages_sec, 0.15),
     disk_queue:              Math.round(j(perf.disk_queue, 0.12) * 100) / 100,
@@ -363,6 +366,7 @@ function spikePerf(perf) {
   if (!perf) return null;
   return {
     ...perf,
+    cpu_p95_pct:        Math.round(rand(85, 99) * 10) / 10,
     input_delay_p95_ms: Math.round(rand(280, 480) * 10) / 10,
     input_delay_p50_ms: Math.round(rand(120, 260) * 10) / 10,
     input_delay_max_ms: Math.round(rand(550, 950) * 10) / 10,
@@ -482,6 +486,7 @@ function startEvolution() {
         hist.push({
           time:                now,
           cpu:                 s.perf.cpu_pct,
+          cpuP95:              s.perf.cpu_p95_pct,
           mem:                 Math.round(svMemPct * 10) / 10,
           inputDelay:          s.perf.input_delay_p95_ms,
           sessions:            s.sessions,
