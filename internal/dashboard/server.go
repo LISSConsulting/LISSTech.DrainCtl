@@ -217,8 +217,8 @@ type DashboardServer struct {
 	// testPutSettingsFunc, if non-nil, is called by handlePutSettings
 	// instead of dc.UpdateNotifySettings. Receives the parsed request values;
 	// nil notifications means the field was absent from the request body
-	// (no-op for that field). nil threshold/gracePeriod mean the fields were absent.
-	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int) error
+	// (no-op for that field). nil threshold/gracePeriod/pollInterval mean the fields were absent.
+	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int) error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -621,11 +621,13 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
+		PollInterval            int                     `json:"poll_interval"`
 		Performance             dc.PerformanceConfig    `json:"performance"`
 	}{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
+		PollInterval:            cfg.PollInterval,
 		Performance:             cfg.Performance,
 	}
 
@@ -652,6 +654,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		Notifications           *[]dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold *int                     `json:"session_warning_threshold,omitempty"`
 		GracePeriod             *int                     `json:"grace_period,omitempty"`
+		PollInterval            *int                     `json:"poll_interval,omitempty"`
 		Performance             *dc.PerformanceConfig    `json:"performance,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
@@ -666,6 +669,10 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 	if in.GracePeriod != nil && (*in.GracePeriod < 1 || *in.GracePeriod > 1440) {
 		http.Error(w, "grace_period must be 1–1440", http.StatusBadRequest)
+		return
+	}
+	if in.PollInterval != nil && (*in.PollInterval < 10 || *in.PollInterval > dc.MaxPollInterval) {
+		http.Error(w, fmt.Sprintf("poll_interval must be 10–%d", dc.MaxPollInterval), http.StatusBadRequest)
 		return
 	}
 
@@ -733,13 +740,13 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 
 	if ds.testPutSettingsFunc != nil {
-		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
+		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval); err != nil {
 			slog.Error("update config failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod); err != nil {
+		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval); err != nil {
 			slog.Error("update settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
