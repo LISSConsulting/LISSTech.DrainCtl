@@ -436,7 +436,7 @@
                         {#if expandedHosts.has(srv.host)}
                             <tr class="detail-row">
                                 <td colspan="11">
-                                    <ServerDetail server={srv} {onhistoryclick} onremove={requestRemoveServer} />
+                                    <ServerDetail server={srv} {now} {onhistoryclick} onremove={requestRemoveServer} />
                                 </td>
                             </tr>
                         {/if}
