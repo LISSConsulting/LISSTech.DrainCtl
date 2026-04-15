@@ -499,13 +499,11 @@
         if (!authState.username) return;
         untrack(() => refresh());
         const interval = setInterval(refresh, 30_000);
-        const onFocus = () => { untrack(() => refresh()); };
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) onFocus();
-        });
+        const onVisible = () => { if (!document.hidden) untrack(() => refresh()); };
+        document.addEventListener('visibilitychange', onVisible);
         return () => {
             clearInterval(interval);
-            document.removeEventListener('visibilitychange', onFocus);
+            document.removeEventListener('visibilitychange', onVisible);
         };
     });
 
@@ -531,8 +529,12 @@
 
         es.onerror = () => {
             appState.sseConnected = false;
-            // EventSource auto-reconnects. If the session expired,
-            // the next poll will catch the 401 and clear auth.
+            // If the connection was permanently closed (e.g. 401 from expired
+            // session), stop reconnecting and trigger an immediate session check.
+            if (es.readyState === EventSource.CLOSED) {
+                es.close();
+                untrack(() => refresh());
+            }
         };
 
         return () => {
