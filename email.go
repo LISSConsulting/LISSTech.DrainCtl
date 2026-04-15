@@ -7,11 +7,11 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"fmt"
-	"html/template"
 	"net"
 	"net/smtp"
 	"net/url"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -21,18 +21,21 @@ var emailTemplateRaw string
 var emailTmpl = template.Must(template.New("email").Parse(emailTemplateRaw))
 
 type emailData struct {
-	Subject     string
-	Host        string
-	Mode        string
-	Status      string
-	Duration    string // drain-state duration (omitted for perf/session triggers)
-	GracePeriod string // grace period (only for drain-state triggers)
-	ChangedBy   string // who changed drain state (omitted for perf/session triggers)
-	Timestamp   string
-	Message     string
-	Trigger     string
-	StatusColor string
-	IsDrain     bool // true for drain-state triggers, controls which detail rows render
+	Subject      string
+	Host         string
+	Mode         string
+	Status       string
+	Duration     string // drain-state duration (omitted for perf/session triggers)
+	GracePeriod  string // grace period (only for drain-state triggers)
+	ChangedBy    string // who changed drain state (omitted for perf/session triggers)
+	Timestamp    string
+	Message      string
+	Trigger      string
+	StatusColor  string // badge background
+	BorderColor  string // left accent border
+	CardBg       string // card background tint
+	BlockquoteBg string // message blockquote background
+	IsDrain      bool   // true for drain-state triggers, controls which detail rows render
 }
 
 // TriggerStatus returns a human-readable status label for a trigger.
@@ -60,32 +63,42 @@ func TriggerStatus(drainStatus string, trigger Trigger) string {
 	}
 }
 
-// emailStatus returns the status label and badge colour for the email template.
-func emailStatus(drainStatus string, trigger Trigger) (label, color string) {
+// emailColors holds the status-driven palette for the email template.
+type emailColors struct {
+	Badge      string // badge background
+	Border     string // left accent border
+	CardBg     string // card background tint
+	Blockquote string // message blockquote background
+}
+
+// emailStatus returns the status label and colour palette for the email template.
+// Colours match the dashboard neobrutal palette.
+func emailStatus(drainStatus string, trigger Trigger) (label string, colors emailColors) {
 	label = TriggerStatus(drainStatus, trigger)
-	// Colours: green (#2d6a4f), amber (#b5651d), red (#c1292e), blue (#4a90d9), grey (#6c757d).
+
+	// Neobrutal palette: green (#5d8a6e), amber (#b87843), red (#9e2a3b), blue (#4a90d9), muted (#7a5a5a).
 	switch trigger {
 	case TriggerCPUWarning, TriggerMemoryWarning, TriggerInputDelayWarning, TriggerSessionWarning:
-		return label, "#b5651d"
+		return label, emailColors{"#b87843", "#b87843", "#fdf6f0", "#faf0e6"}
 	case TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
-		return label, "#c1292e"
+		return label, emailColors{"#9e2a3b", "#9e2a3b", "#fdf0f2", "#fae6ea"}
 	}
 	switch drainStatus {
 	case "Healthy":
-		return label, "#2d6a4f"
+		return label, emailColors{"#5d8a6e", "#5d8a6e", "#f0f7f3", "#e6f0ea"}
 	case "Grace":
-		return label, "#b5651d"
+		return label, emailColors{"#b87843", "#b87843", "#fdf6f0", "#faf0e6"}
 	case "Alert":
-		return label, "#c1292e"
+		return label, emailColors{"#9e2a3b", "#9e2a3b", "#fdf0f2", "#fae6ea"}
 	case "Test":
-		return label, "#4a90d9"
+		return label, emailColors{"#4a90d9", "#4a90d9", "#f0f5fd", "#e6eefa"}
 	default:
-		return label, "#6c757d"
+		return label, emailColors{"#7a5a5a", "#7a5a5a", "#f7f3f3", "#f0eaea"}
 	}
 }
 
 func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, changedBy string) (string, error) {
-	status, statusColor := emailStatus(result.Status, trigger)
+	status, colors := emailStatus(result.Status, trigger)
 
 	isDrain := !perfTriggers[trigger] && trigger != TriggerSessionWarning
 
@@ -105,18 +118,21 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 	}
 
 	data := emailData{
-		Subject:     subject,
-		Host:        result.Host,
-		Mode:        result.DrainModeLabel,
-		Status:      status,
-		Duration:    dur,
-		GracePeriod: grace,
-		ChangedBy:   cb,
-		Timestamp:   result.Timestamp.Format("2006-01-02 15:04:05 MST"),
-		Message:     result.Message,
-		Trigger:     string(trigger),
-		StatusColor: statusColor,
-		IsDrain:     isDrain,
+		Subject:      subject,
+		Host:         result.Host,
+		Mode:         result.DrainModeLabel,
+		Status:       status,
+		Duration:     dur,
+		GracePeriod:  grace,
+		ChangedBy:    cb,
+		Timestamp:    result.Timestamp.Format("2006-01-02 15:04:05 MST"),
+		Message:      result.Message,
+		Trigger:      string(trigger),
+		StatusColor:  colors.Badge,
+		BorderColor:  colors.Border,
+		CardBg:       colors.CardBg,
+		BlockquoteBg: colors.Blockquote,
+		IsDrain:      isDrain,
 	}
 
 	var buf bytes.Buffer
