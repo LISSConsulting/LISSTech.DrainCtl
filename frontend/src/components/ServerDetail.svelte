@@ -3,7 +3,7 @@
     import Sparkline from './Sparkline.svelte';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
-    import { rel, dur, modeLabel } from '../lib/utils.js';
+    import { rel, dur, modeLabel, formatTs } from '../lib/utils.js';
 
     let { server, onhistoryclick = undefined, onremove = undefined } = $props();
 
@@ -77,14 +77,8 @@
     }
     let lsColor = $derived(lastSeenColor(server.last_seen));
 
-    // State Since formatting
-    let stateSinceStr = $derived.by(() => {
-        const iso = server.state_changed_at;
-        if (!iso) return '—';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '—';
-        return d.toISOString().replace('T', ' ').slice(0, 19);
-    });
+    // State Since formatting — use formatTs for locale-aware local time display
+    let stateSinceStr = $derived(server.state_changed_at ? formatTs(server.state_changed_at) : '—');
 
     let isOff = $derived(server.status === 'off');
 </script>
