@@ -6,10 +6,17 @@
 
     let { target, isNew, onsave, onclose } = $props();
 
+    const SECRET_SENTINEL = '••••••••';
+
     // Local working copy — snapshot taken at open time; later mutations only touch `t`.
     // Use JSON round-trip instead of structuredClone to avoid Svelte 5 proxy issues.
     // svelte-ignore state_referenced_locally
     let t = $state(JSON.parse(JSON.stringify(target)));
+
+    // Track whether the secret was set on load (server sends sentinel for existing secrets).
+    let secretWasSet = $state(t.secret === SECRET_SENTINEL);
+    // Clear the sentinel so the password input shows empty with a placeholder.
+    if (secretWasSet) t.secret = '';
 
     let testing = $state(false);
 
@@ -61,6 +68,11 @@
         if (err) {
             toast.err(err);
             return;
+        }
+        // If the secret was set on load and the user didn't type a new one,
+        // send the sentinel back so the backend preserves the existing secret.
+        if (secretWasSet && !t.secret) {
+            t.secret = SECRET_SENTINEL;
         }
         onsave?.(t);
         toast.ok(isNew ? 'Target added' : 'Target updated');
@@ -175,16 +187,16 @@
                 </div>
             {/if}
 
-            <!-- HMAC Secret (webhook only) -->
-            {#if t.type === 'webhook'}
+            <!-- HMAC Secret (webhook) / SMTP Password (email) -->
+            {#if t.type === 'webhook' || t.type === 'email'}
                 <div class="tgt-form-row">
-                    <div class="tgt-form-label">HMAC Secret (optional)</div>
+                    <div class="tgt-form-label">{t.type === 'email' ? 'SMTP Password' : 'HMAC Secret'} (optional)</div>
                     <input
                         class="tgt-form-input"
                         type="password"
                         autocomplete="off"
                         bind:value={t.secret}
-                        placeholder="Leave blank for no signing"
+                        placeholder={secretWasSet ? 'Secret is set — leave blank to keep' : 'Leave blank for none'}
                     />
                 </div>
             {/if}

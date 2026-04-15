@@ -611,6 +611,12 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
+	// Redact secrets — browsers must never see plaintext secrets.
+	for i := range notifications {
+		if notifications[i].Secret != "" {
+			notifications[i].Secret = dc.SecretRedacted
+		}
+	}
 	out := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
@@ -705,6 +711,24 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		if in.Performance.InputDelayAlertDelaySec < 0 {
 			http.Error(w, "input_delay_alert_delay_sec must be non-negative", http.StatusBadRequest)
 			return
+		}
+	}
+
+	// Preserve existing secrets when the browser sends back the redacted sentinel.
+	// Match by URL+type since targets don't have stable IDs on the backend.
+	if in.Notifications != nil {
+		existing, err := dc.LoadConfig()
+		if err == nil {
+			secretMap := make(map[string]string, len(existing.Notifications))
+			for _, t := range existing.Notifications {
+				secretMap[t.Type+"\x00"+t.URL] = t.Secret
+			}
+			for i := range *in.Notifications {
+				t := &(*in.Notifications)[i]
+				if t.Secret == dc.SecretRedacted {
+					t.Secret = secretMap[t.Type+"\x00"+t.URL]
+				}
+			}
 		}
 	}
 

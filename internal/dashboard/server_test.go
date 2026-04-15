@@ -1320,8 +1320,8 @@ func TestHandleGetSettings_MultipleTargets(t *testing.T) {
 	if resp.Notifications[0].Type != "webhook" {
 		t.Errorf("notifications[0].type = %q, want webhook", resp.Notifications[0].Type)
 	}
-	if resp.Notifications[0].Secret != "s3cr3t" {
-		t.Errorf("notifications[0].secret = %q, want s3cr3t", resp.Notifications[0].Secret)
+	if resp.Notifications[0].Secret != dc.SecretRedacted {
+		t.Errorf("notifications[0].secret = %q, want redacted sentinel", resp.Notifications[0].Secret)
 	}
 	if resp.Notifications[1].Type != "ntfy" {
 		t.Errorf("notifications[1].type = %q, want ntfy", resp.Notifications[1].Type)
