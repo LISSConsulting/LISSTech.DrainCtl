@@ -246,8 +246,13 @@ func TestSetNotifyTarget_AppliesSecret(t *testing.T) {
 	if err := setNotifyTarget(cfg, "webhook", "https://hook.example.com/", ov); err != nil {
 		t.Fatalf("setNotifyTarget: %v", err)
 	}
+	// Validate() DPAPI-encrypts the secret; verify the round-trip via DecryptSecrets.
+	if !strings.HasPrefix(cfg.Notifications[0].Secret, "dpapi:") {
+		t.Fatalf("Secret should be DPAPI-encrypted, got %q", cfg.Notifications[0].Secret)
+	}
+	cfg.DecryptSecrets()
 	if cfg.Notifications[0].Secret != "s3cr3t" {
-		t.Errorf("Secret = %q, want s3cr3t", cfg.Notifications[0].Secret)
+		t.Errorf("Decrypted secret = %q, want s3cr3t", cfg.Notifications[0].Secret)
 	}
 }
 
