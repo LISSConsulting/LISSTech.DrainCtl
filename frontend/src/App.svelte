@@ -520,9 +520,34 @@
             try {
                 const event = JSON.parse(e.data);
                 if (event.type === 'server_update' && event.host && event.data) {
-                    appState.handleSSEServerUpdate(event.host, event.data);
+                    const sv = event.data;
+                    // Detect status transitions immediately so the event log updates
+                    // in real-time rather than waiting for the next 30-second poll.
+                    // Also keep prevStates current so the poll doesn't re-log the same
+                    // transition as a duplicate.
+                    const prevStatus = prevStates.get(event.host);
+                    if (prevStatus !== undefined && prevStatus !== sv.status) {
+                        const evtTime = new Date().toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false,
+                        });
+                        addEvent(
+                            serverEvent(evtTime, sv, `${statusLabel(prevStatus)} → ${statusLabel(sv.status)}`, statusSev(sv.status)),
+                        );
+                    }
+                    if (sv.status) prevStates.set(event.host, sv.status);
+                    appState.handleSSEServerUpdate(event.host, sv);
                 } else if (event.type === 'settings_update' && event.data) {
-                    appState.config = event.data;
+                    // Go stores memory thresholds as % free; UI works in % used —
+                    // apply the same inversion that fetchSettings() does on REST load.
+                    const cfg = event.data;
+                    if (cfg.performance) {
+                        cfg.performance.mem_warn_pct = 100 - (cfg.performance.mem_warn_pct ?? 0);
+                        cfg.performance.mem_crit_pct = 100 - (cfg.performance.mem_crit_pct ?? 0);
+                    }
+                    appState.config = cfg;
                 }
             } catch { /* ignore malformed events */ }
         };
