@@ -147,6 +147,8 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 
 ## Code Quality
 
+- `broadcastSettingsUpdate` in `server.go` now honours the `testLoadConfigFunc` injection — previously it called `dc.LoadConfig()` directly so the settings broadcast was untestable in isolation; added `TestHandleReport_BroadcastsSSEUpdate` and `TestHandlePutSettings_BroadcastsSSESettingsUpdate` to verify the end-to-end SSE wiring (`handleReport` → `state.OnUpdate` → `broker.Broadcast` and `handlePutSettings` → `broadcastSettingsUpdate` → `broker.Broadcast`); added missing `429` response to `/events` in `openapi.yaml`
+
 - Removed `internal/dashboard/dashboard.html` — leftover from the pre-Svelte monolith; the Go embed now uses `//go:embed all:dist` exclusively (T048)
 
 - `cmd/drainctl/main.go` split into 8 command files; `handler.go` split into handler + check

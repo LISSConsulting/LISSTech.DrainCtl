@@ -839,6 +839,8 @@ paths:
                 description: "Newline-delimited SSE messages. Each `data:` line contains a JSON object with `type`, `host` (for server_update), `data`, and `timestamp` fields."
         "401":
           description: Not authenticated.
+        "429":
+          description: Too many concurrent SSE connections (limit 100).
 
   /history/{host}:
     get:
