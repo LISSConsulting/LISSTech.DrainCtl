@@ -54,11 +54,6 @@ const (
 
 	// dpapiPrefix marks a secret as DPAPI-encrypted in config.json.
 	dpapiPrefix = "dpapi:"
-
-	// SecretRedacted is the sentinel value sent to browsers in place of
-	// actual secrets.  If the dashboard receives this value back on save,
-	// it preserves the existing secret rather than overwriting it.
-	SecretRedacted = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 )
 
 // ── Trigger type ──────────────────────────────────────────────────────────
@@ -424,7 +419,7 @@ func (c *Config) Validate() {
 	// DPAPI-encrypt any plaintext secrets before writing to disk.
 	for i := range c.Notifications {
 		s := c.Notifications[i].Secret
-		if s == "" || strings.HasPrefix(s, dpapiPrefix) || s == SecretRedacted {
+		if s == "" || strings.HasPrefix(s, dpapiPrefix) {
 			continue
 		}
 		ct, err := DPAPIEncrypt([]byte(s))
