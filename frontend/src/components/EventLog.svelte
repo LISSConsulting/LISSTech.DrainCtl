@@ -327,14 +327,14 @@
                         <div class="evt-metrics">
                             <span class="det-kv"
                                 ><span class="det-k">CPU</span><span class="det-v val-{cpuSev(evt.fleet_cpu_pct)}"
-                                    >{evt.fleet_cpu_pct}%</span
+                                    >{evt.fleet_cpu_pct.toFixed(1)}%</span
                                 ></span
                             >
                             {#if evt.fleet_mem_used_pct !== null}
                                 <span class="det-kv"
                                     ><span class="det-k">MEM</span><span
                                         class="det-v val-{memSev(evt.fleet_mem_used_pct)}"
-                                        >{evt.fleet_mem_used_pct}%</span
+                                        >{evt.fleet_mem_used_pct.toFixed(1)}%</span
                                     ></span
                                 >
                             {/if}
@@ -342,26 +342,26 @@
                                 <span class="det-kv"
                                     ><span class="det-k">DELAY P95</span><span
                                         class="det-v val-{delaySev(evt.fleet_input_delay_p95)}"
-                                        >{evt.fleet_input_delay_p95}ms</span
+                                        >{evt.fleet_input_delay_p95.toFixed(1)}ms</span
                                     ></span
                                 >
                             {/if}
                             {#if evt.fleet_pages_sec !== null}
                                 <span class="det-kv"
-                                    ><span class="det-k">PGS/S</span><span class="det-v">{evt.fleet_pages_sec}</span
+                                    ><span class="det-k">PGS/S</span><span class="det-v">{evt.fleet_pages_sec.toFixed(1)}</span
                                     ></span
                                 >
                             {/if}
                             {#if evt.fleet_tcp_retrans_sec !== null}
                                 <span class="det-kv"
                                     ><span class="det-k">TCP-RET/S</span><span class="det-v"
-                                        >{evt.fleet_tcp_retrans_sec}</span
+                                        >{evt.fleet_tcp_retrans_sec.toFixed(1)}</span
                                     ></span
                                 >
                             {/if}
                             {#if evt.fleet_disk_queue !== null}
                                 <span class="det-kv"
-                                    ><span class="det-k">DISK-Q</span><span class="det-v">{evt.fleet_disk_queue}</span
+                                    ><span class="det-k">DISK-Q</span><span class="det-v">{evt.fleet_disk_queue.toFixed(2)}</span
                                     ></span
                                 >
                             {/if}
@@ -604,6 +604,10 @@
     .det-badge.state-alert {
         background: color-mix(in srgb, var(--color-red) 18%, var(--color-surface));
         color: var(--color-red);
+    }
+    .det-badge.state-warning {
+        background: color-mix(in srgb, var(--color-amber) 18%, var(--color-surface));
+        color: var(--color-amber);
     }
     .det-badge.state-off {
         background: color-mix(in srgb, var(--color-subtle) 18%, var(--color-surface));
