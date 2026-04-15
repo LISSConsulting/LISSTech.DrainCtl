@@ -139,7 +139,7 @@
     // Refresh logic
     // ---------------------------------------------------------------------------
 
-    let refreshing = false;
+    let refreshing = $state(false);
 
     /**
      * Pull fresh data from the API and update global state.
@@ -576,7 +576,7 @@
                     }
                     appState.config = cfg;
                 }
-            } catch { /* ignore malformed events */ }
+            } catch (e) { console.warn('[SSE] malformed event, ignored:', e); }
         };
 
         es.onerror = () => {
@@ -621,7 +621,7 @@
         {/key}
     </main>
 
-    <Footer onrefresh={refresh} />
+    <Footer onrefresh={refresh} {refreshing} />
 
     {#if configOpen}
         <ConfigModal onclose={() => (configOpen = false)} />
