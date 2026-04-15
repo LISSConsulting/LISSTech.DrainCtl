@@ -44,6 +44,10 @@ Cumulative changelog for DrainCtl (Roams #1-99).
 - `frontend/src/lib/utils.js` (new): centralises `rel()`, `formatTs()`, and `dur()` — `ServerTable.svelte`, `ServerDetail.svelte`, and `HistoryModal.svelte` now import from here instead of each carrying its own copy
 - `ConfigModal.svelte` "Memory Thresholds" label now includes the hint "(% free — lower = more pressure)" and the inline unit labels read "% free" instead of "%" to prevent operators from misinterpreting the direction of the threshold (Go stores these as % free, not % used)
 
+- `ServerTable.svelte` status filter pills gain `aria-pressed` so screen readers announce the active filter state without relying solely on the visual amber fill; the pill container gains `role="group" aria-label="Filter servers by status"` for context
+
+- `mock-api.js` `warning` status support: added `warning` to status transitions (`ok→warning`, `warning→ok/alert`); added `warning` perf ranges to `genPerf`/`sessionBase`/`rfxBase` (CPU 68–82%, mem 74–84%, delay 95–145ms — in the warn zone between `ok` and `grace`); fixed `drain_mode` for `warning` servers from `ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS` to `ALLOW_ALL_CONNECTIONS` (`warning` = healthy drain state with elevated perf metrics, registry unchanged); fixed `healthResponse()` to count `warning` servers; added `warning` to `seedHistory` statuses pool and suppressed `changed_by` for `warning` transitions (no manual admin action involved)
+
 ## Bug Fixes
 
 - `App.svelte` SSE `server_update` handler now detects status transitions immediately and emits event-log entries in real time — previously the event log lagged up to 30 seconds behind visual state changes because transition detection only ran in the polling `refresh()` cycle; `prevStates` is also updated on each SSE event so the subsequent poll cycle does not duplicate the same transition entry
