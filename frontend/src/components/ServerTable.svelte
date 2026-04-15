@@ -234,11 +234,12 @@
             bind:value={search}
             style="max-width:300px"
         />
-        <div class="filter-pills">
+        <div class="filter-pills" role="group" aria-label="Filter servers by status">
             {#each ['all', 'ok', 'warning', 'grace', 'alert', 'off'] as f}
                 {@const count = f === 'all' ? appState.servers.length : statusCounts[f]}
                 <button
                     class="filter-pill {f === 'all' ? '' : f} {appState.serverFilter === f ? 'active' : ''}"
+                    aria-pressed={appState.serverFilter === f}
                     onclick={() => (appState.serverFilter = f)}
                 >
                     {f === 'all' ? 'All' : statusLabel(f)}{count ? ' (' + count + ')' : ''}
