@@ -415,6 +415,32 @@ function seedHistory(host, currentStatus) {
 }
 
 // ---------------------------------------------------------------------------
+// SSE — broadcast real-time events to connected dev browsers
+// ---------------------------------------------------------------------------
+
+/** Active SSE response objects — each is a Node.js ServerResponse. */
+const sseClients = new Set();
+
+/**
+ * Broadcast a DrainCtl SSE event to all connected clients.
+ * Silently ignores clients whose connections have already closed.
+ * @param {'server_update'|'settings_update'} type
+ * @param {object} data
+ * @param {string} [host]
+ */
+function broadcastSSE(type, data, host) {
+  const payload = JSON.stringify({ type, host, data, timestamp: new Date().toISOString() });
+  const frame = `data: ${payload}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(frame);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Periodic state evolution — statuses shift, metrics jitter
 // ---------------------------------------------------------------------------
 
@@ -529,6 +555,9 @@ function startEvolution() {
         // Cap at 100 entries
         if (hist.length > 100) hist.splice(0, hist.length - 100);
         history.set(host, hist);
+
+        // Broadcast the state change to all connected SSE clients.
+        broadcastSSE('server_update', serverView(host), host);
       }
     }
   }, 10_000); // every 10 seconds
@@ -655,7 +684,10 @@ function handleRequest(method, pathname, body, query = {}) {
 
   // PUT /api/v1/settings
   if (method === 'PUT' && pathname === '/api/v1/settings') {
-    if (body) mockSettings = body;
+    if (body) {
+      mockSettings = body;
+      broadcastSSE('settings_update', mockSettings);
+    }
     return { status: 200, body: { ok: true } };
   }
 
@@ -702,6 +734,31 @@ export default function mockApi() {
         const [pathname, qs] = req.url.split('?');
         const query = Object.fromEntries(new URLSearchParams(qs || ''));
         const method = req.method?.toUpperCase() ?? 'GET';
+
+        // SSE endpoint — long-lived streaming response.
+        if (method === 'GET' && pathname === '/api/v1/events') {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+          });
+          // Flush headers immediately so the browser establishes the stream.
+          res.flushHeaders?.();
+
+          sseClients.add(res);
+
+          // Periodic keepalive comment to prevent proxy/browser connection timeouts.
+          const heartbeat = setInterval(() => {
+            try { res.write(': keepalive\n\n'); } catch { /* ignore */ }
+          }, 25_000);
+
+          req.on('close', () => {
+            clearInterval(heartbeat);
+            sseClients.delete(res);
+          });
+          return; // do NOT call next()
+        }
 
         // Collect body for PUT/POST
         if (method === 'PUT' || method === 'POST') {
