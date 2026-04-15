@@ -134,7 +134,7 @@
     ];
 
     const POLL_INTERVAL_PRESETS = [15, 30, 60];
-    const SUSTAIN_PRESETS = [30, 60, 90, 120]; // seconds
+    const SUSTAIN_PRESETS = [30, 60, 90, 120, 300]; // seconds
 
     // ---------------------------------------------------------------------------
     // Sustain window — bound directly to config.performance.load_alert_delay_sec
@@ -145,6 +145,7 @@
     function fmtDuration(sec) {
         if (sec < 60) return sec + 's';
         if (sec % 60 === 0) return (sec / 60) + 'm';
+        if (sec % 30 === 0) return (sec / 60).toFixed(1).replace('.0', '') + 'm';
         return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
     }
 
