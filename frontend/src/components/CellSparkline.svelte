@@ -64,10 +64,9 @@
 <style>
     .cell-spark {
         position: absolute;
-        left: 0;
-        top: 15%;
+        inset: 0;
         width: 100%;
-        height: 70%;
+        height: 100%;
         opacity: 0.18;
         pointer-events: none;
     }
