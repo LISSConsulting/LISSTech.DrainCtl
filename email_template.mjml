@@ -7,7 +7,7 @@
   </mj-head>
   <mj-body background-color="#fdf8f6" width="520px">
     <mj-section padding="16px" text-align="left">
-      <mj-column background-color="{{.CardBg}}" border-left="5px solid {{.BorderColor}}" border="2.5px solid #2d1a1a" inner-background-color="{{.CardBg}}" padding="0" css-class="card-brutal">
+      <mj-column background-color="{{.CardBg}}" border-left="5px solid {{.BorderColor}}" border="2.5px solid #2d1a1a" border-radius="10px" inner-background-color="{{.CardBg}}" padding="0" css-class="card-brutal">
 
         <!-- Header -->
         <mj-text padding="24px 28px 4px 28px" font-size="11px" font-weight="700" letter-spacing="0.12em" text-transform="uppercase" color="{{.BorderColor}}">
