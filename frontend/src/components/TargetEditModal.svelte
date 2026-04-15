@@ -14,7 +14,8 @@
     let t = $state(JSON.parse(JSON.stringify(target)));
 
     // Track whether the secret was set on load (server sends sentinel for existing secrets).
-    let secretWasSet = $state(t.secret === SECRET_SENTINEL);
+    // This is a one-time snapshot, not reactive — intentionally not $state.
+    const secretWasSet = t.secret === SECRET_SENTINEL;
     // Clear the sentinel so the password input shows empty with a placeholder.
     if (secretWasSet) t.secret = '';
 
