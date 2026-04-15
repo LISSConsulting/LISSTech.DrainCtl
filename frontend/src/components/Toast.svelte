@@ -112,21 +112,21 @@
 
     :global([data-theme='dark']) .toast-ok {
         --border-dim: #284838;
-        --border-bright: #48c880;
+        --border-bright: #4cd888;
         background: #1a4028;
         color: #b4dcc6;
         box-shadow: 4px 4px 0 #10281a;
     }
     :global([data-theme='dark']) .toast-err {
         --border-dim: #502030;
-        --border-bright: #e07080;
+        --border-bright: #e87888;
         background: #501a28;
         color: #e4c4cc;
         box-shadow: 4px 4px 0 #280c14;
     }
     :global([data-theme='dark']) .toast-info {
         --border-dim: #483418;
-        --border-bright: #d8a830;
+        --border-bright: #e0b038;
         background: #483018;
         color: #dccca8;
         box-shadow: 4px 4px 0 #281c0c;
