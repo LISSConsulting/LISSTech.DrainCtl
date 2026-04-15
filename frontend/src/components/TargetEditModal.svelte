@@ -87,10 +87,16 @@
         }
         testing = true;
         try {
-            const r = await sendNotifyTest(t);
+            // Send sentinel if user didn't change the secret, so backend
+            // resolves the real credential for SMTP auth / webhook HMAC.
+            const payload = JSON.parse(JSON.stringify(t));
+            if (secretWasSet && !payload.secret) {
+                payload.secret = SECRET_SENTINEL;
+            }
+            const r = await sendNotifyTest(payload);
             toast.ok(r.message || 'Test sent');
         } catch (e) {
-            toast.err('Test failed: ' + e.message);
+            toast.err(e?.detail ?? e?.message ?? String(e));
         } finally {
             testing = false;
         }
