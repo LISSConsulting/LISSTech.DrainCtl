@@ -16,15 +16,35 @@ const BASE = '/api/v1';
  * Field names match PerfSnapshot JSON tags exactly (Go struct → JSON snake_case).
  *
  * @typedef {Object} PerfMetrics
- * @property {number} cpu_pct              - Host CPU % (0–100)
- * @property {number} mem_avail_mb         - Available memory in MB
- * @property {number} mem_total_mb         - Total physical memory in MB
- * @property {number} pages_sec            - Memory pages/sec
- * @property {number} disk_queue           - Average disk queue length
- * @property {number} tcp_retrans_sec      - TCP retransmits/sec
- * @property {number} input_delay_p50_ms   - Input delay P50 (ms)
- * @property {number} input_delay_p95_ms   - Input delay P95 (ms)
- * @property {number} input_delay_max_ms   - Input delay max (ms)
+ * @property {number}  cpu_pct                  - Host CPU % (0–100), average across samples
+ * @property {number}  cpu_p95_pct              - Host CPU P95 % across samples
+ * @property {number}  mem_avail_mb             - Available memory in MB
+ * @property {number}  mem_total_mb             - Total physical memory in MB
+ * @property {number}  pages_sec                - Memory pages/sec
+ * @property {number}  disk_queue               - Average disk queue length
+ * @property {number}  tcp_retrans_sec          - TCP retransmits/sec
+ * @property {number}  input_delay_p50_ms       - User input delay P50 (ms)
+ * @property {number}  input_delay_p95_ms       - User input delay P95 (ms)
+ * @property {number}  input_delay_max_ms       - User input delay max (ms)
+ * @property {number}  [session_cpu_p95_pct]    - Per-session CPU P95 % (omitted when zero)
+ * @property {number}  [session_cpu_p50_pct]    - Per-session CPU P50 % (omitted when zero)
+ * @property {number}  [session_mem_p95_bytes]  - Per-session working set P95 in bytes (omitted when zero)
+ * @property {number}  [session_mem_p50_bytes]  - Per-session working set P50 in bytes (omitted when zero)
+ * @property {boolean} rfx_available            - true when RemoteFX counters are collected
+ * @property {number}  [rfx_fps_out]            - RemoteFX output FPS P95
+ * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS P50
+ * @property {number}  [rfx_encode_ms]          - RemoteFX encode time P95 (ms)
+ * @property {number}  [rfx_encode_ms_p50]      - RemoteFX encode time P50 (ms)
+ * @property {number}  [rfx_quality_pct]        - RemoteFX frame quality P95 %
+ * @property {number}  [rfx_quality_pct_p50]    - RemoteFX frame quality P50 %
+ * @property {number}  [rfx_rtt_ms]             - RemoteFX TCP round-trip time P95 (ms)
+ * @property {number}  [rfx_rtt_ms_p50]         - RemoteFX TCP round-trip time P50 (ms)
+ * @property {number}  [rfx_loss_pct]           - RemoteFX loss rate P95 %
+ * @property {number}  [rfx_loss_pct_p50]       - RemoteFX loss rate P50 %
+ * @property {number}  [rfx_skip_server_sec]    - RemoteFX frames skipped/sec (server) P95
+ * @property {number}  [rfx_skip_server_sec_p50] - RemoteFX frames skipped/sec (server) P50
+ * @property {number}  [rfx_skip_net_sec]       - RemoteFX frames skipped/sec (network) P95
+ * @property {number}  [rfx_skip_net_sec_p50]   - RemoteFX frames skipped/sec (network) P50
  */
 
 /**
