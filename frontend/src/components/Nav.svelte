@@ -38,19 +38,21 @@
                 <span class="o">{counters.off}</span> off
             </span>
 
-            {#each TABS as tab}
-                {@const Icon = tab.icon}
-                <button
-                    role="tab"
-                    aria-selected={appState.currentView === tab.id}
-                    class="btn-tab btn-brutal"
-                    class:active={appState.currentView === tab.id}
-                    onclick={() => (appState.currentView = tab.id)}
-                >
-                    <Icon size={13} strokeWidth={2.2} />
-                    {tab.label}
-                </button>
-            {/each}
+            <div role="tablist" aria-label="Dashboard views" class="nav-tabs">
+                {#each TABS as tab}
+                    {@const Icon = tab.icon}
+                    <button
+                        role="tab"
+                        aria-selected={appState.currentView === tab.id}
+                        class="btn-tab btn-brutal"
+                        class:active={appState.currentView === tab.id}
+                        onclick={() => (appState.currentView = tab.id)}
+                    >
+                        <Icon size={13} strokeWidth={2.2} />
+                        {tab.label}
+                    </button>
+                {/each}
+            </div>
 
             <button class="btn-gear btn-brutal" onclick={onconfigopen}>CONFIG</button>
             {#if authState.username}
@@ -130,6 +132,12 @@
     }
     .o {
         color: var(--color-subtle);
+    }
+
+    /* ── Tab group wrapper ───────────────────────────────────────────────── */
+
+    .nav-tabs {
+        display: contents;
     }
 
     /* ── Tabs (match CONFIG button style exactly) ─────────────────────────── */
