@@ -585,7 +585,7 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 		user = auth.Username
 	}
 	slog.Info("dashboard=removed", slog.Int("event_id", dc.EvtServerRemoved), "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
-	ds.broadcastServerDeleted(host)
+	ds.broadcastServerDeleted(host, user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -986,11 +986,17 @@ func (ds *DashboardServer) BroadcastServerUpdate(host string) {
 
 // broadcastServerDeleted broadcasts a server_deleted SSE event so connected
 // browsers remove the host from their list immediately instead of waiting for
-// the next 30-second poll cycle.
-func (ds *DashboardServer) broadcastServerDeleted(host string) {
+// the next 30-second poll cycle. changedBy is the dashboard user who performed
+// the deletion; it is embedded in the event data so the event log can show
+// attribution without a separate API call.
+func (ds *DashboardServer) broadcastServerDeleted(host, changedBy string) {
+	type deletedData struct {
+		ChangedBy string `json:"changed_by,omitempty"`
+	}
 	payload, err := json.Marshal(SSEEvent{
 		Type:      "server_deleted",
 		Host:      host,
+		Data:      mustMarshal(deletedData{ChangedBy: changedBy}),
 		Timestamp: time.Now(),
 	})
 	if err != nil {
