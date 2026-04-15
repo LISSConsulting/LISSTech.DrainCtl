@@ -840,7 +840,7 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--color-accent);
-        margin-bottom: 8px;
+        margin-bottom: 0;
     }
     .settings-check {
         display: flex;
