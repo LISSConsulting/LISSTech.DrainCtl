@@ -972,6 +972,7 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 		Timestamp: time.Now(),
 	})
 	if err != nil {
+		slog.Warn("sse: broadcastServerUpdate: marshal failed", "host", host, "error", err)
 		return
 	}
 	ds.broker.Broadcast(payload)
@@ -993,6 +994,7 @@ func (ds *DashboardServer) broadcastServerDeleted(host string) {
 		Timestamp: time.Now(),
 	})
 	if err != nil {
+		slog.Warn("sse: broadcastServerDeleted: marshal failed", "host", host, "error", err) //nolint:gosec // host is validated by the router pattern
 		return
 	}
 	ds.broker.Broadcast(payload)
@@ -1008,6 +1010,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		cfg, err = dc.LoadConfig()
 	}
 	if err != nil {
+		slog.Warn("sse: broadcastSettingsUpdate: failed to load config", "error", err)
 		return
 	}
 	// Strip secrets before broadcasting — webhook HMAC keys and SMTP
@@ -1037,6 +1040,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		Timestamp: time.Now(),
 	})
 	if err != nil {
+		slog.Warn("sse: broadcastSettingsUpdate: marshal failed", "error", err)
 		return
 	}
 	ds.broker.Broadcast(payload)
