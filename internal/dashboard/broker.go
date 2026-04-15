@@ -25,6 +25,10 @@ type subscriber struct {
 	done chan struct{} // closed when subscriber is removed
 }
 
+// maxSubscribers is the upper bound on concurrent SSE connections.
+// Prevents resource exhaustion from runaway reconnect loops or abuse.
+const maxSubscribers = 100
+
 // Broker manages SSE subscribers and broadcasts events to all of them.
 type Broker struct {
 	mu          sync.RWMutex
@@ -39,11 +43,19 @@ func NewBroker() *Broker {
 	}
 }
 
+// ErrTooManySubscribers is returned when the subscriber cap is reached.
+var ErrTooManySubscribers = fmt.Errorf("too many SSE subscribers")
+
 // Subscribe registers a new subscriber and returns its channel and done signal.
 // The caller must call Unsubscribe when finished.
-func (b *Broker) Subscribe() (id string, ch <-chan []byte, done <-chan struct{}) {
+// Returns ErrTooManySubscribers if the cap is reached.
+func (b *Broker) Subscribe() (id string, ch <-chan []byte, done <-chan struct{}, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if len(b.subscribers) >= maxSubscribers {
+		return "", nil, nil, ErrTooManySubscribers
+	}
 
 	b.nextID++
 	sub := &subscriber{
@@ -53,7 +65,7 @@ func (b *Broker) Subscribe() (id string, ch <-chan []byte, done <-chan struct{})
 	}
 	b.subscribers[sub.id] = sub
 	slog.Debug("sse: subscriber added", "id", sub.id, "total", len(b.subscribers))
-	return sub.id, sub.ch, sub.done
+	return sub.id, sub.ch, sub.done, nil
 }
 
 // Unsubscribe removes a subscriber and closes its done channel.
@@ -88,6 +100,7 @@ func (b *Broker) Broadcast(event SSEEvent) {
 			// channel full — evict slow subscriber
 			slog.Warn("sse: evicting slow subscriber", "id", id)
 			close(sub.done)
+			close(sub.ch)
 			delete(b.subscribers, id)
 		}
 	}

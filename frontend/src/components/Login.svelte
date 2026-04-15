@@ -4,7 +4,7 @@
     import { authState, signInWithWindows, loginWithCredentials } from '../lib/auth.svelte.js';
     import { KeyRound, ShieldCheck } from 'lucide-svelte';
 
-    const isDark = $derived(theme.current === 'dark');
+    const isDark = $derived(theme.resolved === 'dark');
 
     let username = $state('');
     let password = $state('');
