@@ -77,6 +77,7 @@
         border: 3px solid var(--border-bright);
         border-radius: inherit;
         pointer-events: none;
+        opacity: 0.7;
         -webkit-mask: conic-gradient(from 0deg, #000 var(--countdown), transparent 0);
         mask: conic-gradient(from 0deg, #000 var(--countdown), transparent 0);
         animation: border-countdown var(--duration) linear forwards;
@@ -89,46 +90,46 @@
 
     .toast-ok {
         --border-dim: #c8e0d2;
-        --border-bright: #1a8a4a;
-        background: #e8f5ee;
-        color: #1a4d2e;
-        box-shadow: 4px 4px 0 #8aaa96;
+        --border-bright: #4a9a6a;
+        background: #edf7f1;
+        color: #2a5a3e;
+        box-shadow: 4px 4px 0 #9abaa6;
     }
     .toast-err {
-        --border-dim: #e0c0c8;
-        --border-bright: #c42040;
-        background: #fce8ed;
-        color: #6b1a2a;
-        box-shadow: 4px 4px 0 #aa8090;
+        --border-dim: #e0c8cc;
+        --border-bright: #a85060;
+        background: #fcedf0;
+        color: #6b2a35;
+        box-shadow: 4px 4px 0 #b89098;
     }
     .toast-info {
-        --border-dim: #e0d4b8;
-        --border-bright: #b88a14;
-        background: #fdf3e0;
-        color: #5c3a1e;
-        box-shadow: 4px 4px 0 #aa9878;
+        --border-dim: #ddd4c0;
+        --border-bright: #a08030;
+        background: #fdf5e8;
+        color: #5c3e28;
+        box-shadow: 4px 4px 0 #b0a488;
     }
 
     :global([data-theme='dark']) .toast-ok {
         --border-dim: #2a4a36;
-        --border-bright: #40e890;
-        background: #1a4d2e;
-        color: #b8e6cc;
-        box-shadow: 4px 4px 0 #0e2a18;
+        --border-bright: #5aaa78;
+        background: #1e3d2a;
+        color: #b0d4bc;
+        box-shadow: 4px 4px 0 #142a1c;
     }
     :global([data-theme='dark']) .toast-err {
-        --border-dim: #5a2838;
-        --border-bright: #ff6080;
-        background: #6b1a2a;
-        color: #f5d0d8;
-        box-shadow: 4px 4px 0 #2a0e18;
+        --border-dim: #4a2430;
+        --border-bright: #c06878;
+        background: #3d1a24;
+        color: #dab8c0;
+        box-shadow: 4px 4px 0 #2a1018;
     }
     :global([data-theme='dark']) .toast-info {
-        --border-dim: #4a3818;
-        --border-bright: #ffc030;
-        background: #5c3a1e;
-        color: #f5e6c8;
-        box-shadow: 4px 4px 0 #2a1e0e;
+        --border-dim: #443020;
+        --border-bright: #c0983a;
+        background: #3a2818;
+        color: #d4c4a8;
+        box-shadow: 4px 4px 0 #241a0e;
     }
 
     .toast-out {
