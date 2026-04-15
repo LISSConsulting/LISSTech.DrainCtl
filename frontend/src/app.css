@@ -1,3 +1,10 @@
+/* ─── Toast countdown animation property ─────────────────────────────────── */
+@property --countdown {
+    syntax: '<percentage>';
+    initial-value: 100%;
+    inherits: false;
+}
+
 /* ─── Light theme (default) ───────────────────────────────────────────────── */
 :root {
     --color-bg: #fdf8f6;
