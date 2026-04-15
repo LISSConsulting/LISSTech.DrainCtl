@@ -1001,6 +1001,12 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Disable the server's WriteTimeout for this long-lived connection.
+	// Without this, the 15-second WriteTimeout kills the SSE stream,
+	// causing rapid reconnect cycles that exhaust browser connections.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
 	id, ch, done := ds.broker.Subscribe()
 	defer ds.broker.Unsubscribe(id)
 
