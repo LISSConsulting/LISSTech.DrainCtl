@@ -59,31 +59,36 @@
         align-items: center;
         gap: 10px;
         padding: 13px 16px;
-        border: none;
+        border: 3px solid;
         border-radius: var(--radius-default);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.78rem;
         font-weight: 600;
         line-height: 1.4;
-        animation: toast-slide-in 0.12s linear;
+        animation: toast-slam-in 0.15s cubic-bezier(0.2, 0, 0, 1);
     }
 
     .toast-ok {
-        background: linear-gradient(135deg, #1a4d2e, #2d6a4f);
+        background: #1a4d2e;
+        border-color: #2d6a4f;
         color: #b8e6cc;
+        box-shadow: 4px 4px 0 #143d24;
     }
     .toast-err {
-        background: linear-gradient(135deg, #6b1a2a, #a3475b);
+        background: #6b1a2a;
+        border-color: #a3475b;
         color: #f5d0d8;
+        box-shadow: 4px 4px 0 #4a1220;
     }
     .toast-info {
-        background: linear-gradient(135deg, #5c3a1e, #8b6914);
+        background: #5c3a1e;
+        border-color: #8b6914;
         color: #f5e6c8;
+        box-shadow: 4px 4px 0 #3d2810;
     }
 
     .toast-out {
-        animation: toast-slide-out 0.12s linear forwards;
+        animation: toast-slam-out 0.12s cubic-bezier(0.6, 0, 1, 0.8) forwards;
     }
 
     .toast-icon {
@@ -132,24 +137,27 @@
         opacity: 1;
     }
 
-    @keyframes toast-slide-in {
-        from {
+    @keyframes toast-slam-in {
+        0% {
             opacity: 0;
-            transform: translateX(40px);
+            transform: translateX(60px) scale(0.95);
         }
-        to {
+        70% {
             opacity: 1;
-            transform: translateX(0);
+            transform: translateX(-4px) scale(1.02);
+        }
+        100% {
+            transform: translateX(0) scale(1);
         }
     }
-    @keyframes toast-slide-out {
-        from {
+    @keyframes toast-slam-out {
+        0% {
             opacity: 1;
             transform: translateX(0);
         }
-        to {
+        100% {
             opacity: 0;
-            transform: translateX(40px);
+            transform: translateX(60px) scale(0.95);
         }
     }
 </style>
