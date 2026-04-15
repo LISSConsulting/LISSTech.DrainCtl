@@ -110,7 +110,7 @@
             delay_crit: 100,
             delay_percentile: 'p95',
             load_sustain_sec: 60,
-            delay_sustain_sec: 90,
+            delay_sustain_sec: 120,
         },
         {
             level: 3,
@@ -134,7 +134,7 @@
     ];
 
     const POLL_INTERVAL_PRESETS = [15, 30, 60];
-    const SUSTAIN_PRESETS = [30, 60, 90, 120, 300]; // seconds
+    const SUSTAIN_PRESETS = [30, 60, 120, 300]; // seconds
 
     // ---------------------------------------------------------------------------
     // Sustain window — bound directly to config.performance.load_alert_delay_sec
