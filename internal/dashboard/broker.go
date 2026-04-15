@@ -20,9 +20,15 @@ type SSEEvent struct {
 
 // subscriber is a connected browser session consuming the event stream.
 type subscriber struct {
-	ch   chan []byte
-	id   string
-	done chan struct{} // closed when subscriber is removed
+	ch        chan []byte
+	id        string
+	done      chan struct{}
+	closeOnce sync.Once // guards close(done) — safe from both Unsubscribe and Broadcast
+}
+
+// close signals the subscriber to stop. Safe to call multiple times.
+func (s *subscriber) stop() {
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 // maxSubscribers is the upper bound on concurrent SSE connections.
@@ -68,13 +74,13 @@ func (b *Broker) Subscribe() (id string, ch <-chan []byte, done <-chan struct{},
 	return sub.id, sub.ch, sub.done, nil
 }
 
-// Unsubscribe removes a subscriber and closes its done channel.
+// Unsubscribe removes a subscriber and signals it to stop.
 func (b *Broker) Unsubscribe(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if sub, ok := b.subscribers[id]; ok {
-		close(sub.done)
+		sub.stop()
 		delete(b.subscribers, id)
 		slog.Debug("sse: subscriber removed", "id", id, "total", len(b.subscribers))
 	}
@@ -109,8 +115,7 @@ func (b *Broker) Broadcast(payload []byte) {
 		for _, sub := range evict {
 			if _, ok := b.subscribers[sub.id]; ok {
 				slog.Warn("sse: evicting slow subscriber", "id", sub.id)
-				close(sub.done)
-				close(sub.ch)
+				sub.stop() // sync.Once — safe even if Unsubscribe races
 				delete(b.subscribers, sub.id)
 			}
 		}
