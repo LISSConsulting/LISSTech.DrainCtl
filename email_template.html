@@ -50,19 +50,25 @@
                   <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">Status</td>
                   <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">{{.Status}}</td>
                 </tr>
-                {{if .Duration}}
+                {{if .IsDrain}}{{if .Duration}}
                 <tr>
                   <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:#fffaf8;mso-line-height-rule:exactly;line-height:18px;">Duration</td>
                   <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:#fffaf8;mso-line-height-rule:exactly;line-height:18px;">{{.Duration}}</td>
                 </tr>
+                {{end}}{{if .GracePeriod}}
+                <tr>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">Grace Period</td>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">{{.GracePeriod}}</td>
+                </tr>
                 {{end}}
                 <tr>
-                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:{{if .Duration}}#f5ebe8{{else}}#fffaf8{{end}};mso-line-height-rule:exactly;line-height:18px;">Changed By</td>
-                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:{{if .Duration}}#f5ebe8{{else}}#fffaf8{{end}};mso-line-height-rule:exactly;line-height:18px;">{{.ChangedBy}}</td>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:#fffaf8;mso-line-height-rule:exactly;line-height:18px;">Changed By</td>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:#fffaf8;mso-line-height-rule:exactly;line-height:18px;">{{.ChangedBy}}</td>
                 </tr>
+                {{end}}
                 <tr>
-                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:{{if .Duration}}#fffaf8{{else}}#f5ebe8{{end}};mso-line-height-rule:exactly;line-height:18px;">Timestamp</td>
-                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:{{if .Duration}}#fffaf8{{else}}#f5ebe8{{end}};mso-line-height-rule:exactly;line-height:18px;">{{.Timestamp}}</td>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:12px;font-weight:600;color:#7a5c52;text-transform:uppercase;letter-spacing:0.06em;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">Timestamp</td>
+                  <td height="36" valign="middle" style="height:36px;padding:0 14px;font-size:14px;color:#2c1810;background-color:#f5ebe8;mso-line-height-rule:exactly;line-height:18px;">{{.Timestamp}}</td>
                 </tr>
               </table>
 

@@ -59,18 +59,21 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 
 	connAllowed := result.ConnectionsAllowed != nil && *result.ConnectionsAllowed
 	payload := map[string]any{
-		"event":                  string(trigger),
-		"host":                   result.Host,
-		"drain_mode":             result.DrainModeLabel,
-		"status":                 TriggerStatus(result.Status, trigger),
-		"message":                result.Message,
-		"changed_by":             changedBy,
-		"state_duration_seconds": int(stateDur),
-		"grace_period_seconds":   result.GracePeriodSeconds,
-		"connections_allowed":    connAllowed,
-		"version":                result.Version,
-		"timestamp":              result.Timestamp.Format(time.RFC3339),
-		"subject":                NotificationSubject(result, trigger, changedBy),
+		"event":               string(trigger),
+		"host":                result.Host,
+		"drain_mode":          result.DrainModeLabel,
+		"status":              TriggerStatus(result.Status, trigger),
+		"message":             result.Message,
+		"connections_allowed": connAllowed,
+		"version":             result.Version,
+		"timestamp":           result.Timestamp.Format(time.RFC3339),
+		"subject":             NotificationSubject(result, trigger, changedBy),
+	}
+	// Drain-specific fields — only meaningful for drain-state triggers.
+	if !perfTriggers[trigger] && trigger != TriggerSessionWarning {
+		payload["changed_by"] = changedBy
+		payload["state_duration_seconds"] = int(stateDur)
+		payload["grace_period_seconds"] = result.GracePeriodSeconds
 	}
 	if result.Transition && result.TransitionFrom != "" {
 		payload["previous_mode"] = result.TransitionFrom
