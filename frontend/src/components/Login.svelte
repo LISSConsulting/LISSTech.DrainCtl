@@ -32,15 +32,15 @@
         e.preventDefault();
         const u = username.trim();
         if (!u) {
-            toast.err('Enter your username.');
+            toast.err('Enter your username');
             return;
         }
         if (!u.includes('\\') && !u.includes('@')) {
-            toast.err('Include a domain — use DOMAIN\\username or username@domain.');
+            toast.err('Include a domain — use DOMAIN\\username or username@domain');
             return;
         }
         if (!password) {
-            toast.err('Enter your password.');
+            toast.err('Enter your password');
             return;
         }
         submitting = true;
