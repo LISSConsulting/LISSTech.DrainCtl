@@ -306,7 +306,7 @@
             {:else if config}
                 <!-- Global Alert Sensitivity -->
                 <div class="settings-group">
-                    <div class="settings-label">Alert Sensitivity</div>
+                    <div class="section-header"><Coffee size={14} strokeWidth={2.5} /> Alert Sensitivity</div>
                     <div class="fire-row">
                         {#each FIRE_PRESETS as preset}
                             <button
@@ -361,7 +361,6 @@
                 </button>
 
                 {#if showManual}
-                    <div class="settings-divider"></div>
 
                     <!-- 1. Agent Poll Interval -->
                     <div class="settings-group">
@@ -394,8 +393,6 @@
                         </div>
                     </div>
 
-                    <div class="settings-divider"></div>
-
                     <!-- 2. Escalation Window -->
                     <div class="settings-group">
                         <div class="section-header"><ShieldAlert size={14} strokeWidth={2.5} /> Escalation Window</div>
@@ -427,12 +424,10 @@
                         </div>
                     </div>
 
-                    <div class="settings-divider"></div>
-
                     <!-- 3. Session Warning -->
                     <div class="settings-group">
                         <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
-                        <div class="settings-hint" style="margin-bottom:6px">Fires a session_warning alert when utilization exceeds this percentage of max sessions.</div>
+                        <div class="settings-hint" style="margin-bottom:6px">Alert when active sessions reach this percentage of the server's capacity. Set to 0 to disable.</div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <input
                                 type="number"
@@ -441,11 +436,9 @@
                                 min="0"
                                 max="100"
                             />
-                            <span class="settings-num-label">% of max sessions (0 = disabled)</span>
+                            <span class="settings-num-label">%</span>
                         </div>
                     </div>
-
-                    <div class="settings-divider"></div>
 
                     <!-- 4. Performance Monitoring -->
                     {#if config.performance}
@@ -463,7 +456,7 @@
                             </label>
                             {#if config.performance.enabled && !config.performance.force_disabled}
                                 <!-- Poll Interval -->
-                                <div style="margin-top:8px">
+                                <div class="subsection" style="margin-top:8px">
                                     <div class="settings-label">Poll Interval</div>
                                     <div class="settings-hint" style="margin-bottom:6px">How often each server is sampled for CPU, memory, and input delay.</div>
                                     <div class="repeat-pills">
@@ -493,9 +486,8 @@
                                     </div>
                                 </div>
 
-                                <div class="settings-divider" style="margin:12px 0"></div>
-
                                 <!-- Thresholds — 2-column grid -->
+                                <div class="subsection">
                                 <div class="settings-cfg-grid">
                                     <div>
                                         <div class="settings-label">CPU Thresholds</div>
@@ -576,10 +568,10 @@
                                         </div>
                                     </div>
                                 </div>
-
-                                <div class="settings-divider" style="margin:12px 0"></div>
+                                </div>
 
                                 <!-- Alert Sustain Window -->
+                                <div class="subsection">
                                 <div class="settings-label">Alert Sustain Window</div>
                                 <div class="settings-hint" style="margin-bottom:6px">How long a metric must breach its threshold before an alert fires.</div>
                                 <div class="settings-cfg-grid">
@@ -641,6 +633,7 @@
                                             <span class="settings-hint">({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span>
                                         </div>
                                     </div>
+                                </div>
                                 </div>
 
                                 <div style="margin-top:10px">
@@ -821,7 +814,11 @@
         color: var(--color-accent);
         margin-bottom: 6px;
         padding: 4px 0;
-        border-bottom: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+    }
+    .subsection {
+        border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+        padding-left: 14px;
+        margin-top: 10px;
     }
     .settings-label {
         font-size: 0.75rem;
