@@ -98,6 +98,8 @@ const BASE = '/api/v1';
  * @property {number} mem_crit_pct
  * @property {number} input_delay_warn_ms
  * @property {number} input_delay_crit_ms
+ * @property {number} load_alert_delay_sec
+ * @property {number} input_delay_alert_delay_sec
  * @property {boolean} collect_per_session
  * @property {boolean} collect_remotefx
  */

@@ -402,11 +402,19 @@ components:
         load_consecutive_polls:
           type: integer
           minimum: 1
-          description: "Consecutive polls required before CPU/memory alerts fire. Default 2."
+          description: "DEPRECATED — computed from load_alert_delay_sec / sample_interval_sec."
         input_delay_consecutive_polls:
           type: integer
           minimum: 1
-          description: "Consecutive polls required before input delay alerts fire. Default 10."
+          description: "DEPRECATED — computed from input_delay_alert_delay_sec / sample_interval_sec."
+        load_alert_delay_sec:
+          type: integer
+          minimum: 0
+          description: "Seconds a CPU/memory metric must breach before alert fires. Default 60."
+        input_delay_alert_delay_sec:
+          type: integer
+          minimum: 0
+          description: "Seconds input delay must breach before alert fires. Default 90."
         collect_remotefx:
           type: boolean
         collect_per_session:
