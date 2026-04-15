@@ -149,7 +149,7 @@
                 expandedHosts = next;
             }
         } catch (e) {
-            removeError = 'Remove failed: ' + e.message;
+            removeError = 'Remove failed: ' + (e?.message ?? String(e));
             setTimeout(() => (removeError = ''), 5000);
         } finally {
             const next = new Set(removingHosts);
@@ -371,7 +371,7 @@
                                     data={srvHistory?.map((s) => s.cpu) ?? []}
                                     color={sparkColor(cpuColor)}
                                 />
-                                {srv.perf ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}
+                                {srv.perf?.cpu_pct != null ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}
                             </td>
                             <td class="mono spark-cell" style={memStyle}>
                                 <CellSparkline
@@ -385,7 +385,7 @@
                                     data={srvHistory?.map((s) => s.inputDelay) ?? []}
                                     color={sparkColor(delayColor)}
                                 />
-                                {srv.perf ? (srv.perf.input_delay_p95_ms?.toFixed(1) ?? '—') + 'ms' : '—'}
+                                {srv.perf?.input_delay_p95_ms != null ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms' : '—'}
                             </td>
                             <td class="mono muted">{rel(srv.last_seen, now)}</td>
                             <td onclick={(e) => e.stopPropagation()}>
