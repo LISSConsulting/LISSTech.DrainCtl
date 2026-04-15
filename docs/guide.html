@@ -697,10 +697,13 @@ Get-RDSHDrainMode | Format-List</code></pre>
             </p>
 
             <div class="callout">
-                <strong>&#x1F504; Migrating from a previous version?</strong>
-                On first run, DrainCtl automatically migrates your settings from the registry
-                (<code>HKLM\SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters</code>) into <code>config.json</code>.
-                Your old registry values are left in place but are no longer read. No manual migration needed.
+                <strong>&#x1F504; Config normalization</strong>
+                On every service start, DrainCtl validates <code>config.json</code> and writes it back with all
+                fields populated at their effective defaults. New fields (like <code>input_delay_percentile</code>,
+                <code>load_consecutive_polls</code>) appear automatically after upgrading &mdash; no manual editing
+                required. If migrating from a registry-based version, settings are imported from
+                <code>HKLM\...\DrainCtl\Parameters</code> on first run; the old values are left in place but no
+                longer read.
             </div>
 
             <!-- ── Audit Setup ───────────────────────────────────────────────────── -->
@@ -1497,17 +1500,28 @@ drainctl dashboard remove-server RDSH-OLD</code></pre>
 
             <h3>Authentication</h3>
             <p>
-                The dashboard uses <strong>Windows Authentication (Kerberos/SPNEGO)</strong> via SSPI. No passwords, no
-                tokens, no configuration:
+                The dashboard supports two login methods:
+            </p>
+            <ul>
+                <li>
+                    <strong>Windows SSO (primary)</strong> &mdash; Kerberos/SPNEGO via SSPI. Your browser sends domain
+                    credentials automatically (Integrated Windows Auth). Works out of the box in the Intranet zone.
+                </li>
+                <li>
+                    <strong>Credential login (fallback)</strong> &mdash; username and password form for non-domain
+                    machines, remote access, or browsers that don't support Negotiate. Accepts
+                    <code>DOMAIN\username</code> or <code>username@domain</code> format. Credentials are validated
+                    against Active Directory via <code>LogonUserW</code>; passwords are never stored or logged.
+                </li>
+            </ul>
+            <p>
+                Both methods create a session cookie (<code>drainctl_session</code>) with an 8-hour inactivity
+                timeout and 24-hour absolute lifetime. Sessions are stored in memory and do not survive service restarts.
             </p>
             <ul>
                 <li>
                     <strong>Agent reporting</strong> &mdash; each server authenticates with its machine Kerberos ticket.
                     Automatic in a domain, zero config.
-                </li>
-                <li>
-                    <strong>Dashboard UI</strong> &mdash; your browser sends your domain credentials (Integrated Windows
-                    Auth). Works out of the box in Intranet zone.
                 </li>
                 <li>
                     <strong>Authorization</strong> &mdash; only members of the configured AD group (DashboardGroup) can
@@ -1845,11 +1859,38 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 This prevents notification storms from volatile metrics like input delay.
             </p>
 
+            <h3>Real-Time Event Streaming (SSE)</h3>
+            <p>
+                The dashboard streams real-time updates to connected browsers via
+                <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events">Server-Sent Events</a>.
+                When an agent reports or settings change, every open dashboard tab updates within 2 seconds &mdash;
+                no manual refresh needed.
+            </p>
+            <ul>
+                <li><strong>Endpoint</strong>: <code>GET /api/v1/events</code> (requires session cookie)</li>
+                <li><strong>Event types</strong>: <code>server_update</code> (agent reports, local checks)
+                    and <code>settings_update</code> (config changes)</li>
+                <li><strong>Reconnection</strong>: automatic (~3 seconds, handled by the browser&rsquo;s EventSource API)</li>
+                <li><strong>Fallback</strong>: the existing periodic poll continues as a full-sync safety net</li>
+                <li><strong>Capacity</strong>: 50+ concurrent browser sessions with &lt;1 MB memory per subscriber</li>
+            </ul>
+
+            <h3>Dashboard UI Features</h3>
+            <ul>
+                <li><strong>Multi-expand</strong>: open multiple server detail panels simultaneously</li>
+                <li><strong>Page size</strong>: choose 15, 30, or 50 servers per page (persisted in browser)</li>
+                <li><strong>Alert presets</strong>: Chill, Anxious, or Twitchy &mdash; one click sets thresholds,
+                    percentile, and consecutive poll counts</li>
+                <li><strong>CPU P95 overlay</strong>: toggle a P95 line on the fleet LOAD chart to surface spikes
+                    the average smooths over</li>
+            </ul>
+
             <h3>REST API Documentation</h3>
             <p>
                 The dashboard serves an OpenAPI 3.1 spec at
                 <code>/api/v1/openapi.yaml</code> and a Swagger UI at <code>/api/docs</code>.
-                Both are public (no authentication required).
+                Both are public (no authentication required). The spec covers all 16 API endpoints
+                including the SSE event stream.
             </p>
 
             <!-- ── RMM Integration ────────────────────────────────────────────────── -->
