@@ -2,6 +2,10 @@
 
 Cumulative changelog for DrainCtl (Roams #1-99).
 
+## Security
+
+- `handleSSE` in `internal/dashboard/server.go` never re-validated the session after the initial connection — if a user logged out from another tab or an admin deleted a session, the SSE stream continued delivering real-time server and settings events indefinitely until the TCP connection dropped; fixed by adding `sseSessionCheckInterval` (5 min, overridable in tests) and a `sessionCheck` ticker that calls `ds.sessionStore.Get(token)` on each tick; when the session is missing the stream is closed immediately so the browser reconnects and receives a 401; `sseSessionCheckInterval` follows the same test-override pattern as `sseKeepaliveInterval`; `TestHandleSSE_ClosesOnSessionExpiry` covers the full path: creates a real session, starts the SSE stream, deletes the session, and asserts the handler returns within 2 s
+
 ## Bug Fixes
 
 - `ServerView` (Go) was missing `state_changed_at` — `ServerDetail.svelte` and `ServerTable.svelte` both read `server.state_changed_at` to display the "State Since" tile row and the state-age column respectively, but the field was never emitted by the real backend; in production the detail tile always showed `'—'` and the table column silently fell back to `registered_at` (the server's registration time, not the current-state onset); fixed by adding `StateChangedAt *time.Time json:"state_changed_at,omitempty"` to `ServerView` and assigning `r.StateSince` in `toServerView()`; the mock-api already emitted this field correctly; `api.js` typedef and `openapi.yaml` schema updated to document the field; `ServerDetail.svelte` `stateSinceStr` also replaced `toISOString()` (always UTC) with `formatTs()` for locale-aware local time, matching the format used everywhere else in the dashboard
