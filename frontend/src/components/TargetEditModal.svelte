@@ -16,6 +16,10 @@
     const secretWasSet = !!t.has_secret;
     // Secret field is always empty from the API; user types a new value or leaves blank.
     t.secret = '';
+    // clear_secret tells the backend to wipe the saved secret. Empty `secret`
+    // alone means "preserve" — without this flag there's no way to go back to
+    // having no secret once one was set.
+    t.clear_secret = false;
 
     let testing = $state(false);
 
@@ -197,13 +201,33 @@
             {#if t.type === 'webhook' || t.type === 'email'}
                 <div class="tgt-form-row">
                     <div class="tgt-form-label">{t.type === 'email' ? 'SMTP Password' : 'HMAC Secret'} (optional)</div>
-                    <input
-                        class="tgt-form-input"
-                        type="password"
-                        autocomplete="off"
-                        bind:value={t.secret}
-                        placeholder={secretWasSet ? 'Secret is set — leave blank to keep' : 'Leave blank for none'}
-                    />
+                    <div class="tgt-secret-row">
+                        <input
+                            class="tgt-form-input"
+                            type="password"
+                            autocomplete="off"
+                            bind:value={t.secret}
+                            disabled={t.clear_secret}
+                            placeholder={t.clear_secret
+                                ? 'Will be cleared on save'
+                                : secretWasSet
+                                  ? 'Secret is set — leave blank to keep'
+                                  : 'Leave blank for none'}
+                        />
+                        {#if secretWasSet}
+                            <button
+                                type="button"
+                                class="tgt-secret-clear"
+                                onclick={() => {
+                                    t.clear_secret = !t.clear_secret;
+                                    if (t.clear_secret) t.secret = '';
+                                }}
+                                title={t.clear_secret ? 'Cancel clearing the secret' : 'Wipe the saved secret on save'}
+                            >
+                                {t.clear_secret ? 'Cancel clear' : 'Clear'}
+                            </button>
+                        {/if}
+                    </div>
                 </div>
             {/if}
 
@@ -345,6 +369,36 @@
         background: var(--color-bg);
         color: var(--color-fg);
         box-sizing: border-box;
+    }
+    .tgt-form-input:disabled {
+        opacity: 0.6;
+    }
+    .tgt-secret-row {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+    }
+    .tgt-secret-row .tgt-form-input {
+        flex: 1 1 auto;
+    }
+    .tgt-secret-clear {
+        flex: 0 0 auto;
+        padding: 0 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+        border-radius: 6px;
+        background: var(--color-card);
+        color: var(--color-muted);
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .tgt-secret-clear:hover {
+        background: var(--color-bg);
+        color: var(--color-fg);
     }
     .tgt-type-pills {
         display: flex;
