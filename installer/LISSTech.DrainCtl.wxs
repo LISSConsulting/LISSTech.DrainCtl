@@ -63,7 +63,7 @@
             The second call loads the config saved by the first and layers on URL flags.
         -->
         <SetProperty Id="ConfigureAction" Before="ConfigureAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX] --log-file-level=[LOG_FILE_LEVEL] --log-event-level=[LOG_EVENT_LEVEL] --dashboard-only=[DASHBOARD_ONLY]" />
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX]" />
         <CustomAction Id="ConfigureAction"
             DllEntry="WixQuietExec"
             Execute="commit"
@@ -74,6 +74,15 @@
         <SetProperty Id="ConfigureNotifyAction" Before="ConfigureNotifyAction" Sequence="execute"
             Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL] --poll-interval=[POLL_INTERVAL] --session-warning-threshold=[SESSION_THRESHOLD]" />
         <CustomAction Id="ConfigureNotifyAction"
+            DllEntry="WixQuietExec"
+            Execute="commit"
+            Impersonate="no"
+            Return="check"
+            BinaryRef="Wix4UtilCA_X64" />
+
+        <SetProperty Id="ConfigureExtrasAction" Before="ConfigureExtrasAction" Sequence="execute"
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --log-file-level=[LOG_FILE_LEVEL] --log-event-level=[LOG_EVENT_LEVEL] --dashboard-only=[DASHBOARD_ONLY]" />
+        <CustomAction Id="ConfigureExtrasAction"
             DllEntry="WixQuietExec"
             Execute="commit"
             Impersonate="no"
@@ -134,8 +143,11 @@
             <Custom Action="ConfigureNotifyAction"
                 After="ConfigureAction"
                 Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
-            <Custom Action="CleanETWProvider"
+            <Custom Action="ConfigureExtrasAction"
                 After="ConfigureNotifyAction"
+                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
+            <Custom Action="CleanETWProvider"
+                After="ConfigureExtrasAction"
                 Condition="NOT REMOVE" />
             <Custom Action="RegisterETWProvider"
                 After="CleanETWProvider"
