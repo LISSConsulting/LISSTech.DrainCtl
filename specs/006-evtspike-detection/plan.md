@@ -5,7 +5,7 @@
 
 ## Summary
 
-Detect anomalous Windows event-log activity on RDSH hosts by subscribing to ~54 channels, counting arrivals into 10-second buckets aggregated into 60-second rolling scoring windows, and scoring each window against a per-channel, per-time-of-day Gamma-Poisson baseline with Negative-Binomial tail probability. Confirmed spikes (≥2 of 3 consecutive windows) are fanned out through the existing notification pipeline via a new `event_spike` trigger. The detector ships two ways: (a) as an optional, config-gated subsystem inside the existing DrainCtl service, and (b) as a standalone CLI that can also install as a Windows service and forward spikes over the existing `\\.\pipe\drainctl` named pipe. Baseline state (~135 KB per host) persists to an atomically-written JSON file for warm restart. A small dashboard surface (status pill + recent-spikes list) is added to the existing Svelte dashboard; no new dashboard pages. The `Security` channel is excluded from defaults; admins opt in at install time via an MSI component that grants `SeSecurityPrivilege` to the DrainCtl service account and revokes it on opt-out.
+Detect anomalous Windows event-log activity on RDSH hosts by subscribing to ~54 channels, counting arrivals into 10-second scoring buckets (each bucket is scored directly; no further aggregation), and scoring each bucket against a per-channel, per-time-of-day Gamma-Poisson baseline with Negative-Binomial tail probability. Confirmed spikes (≥2 of 3 consecutive windows) are fanned out through the existing notification pipeline via a new `event_spike` trigger. The detector ships two ways: (a) as an optional, config-gated subsystem inside the existing DrainCtl service, and (b) as a standalone CLI that can also install as a Windows service and forward spikes over the existing `\\.\pipe\drainctl` named pipe. Baseline state (~135 KB per host) persists to an atomically-written JSON file for warm restart. A small dashboard surface (status pill + recent-spikes list) is added to the existing Svelte dashboard; no new dashboard pages. The `Security` channel is excluded from defaults; admins opt in at install time via an MSI component that grants `SeSecurityPrivilege` to the DrainCtl service account and revokes it on opt-out.
 
 The POC on `feat/evtspike-poc` already validates the detection algorithm. The remaining work is productization: lifting the detector package into the service codebase, wiring it into Config / Notify / dashboard / named pipe, making the standalone a Windows service, and adding the MSI component for Security opt-in.
 
@@ -30,7 +30,7 @@ The POC on `feat/evtspike-poc` already validates the detection algorithm. The re
 **Project Type**: Single Windows service (with a secondary CLI/service binary). Fits the existing DrainCtl shape: root package exposes public API, `cmd/drainctl` is the user CLI, `cmd/cshared` is the DLL, `cmd/evtspike` is the standalone binary. No new top-level project layout.
 
 **Performance Goals**:
-- SC-002: ≤3 minutes (three 60-second scoring windows) from anomaly onset to notification fired.
+- SC-002: ≤30 seconds (three 10-second scoring buckets) from anomaly onset to notification fired.
 - SC-007: steady-state CPU a small single-digit percentage of one core; memory well under 50 MB.
 - SC-008: standalone CLI first scoring pass within 15 s of launch.
 - Baseline write: default once every 15 minutes (one per slot rollover) — sized so a day of writes is <0.1 MB/day churn, and a crash loses at most 15 minutes of learning.
