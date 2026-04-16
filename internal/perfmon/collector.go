@@ -93,10 +93,16 @@ type Collector struct {
 }
 
 // do dispatches fn to the dedicated PDH thread and blocks until completion.
-func (c *Collector) do(fn func()) {
+// Returns false if the collector is closed/closing.
+func (c *Collector) do(fn func()) bool {
 	r := request{fn: fn, done: make(chan struct{})}
-	c.reqCh <- r
-	<-r.done
+	select {
+	case c.reqCh <- r:
+		<-r.done
+		return true
+	case <-c.stopCh:
+		return false
+	}
 }
 
 func startWorker() chan request {
