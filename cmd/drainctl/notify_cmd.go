@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +23,8 @@ func notifyCmd() *cobra.Command {
 	cmd.AddCommand(notifyStatusCmd())
 	cmd.AddCommand(notifySetWebhookCmd())
 	cmd.AddCommand(notifySetNtfyCmd())
+	cmd.AddCommand(notifySetEmailCmd())
+	cmd.AddCommand(notifyRemoveCmd())
 	cmd.AddCommand(notifyTestCmd())
 
 	return cmd
@@ -45,15 +48,23 @@ func notifyStatusCmd() *cobra.Command {
 func notifySetWebhookCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "set-webhook [url]",
-		Short: "Set webhook URL (empty to disable)",
-		Long: `Set the webhook notification URL.
+		Short: "Set webhook URL (empty to remove all webhook targets)",
+		Long: `Set a webhook notification URL.
 
 When called without optional flags, only the URL is updated and all other
 settings (secret, triggers, repeat interval) are preserved.
 
-Use --secret to configure HMAC-SHA256 request signing.
-Use --triggers to filter which events fire this webhook.
-Use --repeat-minutes to control how often repeated events notify (0=once).`,
+Use --secret or --secret-env to configure HMAC-SHA256 request signing.
+  --secret <value>         pass the secret directly (visible in shell history)
+  --secret-env <NAME>      read the secret from the named environment variable
+                           (RMM/script-friendly; secret never lands on disk)
+
+Use --target-index N to address the Nth webhook target (default 0). An index
+past the end appends a new target. Use --triggers and --repeat-minutes to
+control which events fire and how often.
+
+Pass an empty URL ("") to remove ALL webhook targets at once. To remove a
+single target, use 'drainctl notify remove --type webhook --target-index N'.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fileCfg, err := dc.LoadConfig()
@@ -65,47 +76,35 @@ Use --repeat-minutes to control how often repeated events notify (0=once).`,
 				url = args[0]
 			}
 
-			var ov notifyOverrides
-			if cmd.Flags().Changed("secret") {
-				s, _ := cmd.Flags().GetString("secret")
-				ov.Secret = &s
-			}
-			if cmd.Flags().Changed("triggers") {
-				raw, _ := cmd.Flags().GetString("triggers")
-				triggers, err := parseTriggers(raw)
-				if err != nil {
-					return err
-				}
-				ov.Triggers = &triggers
-			}
-			if cmd.Flags().Changed("repeat-minutes") {
-				m, _ := cmd.Flags().GetInt("repeat-minutes")
-				if m < 0 || m > dc.MaxRepeatMinutes {
-					return fmt.Errorf("repeat-minutes must be 0–%d", dc.MaxRepeatMinutes)
-				}
-				ov.RepeatMinutes = &m
+			ov, err := buildOverrides(cmd, true)
+			if err != nil {
+				return err
 			}
 
 			return setNotifyTarget(fileCfg, "webhook", url, ov)
 		},
 	}
 	c.Flags().String("secret", "", "HMAC-SHA256 signing secret (empty to clear)")
+	c.Flags().String("secret-env", "", "Name of env var to read the secret from (mutex with --secret)")
 	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this webhook (valid: %s)", triggerList()))
 	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
+	c.Flags().Int("target-index", 0, "0-based index among webhook targets (past end → append)")
 	return c
 }
 
 func notifySetNtfyCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "set-ntfy [url]",
-		Short: "Set ntfy URL (empty to disable)",
-		Long: `Set the ntfy.sh notification URL.
+		Short: "Set ntfy URL (empty to remove all ntfy targets)",
+		Long: `Set an ntfy.sh notification URL.
 
 When called without optional flags, only the URL is updated and all other
 settings (triggers, repeat interval) are preserved.
 
-Use --triggers to filter which events fire this notification.
-Use --repeat-minutes to control how often repeated events notify (0=once).`,
+Use --target-index N to address the Nth ntfy target (default 0). An index
+past the end appends a new target.
+
+Pass an empty URL ("") to remove ALL ntfy targets at once.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fileCfg, err := dc.LoadConfig()
@@ -117,21 +116,9 @@ Use --repeat-minutes to control how often repeated events notify (0=once).`,
 				url = args[0]
 			}
 
-			var ov notifyOverrides
-			if cmd.Flags().Changed("triggers") {
-				raw, _ := cmd.Flags().GetString("triggers")
-				triggers, err := parseTriggers(raw)
-				if err != nil {
-					return err
-				}
-				ov.Triggers = &triggers
-			}
-			if cmd.Flags().Changed("repeat-minutes") {
-				m, _ := cmd.Flags().GetInt("repeat-minutes")
-				if m < 0 || m > dc.MaxRepeatMinutes {
-					return fmt.Errorf("repeat-minutes must be 0–%d", dc.MaxRepeatMinutes)
-				}
-				ov.RepeatMinutes = &m
+			ov, err := buildOverrides(cmd, false)
+			if err != nil {
+				return err
 			}
 
 			return setNotifyTarget(fileCfg, "ntfy", url, ov)
@@ -139,6 +126,103 @@ Use --repeat-minutes to control how often repeated events notify (0=once).`,
 	}
 	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
 	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
+	c.Flags().Int("target-index", 0, "0-based index among ntfy targets (past end → append)")
+	return c
+}
+
+func notifySetEmailCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "set-email <smtp-url>",
+		Short: "Set an SMTP email notification target",
+		Long: `Configure an SMTP email notification target.
+
+The URL must use the smtp:// or smtps:// scheme (e.g., smtp://mail.example.com:587).
+
+Required on first creation:
+  --from <addr>            sender address
+  --to <addr1,addr2,...>   one or more recipient addresses
+
+Use --secret or --secret-env to set the SMTP password:
+  --secret <value>         pass the password directly (visible in shell history)
+  --secret-env <NAME>      read the password from the named environment variable
+                           (RMM/script-friendly; password never lands on disk)
+
+The plaintext password is DPAPI-encrypted before being written to config.json.
+Use --target-index N to address the Nth email target (default 0). An index
+past the end appends a new target.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fileCfg, err := dc.LoadConfig()
+			if err != nil {
+				return err
+			}
+			url := args[0]
+			if strings.TrimSpace(url) == "" {
+				return errors.New("smtp-url is required")
+			}
+
+			ov, err := buildOverrides(cmd, true)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("from") {
+				s, _ := cmd.Flags().GetString("from")
+				ov.From = &s
+			}
+			if cmd.Flags().Changed("to") {
+				raw, _ := cmd.Flags().GetString("to")
+				to := splitCSV(raw)
+				if len(to) == 0 {
+					return errors.New("--to must contain at least one address")
+				}
+				ov.To = &to
+			}
+
+			return setNotifyTarget(fileCfg, "email", url, ov)
+		},
+	}
+	c.Flags().String("from", "", "Sender email address")
+	c.Flags().String("to", "", "Comma-separated recipient email addresses")
+	c.Flags().String("secret", "", "SMTP password (DPAPI-encrypted on disk)")
+	c.Flags().String("secret-env", "", "Name of env var to read the password from (mutex with --secret)")
+	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
+	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
+	c.Flags().Int("target-index", 0, "0-based index among email targets (past end → append)")
+	return c
+}
+
+func notifyRemoveCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "remove",
+		Short: "Remove a single notification target by type and index",
+		Long: `Remove the Nth notification target of a given type.
+
+Use 'drainctl notify status' to see the index of each target.
+
+Examples:
+  drainctl notify remove --type webhook --target-index 1
+  drainctl notify remove --type email   --target-index 0`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			typ, _ := cmd.Flags().GetString("type")
+			idx, _ := cmd.Flags().GetInt("target-index")
+
+			fileCfg, err := dc.LoadConfig()
+			if err != nil {
+				return err
+			}
+			if err := dc.RemoveNotifyTarget(fileCfg, typ, idx); err != nil {
+				return err
+			}
+			if err := dc.SaveConfig(fileCfg); err != nil {
+				return err
+			}
+			slog.Info(fmt.Sprintf("removed %s[%d]", typ, idx))
+			return nil
+		},
+	}
+	c.Flags().String("type", "", "Target type: webhook, ntfy, or email (required)")
+	c.Flags().Int("target-index", 0, "0-based index among targets of the chosen type")
+	_ = c.MarkFlagRequired("type")
 	return c
 }
 
@@ -160,14 +244,66 @@ func notifyTestCmd() *cobra.Command {
 // A nil pointer means "preserve the existing value".
 type notifyOverrides struct {
 	Secret        *string
+	From          *string
+	To            *[]string
 	Triggers      *[]dc.Trigger
 	RepeatMinutes *int
+	TargetIndex   int
 }
 
-// setNotifyTarget sets or clears the first notification target of typ.
-// If url is empty, all targets of typ are removed. Otherwise the first
-// existing target of typ is updated (URL + any non-nil overrides), or a new
-// one is appended when none exists.
+// buildOverrides reads --secret/--secret-env/--triggers/--repeat-minutes/
+// --target-index from cmd. allowSecret controls whether --secret/--secret-env
+// are consulted (ntfy doesn't accept a secret).
+func buildOverrides(cmd *cobra.Command, allowSecret bool) (notifyOverrides, error) {
+	var ov notifyOverrides
+
+	if allowSecret {
+		secretChanged := cmd.Flags().Changed("secret")
+		secretEnvChanged := cmd.Flags().Changed("secret-env")
+		if secretChanged && secretEnvChanged {
+			return ov, errors.New("--secret and --secret-env are mutually exclusive")
+		}
+		if secretChanged {
+			s, _ := cmd.Flags().GetString("secret")
+			ov.Secret = &s
+		} else if secretEnvChanged {
+			name, _ := cmd.Flags().GetString("secret-env")
+			if strings.TrimSpace(name) == "" {
+				return ov, errors.New("--secret-env requires a non-empty variable name")
+			}
+			val, ok := os.LookupEnv(name)
+			if !ok {
+				return ov, fmt.Errorf("environment variable %q is not set", name)
+			}
+			ov.Secret = &val
+		}
+	}
+	if cmd.Flags().Changed("triggers") {
+		raw, _ := cmd.Flags().GetString("triggers")
+		triggers, err := parseTriggers(raw)
+		if err != nil {
+			return ov, err
+		}
+		ov.Triggers = &triggers
+	}
+	if cmd.Flags().Changed("repeat-minutes") {
+		m, _ := cmd.Flags().GetInt("repeat-minutes")
+		if m < 0 || m > dc.MaxRepeatMinutes {
+			return ov, fmt.Errorf("repeat-minutes must be 0–%d", dc.MaxRepeatMinutes)
+		}
+		ov.RepeatMinutes = &m
+	}
+	if cmd.Flags().Changed("target-index") {
+		ov.TargetIndex, _ = cmd.Flags().GetInt("target-index")
+	}
+	return ov, nil
+}
+
+// setNotifyTarget upserts or removes notification targets of typ.
+//
+// Empty url removes ALL targets of typ (legacy CLI semantic preserved for
+// scripts). Non-empty url funnels through dc.SetNotifyTarget so the CLI and
+// the DLL share one mutation path.
 func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) error {
 	if url == "" {
 		filtered := fileCfg.Notifications[:0]
@@ -184,24 +320,19 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) er
 		return nil
 	}
 
-	fileCfg.Notifications = upsertNotifyTarget(fileCfg.Notifications, typ, url)
-
-	// Apply per-field overrides to the target we just upserted/updated.
-	for i := range fileCfg.Notifications {
-		if fileCfg.Notifications[i].Type == typ {
-			if ov.Secret != nil {
-				fileCfg.Notifications[i].Secret = *ov.Secret
-			}
-			if ov.Triggers != nil {
-				fileCfg.Notifications[i].Triggers = *ov.Triggers
-			}
-			if ov.RepeatMinutes != nil {
-				fileCfg.Notifications[i].RepeatMinutes = *ov.RepeatMinutes
-			}
-			break
-		}
+	update := dc.NotifyTargetUpdate{
+		Type:          typ,
+		URL:           url,
+		TargetIndex:   ov.TargetIndex,
+		Secret:        ov.Secret,
+		From:          ov.From,
+		To:            ov.To,
+		Triggers:      ov.Triggers,
+		RepeatMinutes: ov.RepeatMinutes,
 	}
-
+	if err := dc.SetNotifyTarget(fileCfg, update); err != nil {
+		return err
+	}
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
@@ -209,6 +340,19 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) er
 		dc.PrintResult(os.Stdout, fmt.Sprintf("%s_url=%q", typ, url))
 	}
 	return nil
+}
+
+// splitCSV splits a comma-separated string and trims whitespace, dropping empties.
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // parseTriggers splits a comma-separated trigger list and validates each name.
@@ -249,6 +393,9 @@ func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
 		slog.Warn("notifications=disabled (no targets configured)")
 		return
 	}
+	// Per-type counters so each line shows the index a user would pass to
+	// --target-index when editing or removing it.
+	counts := map[string]int{}
 	for i, t := range targets {
 		effectiveTriggers := t.Triggers
 		triggerNote := ""
@@ -260,16 +407,25 @@ func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
 		for j, tr := range effectiveTriggers {
 			triggers[j] = string(tr)
 		}
-		hmacNote := ""
-		if t.Type == "webhook" {
+		secretNote := ""
+		switch t.Type {
+		case "webhook":
 			if t.Secret != "" {
-				hmacNote = " hmac_secret=set"
+				secretNote = " hmac_secret=set"
 			} else {
-				hmacNote = " hmac_secret=unset"
+				secretNote = " hmac_secret=unset"
+			}
+		case "email":
+			if t.Secret != "" {
+				secretNote = " smtp_password=set"
+			} else {
+				secretNote = " smtp_password=unset"
 			}
 		}
-		slog.Info(fmt.Sprintf("target[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
-			i, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, hmacNote))
+		typeIdx := counts[t.Type]
+		counts[t.Type]++
+		slog.Info(fmt.Sprintf("target[%d] %s[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
+			i, t.Type, typeIdx, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, secretNote))
 	}
 	if hasTargets {
 		if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
@@ -280,18 +436,10 @@ func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
 	}
 }
 
-// upsertNotifyTarget updates the URL of the first target of typ, or appends a
-// new target when none exists. Used by both setNotifyTarget and runConfigureFlags.
+// upsertNotifyTarget retained as a thin shim over dc.SetNotifyTarget so existing
+// callers in configure_cmd.go and tests keep working.
 func upsertNotifyTarget(targets []dc.NotificationTarget, typ, url string) []dc.NotificationTarget {
-	for i := range targets {
-		if targets[i].Type == typ {
-			targets[i].URL = url
-			return targets
-		}
-	}
-	return append(targets, dc.NotificationTarget{
-		Type:     typ,
-		URL:      url,
-		Triggers: dc.DefaultTriggers,
-	})
+	cfg := &dc.Config{Notifications: targets}
+	_ = dc.SetNotifyTarget(cfg, dc.NotifyTargetUpdate{Type: typ, URL: url})
+	return cfg.Notifications
 }
