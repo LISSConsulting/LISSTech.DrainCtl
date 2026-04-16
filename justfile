@@ -32,10 +32,13 @@ header recipe:
 # ── Version ──────────────────────────────────────────────────────────────────
 
 # Bump patch version (CalVer YY.DOY.patch) across all 8 files + recompile .syso
+# Usage: just bump       (bump by 1)
+#        just bump 5     (bump by 5)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-bump: (header "bump")
+bump n="1": (header "bump")
     $exePath = "{{bin_dir}}/drainctl.exe"
+    $bumpBy = [int]"{{n}}"
 
     # Determine current version from source
     $src = Get-Content "drainctl.go" -Raw
@@ -51,9 +54,9 @@ bump: (header "bump")
     $yy = (Get-Date).Year % 100
     $doy = (Get-Date).DayOfYear
     if ([int]$parts[0] -eq $yy -and [int]$parts[1] -eq $doy) {
-        $patch = [int]$parts[2] + 1
+        $patch = [int]$parts[2] + $bumpBy
     } else {
-        $patch = 0
+        $patch = 0 + ($bumpBy - 1)
     }
     $new = "$yy.$doy.$patch"
 

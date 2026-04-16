@@ -75,11 +75,11 @@
   </style>
 </head>
 
-<body style="word-spacing:normal;background-color:#fdf8f6;">
-  <div aria-roledescription="email" style="background-color:#fdf8f6;" role="article" lang="und" dir="auto">
-    <!--[if mso | IE]><table align="center" border="0" cellpadding="0" cellspacing="0" class="" role="presentation" style="width:520px;" width="520" ><tr><td style="line-height:0px;font-size:0px;mso-line-height-rule:exactly;"><![endif]-->
-    <div style="margin:0px auto;max-width:520px;">
-      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+<body style="word-spacing:normal;background-color:transparent;">
+  <div aria-roledescription="email" style="background-color:transparent;" role="article" lang="und" dir="auto">
+    <!--[if mso | IE]><table align="left" border="0" cellpadding="0" cellspacing="0" class="" role="presentation" style="width:520px;" width="520" ><tr><td style="line-height:0px;font-size:0px;mso-line-height-rule:exactly;"><![endif]-->
+    <div style="margin:0;max-width:520px;">
+      <table align="left" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
         <tbody>
           <tr>
             <td style="direction:ltr;font-size:0px;padding:16px;text-align:left;">
@@ -88,8 +88,8 @@
                 <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%" style="border-collapse:separate;">
                   <tbody>
                     <tr>
-                      <td style="background-color:{{.CardBg}};border:2.5px solid #2d1a1a;border-left:5px solid {{.BorderColor}};border-radius:10px;vertical-align:top;border-collapse:separate;padding:0;">
-                        <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="background-color:{{.CardBg}};" width="100%">
+                      <td style="background-color:#ffffff;border:1.5px solid #d5c5c0;border-left:6px solid {{.BorderColor}};border-radius:10px;vertical-align:top;border-collapse:separate;padding:0;overflow:hidden;">
+                        <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#ffffff;" width="100%">
                           <tbody>
                             <!-- Header -->
                             <tr>
@@ -116,7 +116,7 @@
                                 <div style="font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;font-size:13px;line-height:1.4;text-align:left;color:#000000;">
                                   <table cellpadding="0" cellspacing="0" border="0" role="presentation">
                                     <tr>
-                                      <td style="background-color:{{.StatusColor}};color:#ffffff;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:5px 14px;border:2px solid #2d1a1a;mso-padding-alt:5px 14px;">{{.Status}}</td>
+                                      <td style="background-color:{{.StatusColor}};color:#ffffff;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:8px 20px;border:2px solid #2d1a1a;mso-padding-alt:8px 20px;">{{.Status}}</td>
                                     </tr>
                                   </table>
                                 </div>
@@ -127,35 +127,35 @@
                               <td align="left" class="detail-table" style="font-size:0px;padding:0 28px 16px 28px;word-break:break-word;">
                                 <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;font-size:13px;line-height:22px;table-layout:auto;width:100%;border:none;">
                                   <tr style="background-color:#f5ebe8;">
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;width:36%;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Server</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;width:36%;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Server</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;font-weight:600;border-bottom:1px solid #d5c5c0;">{{.Host}}</td>
                                   </tr>
                                   <tr>
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Mode</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Mode</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Mode}}</td>
                                   </tr>
                                   <tr style="background-color:#f5ebe8;">
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Status</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Status</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Status}}</td>
                                   </tr>
                                   {{if .IsDrain}}{{if .Duration}}
                                   <tr>
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Duration</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Duration</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Duration}}</td>
                                   </tr>
                                   {{end}}{{if .GracePeriod}}
                                   <tr style="background-color:#f5ebe8;">
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Grace Period</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Grace Period</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.GracePeriod}}</td>
                                   </tr>
                                   {{end}}
                                   <tr>
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Changed By</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Changed By</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.ChangedBy}}</td>
                                   </tr>
                                   {{end}}
                                   <tr style="background-color:#f5ebe8;">
-                                    <td style="padding:9px 14px;font-size:11px;font-weight:700;color:#7a5a5a;text-transform:uppercase;letter-spacing:0.06em;">Timestamp</td>
+                                    <td style="padding:9px 14px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;">Timestamp</td>
                                     <td style="padding:9px 14px;font-size:14px;color:#2d1a1a;">{{.Timestamp}}</td>
                                   </tr>
                                 </table>
@@ -165,9 +165,9 @@
                             <tr>
                               <td align="left" style="font-size:0px;padding:0 28px 20px 28px;word-break:break-word;">
                                 <div style="font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;font-size:13px;line-height:1.4;text-align:left;color:#000000;">{{if .Message}}
-                                  <div style="border-left:3px solid {{.BorderColor}};padding:10px 14px;background-color:{{.BlockquoteBg}};">
-                                    <p style="margin:0;font-size:14px;color:#2d1a1a;line-height:1.5;font-style:italic;">{{.Message}}</p>
-                                  </div>
+                                  <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%"><tr>
+                                    <td style="border-left:3px solid {{.BorderColor}};padding:10px 14px;background-color:{{.BlockquoteBg}};font-size:14px;color:#2d1a1a;line-height:1.5;font-style:italic;mso-padding-alt:10px 14px;">{{.Message}}</td>
+                                  </tr></table>
                                   {{end}}
                                 </div>
                               </td>
