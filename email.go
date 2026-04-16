@@ -28,6 +28,8 @@ type emailData struct {
 	Duration     string // drain-state duration (omitted for perf/session triggers)
 	GracePeriod  string // grace period (only for drain-state triggers)
 	ChangedBy    string // who changed drain state (omitted for perf/session triggers)
+	Sessions     string // e.g. "45 of 50 (90%)"
+	PerfSummary  string // e.g. "CPU 67% · Mem 92% · Delay 38ms"
 	Timestamp    string
 	Message      string
 	Trigger      string
@@ -36,6 +38,24 @@ type emailData struct {
 	CardBg       string // card background tint
 	BlockquoteBg string // message blockquote background
 	IsDrain      bool   // true for drain-state triggers, controls which detail rows render
+}
+
+// humanModeLabel converts raw Windows registry drain mode constants
+// to concise human-readable labels for notifications.
+func humanModeLabel(raw string) string {
+	switch raw {
+	case "ALLOW_ALL_CONNECTIONS":
+		return "Accepting Connections"
+	case "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS":
+		return "Blocking New Connections"
+	case "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART":
+		return "Blocking Until Restart"
+	default:
+		if raw == "" {
+			return "Unknown"
+		}
+		return raw
+	}
 }
 
 // TriggerStatus returns a human-readable status label for a trigger.
@@ -117,14 +137,43 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		}
 	}
 
+	// Session summary
+	sessions := ""
+	if result.Sessions != nil {
+		s := result.Sessions
+		if s.MaxSessions > 0 {
+			sessions = fmt.Sprintf("%d of %d (%d%%)", s.TotalSessions, s.MaxSessions, s.UtilizationPct)
+		} else {
+			sessions = fmt.Sprintf("%d active", s.TotalSessions)
+		}
+	}
+
+	// Performance one-liner
+	perfSummary := ""
+	if result.Performance != nil {
+		p := result.Performance
+		parts := []string{}
+		parts = append(parts, fmt.Sprintf("CPU %.0f%%", p.CPUPct))
+		if p.MemTotalMB > 0 {
+			memPct := (1 - p.MemAvailMB/p.MemTotalMB) * 100
+			parts = append(parts, fmt.Sprintf("Mem %.0f%%", memPct))
+		}
+		if p.InputDelayP95 > 0 {
+			parts = append(parts, fmt.Sprintf("Delay %.0fms", p.InputDelayP95))
+		}
+		perfSummary = strings.Join(parts, " · ")
+	}
+
 	data := emailData{
 		Subject:      subject,
 		Host:         result.Host,
-		Mode:         result.DrainModeLabel,
+		Mode:         humanModeLabel(result.DrainModeLabel),
 		Status:       status,
 		Duration:     dur,
 		GracePeriod:  grace,
 		ChangedBy:    cb,
+		Sessions:     sessions,
+		PerfSummary:  perfSummary,
 		Timestamp:    result.Timestamp.Format("2006-01-02 15:04:05 MST"),
 		Message:      result.Message,
 		Trigger:      string(trigger),

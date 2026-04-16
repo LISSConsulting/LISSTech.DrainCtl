@@ -67,6 +67,9 @@
         padding: 12px !important;
       }
     }
+    .detail-table tr:nth-child(odd) td {
+      background-color: #f5ebe8 !important;
+    }
 
   </style>
   <style media="screen and (min-width:480px)">
@@ -79,6 +82,7 @@
 </head>
 
 <body style="word-spacing:normal;background-color:transparent;">
+  <div style="display:none;font-size:1px;color:#fdf8f6;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">{{.Message}} &#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;&#847;&#160;</div>
   <div aria-roledescription="email" style="background-color:transparent;" role="article" lang="und" dir="auto">
     <!--[if mso | IE]><table align="left" border="0" cellpadding="0" cellspacing="0" class="" role="presentation" style="width:520px;" width="520" ><tr><td style="line-height:0px;font-size:0px;mso-line-height-rule:exactly;padding:12px;"><![endif]-->
     <div style="margin:0;max-width:520px;width:100%;">
@@ -129,7 +133,7 @@
                             <tr>
                               <td align="left" class="detail-table" style="font-size:0px;padding:0 12px 12px 12px;word-break:break-word;">
                                 <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;font-size:13px;line-height:22px;table-layout:auto;width:100%;border:none;">
-                                  <tr style="background-color:#f5ebe8;">
+                                  <tr>
                                     <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;width:36%;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Server</td>
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;font-weight:600;border-bottom:1px solid #d5c5c0;">{{.Host}}</td>
                                   </tr>
@@ -137,17 +141,13 @@
                                     <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Mode</td>
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Mode}}</td>
                                   </tr>
-                                  <tr style="background-color:#f5ebe8;">
-                                    <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Status</td>
-                                    <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Status}}</td>
-                                  </tr>
                                   {{if .IsDrain}}{{if .Duration}}
                                   <tr>
-                                    <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Duration</td>
+                                    <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Draining For</td>
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Duration}}</td>
                                   </tr>
                                   {{end}}{{if .GracePeriod}}
-                                  <tr style="background-color:#f5ebe8;">
+                                  <tr>
                                     <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Grace Period</td>
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.GracePeriod}}</td>
                                   </tr>
@@ -157,7 +157,19 @@
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.ChangedBy}}</td>
                                   </tr>
                                   {{end}}
-                                  <tr style="background-color:#f5ebe8;">
+                                  {{if .Sessions}}
+                                  <tr>
+                                    <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Sessions</td>
+                                    <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.Sessions}}</td>
+                                  </tr>
+                                  {{end}}
+                                  {{if .PerfSummary}}
+                                  <tr>
+                                    <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #d5c5c0;">Performance</td>
+                                    <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;border-bottom:1px solid #d5c5c0;">{{.PerfSummary}}</td>
+                                  </tr>
+                                  {{end}}
+                                  <tr>
                                     <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#5a3a3a;text-transform:uppercase;letter-spacing:0.06em;">Timestamp</td>
                                     <td style="padding:8px 10px;font-size:14px;color:#2d1a1a;">{{.Timestamp}}</td>
                                   </tr>
@@ -186,12 +198,14 @@
                             </tr>
                             <tr>
                               <td align="left" style="font-size:0px;padding:10px 12px 12px 12px;word-break:break-word;">
-                                <div style="font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;font-size:11px;line-height:1.4;text-align:left;color:#000000;"><span style="font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:{{.BorderColor}};">LISSTech DrainCtl</span>
-                                  <span style="color:#a68e8e;"> &middot; </span>
-                                  <span style="font-size:10px;color:#a68e8e;">LISS Technologies</span>
-                                  <!--[if mso]>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<![endif]-->
-                                  <span style="float:right;font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#7a5a5a;background-color:#f5ebe8;padding:2px 8px;border:1.5px solid #d5c5c0;">{{.Trigger}}</span>
-                                </div>
+                                <table cellpadding="0" cellspacing="0" border="0" width="100%" role="presentation" style="font-family:'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;">
+                                  <tr>
+                                    <td align="center" style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:{{.BorderColor}};padding-bottom:2px;">LISSTech DrainCtl</td>
+                                  </tr>
+                                  <tr>
+                                    <td align="center" style="font-size:10px;color:#a68e8e;">LISS Technologies</td>
+                                  </tr>
+                                </table>
                               </td>
                             </tr>
                           </tbody>

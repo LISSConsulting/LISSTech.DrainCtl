@@ -301,11 +301,11 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 
 	switch trigger {
 	case TriggerDrainOn:
-		return fmt.Sprintf("%s \u2014 New remote connections disabled%s", host, by)
+		return fmt.Sprintf("\U0001F6AB %s \u2014 New remote connections disabled%s", host, by)
 	case TriggerDrainOff:
-		return fmt.Sprintf("%s \u2014 Remote connections re-enabled%s", host, by)
+		return fmt.Sprintf("\u2705 %s \u2014 Remote connections re-enabled%s", host, by)
 	case TriggerAlert:
-		return fmt.Sprintf("%s \u2014 Remote connections disabled for %s (exceeds %s grace period)", host, dur, grace)
+		return fmt.Sprintf("\U0001F6A8 %s \u2014 Remote connections disabled for %s (exceeds %s grace period)", host, dur, grace)
 	case TriggerGraceEntered:
 		remaining := ""
 		if result.StateDurationSeconds != nil {
@@ -314,31 +314,47 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 				remaining = formatDuration(rem) + " remaining in "
 			}
 		}
-		return fmt.Sprintf("%s \u2014 Remote connections disabled, %sgrace period", host, remaining)
+		return fmt.Sprintf("\u23F3 %s \u2014 Remote connections disabled, %sgrace period", host, remaining)
 	case TriggerHealthy:
-		return fmt.Sprintf("%s \u2014 Remote connections enabled, server healthy", host)
+		return fmt.Sprintf("\u2705 %s \u2014 Remote connections enabled, server healthy", host)
 	case TriggerSessionWarning:
 		if result.Sessions != nil {
-			return fmt.Sprintf("%s \u2014 Session utilization at %d%% (%d/%d sessions)",
+			return fmt.Sprintf("\U0001F465 %s \u2014 Session utilization at %d%% (%d/%d sessions)",
 				host, result.Sessions.UtilizationPct, result.Sessions.TotalSessions, result.Sessions.MaxSessions)
 		}
-		return fmt.Sprintf("%s \u2014 Session utilization warning", host)
-	case TriggerCPUWarning, TriggerCPUCritical:
+		return fmt.Sprintf("\U0001F465 %s \u2014 Session utilization warning", host)
+	case TriggerCPUWarning:
 		if result.Performance != nil {
-			return fmt.Sprintf("%s \u2014 CPU at %.0f%%", host, result.Performance.CPUPct)
+			return fmt.Sprintf("\u26A0\uFE0F %s \u2014 CPU at %.0f%%", host, result.Performance.CPUPct)
 		}
-		return fmt.Sprintf("%s \u2014 %s", host, trigger)
-	case TriggerMemoryWarning, TriggerMemoryCritical:
+		return fmt.Sprintf("\u26A0\uFE0F %s \u2014 %s", host, trigger)
+	case TriggerCPUCritical:
+		if result.Performance != nil {
+			return fmt.Sprintf("\U0001F525 %s \u2014 CPU at %.0f%%", host, result.Performance.CPUPct)
+		}
+		return fmt.Sprintf("\U0001F525 %s \u2014 %s", host, trigger)
+	case TriggerMemoryWarning:
 		if result.Performance != nil && result.Performance.MemTotalMB > 0 {
 			usedPct := (1 - result.Performance.MemAvailMB/result.Performance.MemTotalMB) * 100
-			return fmt.Sprintf("%s \u2014 Memory at %.0f%%", host, usedPct)
+			return fmt.Sprintf("\u26A0\uFE0F %s \u2014 Memory at %.0f%%", host, usedPct)
 		}
-		return fmt.Sprintf("%s \u2014 %s", host, trigger)
-	case TriggerInputDelayWarning, TriggerInputDelayCritical:
+		return fmt.Sprintf("\u26A0\uFE0F %s \u2014 %s", host, trigger)
+	case TriggerMemoryCritical:
+		if result.Performance != nil && result.Performance.MemTotalMB > 0 {
+			usedPct := (1 - result.Performance.MemAvailMB/result.Performance.MemTotalMB) * 100
+			return fmt.Sprintf("\U0001F525 %s \u2014 Memory at %.0f%%", host, usedPct)
+		}
+		return fmt.Sprintf("\U0001F525 %s \u2014 %s", host, trigger)
+	case TriggerInputDelayWarning:
 		if result.Performance != nil {
-			return fmt.Sprintf("%s \u2014 Input delay P95 %.0fms", host, result.Performance.InputDelayP95)
+			return fmt.Sprintf("\u26A0\uFE0F %s \u2014 Input delay P95 %.0fms", host, result.Performance.InputDelayP95)
 		}
-		return fmt.Sprintf("%s \u2014 %s", host, trigger)
+		return fmt.Sprintf("\u26A0\uFE0F %s \u2014 %s", host, trigger)
+	case TriggerInputDelayCritical:
+		if result.Performance != nil {
+			return fmt.Sprintf("\U0001F525 %s \u2014 Input delay P95 %.0fms", host, result.Performance.InputDelayP95)
+		}
+		return fmt.Sprintf("\U0001F525 %s \u2014 %s", host, trigger)
 	default:
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
 	}
