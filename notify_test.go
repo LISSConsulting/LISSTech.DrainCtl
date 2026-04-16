@@ -398,7 +398,7 @@ func TestSendNtfy_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := sendNtfy(srv.URL, "DrainCtl: Alert on SRV01", "Drain active.", "high", "warning"); err != nil {
+	if err := sendNtfy(srv.URL, "DrainCtl: Alert on SRV01", "Drain active.", "high"); err != nil {
 		t.Fatalf("sendNtfy error: %v", err)
 	}
 }
@@ -409,7 +409,7 @@ func TestSendNtfy_NonSuccessStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := sendNtfy(srv.URL, "title", "msg", "default", "white_check_mark")
+	err := sendNtfy(srv.URL, "title", "msg", "default")
 	if err == nil {
 		t.Error("expected error for 500 response, got nil")
 	}
@@ -423,14 +423,13 @@ func TestSendNtfy_SetsHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := sendNtfy(srv.URL, "My Title", "My Message", "high", "warning"); err != nil {
+	if err := sendNtfy(srv.URL, "My Title", "My Message", "high"); err != nil {
 		t.Fatalf("sendNtfy error: %v", err)
 	}
 
 	checks := map[string]string{
 		"Title":    "My Title",
 		"Priority": "high",
-		"Tags":     "warning",
 	}
 	for header, want := range checks {
 		if got := captured.Header.Get(header); got != want {
@@ -1037,7 +1036,7 @@ func TestSendWebhook_InvalidURL_ReturnsError(t *testing.T) {
 // TestSendNtfy_InvalidURL_ReturnsError verifies that sendNtfy returns an error
 // when the target URL is not valid.
 func TestSendNtfy_InvalidURL_ReturnsError(t *testing.T) {
-	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default", "test_tube")
+	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default")
 	if err == nil {
 		t.Error("expected error for invalid URL, got nil")
 	}
@@ -1167,7 +1166,7 @@ func TestSendNtfy_DoFails_ReturnsError(t *testing.T) {
 	url := srv.URL
 	srv.Close() // close before use — Do will get connection refused
 
-	err := sendNtfy(url, "Test", "msg", "default", "test_tube")
+	err := sendNtfy(url, "Test", "msg", "default")
 	if err == nil {
 		t.Fatal("expected error when connection refused, got nil")
 	}

@@ -138,7 +138,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 
 		case "ntfy":
 			title := NotificationSubject(result, trigger, changedBy)
-			priority, tags := ntfyStyle(trigger)
+			priority := ntfyStyle(trigger)
 			ntfyMsg := result.Message
 			if trigger == TriggerSessionWarning && result.Sessions != nil {
 				sess := result.Sessions
@@ -148,7 +148,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := sendNtfy(t.URL, title, ntfyMsg, priority, tags); err != nil {
+				if err := sendNtfy(t.URL, title, ntfyMsg, priority); err != nil {
 					slog.Warn("ntfy notification failed", "error", err, "url", t.URL)
 				} else {
 					slog.Info("", "notify", "ntfy", "event", string(trigger), "url", t.URL)
@@ -228,7 +228,7 @@ func SendTestNotification(targets []NotificationTarget) error {
 		case "ntfy":
 			title := fmt.Sprintf("DrainCtl Test: %s", host)
 			msg := "This is a test notification from DrainCtl."
-			if err := sendNtfy(target.URL, title, msg, "default", "test_tube"); err != nil {
+			if err := sendNtfy(target.URL, title, msg, "default"); err != nil {
 				slog.Error("ntfy test failed", "error", err, "url", target.URL)
 				errs = append(errs, fmt.Errorf("ntfy %s: %w", target.URL, err))
 			} else {
@@ -395,14 +395,13 @@ func formatDuration(d time.Duration) string {
 }
 
 // sendNtfy posts a message to an ntfy.sh-compatible endpoint.
-func sendNtfy(url string, title string, message string, priority string, tags string) error {
+func sendNtfy(url string, title string, message string, priority string) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBufferString(message))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
-	req.Header.Set("Tags", tags)
 	req.Header.Set("User-Agent", "DrainCtl/"+Version)
 
 	resp, err := httpClient.Do(req)
@@ -419,19 +418,12 @@ func sendNtfy(url string, title string, message string, priority string, tags st
 }
 
 // ntfyStyle returns the ntfy priority and tags emoji for a given trigger.
-func ntfyStyle(trigger Trigger) (priority, tags string) {
+func ntfyStyle(trigger Trigger) (priority string) {
 	switch trigger {
 	case TriggerAlert, TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
-		return "high", "warning"
-	case TriggerGraceEntered, TriggerCPUWarning, TriggerMemoryWarning,
-		TriggerInputDelayWarning, TriggerSessionWarning:
-		return "default", "warning"
-	case TriggerDrainOn:
-		return "default", "no_entry"
-	case TriggerDrainOff, TriggerHealthy:
-		return "default", "white_check_mark"
+		return "high"
 	default:
-		return "default", "white_check_mark"
+		return "default"
 	}
 }
 

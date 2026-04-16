@@ -133,8 +133,8 @@ func TestParseFormat_Invalid(t *testing.T) {
 func TestValidate_LogFileLevelEmpty_UsesDefault(t *testing.T) {
 	c := &Config{LogFileLevel: ""}
 	c.Validate()
-	if c.LogFileLevel != "debug" {
-		t.Errorf("LogFileLevel = %q, want \"debug\"", c.LogFileLevel)
+	if c.LogFileLevel != "info" {
+		t.Errorf("LogFileLevel = %q, want \"info\"", c.LogFileLevel)
 	}
 }
 
@@ -177,8 +177,8 @@ func TestValidate_LogFileLevelCaseInsensitive(t *testing.T) {
 func TestValidate_LogFileLevelInvalid_UsesDefault(t *testing.T) {
 	c := &Config{LogFileLevel: "verbose"}
 	c.Validate()
-	if c.LogFileLevel != "debug" {
-		t.Errorf("LogFileLevel = %q, want \"debug\" (default after invalid)", c.LogFileLevel)
+	if c.LogFileLevel != "info" {
+		t.Errorf("LogFileLevel = %q, want \"info\" (default after invalid)", c.LogFileLevel)
 	}
 }
 
