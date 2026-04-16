@@ -210,3 +210,27 @@ An administrator wants to turn detection on, pick which servers participate, tun
 - **Warm-up**: A per-slot baseline is considered mature after a configurable number of observations, default seven (approximately one week of wall-clock observation, since each 15-minute slot is visited once per day). During warm-up, the detector falls back to the global all-hours baseline; alerts fired during this period are directionally correct but noisier. Admins should expect the first week after install at default settings to produce more false positives than steady state, and may raise or lower the threshold via `config.json`.
 - **Standalone pipe scope**: The standalone CLI's named-pipe target is a DrainCtl service on the same host. Cross-machine forwarding is out of scope for this feature.
 - **Validation**: The POC on `feat/evtspike-poc` has validated the statistical approach (Gamma-Poisson posterior, Negative Binomial tail, 2-of-3 confirmation, time-of-day slots, robust capped updates). This specification treats the algorithm as committed; productization — deployment modes, persistence, configuration, notification integration — is the remaining work.
+
+## Architectural Note: Reusable Scoring Engine
+
+### Motivation
+
+The anomaly detection engine specified above — Bayesian baseline learning, time-of-day slotting, capped updates, 2-of-3 confirmation, and cooldown management — is general-purpose. Future use cases such as performance counter monitoring (CPU utilization, memory pressure, disk latency, session counts), application-level metrics, or other numeric time-series data should be able to reuse the same engine without duplication or major refactoring. This addendum captures the architectural seam that MVP must respect in its internal design, without expanding MVP scope or introducing new public surface.
+
+### Design Points
+
+- **Structured observation interface.** The scoring engine SHOULD accept observations through a defined internal interface comprising: source identifier, timestamp, numeric value, and a model descriptor. It SHOULD return a verdict (normal / anomalous / confirming) together with context (observed value, expected value, deviation score). Adapters and the notification pipeline are the only consumers of this interface; it is not exposed as public API.
+- **Parameterized models per source.** The model used for scoring SHOULD be parameterized per source. MVP ships with the Gamma-Poisson / Negative Binomial model for count data (event log channels). The interface SHOULD allow future model implementations — for example, a Normal-Inverse-Gamma model for continuous metrics like CPU utilization or disk latency — to be registered and selected per source without modifying the engine core.
+- **Event log subscription as adapter.** The event log subscription layer becomes an adapter: it subscribes to channels, buckets arrivals into counts, and feeds the scoring engine. Future adapters (performance counter polling, custom metric ingestion) feed the same engine with their own data and model choice. Each adapter is responsible for acquisition and shaping; it does not reimplement baseline learning, confirmation, or cooldown.
+- **Engine-owned cross-cutting concerns.** Baseline storage, time-of-day slotting, per-slot maturity tracking, 2-of-3 confirmation logic, and cooldown management remain engine responsibilities. Adapters MUST NOT reimplement these.
+- **Source-agnostic spike output.** The spike event emitted by the engine carries source ID, source type, metric name, observed value, expected value, and window timestamps. The notification pipeline formats the human-readable message based on source type; the engine itself is indifferent to what the source represents.
+
+### MVP Constraint
+
+MVP ships only the event log adapter and the Gamma-Poisson model. The scoring engine interface and model parameterization described above are internal design decisions — they guide code organization and type boundaries, but they do not introduce any new public API, configuration surface, or user-facing model-selection mechanism. The goal is clean separation that makes future extension inexpensive, not premature generalization that adds complexity today.
+
+### Future Considerations
+
+- **Continuous metric models.** A Normal-Inverse-Gamma conjugate model (or similar) would support continuous-valued metrics such as CPU utilization, memory working set, and disk latency, where the Gamma-Poisson count model does not apply.
+- **Bidirectional anomaly detection.** The current engine flags only upward deviations (spike detection). Some future metrics — session counts dropping unexpectedly, throughput collapsing — require detection in both directions. The scoring interface should not preclude a signed deviation score.
+- **Scaling with many metric sources.** Adding performance counters or application metrics may increase the number of tracked sources per host by an order of magnitude. Baseline storage format, persistence write cost, and per-source memory overhead should be evaluated if the source count grows well beyond the current ~54-channel ceiling.
