@@ -300,6 +300,63 @@ func buildLegacyTriggers(onTransition, onGraceExceeded *bool) []dc.Trigger {
 	return triggers
 }
 
+// Upserts a single notification target. The body is a JSON-encoded
+// dc.NotifyTargetUpdate; pointer fields left out preserve existing values.
+// On success returns {"ok":true,"target_index":N} where N is the per-type
+// index of the upserted target. The caller (PS / RMM) must DrainCtl_Free
+// the returned string.
+//
+//export DrainCtl_NotifySetTarget
+func DrainCtl_NotifySetTarget(jsonStr *C.char) *C.char {
+	raw := C.GoString(jsonStr)
+	var update dc.NotifyTargetUpdate
+	if err := json.Unmarshal([]byte(raw), &update); err != nil {
+		return marshalError(err)
+	}
+
+	cfg, err := dc.LoadConfig()
+	if err != nil {
+		return marshalError(err)
+	}
+	if err := dc.SetNotifyTarget(cfg, update); err != nil {
+		return marshalError(err)
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		return marshalError(err)
+	}
+
+	// Compute the resulting per-type index so the caller can confirm where
+	// the target landed (especially when TargetIndex was past-end).
+	resultIdx := -1
+	count := 0
+	for _, t := range cfg.Notifications {
+		if t.Type == update.Type {
+			if t.URL == update.URL {
+				resultIdx = count
+			}
+			count++
+		}
+	}
+	return marshalJSON(map[string]any{"ok": true, "target_index": resultIdx})
+}
+
+// Removes the index-th target of typ. Returns {"ok":true} on success.
+//
+//export DrainCtl_NotifyRemoveTarget
+func DrainCtl_NotifyRemoveTarget(typ *C.char, index C.int) *C.char {
+	cfg, err := dc.LoadConfig()
+	if err != nil {
+		return marshalError(err)
+	}
+	if err := dc.RemoveNotifyTarget(cfg, C.GoString(typ), int(index)); err != nil {
+		return marshalError(err)
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		return marshalError(err)
+	}
+	return C.CString(`{"ok":true}`)
+}
+
 //export DrainCtl_TestNotify
 func DrainCtl_TestNotify() *C.char {
 	cfg, err := dc.LoadConfig()

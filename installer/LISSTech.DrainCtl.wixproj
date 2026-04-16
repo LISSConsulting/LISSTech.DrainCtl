@@ -9,7 +9,7 @@
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
   <PropertyGroup>
-    <DefineConstants>ProductVersion=26.106.13</DefineConstants>
+    <DefineConstants>ProductVersion=26.106.14</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
