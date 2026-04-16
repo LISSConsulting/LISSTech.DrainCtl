@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"runtime"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 
@@ -88,6 +89,7 @@ type Collector struct {
 	loggedErrors map[string]bool
 	reqCh        chan request
 	stopCh       chan struct{} // closed by Close() to stop sampler
+	closeOnce    sync.Once
 }
 
 // do dispatches fn to the dedicated PDH thread and blocks until completion.
@@ -268,6 +270,11 @@ func (c *Collector) sampler() {
 					return
 				}
 				c.accum = append(c.accum, *snap)
+				// Cap accumulator to prevent unbounded growth if Collect() is never called.
+				const maxAccum = 120
+				if len(c.accum) > maxAccum {
+					c.accum = c.accum[len(c.accum)-maxAccum:]
+				}
 			})
 		}
 	}
@@ -487,22 +494,17 @@ func (c *Collector) rfxScalar(h syscall.Handle, dst *float64, places int) {
 
 // Close releases PDH queries and stops the worker goroutine.
 func (c *Collector) Close() {
-	if c == nil || c.reqCh == nil {
+	if c == nil {
 		return
 	}
-	// Stop sampler goroutine before closing queries.
-	select {
-	case <-c.stopCh:
-		// already closed
-	default:
+	c.closeOnce.Do(func() {
 		close(c.stopCh)
-	}
-	c.do(func() {
-		pdhCloseQuery(c.hostQuery)
-		c.hostQuery = 0
-		pdhCloseQuery(c.sessionQuery)
-		c.sessionQuery = 0
+		c.do(func() {
+			pdhCloseQuery(c.hostQuery)
+			c.hostQuery = 0
+			pdhCloseQuery(c.sessionQuery)
+			c.sessionQuery = 0
+		})
+		close(c.reqCh)
 	})
-	close(c.reqCh)
-	c.reqCh = nil
 }

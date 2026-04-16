@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -85,6 +86,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		payload["performance"] = result.Performance
 	}
 
+	var wg sync.WaitGroup
 	for _, target := range targets {
 		// Skip disabled targets (nil Enabled means enabled by default).
 		if target.Enabled != nil && !*target.Enabled {
@@ -119,14 +121,20 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			}
 		}
 
-		// Dispatch to backend.
-		switch target.Type {
+		// Dispatch to backend in a goroutine so the poll loop is not
+		// blocked by slow HTTP/SMTP calls.
+		t := target // capture for goroutine
+		switch t.Type {
 		case "webhook":
-			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
-				slog.Warn("webhook notification failed", "error", err, "url", target.URL)
-			} else {
-				slog.Info("", "notify", "webhook", "event", string(trigger), "url", target.URL)
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := sendWebhook(t.URL, t.Secret, payload); err != nil {
+					slog.Warn("webhook notification failed", "error", err, "url", t.URL)
+				} else {
+					slog.Info("", "notify", "webhook", "event", string(trigger), "url", t.URL)
+				}
+			}()
 
 		case "ntfy":
 			title := NotificationSubject(result, trigger, changedBy)
@@ -137,20 +145,29 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
 					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
 			}
-			if err := sendNtfy(target.URL, title, ntfyMsg, priority, tags); err != nil {
-				slog.Warn("ntfy notification failed", "error", err, "url", target.URL)
-			} else {
-				slog.Info("", "notify", "ntfy", "event", string(trigger), "url", target.URL)
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := sendNtfy(t.URL, title, ntfyMsg, priority, tags); err != nil {
+					slog.Warn("ntfy notification failed", "error", err, "url", t.URL)
+				} else {
+					slog.Info("", "notify", "ntfy", "event", string(trigger), "url", t.URL)
+				}
+			}()
 
 		case "email":
-			if err := sendEmail(target, result, trigger, changedBy); err != nil {
-				slog.Warn("email notification failed", "error", err, "url", target.URL)
-			} else {
-				slog.Info("", "notify", "email", "event", string(trigger), "to", target.To)
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := sendEmail(t, result, trigger, changedBy); err != nil {
+					slog.Warn("email notification failed", "error", err, "url", t.URL)
+				} else {
+					slog.Info("", "notify", "email", "event", string(trigger), "to", t.To)
+				}
+			}()
 		}
 	}
+	wg.Wait()
 }
 
 // SendTestNotification sends a test message to all configured targets.

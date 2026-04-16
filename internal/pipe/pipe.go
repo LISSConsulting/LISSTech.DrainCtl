@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"time"
@@ -201,11 +202,11 @@ func pipeRPC(req PipeRequest) (*PipeResponse, error) {
 		return nil, fmt.Errorf("write request: %w", err)
 	}
 
-	buf := make([]byte, 256*1024) // 256KB for large history responses
-	n, err := conn.Read(buf)
+	buf, err := io.ReadAll(io.LimitReader(conn, 4*1024*1024)) // 4MB cap
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
+	n := len(buf)
 
 	var resp PipeResponse
 	if err := json.Unmarshal(buf[:n], &resp); err != nil {

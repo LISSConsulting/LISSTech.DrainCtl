@@ -124,15 +124,17 @@ func (m *MemAuditStore) History(n int) []dc.AuditRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Copy and reverse.
-	out := make([]dc.AuditRecord, len(m.records))
-	copy(out, m.records)
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+	total := len(m.records)
+	if total == 0 {
+		return nil
 	}
-
-	if n > 0 && n < len(out) {
-		out = out[:n]
+	count := total
+	if n > 0 && n < count {
+		count = n
+	}
+	out := make([]dc.AuditRecord, count)
+	for i := 0; i < count; i++ {
+		out[i] = m.records[total-1-i]
 	}
 	return out
 }
@@ -143,18 +145,13 @@ func (m *MemAuditStore) Changes(n int) []dc.AuditRecord {
 	defer m.mu.RUnlock()
 
 	var changes []dc.AuditRecord
-	for _, r := range m.records {
-		if r.Changed {
-			changes = append(changes, r)
+	for i := len(m.records) - 1; i >= 0; i-- {
+		if m.records[i].Changed {
+			changes = append(changes, m.records[i])
+			if n > 0 && len(changes) >= n {
+				break
+			}
 		}
-	}
-
-	for i, j := 0, len(changes)-1; i < j; i, j = i+1, j-1 {
-		changes[i], changes[j] = changes[j], changes[i]
-	}
-
-	if n > 0 && n < len(changes) {
-		changes = changes[:n]
 	}
 	return changes
 }
