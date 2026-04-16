@@ -1517,6 +1517,46 @@ func TestHandlePutSettings_WebhookSecretPreserved(t *testing.T) {
 	}
 }
 
+// TestHandlePutSettings_ClearSecret verifies the dashboard's escape hatch for
+// wiping a saved secret. Empty secret means "preserve" (legacy back-compat),
+// so the only way to actually clear is the per-target clear_secret flag.
+func TestHandlePutSettings_ClearSecret(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	// Seed an existing config with a secret on disk so the preserve path has
+	// something to fall back on (proves clear_secret beats preservation).
+	seed := dc.DefaultConfig()
+	seed.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook/", Secret: "old-hmac", Triggers: dc.DefaultTriggers},
+	}
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	var capturedNotifs *[]dc.NotificationTarget
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
+		capturedNotifs = notifications
+		return nil
+	}
+
+	// Send the same target with no secret AND clear_secret=true.
+	body := `{"notifications":[{"type":"webhook","url":"https://hook/","triggers":["drain_on","drain_off","alert","healthy"],"clear_secret":true}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if capturedNotifs == nil || len(*capturedNotifs) != 1 {
+		t.Fatalf("captured = %v, want 1 target", capturedNotifs)
+	}
+	if got := (*capturedNotifs)[0].Secret; got != "" {
+		t.Errorf("Secret = %q, want empty (clear_secret should wipe)", got)
+	}
+}
+
 func TestHandlePutSettings_AbsentNotifications_PassedAsNil(t *testing.T) {
 	ds := newTestServer(t)
 

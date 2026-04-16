@@ -667,18 +667,37 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Wire-only target type so the frontend can send clear_secret=true to
+	// explicitly wipe a saved secret. We can't put ClearSecret on
+	// dc.NotificationTarget because that struct is also the on-disk format.
+	type wireTarget struct {
+		dc.NotificationTarget
+		ClearSecret bool `json:"clear_secret,omitempty"`
+	}
+
 	// Use pointer-to-slice so we can distinguish absent ("don't change") from
 	// explicit empty array ("clear all notifications").
 	var in struct {
-		Notifications           *[]dc.NotificationTarget `json:"notifications"`
-		SessionWarningThreshold *int                     `json:"session_warning_threshold,omitempty"`
-		GracePeriod             *int                     `json:"grace_period,omitempty"`
-		PollInterval            *int                     `json:"poll_interval,omitempty"`
-		Performance             *dc.PerformanceConfig    `json:"performance,omitempty"`
+		Notifications           *[]wireTarget         `json:"notifications"`
+		SessionWarningThreshold *int                  `json:"session_warning_threshold,omitempty"`
+		GracePeriod             *int                  `json:"grace_period,omitempty"`
+		PollInterval            *int                  `json:"poll_interval,omitempty"`
+		Performance             *dc.PerformanceConfig `json:"performance,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
+	}
+
+	// Project the wire targets back into the on-disk type once we've consumed
+	// the wire-only flags.
+	var notifications *[]dc.NotificationTarget
+	if in.Notifications != nil {
+		flat := make([]dc.NotificationTarget, len(*in.Notifications))
+		for i, w := range *in.Notifications {
+			flat[i] = w.NotificationTarget
+		}
+		notifications = &flat
 	}
 
 	// Validate numeric fields before persisting; return 400 (client error) not 500.
@@ -697,8 +716,8 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 
 	// Validate notification targets so invalid entries are rejected with a clear
 	// 400 instead of being silently stripped by Config.Validate() after save.
-	if in.Notifications != nil {
-		for i, t := range *in.Notifications {
+	if notifications != nil {
+		for i, t := range *notifications {
 			if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
 				http.Error(w, fmt.Sprintf("notifications[%d]: unknown type %q (want \"webhook\", \"ntfy\", or \"email\")", i, t.Type), http.StatusBadRequest)
 				return
@@ -741,32 +760,38 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Secrets are write-only: the GET response never includes them.
-	// Empty string = "don't change" → preserve existing secret from disk.
-	// Non-empty string = new secret (will be DPAPI-encrypted by Validate).
-	if in.Notifications != nil {
+	// Three semantics on a per-target basis:
+	//   clear_secret=true  → wipe the saved secret (regardless of secret field)
+	//   secret == ""       → preserve the existing secret from disk
+	//   secret != ""       → replace with the new value (DPAPI-encrypted by Validate)
+	if notifications != nil {
 		existing, err := dc.LoadConfig()
+		secretMap := map[string]string{}
 		if err == nil {
-			secretMap := make(map[string]string, len(existing.Notifications))
 			for _, t := range existing.Notifications {
 				secretMap[t.Type+"\x00"+t.URL] = t.Secret
 			}
-			for i := range *in.Notifications {
-				t := &(*in.Notifications)[i]
-				if t.Secret == "" {
-					t.Secret = secretMap[t.Type+"\x00"+t.URL]
-				}
+		}
+		for i := range *notifications {
+			t := &(*notifications)[i]
+			wire := (*in.Notifications)[i] // sibling slot in the wire-only slice
+			switch {
+			case wire.ClearSecret:
+				t.Secret = ""
+			case t.Secret == "":
+				t.Secret = secretMap[t.Type+"\x00"+t.URL]
 			}
 		}
 	}
 
 	if ds.testPutSettingsFunc != nil {
-		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
+		if err := ds.testPutSettingsFunc(notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
 			slog.Error("update config failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
+		if err := dc.UpdateNotifySettings(notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
 			slog.Error("update settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
