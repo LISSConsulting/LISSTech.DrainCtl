@@ -293,13 +293,13 @@
                         <th></th>
                         <th
                             onclick={() => sort('host')}
-                            class="sortable" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'host' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Host {sortCol === 'host' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('status')}
-                            class="sortable" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'status' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Status {sortCol === 'status' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
@@ -307,31 +307,31 @@
                         <th>Since</th>
                         <th
                             onclick={() => sort('sessions')}
-                            class="sortable spark-col" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'sessions' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('cpu')}
-                            class="sortable spark-col" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'cpu' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('mem')}
-                            class="sortable spark-col" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >MEM {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('delay')}
-                            class="sortable spark-col" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('last_seen')}
-                            class="sortable" tabindex="0" role="button" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
                             aria-sort={sortCol === 'last_seen' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
