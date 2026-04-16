@@ -26,7 +26,8 @@ Returns the current detector status for one registered server.
 
 **Response 404**: hostname not registered.
 **Response 401**: no valid session.
-**Response 503**: dashboard server not configured for evtspike (the service has it disabled and the standalone has never forwarded).
+
+> **Disabled feature**: when evtspike is disabled in configuration, this endpoint returns **200** with `state: "disabled"` in the `DetectorStatus` body — not 503. HTTP 503 would imply "retry later"; a deliberately disabled feature is a permanent configuration state. The `DetectorStatus.State` field is the correct signal for the UI.
 
 **Omit optional fields** when zero-valued:
 - `error_reason` omitted unless `state == "error"`.

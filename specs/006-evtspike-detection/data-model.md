@@ -16,7 +16,7 @@ Nested under the existing root `Config` struct. Edits `config.go`.
 | CooldownMinutes | `int` | `cooldown_minutes` | `10` | [1, 1440] | Suppress repeat alerts for same (host, channel) within this window. |
 | SlotMaturityObservations | `int` | `slot_maturity_observations` | `7` | [1, 100] | Observations per 15-minute slot before that slot is trusted (Q1 clarification). |
 | PersistIntervalSeconds | `int` | `persist_interval_seconds` | `900` | [60, 86400] | Baseline write cadence (R1). |
-| HalfLifeBuckets | `int` | `half_life_buckets` | `360` | [60, 10000] | Exponential forgetting half-life in 10s buckets. |
+| HalfLifeBuckets | `int` | `half_life_buckets` | `360` | [60, 10000] | Exponential forgetting half-life in 10s buckets (360 × 10 s = ~1 hour). |
 | PriorStrength | `float64` | `prior_strength` | `60` | [1, 10000] | Weakly-informative prior strength in bucket-equivalents. |
 | MeanPerBucketPrior | `float64` | `mean_per_bucket_prior` | `0.1` | [0.0, 1000] | Prior expected events per 10s bucket. |
 | BaselinePath | `string` | `baseline_path` | `""` → default path | — | Override for the baseline file location. Empty string means the default. |
@@ -143,7 +143,7 @@ Lives in `internal/evtspike/spike.go`. Used three ways: notification dispatch, p
 
 **Invariants**:
 - `Observed >= 0`, `Expected >= 0`, `0 < TailProbability < 1`, `ConfirmationCount in {2, 3}`.
-- `WindowEnd == WindowStart + 60s`.
+- `WindowEnd == WindowStart + 10s`.
 - `FirstSeenAt <= WindowStart`.
 
 ---
@@ -165,7 +165,7 @@ Lives in `internal/evtspike/status.go`. Published via REST + SSE per R7.
 | Condition | State |
 |-----------|-------|
 | `cfg.EvtSpike.Enabled == false` | `disabled` |
-| subsystem failed to start (couldn't open baseline file, 0 channels subscribed) | `error` |
+| subsystem failed to start (0 channels subscribed — all failed to subscribe) | `error` |
 | running but `MatureChannels == 0` | `training` |
 | running and `MatureChannels > 0` | `healthy` |
 
