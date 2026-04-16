@@ -543,11 +543,11 @@ func TestSendNotification_WebhookPayloadOmitsSessionsWhenNil(t *testing.T) {
 // ── SendTestNotification ──────────────────────────────────────────────────────
 
 func TestSendTestNotification_NoTargets_ReturnsError(t *testing.T) {
-	err := SendTestNotification(nil)
+	_, err := SendTestNotification(nil)
 	if err == nil {
 		t.Error("expected error for nil targets, got nil")
 	}
-	err2 := SendTestNotification([]NotificationTarget{})
+	_, err2 := SendTestNotification([]NotificationTarget{})
 	if err2 == nil {
 		t.Error("expected error for empty targets, got nil")
 	}
@@ -558,7 +558,7 @@ func TestSendTestNotification_EmptyURLTargets_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: ""},
 	}
-	if err := SendTestNotification(targets); err == nil {
+	if _, err := SendTestNotification(targets); err == nil {
 		t.Error("expected error when all target URLs are empty, got nil")
 	}
 }
@@ -578,7 +578,7 @@ func TestSendTestNotification_WebhookSuccess(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets); err != nil {
+	if _, err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count) != 1 {
@@ -602,7 +602,7 @@ func TestSendTestNotification_WebhookError_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets); err == nil {
+	if _, err := SendTestNotification(targets); err == nil {
 		t.Error("expected error for webhook 500 response, got nil")
 	}
 }
@@ -618,7 +618,7 @@ func TestSendTestNotification_NtfySuccess(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "ntfy", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets); err != nil {
+	if _, err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count) != 1 {
@@ -643,7 +643,7 @@ func TestSendTestNotification_MultipleTargets_CallsAll(t *testing.T) {
 		{Type: "webhook", URL: srv1.URL},
 		{Type: "ntfy", URL: srv2.URL},
 	}
-	if err := SendTestNotification(targets); err != nil {
+	if _, err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 	if atomic.LoadInt32(&count1) != 1 || atomic.LoadInt32(&count2) != 1 {
@@ -666,7 +666,7 @@ func TestSendTestNotification_MultipleErrors_ReturnsAll(t *testing.T) {
 		{Type: "webhook", URL: srv1.URL},
 		{Type: "webhook", URL: srv2.URL},
 	}
-	err := SendTestNotification(targets)
+	_, err := SendTestNotification(targets)
 	if err == nil {
 		t.Fatal("expected error when both targets fail, got nil")
 	}
@@ -890,7 +890,7 @@ func TestSendTestNotification_UnknownTypeSkipped(t *testing.T) {
 	defer srv.Close()
 	targets[0].URL = srv.URL
 
-	if err := SendTestNotification(targets); err != nil {
+	if _, err := SendTestNotification(targets); err != nil {
 		t.Errorf("SendTestNotification with unknown type returned error: %v", err)
 	}
 }
@@ -911,7 +911,7 @@ func TestSendTestNotification_WebhookPayloadSchemaComplete(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "webhook", URL: srv.URL, Triggers: DefaultTriggers},
 	}
-	if err := SendTestNotification(targets); err != nil {
+	if _, err := SendTestNotification(targets); err != nil {
 		t.Fatalf("SendTestNotification error: %v", err)
 	}
 
@@ -1071,7 +1071,7 @@ func TestSendTestNotification_NtfyError_ReturnsError(t *testing.T) {
 	targets := []NotificationTarget{
 		{Type: "ntfy", URL: srv.URL},
 	}
-	err := SendTestNotification(targets)
+	_, err := SendTestNotification(targets)
 	if err == nil {
 		t.Error("expected error when ntfy returns 503, got nil")
 	}
@@ -1133,7 +1133,7 @@ func TestSendTestNotification_SkipsEmptyURLTarget(t *testing.T) {
 		{Type: "webhook", URL: ""},
 		{Type: "webhook", URL: srv.URL},
 	}
-	err := SendTestNotification(targets)
+	_, err := SendTestNotification(targets)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

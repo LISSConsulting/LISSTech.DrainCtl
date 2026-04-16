@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -92,21 +93,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				}
 			}
 
-			// Final status line — goes to stdout, not the log.
-			switch result.Status {
-			case "Alert":
-				dc.PrintResult(os.Stdout, "status=alert",
-					fmt.Sprintf("connections_allowed=%s", dc.FormatBool(result.ConnectionsAllowed)),
-					fmt.Sprintf("exit=%d", result.ExitCode))
-			case "Grace":
-				dc.PrintResult(os.Stdout, "status=grace",
-					fmt.Sprintf("connections_allowed=%s", dc.FormatBool(result.ConnectionsAllowed)),
-					fmt.Sprintf("exit=%d", result.ExitCode))
-			default:
-				dc.PrintResult(os.Stdout, "status=healthy",
-					fmt.Sprintf("connections_allowed=%s", dc.FormatBool(result.ConnectionsAllowed)),
-					fmt.Sprintf("exit=%d", result.ExitCode))
-			}
+			slog.Info("check result",
+				"status", strings.ToLower(result.Status),
+				"connections_allowed", dc.FormatBool(result.ConnectionsAllowed),
+				"exit", result.ExitCode)
 		} else {
 			result.Write(os.Stdout, format)
 		}
@@ -129,21 +119,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	if format == dc.FormatPlain {
-		// Result line already logged inside Check(); just emit the final --- line.
-		switch out.Result.Status {
-		case "Alert":
-			dc.PrintResult(os.Stdout, "status=alert",
-				fmt.Sprintf("connections_allowed=%s", dc.FormatBool(out.Result.ConnectionsAllowed)),
-				fmt.Sprintf("exit=%d", out.Result.ExitCode))
-		case "Grace":
-			dc.PrintResult(os.Stdout, "status=grace",
-				fmt.Sprintf("connections_allowed=%s", dc.FormatBool(out.Result.ConnectionsAllowed)),
-				fmt.Sprintf("exit=%d", out.Result.ExitCode))
-		default:
-			dc.PrintResult(os.Stdout, "status=healthy",
-				fmt.Sprintf("connections_allowed=%s", dc.FormatBool(out.Result.ConnectionsAllowed)),
-				fmt.Sprintf("exit=%d", out.Result.ExitCode))
-		}
+		slog.Info("check result",
+			"status", strings.ToLower(out.Result.Status),
+			"connections_allowed", dc.FormatBool(out.Result.ConnectionsAllowed),
+			"exit", out.Result.ExitCode)
 	} else {
 		out.Result.Write(os.Stdout, format)
 	}
