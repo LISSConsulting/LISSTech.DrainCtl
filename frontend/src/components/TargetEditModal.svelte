@@ -83,8 +83,17 @@
         try {
             // Empty secret = backend looks up saved credential for SMTP auth / webhook HMAC.
             // Non-empty = user typed a new secret, test with that.
-            const r = await sendNotifyTest(t);
-            toast.ok(r.message || 'Test sent');
+            const body = await sendNotifyTest(t);
+            const results = body?.results || [];
+            const failed = results.filter((r) => !r.ok);
+            if (body.ok && failed.length === 0) {
+                toast.ok('Test sent');
+            } else if (failed.length > 0) {
+                const f = failed[0];
+                toast.err(`${f.type} ${f.url}: ${f.error || 'unknown error'}`);
+            } else {
+                toast.err(body.error || 'Test failed');
+            }
         } catch (e) {
             toast.err(e?.detail ?? e?.message ?? String(e));
         } finally {

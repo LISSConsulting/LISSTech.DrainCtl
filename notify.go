@@ -170,9 +170,22 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	wg.Wait()
 }
 
-// SendTestNotification sends a test message to all configured targets.
-// Disabled targets (Enabled == false) are skipped.
-func SendTestNotification(targets []NotificationTarget) error {
+// TestNotificationResult is the per-target outcome of a SendTestNotification
+// call. It is JSON-stable so the dashboard UI and PowerShell module can
+// surface exactly which target failed and why.
+type TestNotificationResult struct {
+	Type      string `json:"type"`
+	URL       string `json:"url"`
+	TypeIndex int    `json:"type_index"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
+
+// SendTestNotification sends a test message to each enabled target and returns
+// a per-target result slice. The aggregate error is non-nil if any target
+// failed, so callers that only need success/failure can ignore the slice.
+// Disabled targets (Enabled == false) are skipped and not included in results.
+func SendTestNotification(targets []NotificationTarget) ([]TestNotificationResult, error) {
 	hasTargets := false
 	for _, t := range targets {
 		if t.Enabled != nil && !*t.Enabled {
@@ -184,7 +197,7 @@ func SendTestNotification(targets []NotificationTarget) error {
 		}
 	}
 	if !hasTargets {
-		return fmt.Errorf("no notification targets configured")
+		return nil, fmt.Errorf("no notification targets configured")
 	}
 
 	host, _ := os.Hostname()
@@ -207,6 +220,8 @@ func SendTestNotification(targets []NotificationTarget) error {
 	}
 
 	var errs []error
+	results := make([]TestNotificationResult, 0, len(targets))
+	typeCounts := map[string]int{}
 
 	for _, target := range targets {
 		if target.Enabled != nil && !*target.Enabled {
@@ -216,25 +231,18 @@ func SendTestNotification(targets []NotificationTarget) error {
 			continue
 		}
 
+		typeIdx := typeCounts[target.Type]
+		typeCounts[target.Type]++
+		res := TestNotificationResult{Type: target.Type, URL: target.URL, TypeIndex: typeIdx}
+
+		var sendErr error
 		switch target.Type {
 		case "webhook":
-			if err := sendWebhook(target.URL, target.Secret, payload); err != nil {
-				slog.Error("webhook test failed", "error", err, "url", target.URL)
-				errs = append(errs, fmt.Errorf("webhook %s: %w", target.URL, err))
-			} else {
-				slog.Info("notify=webhook test=sent", "url", target.URL)
-			}
-
+			sendErr = sendWebhook(target.URL, target.Secret, payload)
 		case "ntfy":
 			title := fmt.Sprintf("DrainCtl Test: %s", host)
 			msg := "This is a test notification from DrainCtl."
-			if err := sendNtfy(target.URL, title, msg, "default"); err != nil {
-				slog.Error("ntfy test failed", "error", err, "url", target.URL)
-				errs = append(errs, fmt.Errorf("ntfy %s: %w", target.URL, err))
-			} else {
-				slog.Info("notify=ntfy test=sent", "url", target.URL)
-			}
-
+			sendErr = sendNtfy(target.URL, title, msg, "default")
 		case "email":
 			testResult := &CheckResult{
 				Host:           host,
@@ -244,16 +252,21 @@ func SendTestNotification(targets []NotificationTarget) error {
 				Message:        "This is a test notification from DrainCtl.",
 				Version:        Version,
 			}
-			if err := sendEmail(target, testResult, "test", ""); err != nil {
-				slog.Error("email test failed", "error", err, "url", target.URL)
-				errs = append(errs, fmt.Errorf("email %s: %w", target.URL, err))
-			} else {
-				slog.Info("notify=email test=sent", "to", target.To)
-			}
+			sendErr = sendEmail(target, testResult, "test", "")
 		}
+
+		if sendErr != nil {
+			res.Error = sendErr.Error()
+			slog.Error(target.Type+" test failed", "error", sendErr, "url", target.URL)
+			errs = append(errs, fmt.Errorf("%s %s: %w", target.Type, target.URL, sendErr))
+		} else {
+			res.OK = true
+			slog.Info("notify="+target.Type+" test=sent", "url", target.URL)
+		}
+		results = append(results, res)
 	}
 
-	return errors.Join(errs...)
+	return results, errors.Join(errs...)
 }
 
 // sendWebhook performs an HTTP POST with a JSON payload to the given URL.

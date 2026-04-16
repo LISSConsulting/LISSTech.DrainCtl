@@ -25,6 +25,10 @@ func main() {
 		Use:     "drainctl",
 		Short:   "Remote Desktop Session Host drain mode monitor",
 		Version: dc.Version,
+		// Errors should print only the message — no usage dump, and no
+		// duplicate "Error: ..." line (main() prints "drainctl: ...").
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			level, err := logging.ParseLevel(cfg.LogLevel)
 			if err != nil {

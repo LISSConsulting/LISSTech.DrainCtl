@@ -10,18 +10,18 @@ import (
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 
-// TestSetNotifyTarget_AppendsWhenEmpty verifies that the first webhook target
-// is appended at index 0 when no notifications exist.
-func TestSetNotifyTarget_AppendsWhenEmpty(t *testing.T) {
+// TestAppendNotifyTarget_AppendsWebhook verifies the basic append path used
+// by the new CLI 'add-webhook' command.
+func TestAppendNotifyTarget_AppendsWebhook(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Notifications = nil
 
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
 		Type: "webhook",
 		URL:  "https://hook.example.com/",
 	})
 	if err != nil {
-		t.Fatalf("SetNotifyTarget: %v", err)
+		t.Fatalf("AppendNotifyTarget: %v", err)
 	}
 	if len(cfg.Notifications) != 1 {
 		t.Fatalf("len = %d, want 1", len(cfg.Notifications))
@@ -30,7 +30,55 @@ func TestSetNotifyTarget_AppendsWhenEmpty(t *testing.T) {
 		t.Errorf("target = %+v", cfg.Notifications[0])
 	}
 	if len(cfg.Notifications[0].Triggers) == 0 {
-		t.Error("new target should have DefaultTriggers, got empty")
+		t.Error("new target should have DefaultTriggers")
+	}
+}
+
+// TestAppendNotifyTarget_EmailRequiresFrom verifies the upfront email gate so
+// 'add-email' cannot create a half-configured target that SaveConfig would
+// silently strip.
+func TestAppendNotifyTarget_EmailRequiresFrom(t *testing.T) {
+	cfg := DefaultConfig()
+	to := []string{"ops@example.com"}
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
+		Type: "email", URL: "smtp://mail/:587", To: &to,
+	})
+	if err == nil || !strings.Contains(err.Error(), "from") {
+		t.Errorf("err = %v, want missing-from error", err)
+	}
+	if len(cfg.Notifications) != 0 {
+		t.Errorf("cfg should be unchanged on validation failure")
+	}
+}
+
+// TestSetNotifyTarget_ErrorsWhenNoTargetAtIndex verifies that 'set-X' is
+// strict — it will not silently create a target when the operator picked the
+// wrong index. Forces them to use 'add-X' explicitly.
+func TestSetNotifyTarget_ErrorsWhenNoTargetAtIndex(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = nil
+
+	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
+		Type: "webhook", URL: "https://hook/",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no webhook target") {
+		t.Errorf("err = %v, want 'no webhook target' error", err)
+	}
+}
+
+func TestSetNotifyTarget_ErrorsWhenIndexPastEnd(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Notifications = []NotificationTarget{
+		{Type: "webhook", URL: "https://hook1/"},
+	}
+	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
+		Type: "webhook", URL: "https://hook2/", TargetIndex: 5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no webhook target at index 5") {
+		t.Errorf("err = %v", err)
+	}
+	if len(cfg.Notifications) != 1 {
+		t.Errorf("cfg should be unchanged, got %d targets", len(cfg.Notifications))
 	}
 }
 
@@ -90,29 +138,7 @@ func TestSetNotifyTarget_TargetIndexAddressesNthOfType(t *testing.T) {
 	}
 }
 
-// TestSetNotifyTarget_PastEndAppends verifies that an out-of-range target_index
-// appends a new target rather than erroring.
-func TestSetNotifyTarget_PastEndAppends(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Notifications = []NotificationTarget{
-		{Type: "webhook", URL: "https://hook1.example.com/"},
-	}
-
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
-		Type:        "webhook",
-		URL:         "https://hook2.example.com/",
-		TargetIndex: 5,
-	})
-	if err != nil {
-		t.Fatalf("SetNotifyTarget: %v", err)
-	}
-	if len(cfg.Notifications) != 2 {
-		t.Fatalf("len = %d, want 2", len(cfg.Notifications))
-	}
-	if cfg.Notifications[1].URL != "https://hook2.example.com/" {
-		t.Errorf("appended target = %+v", cfg.Notifications[1])
-	}
-}
+// (past-end-appends behavior removed — see TestSetNotifyTarget_ErrorsWhenIndexPastEnd)
 
 // TestSetNotifyTarget_NilFieldsPreserve verifies that nil pointers leave existing
 // values untouched while only the URL changes.
@@ -179,13 +205,13 @@ func TestSetNotifyTarget_OverwritesProvidedFields(t *testing.T) {
 	}
 }
 
-// TestSetNotifyTarget_EmailFields verifies that email-specific From/To fields
-// flow through to the target.
-func TestSetNotifyTarget_EmailFields(t *testing.T) {
+// TestAppendNotifyTarget_EmailFields verifies that email-specific From/To fields
+// flow through to the appended target.
+func TestAppendNotifyTarget_EmailFields(t *testing.T) {
 	cfg := DefaultConfig()
 	to := []string{"ops@example.com", "oncall@example.com"}
 
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
 		Type:   "email",
 		URL:    "smtp://mail.example.com:587",
 		From:   strPtr("alerts@example.com"),
@@ -193,7 +219,7 @@ func TestSetNotifyTarget_EmailFields(t *testing.T) {
 		Secret: strPtr("smtppass"),
 	})
 	if err != nil {
-		t.Fatalf("SetNotifyTarget: %v", err)
+		t.Fatalf("AppendNotifyTarget: %v", err)
 	}
 	got := cfg.Notifications[len(cfg.Notifications)-1]
 	if got.From != "alerts@example.com" {
@@ -207,14 +233,14 @@ func TestSetNotifyTarget_EmailFields(t *testing.T) {
 	}
 }
 
-// TestSetNotifyTarget_DPAPIRoundTrip verifies that a plaintext secret set via
-// the shared API gets DPAPI-encrypted on SaveConfig and decrypts back to the
-// original value.
-func TestSetNotifyTarget_DPAPIRoundTrip(t *testing.T) {
+// TestAppendNotifyTarget_DPAPIRoundTrip verifies that a plaintext secret set
+// via the shared API gets DPAPI-encrypted on SaveConfig and decrypts back to
+// the original value.
+func TestAppendNotifyTarget_DPAPIRoundTrip(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 	cfg := DefaultConfig()
 
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
 		Type:   "webhook",
 		URL:    "https://hook.example.com/",
 		Secret: strPtr("hunter2"),
@@ -268,56 +294,34 @@ func TestSetNotifyTarget_NilCfg(t *testing.T) {
 
 // ── email validation ─────────────────────────────────────────────────────────
 
-// TestSetNotifyTarget_EmailMissingFrom verifies that omitting --from on a new
-// email target is rejected up-front rather than silently producing a target
-// that SaveConfig will later disable.
-func TestSetNotifyTarget_EmailMissingFrom(t *testing.T) {
-	cfg := DefaultConfig()
-	to := []string{"ops@example.com"}
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
-		Type: "email",
-		URL:  "smtp://mail.example.com:587",
-		To:   &to,
-	})
-	if err == nil || !strings.Contains(err.Error(), "from") {
-		t.Errorf("err = %v, want missing-from error", err)
-	}
-	if len(cfg.Notifications) != 0 {
-		t.Errorf("cfg should be unchanged on validation failure, got %d targets", len(cfg.Notifications))
-	}
-}
-
-func TestSetNotifyTarget_EmailMissingTo(t *testing.T) {
+// TestAppendNotifyTarget_EmailMissingTo verifies that the upfront email gate
+// rejects --to omission on AppendNotifyTarget too.
+func TestAppendNotifyTarget_EmailMissingTo(t *testing.T) {
 	cfg := DefaultConfig()
 	from := "alerts@example.com"
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
-		Type: "email",
-		URL:  "smtp://mail.example.com:587",
-		From: &from,
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
+		Type: "email", URL: "smtp://mail/:587", From: &from,
 	})
 	if err == nil || !strings.Contains(err.Error(), "to") {
 		t.Errorf("err = %v, want missing-to error", err)
 	}
 	if len(cfg.Notifications) != 0 {
-		t.Errorf("cfg should be unchanged on validation failure, got %d targets", len(cfg.Notifications))
+		t.Errorf("cfg should be unchanged")
 	}
 }
 
-func TestSetNotifyTarget_EmailBadScheme(t *testing.T) {
+func TestAppendNotifyTarget_EmailBadScheme(t *testing.T) {
 	cfg := DefaultConfig()
 	from := "alerts@example.com"
 	to := []string{"ops@example.com"}
-	err := SetNotifyTarget(cfg, NotifyTargetUpdate{
-		Type: "email",
-		URL:  "https://mail.example.com/",
-		From: &from,
-		To:   &to,
+	err := AppendNotifyTarget(cfg, NotifyTargetUpdate{
+		Type: "email", URL: "https://mail/", From: &from, To: &to,
 	})
 	if err == nil || !strings.Contains(err.Error(), "smtp") {
 		t.Errorf("err = %v, want bad-scheme error", err)
 	}
 	if len(cfg.Notifications) != 0 {
-		t.Errorf("cfg should be unchanged on validation failure, got %d targets", len(cfg.Notifications))
+		t.Errorf("cfg should be unchanged")
 	}
 }
 
