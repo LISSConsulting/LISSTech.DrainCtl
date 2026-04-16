@@ -251,19 +251,39 @@
         }
         testing = true;
         try {
-            // Test each target individually using the unsaved config — no need to save first.
-            const results = await Promise.allSettled(targets.map((t) => sendNotifyTest(t)));
-            const failed = results.filter((r) => r.status === 'rejected');
-            if (failed.length === 0) {
-                toast.ok(`Test sent to ${targets.length} target${targets.length > 1 ? 's' : ''}`);
+            // Test each target individually with the unsaved config — no need to save first.
+            // Each call returns {ok, results:[{type,url,ok,error}], error?} so we can show
+            // the per-target failure reason rather than a generic count.
+            const responses = await Promise.allSettled(targets.map((t) => sendNotifyTest(t)));
+            const failures = []; // { type, url, error }
+            let okCount = 0;
+            responses.forEach((resp, i) => {
+                const tgt = targets[i];
+                if (resp.status === 'rejected') {
+                    failures.push({
+                        type: tgt.type,
+                        url: tgt.url,
+                        error: resp.reason?.detail || resp.reason?.message || String(resp.reason),
+                    });
+                    return;
+                }
+                const body = resp.value || {};
+                const perTarget = body.results || [];
+                if (perTarget.length === 0) {
+                    if (body.ok) okCount++;
+                    else failures.push({ type: tgt.type, url: tgt.url, error: body.error || 'unknown error' });
+                    return;
+                }
+                for (const r of perTarget) {
+                    if (r.ok) okCount++;
+                    else failures.push({ type: r.type, url: r.url, error: r.error || 'unknown error' });
+                }
+            });
+            if (failures.length === 0) {
+                toast.ok(`Test sent to ${okCount} target${okCount > 1 ? 's' : ''}`);
             } else {
-                // Surface the actual error details (DNS, timeout, auth, etc.)
-                const details = failed.map((r) => {
-                    const detail = r.reason?.detail || r.reason?.message || String(r.reason);
-                    return detail;
-                });
-                const unique = [...new Set(details)];
-                toast.err(`${failed.length} of ${targets.length} failed: ${unique.join('; ')}`);
+                const lines = failures.map((f) => `${f.type} ${f.url}: ${f.error}`);
+                toast.err(`${failures.length} failed — ${lines.join(' | ')}`);
             }
         } catch (e) {
             toast.err('Test failed: ' + (e?.detail ?? e?.message ?? String(e)));

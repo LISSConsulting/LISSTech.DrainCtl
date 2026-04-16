@@ -35,20 +35,51 @@ var validNotifyTypes = map[string]bool{
 	"email":   true,
 }
 
-// SetNotifyTarget applies u to cfg in place. It does NOT call SaveConfig — the
-// caller is responsible for persisting the change so that mutations can be
-// composed before a single atomic write.
+// AppendNotifyTarget appends a new notification target to cfg. Required fields
+// must be supplied — there is no preserved-existing fallback. For email
+// targets, the URL must use smtp(s):// scheme and From + at least one To
+// address must be present.
 //
-// If a target of u.Type exists at u.TargetIndex (counted within targets of that
-// type), its fields are overwritten where u's pointer fields are non-nil. URL
-// always overwrites. If u.TargetIndex equals or exceeds the count of matching
-// targets, a new target is appended with DefaultTriggers when no Triggers
-// override is supplied.
+// Use this for "add" operations where the operator is creating a brand-new
+// target. For in-place updates of an existing target, use SetNotifyTarget.
 //
-// For email targets, the proposed final state is validated before mutation:
-// the URL must use smtp(s):// scheme and From + at least one To address must
-// be present. Without this gate the downstream Validate() in SaveConfig would
-// silently clear the URL, leaving the caller convinced the target was saved.
+// Does NOT call SaveConfig — the caller persists.
+func AppendNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
+	if cfg == nil {
+		return errors.New("cfg is nil")
+	}
+	if !validNotifyTypes[u.Type] {
+		return fmt.Errorf("invalid type %q (valid: email, ntfy, webhook)", u.Type)
+	}
+	if strings.TrimSpace(u.URL) == "" {
+		return errors.New("url is required")
+	}
+
+	t := NotificationTarget{Type: u.Type, URL: u.URL}
+	applyUpdate(&t, u)
+	if len(t.Triggers) == 0 {
+		t.Triggers = append([]Trigger{}, DefaultTriggers...)
+	}
+
+	if u.Type == "email" {
+		if err := validateEmailTarget(&t); err != nil {
+			return err
+		}
+	}
+
+	cfg.Notifications = append(cfg.Notifications, t)
+	return nil
+}
+
+// SetNotifyTarget updates an existing notification target in place. Returns
+// an error if no target of u.Type exists at u.TargetIndex — use
+// AppendNotifyTarget to create new targets.
+//
+// Pointer fields in u that are nil preserve the existing value; URL always
+// overwrites. Email targets are re-validated post-update so a partial change
+// can't leave the target in an unusable state.
+//
+// Does NOT call SaveConfig.
 func SetNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
 	if cfg == nil {
 		return errors.New("cfg is nil")
@@ -64,17 +95,12 @@ func SetNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
 	}
 
 	matchingPositions := indicesOfType(cfg.Notifications, u.Type)
-	appending := u.TargetIndex >= len(matchingPositions)
-
-	// Build the proposed final target state from existing values + the update.
-	// We validate this proposal before touching cfg so failed updates leave the
-	// config exactly as the caller passed it in.
-	var proposed NotificationTarget
-	if appending {
-		proposed = NotificationTarget{Type: u.Type}
-	} else {
-		proposed = cfg.Notifications[matchingPositions[u.TargetIndex]]
+	if u.TargetIndex >= len(matchingPositions) {
+		return fmt.Errorf("no %s target at index %d (have %d) — use 'add-%s' to create a new one",
+			u.Type, u.TargetIndex, len(matchingPositions), u.Type)
 	}
+
+	proposed := cfg.Notifications[matchingPositions[u.TargetIndex]]
 	proposed.URL = u.URL
 	applyUpdate(&proposed, u)
 	if len(proposed.Triggers) == 0 {
@@ -87,11 +113,7 @@ func SetNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
 		}
 	}
 
-	if appending {
-		cfg.Notifications = append(cfg.Notifications, proposed)
-	} else {
-		cfg.Notifications[matchingPositions[u.TargetIndex]] = proposed
-	}
+	cfg.Notifications[matchingPositions[u.TargetIndex]] = proposed
 	return nil
 }
 

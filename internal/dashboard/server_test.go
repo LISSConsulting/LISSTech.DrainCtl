@@ -1022,8 +1022,8 @@ func TestHandleDeleteServer_AuthenticatedUser_Returns200(t *testing.T) {
 
 func TestHandleNotifyTest_NoTargets_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testNotifyFunc = func() error {
-		return fmt.Errorf("no notification targets configured")
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
+		return nil, fmt.Errorf("no notification targets configured")
 	}
 
 	w := httptest.NewRecorder()
@@ -1041,9 +1041,11 @@ func TestHandleNotifyTest_NoTargets_Returns400(t *testing.T) {
 func TestHandleNotifyTest_Success_Returns200(t *testing.T) {
 	ds := newTestServer(t)
 	called := false
-	ds.testNotifyFunc = func() error {
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
 		called = true
-		return nil
+		return []dc.TestNotificationResult{
+			{Type: "webhook", URL: "https://hook/", OK: true},
+		}, nil
 	}
 
 	w := httptest.NewRecorder()
@@ -1072,8 +1074,10 @@ func TestHandleNotifyTest_Success_Returns200(t *testing.T) {
 
 func TestHandleNotifyTest_NetworkError_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testNotifyFunc = func() error {
-		return fmt.Errorf("connection refused")
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
+		return []dc.TestNotificationResult{
+			{Type: "webhook", URL: "https://hook/", OK: false, Error: "connection refused"},
+		}, fmt.Errorf("connection refused")
 	}
 
 	w := httptest.NewRecorder()
@@ -1087,8 +1091,8 @@ func TestHandleNotifyTest_NetworkError_Returns400(t *testing.T) {
 
 func TestHandleNotifyTest_ConfigError_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testNotifyFunc = func() error {
-		return fmt.Errorf("failed to load config: open config.json: no such file or directory")
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
+		return nil, fmt.Errorf("failed to load config: open config.json: no such file or directory")
 	}
 
 	w := httptest.NewRecorder()
@@ -1116,7 +1120,7 @@ func TestHandleNotifyTest_MockWebhookReceivesRequest(t *testing.T) {
 		URL:      webhookSrv.URL,
 		Triggers: dc.DefaultTriggers,
 	}
-	ds.testNotifyFunc = func() error {
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
 		return dc.SendTestNotification([]dc.NotificationTarget{target})
 	}
 
@@ -1151,7 +1155,7 @@ func TestHandleNotifyTest_MockWebhookWithSecret_SignatureHeaderPresent(t *testin
 		Secret:   "test-secret",
 		Triggers: dc.DefaultTriggers,
 	}
-	ds.testNotifyFunc = func() error {
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) {
 		return dc.SendTestNotification([]dc.NotificationTarget{target})
 	}
 
@@ -1758,7 +1762,7 @@ func TestHandlePutSettings_AuthenticatedUser_Returns200(t *testing.T) {
 // auth info in its context (covers the auth != nil branch).
 func TestHandleNotifyTest_AuthenticatedUser_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testNotifyFunc = func() error { return nil }
+	ds.testNotifyFunc = func() ([]dc.TestNotificationResult, error) { return nil, nil }
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/notify-test", nil)

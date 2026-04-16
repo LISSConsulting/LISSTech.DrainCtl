@@ -76,6 +76,10 @@ public static class DrainCtlNative {
         [MarshalAs(UnmanagedType.LPStr)] string keyPath);
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_NotifyAppendTarget(
+        [MarshalAs(UnmanagedType.LPStr)] string jsonStr);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr DrainCtl_NotifySetTarget(
         [MarshalAs(UnmanagedType.LPStr)] string jsonStr);
 
@@ -434,124 +438,6 @@ function Install-RDSHDrainAudit {
     Write-Verbose 'Registry auditing configured. Event ID 4657 will now record TSServerDrainMode changes.'
 }
 
-function Get-RDSHDrainNotification {
-    <#
-    .SYNOPSIS
-    Shows the current notification configuration for DrainCtl.
-
-    .DESCRIPTION
-    Reads notification settings from config.json and returns them as a
-    structured object. Shows webhook URL, ntfy URL, transition/grace
-    notification toggles, and repeat interval.
-
-    .EXAMPLE
-    PS> Get-RDSHDrainNotification
-
-    WebhookURL      : https://hooks.example.com/drainctl
-    NtfyURL         :
-    OnTransition    : True
-    OnGraceExceeded : True
-    RepeatMinutes   : 0
-    Enabled         : True
-    #>
-    [CmdletBinding()]
-    [OutputType([PSCustomObject])]
-    param()
-
-    $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
-    $raw = Invoke-DrainCtlNative -Ptr $ptr
-
-    [PSCustomObject]@{
-        PSTypeName      = 'DrainCtl.Settings'
-        WebhookURL      = Get-SafeProperty $raw 'webhook_url' ''
-        NtfyURL         = Get-SafeProperty $raw 'ntfy_url' ''
-        OnTransition    = [bool](Get-SafeProperty $raw 'on_transition' $true)
-        OnGraceExceeded = [bool](Get-SafeProperty $raw 'on_grace_exceeded' $true)
-        RepeatMinutes   = [int](Get-SafeProperty $raw 'repeat_minutes' 0)
-        Enabled         = [bool](Get-SafeProperty $raw 'enabled' $false)
-    }
-}
-
-function Set-RDSHDrainNotification {
-    <#
-    .SYNOPSIS
-    Updates notification settings for DrainCtl (legacy — use Add/Remove-RDSHDrainNotificationTarget instead).
-
-    .DESCRIPTION
-    Writes notification configuration to config.json using the legacy flat
-    format (single webhook + single ntfy). Only specified parameters are
-    changed; unspecified parameters retain their current values.
-
-    DEPRECATED: This cmdlet manages at most one webhook and one ntfy target.
-    For multi-target management use Get-RDSHDrainNotificationTarget,
-    Add-RDSHDrainNotificationTarget, and Remove-RDSHDrainNotificationTarget.
-
-    .PARAMETER WebhookURL
-    Webhook URL for HTTP POST JSON notifications. Set to empty string to disable.
-
-    .PARAMETER NtfyURL
-    ntfy.sh topic URL (e.g. "https://ntfy.sh/drainctl-alerts"). Set to empty string to disable.
-
-    .PARAMETER OnTransition
-    Enable or disable notifications on state transitions.
-
-    .PARAMETER OnGraceExceeded
-    Enable or disable notifications when drain exceeds grace period.
-
-    .PARAMETER RepeatMinutes
-    Minutes between repeated alert notifications (0 = notify once only).
-
-    .EXAMPLE
-    PS> Set-RDSHDrainNotification -WebhookURL 'https://hooks.example.com/drainctl'
-
-    .EXAMPLE
-    PS> Set-RDSHDrainNotification -NtfyURL 'https://ntfy.sh/my-alerts' -RepeatMinutes 30
-
-    .EXAMPLE
-    PS> Set-RDSHDrainNotification -WebhookURL '' -NtfyURL ''
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
-    [OutputType([void])]
-    param(
-        [Parameter()]
-        [AllowEmptyString()]
-        [string]$WebhookURL,
-
-        [Parameter()]
-        [AllowEmptyString()]
-        [string]$NtfyURL,
-
-        [Parameter()]
-        [bool]$OnTransition,
-
-        [Parameter()]
-        [bool]$OnGraceExceeded,
-
-        [Parameter()]
-        [ValidateRange(0, [int]::MaxValue)]
-        [int]$RepeatMinutes
-    )
-
-    Write-Warning 'Set-RDSHDrainNotification is deprecated. Use Add-RDSHDrainNotificationTarget and Remove-RDSHDrainNotificationTarget for multi-target management.'
-
-    if (-not $PSCmdlet.ShouldProcess('DrainCtl notification configuration', 'Update')) {
-        return
-    }
-
-    $payload = @{}
-    if ($PSBoundParameters.ContainsKey('WebhookURL'))      { $payload['webhook_url']       = $WebhookURL }
-    if ($PSBoundParameters.ContainsKey('NtfyURL'))          { $payload['ntfy_url']          = $NtfyURL }
-    if ($PSBoundParameters.ContainsKey('OnTransition'))     { $payload['on_transition']     = $OnTransition }
-    if ($PSBoundParameters.ContainsKey('OnGraceExceeded'))  { $payload['on_grace_exceeded'] = $OnGraceExceeded }
-    if ($PSBoundParameters.ContainsKey('RepeatMinutes'))    { $payload['repeat_minutes']    = $RepeatMinutes }
-
-    $jsonStr = $payload | ConvertTo-Json -Compress
-    $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
-    $null = Invoke-DrainCtlNative -Ptr $ptr
-
-    Write-Verbose 'Notification configuration updated.'
-}
-
 function Get-RDSHDrainNotificationTarget {
     <#
     .SYNOPSIS
@@ -679,12 +565,10 @@ function Add-RDSHDrainNotificationTarget {
         return
     }
 
-    # TargetIndex past-end (huge value) tells the shared API to append.
     $payload = [ordered]@{
-        type         = $Type
-        url          = $URL
-        target_index = [int]::MaxValue
-        triggers     = @($Triggers)
+        type           = $Type
+        url            = $URL
+        triggers       = @($Triggers)
         repeat_minutes = $RepeatMinutes
     }
     if ($PSBoundParameters.ContainsKey('Secret')) {
@@ -698,7 +582,7 @@ function Add-RDSHDrainNotificationTarget {
     }
 
     $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
-    $ptr = [DrainCtlNative]::DrainCtl_NotifySetTarget($jsonStr)
+    $ptr = [DrainCtlNative]::DrainCtl_NotifyAppendTarget($jsonStr)
     $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose "Added $Type notification target: $URL"
@@ -893,27 +777,84 @@ function Remove-RDSHDrainNotificationTarget {
     }
 }
 
-function Test-RDSHDrainNotification {
+function Test-RDSHDrainNotificationTarget {
     <#
     .SYNOPSIS
-    Sends a test notification to all configured backends.
+    Sends a test notification to one, several, or all configured targets.
 
     .DESCRIPTION
-    Reads the current notification configuration and sends a test message
-    to each configured backend (webhook and/or ntfy). Returns an error
-    if no backends are configured or if sending fails.
+    Returns one structured result per target ({Type, URL, TypeIndex, OK, Error})
+    so the operator can see exactly which target failed and why — no more
+    "1 of 3 failed" without context.
+
+    With no parameters: tests every configured target.
+    With pipeline input from Get-RDSHDrainNotificationTarget: tests only those
+    objects (matched by Type + URL).
+
+    .PARAMETER URL
+    Pipeline-bound URL of a target to test (matched together with Type).
+
+    .PARAMETER Type
+    Pipeline-bound type ('webhook' / 'ntfy' / 'email').
 
     .EXAMPLE
-    PS> Test-RDSHDrainNotification
+    PS> Test-RDSHDrainNotificationTarget                      # tests all
+
+    .EXAMPLE
+    PS> Get-RDSHDrainNotificationTarget |
+            Where-Object Type -eq 'webhook' |
+            Test-RDSHDrainNotificationTarget                  # tests only webhooks
     #>
     [CmdletBinding()]
-    [OutputType([void])]
-    param()
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]$URL,
 
-    $ptr = [DrainCtlNative]::DrainCtl_TestNotify()
-    $null = Invoke-DrainCtlNative -Ptr $ptr
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [ValidateSet('webhook', 'ntfy', 'email')]
+        [string]$Type
+    )
 
-    Write-Host 'Test notification sent successfully.'
+    begin {
+        $filter = @()
+    }
+
+    process {
+        if ($PSBoundParameters.ContainsKey('URL') -or $PSBoundParameters.ContainsKey('Type')) {
+            $filter += [PSCustomObject]@{ Type = $Type; URL = $URL }
+        }
+    }
+
+    end {
+        # The DLL endpoint tests all targets and returns per-target results.
+        # When the operator passed a filter via the pipeline, we filter the
+        # returned results down to the matching subset.
+        $ptr = [DrainCtlNative]::DrainCtl_TestNotify()
+        $raw = Invoke-DrainCtlNative -Ptr $ptr
+
+        $results = @(Get-SafeProperty $raw 'results' @())
+        if ($filter.Count -gt 0) {
+            $results = $results | Where-Object {
+                $r = $_
+                $filter | Where-Object {
+                    ($_.Type -eq '' -or $_.Type -eq $r.type) -and
+                    ($_.URL -eq '' -or $_.URL -eq $r.url)
+                } | Select-Object -First 1
+            }
+        }
+
+        foreach ($r in $results) {
+            [PSCustomObject]@{
+                PSTypeName = 'DrainCtl.NotificationTestResult'
+                Type       = $r.type
+                URL        = $r.url
+                TypeIndex  = [int](Get-SafeProperty $r 'type_index' 0)
+                OK         = [bool]$r.ok
+                Error      = Get-SafeProperty $r 'error' ''
+            }
+        }
+    }
 }
 
 function Enable-RDSHDrainDashboard {
@@ -999,13 +940,11 @@ Export-ModuleMember -Function @(
     'Test-RDSHDrainMode'
     'Get-RDSHDrainHistory'
     'Install-RDSHDrainAudit'
-    'Get-RDSHDrainNotification'
-    'Set-RDSHDrainNotification'
     'Get-RDSHDrainNotificationTarget'
     'Add-RDSHDrainNotificationTarget'
     'Set-RDSHDrainNotificationTarget'
     'Remove-RDSHDrainNotificationTarget'
-    'Test-RDSHDrainNotification'
+    'Test-RDSHDrainNotificationTarget'
     'Enable-RDSHDrainDashboard'
     'Disable-RDSHDrainDashboard'
     'Install-RDSHDrainCertificate'

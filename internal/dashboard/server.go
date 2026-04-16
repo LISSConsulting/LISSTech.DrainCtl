@@ -208,7 +208,7 @@ type DashboardServer struct {
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
-	testNotifyFunc func() error
+	testNotifyFunc func() ([]dc.TestNotificationResult, error)
 
 	// testLoadConfigFunc, if non-nil, is called by handleGetSettings instead
 	// of dc.LoadConfig. Used in tests to avoid filesystem access.
@@ -823,38 +823,62 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	var err error
+	var (
+		results []dc.TestNotificationResult
+		err     error
+	)
 	if singleTarget != nil {
 		slog.Info("dashboard=notify-test-target", "user", user, "type", singleTarget.Type, "url", singleTarget.URL)
-		err = dc.SendTestNotification([]dc.NotificationTarget{*singleTarget})
+		results, err = dc.SendTestNotification([]dc.NotificationTarget{*singleTarget})
 	} else {
 		slog.Info("dashboard=notify-test", "user", user)
 		// testNotifyFunc can be injected in tests to avoid real config/network I/O.
 		fn := ds.testNotifyFunc
 		if fn == nil {
-			fn = func() error {
+			fn = func() ([]dc.TestNotificationResult, error) {
 				loadFn := ds.testLoadConfigFunc
 				if loadFn == nil {
 					loadFn = func() (*dc.Config, error) { return dc.LoadConfig() }
 				}
-				cfg, err := loadFn()
-				if err != nil {
-					return fmt.Errorf("failed to load config: %w", err)
+				cfg, loadErr := loadFn()
+				if loadErr != nil {
+					return nil, fmt.Errorf("failed to load config: %w", loadErr)
 				}
 				return dc.SendTestNotification(cfg.Notifications)
 			}
 		}
-		err = fn()
+		results, err = fn()
 	}
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
+	// Always return the per-target results (UI uses them to show which target
+	// failed). HTTP status is 200 if everything succeeded, 207 (Multi-Status)
+	// if some targets failed but at least one succeeded, 400 if all failed or
+	// the request was malformed.
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true}`))
+	successes := 0
+	for _, r := range results {
+		if r.OK {
+			successes++
+		}
+	}
+
+	body := map[string]any{
+		"ok":      err == nil,
+		"results": results,
+	}
+	if err != nil {
+		body["error"] = err.Error()
+	}
+	status := http.StatusOK
+	if err != nil {
+		if successes == 0 {
+			status = http.StatusBadRequest
+		} else {
+			status = http.StatusMultiStatus
+		}
+	}
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // handleUI serves the embedded SPA index.html.
