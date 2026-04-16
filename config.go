@@ -150,7 +150,8 @@ type Config struct {
 
 	Notifications []NotificationTarget `json:"notifications"`
 
-	Dashboard DashboardJSON `json:"dashboard"`
+	DashboardOnly bool          `json:"dashboard_only"` // true = run dashboard but skip local drain monitoring
+	Dashboard     DashboardJSON `json:"dashboard"`
 
 	SessionWarningThreshold int `json:"session_warning_threshold"` // 0=disabled, 1-100
 
@@ -180,6 +181,7 @@ type ServiceConfig struct {
 	AuditPath               string
 	SessionWarningThreshold int
 	Performance             PerformanceConfig
+	DashboardOnly           bool // run dashboard but skip local drain monitoring
 }
 
 // DashboardConfig holds runtime dashboard parameters.
@@ -228,6 +230,7 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 		AuditPath:               c.AuditPath,
 		SessionWarningThreshold: c.SessionWarningThreshold,
 		Performance:             c.Performance,
+		DashboardOnly:           c.DashboardOnly,
 	}
 }
 
