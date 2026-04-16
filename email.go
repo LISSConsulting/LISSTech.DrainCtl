@@ -40,6 +40,12 @@ type emailData struct {
 	IsDrain      bool   // true for drain-state triggers, controls which detail rows render
 }
 
+// sanitizeHeader strips CR, LF, and NUL from a string to prevent
+// SMTP header injection.
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(s)
+}
+
 // humanModeLabel converts raw Windows registry drain mode constants
 // to concise human-readable labels for notifications.
 func humanModeLabel(raw string) string {
@@ -218,9 +224,9 @@ func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, 
 
 	// Build MIME message.
 	var msg bytes.Buffer
-	msg.WriteString("From: " + target.From + "\r\n")
-	msg.WriteString("To: " + strings.Join(target.To, ", ") + "\r\n")
-	msg.WriteString("Subject: " + subject + "\r\n")
+	msg.WriteString("From: " + sanitizeHeader(target.From) + "\r\n")
+	msg.WriteString("To: " + sanitizeHeader(strings.Join(target.To, ", ")) + "\r\n")
+	msg.WriteString("Subject: " + sanitizeHeader(subject) + "\r\n")
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
 	msg.WriteString("X-Mailer: DrainCtl/" + Version + "\r\n")

@@ -1002,7 +1002,7 @@ func TestUpdateNotifySettings_AllNilIsNoOp(t *testing.T) {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	if err := UpdateNotifySettings(nil, nil, nil, nil); err != nil {
+	if err := UpdateNotifySettings(nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateNotifySettings(nil,nil,nil): %v", err)
 	}
 
@@ -1030,7 +1030,7 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	threshold := 60
 	grace := 90
 
-	if err := UpdateNotifySettings(&targets, &threshold, &grace, nil); err != nil {
+	if err := UpdateNotifySettings(&targets, &threshold, &grace, nil, nil); err != nil {
 		t.Fatalf("UpdateNotifySettings: %v", err)
 	}
 
@@ -1058,7 +1058,7 @@ func TestUpdateNotifySettings_InvalidThreshold(t *testing.T) {
 	}
 	for _, pct := range []int{-1, 101} {
 		v := pct
-		err := UpdateNotifySettings(nil, &v, nil, nil)
+		err := UpdateNotifySettings(nil, &v, nil, nil, nil)
 		if err == nil {
 			t.Errorf("UpdateNotifySettings(threshold=%d): expected error, got nil", pct)
 			continue
@@ -1078,7 +1078,7 @@ func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
 	}
 	for _, m := range []int{0, 1441} {
 		v := m
-		err := UpdateNotifySettings(nil, nil, &v, nil)
+		err := UpdateNotifySettings(nil, nil, &v, nil, nil)
 		if err == nil {
 			t.Errorf("UpdateNotifySettings(grace=%d): expected error, got nil", m)
 			continue
@@ -1134,7 +1134,7 @@ func TestUpdateGracePeriod_LoadError(t *testing.T) {
 // propagates a LoadConfig error.
 func TestUpdateNotifySettings_LoadError(t *testing.T) {
 	blockConfigRead(t)
-	if err := UpdateNotifySettings(nil, nil, nil, nil); err == nil {
+	if err := UpdateNotifySettings(nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error from UpdateNotifySettings when LoadConfig fails, got nil")
 	}
 }
