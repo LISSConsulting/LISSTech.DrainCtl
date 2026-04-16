@@ -23,12 +23,12 @@ An administrator is responsible for a farm of RDSH servers. A driver on one serv
 
 **Why this priority**: This is the entire product premise. Admins today only learn about driver crashes, auth failures, profile-service thrashes, SMB hiccups, and similar issues after user complaints. Shifting detection earlier is the core value — every other story exists to support this one.
 
-**Independent Test**: Deploy the built-in mode to one server, let the baseline settle, then inject a sustained burst of events on any watched channel. Verify a notification fires within the confirmation window (≤3 × 60 s), names the channel correctly, and does not fire on isolated one-off events.
+**Independent Test**: Deploy the built-in mode to one server, let the baseline settle, then inject a sustained burst of events on any watched channel. Verify a notification fires within the confirmation window (≤3 × 10 s = ≤30 s), names the channel correctly, and does not fire on isolated one-off events.
 
 **Acceptance Scenarios**:
 
-1. **Given** a server has been running with the detector enabled for at least its configured warm-up period, **When** a watched channel logs events at a rate that is statistically unusual for the current time of day and the elevated rate persists across two of three consecutive 60-second windows, **Then** a notification fires through the configured targets (webhook, ntfy, email) identifying server, channel, observed count, expected count, and time.
-2. **Given** the detector is running, **When** a watched channel logs a single transient burst within one 60-second window, **Then** no notification fires (the confirmation requirement suppresses one-shot transients).
+1. **Given** a server has been running with the detector enabled for at least its configured warm-up period, **When** a watched channel logs events at a rate that is statistically unusual for the current time of day and the elevated rate persists across two of three consecutive 10-second scoring buckets, **Then** a notification fires through the configured targets (webhook, ntfy, email) identifying server, channel, observed count, expected count, and time.
+2. **Given** the detector is running, **When** a watched channel logs a single transient burst within one 10-second scoring bucket, **Then** no notification fires (the confirmation requirement suppresses one-shot transients).
 3. **Given** the detector is running during a routine morning logon storm that is normal for this time of day after observation, **When** logon-related channels spike as usual, **Then** no notification fires (time-of-day awareness recognizes the spike as normal).
 4. **Given** a notification fires for a channel and the channel continues to spike, **When** the configured repeat interval has not elapsed, **Then** no additional notification fires for the same server/channel (cooldown).
 
@@ -130,7 +130,7 @@ An administrator wants to turn detection on, pick which servers participate, tun
 - **FR-031**: The installer UI for this option MUST state plainly that `SeSecurityPrivilege` additionally allows the DrainCtl service to read the Security log, clear the Security log, alter SACLs, and manage audit policy — so the admin is accepting informed risk.
 - **FR-032**: When the admin opts out of this component on re-run of the installer, the installer MUST (a) remove `Security` from the watched channel list on this host and (b) revoke `SeSecurityPrivilege` from the DrainCtl service account, restoring minimum-privilege posture.
 - **FR-033**: The detector MUST run as a single process with a single configuration and a single baseline state file regardless of whether Security monitoring is enabled — Security is an extra channel inside the same detector, not a separate sidecar service.
-- **FR-002**: The detector MUST count event arrivals on each subscribed channel into short time buckets (approximately 10 seconds), aggregated into rolling windows of approximately 60 seconds for scoring.
+- **FR-002**: The detector MUST count event arrivals on each subscribed channel into 10-second buckets and score each bucket directly against the channel's baseline. There is no further aggregation into longer windows; the 10-second bucket is the atomic scoring unit.
 - **FR-003**: The detector MUST maintain a separate expected-rate baseline per channel per 15-minute time-of-day slot (96 slots covering 24 hours) so that rates that are normal during one part of the day but unusual during another are scored correctly.
 - **FR-004**: The detector MUST flag a window as anomalous only when the observed count both exceeds a configured absolute floor and is statistically unlikely given the channel's baseline.
 - **FR-005**: The detector MUST require an anomaly to persist across at least two of three consecutive scoring windows before firing an alert (confirmation).
@@ -182,7 +182,7 @@ An administrator wants to turn detection on, pick which servers participate, tun
 
 - **Watched Channel**: A single Windows Event Log channel on a single host that the detector is subscribed to. Has a name (e.g., `Microsoft-Windows-Winlogon/Operational`), a subscription status, and a learned baseline.
 - **Baseline**: The detector's learned sense of "normal" for one channel. Composed of one small numeric summary per 15-minute time-of-day slot (96 total), plus an all-hours global summary used while slots are immature.
-- **Scoring Window**: A 60-second rolling aggregation of short-bucket counts for one channel. The atomic unit that gets scored and contributes (possibly capped) to the baseline.
+- **Scoring Window**: A 10-second event-count bucket for one channel. The atomic unit that gets scored and contributes (possibly capped) to the baseline.
 - **Spike Event**: The detector's output. Carries server, channel, observed count, expected count, window timestamps, and a severity. Delivered to the notification pipeline (built-in mode) or over the named pipe to DrainCtl (standalone mode).
 - **Notification Trigger (`event_spike`)**: A new entry in the existing notification trigger taxonomy. Alongside the existing triggers, it can be associated with any mix of webhook, ntfy, and email targets, with per-target repeat intervals.
 - **Baseline State File**: The on-disk JSON file holding the full set of learned baselines for all watched channels on this host, written atomically on a cadence the service controls.
@@ -192,7 +192,7 @@ An administrator wants to turn detection on, pick which servers participate, tun
 ### Measurable Outcomes
 
 - **SC-001**: On a representative RDSH host, routine daily operation (morning logon storm, steady-state work hours, evening logoff, overnight idle) produces zero `event_spike` notifications over a full weekly cycle once the baseline is mature.
-- **SC-002**: When a genuine sustained anomaly is present on a watched channel, the administrator receives a notification within three 60-second scoring windows (≤3 minutes) from the moment the anomaly begins.
+- **SC-002**: When a genuine sustained anomaly is present on a watched channel, the administrator receives a notification within three 10-second scoring buckets (≤30 seconds) from the moment the anomaly begins.
 - **SC-003**: A single transient burst that lasts under one scoring window does not produce a notification in at least 99% of cases observed during steady-state operation.
 - **SC-004**: After the detector experiences a sustained artificial flood on one channel, a subsequent smaller-but-still-anomalous event on the same channel is still detected — the baseline is not poisoned by the prior flood.
 - **SC-005**: Restarting the service does not produce a post-restart alert storm, and does not re-enter the warm-up period for channels whose baseline was already mature before the restart.
