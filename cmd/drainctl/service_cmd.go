@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
 )
@@ -62,16 +61,13 @@ func serviceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			format, _ := getFormat(dc.FormatPlain)
 			switch state {
 			case "Running":
-				if format == dc.FormatPlain {
-					dc.PrintResult(os.Stdout, fmt.Sprintf("service=%s", state))
-				}
+				slog.Info("service status", "state", state)
 			case "Stopped":
-				slog.Warn(fmt.Sprintf("service=%s", state))
+				slog.Warn("service status", "state", state)
 			default:
-				slog.Info(fmt.Sprintf("service=%s", state))
+				slog.Info("service status", "state", state)
 			}
 			return nil
 		},

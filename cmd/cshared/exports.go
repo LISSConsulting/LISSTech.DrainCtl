@@ -300,11 +300,44 @@ func buildLegacyTriggers(onTransition, onGraceExceeded *bool) []dc.Trigger {
 	return triggers
 }
 
-// Upserts a single notification target. The body is a JSON-encoded
-// dc.NotifyTargetUpdate; pointer fields left out preserve existing values.
-// On success returns {"ok":true,"target_index":N} where N is the per-type
-// index of the upserted target. The caller (PS / RMM) must DrainCtl_Free
-// the returned string.
+// Appends a brand-new notification target. The body is a JSON-encoded
+// dc.NotifyTargetUpdate; required fields must be supplied (no preserved-
+// existing fallback). For email targets, From + To + smtp(s):// URL are
+// required. Returns {"ok":true,"target_index":N}.
+//
+//export DrainCtl_NotifyAppendTarget
+func DrainCtl_NotifyAppendTarget(jsonStr *C.char) *C.char {
+	raw := C.GoString(jsonStr)
+	var update dc.NotifyTargetUpdate
+	if err := json.Unmarshal([]byte(raw), &update); err != nil {
+		return marshalError(err)
+	}
+	cfg, err := dc.LoadConfig()
+	if err != nil {
+		return marshalError(err)
+	}
+	if err := dc.AppendNotifyTarget(cfg, update); err != nil {
+		return marshalError(err)
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		return marshalError(err)
+	}
+	resultIdx := -1
+	count := 0
+	for _, t := range cfg.Notifications {
+		if t.Type == update.Type {
+			if t.URL == update.URL {
+				resultIdx = count
+			}
+			count++
+		}
+	}
+	return marshalJSON(map[string]any{"ok": true, "target_index": resultIdx})
+}
+
+// Updates an existing notification target at TargetIndex. Errors if no
+// target of that type exists at that index — use DrainCtl_NotifyAppendTarget
+// to create new targets. Pointer fields left out preserve existing values.
 //
 //export DrainCtl_NotifySetTarget
 func DrainCtl_NotifySetTarget(jsonStr *C.char) *C.char {
@@ -357,16 +390,26 @@ func DrainCtl_NotifyRemoveTarget(typ *C.char, index C.int) *C.char {
 	return C.CString(`{"ok":true}`)
 }
 
+// Tests all currently-configured notification targets and returns a per-target
+// result array so the caller can show exactly which one failed and why.
+//
+// Returns: {"ok": bool, "results": [{type, url, type_index, ok, error?}, ...], "error": optional}
+//
 //export DrainCtl_TestNotify
 func DrainCtl_TestNotify() *C.char {
 	cfg, err := dc.LoadConfig()
 	if err != nil {
 		return marshalError(err)
 	}
-	if err := dc.SendTestNotification(cfg.Notifications); err != nil {
-		return marshalError(err)
+	results, err := dc.SendTestNotification(cfg.Notifications)
+	body := map[string]any{
+		"ok":      err == nil,
+		"results": results,
 	}
-	return C.CString(`{"ok":true}`)
+	if err != nil {
+		body["error"] = err.Error()
+	}
+	return marshalJSON(body)
 }
 
 //export DrainCtl_EnableDashboard

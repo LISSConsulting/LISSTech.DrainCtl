@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -91,9 +90,7 @@ func dashboardCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
-				dc.PrintResult(os.Stdout, fmt.Sprintf("dashboard=enabled port=%d group=%q", port, group))
-			}
+			slog.Debug("dashboard enabled", "port", port, "group", group)
 
 			// Restart the service so the dashboard listener starts.
 			if err := svc.RestartService(); err != nil {
@@ -118,9 +115,7 @@ func dashboardCmd() *cobra.Command {
 			if err := dc.SaveConfig(fileCfg); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
-			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
-				dc.PrintResult(os.Stdout, "dashboard=disabled")
-			}
+			slog.Debug("dashboard disabled")
 
 			// Restart the service to stop the dashboard listener.
 			if err := svc.RestartService(); err != nil {
@@ -161,10 +156,7 @@ Restart the service after installing a new certificate.`,
 			if err := dc.InstallCertificate(args[0], args[1]); err != nil {
 				return err
 			}
-			if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
-				dc.PrintResult(os.Stdout, "certificate installed")
-			}
-			slog.Info("restart the DrainCtl service to use the new certificate")
+			slog.Info("certificate installed; restart the DrainCtl service to use it")
 			return nil
 		},
 	}

@@ -3,12 +3,15 @@
 package main
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"slices"
 	"strings"
+	"text/tabwriter"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/spf13/cobra"
@@ -20,7 +23,10 @@ func notifyCmd() *cobra.Command {
 		Short: "Manage notification settings",
 	}
 
-	cmd.AddCommand(notifyStatusCmd())
+	cmd.AddCommand(notifyListCmd())
+	cmd.AddCommand(notifyAddWebhookCmd())
+	cmd.AddCommand(notifyAddNtfyCmd())
+	cmd.AddCommand(notifyAddEmailCmd())
 	cmd.AddCommand(notifySetWebhookCmd())
 	cmd.AddCommand(notifySetNtfyCmd())
 	cmd.AddCommand(notifySetEmailCmd())
@@ -30,182 +36,168 @@ func notifyCmd() *cobra.Command {
 	return cmd
 }
 
-func notifyStatusCmd() *cobra.Command {
+func notifyListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Show current notification configuration",
+		Use:     "list",
+		Aliases: []string{"status"},
+		Short:   "List configured notification targets",
+		Long: `List all notification targets. Use --format to control output:
+  plain (default) — one INFO log line per target with per-type index
+  table           — aligned columns, header row
+  json            — array of target objects (secrets redacted)
+  csv             — comma-separated, header row (secrets redacted)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
 			}
-			printNotifyTargets(fileCfg.Notifications, fileCfg.HasTargets())
-			return nil
+			format, err := getFormat(dc.FormatPlain)
+			if err != nil {
+				return err
+			}
+			return writeNotifyList(os.Stdout, fileCfg.Notifications, format)
 		},
 	}
 }
 
-func notifySetWebhookCmd() *cobra.Command {
+// ── add-X (append-only, validates everything) ───────────────────────────────
+
+func notifyAddWebhookCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "set-webhook [url]",
-		Short: "Set webhook URL (empty to remove all webhook targets)",
-		Long: `Set a webhook notification URL.
+		Use:   "add-webhook <url>",
+		Short: "Append a new webhook notification target",
+		Long: `Append a new webhook target. To update an existing target, use 'set-webhook'.
 
-When called without optional flags, only the URL is updated and all other
-settings (secret, triggers, repeat interval) are preserved.
-
-Use --secret or --secret-env to configure HMAC-SHA256 request signing.
-  --secret <value>         pass the secret directly (visible in shell history)
-  --secret-env <NAME>      read the secret from the named environment variable
-                           (RMM/script-friendly; secret never lands on disk)
-
-Use --target-index N to address the Nth webhook target (default 0). An index
-past the end appends a new target. Use --triggers and --repeat-minutes to
-control which events fire and how often.
-
-Pass an empty URL ("") to remove ALL webhook targets at once. To remove a
-single target, use 'drainctl notify remove --type webhook --target-index N'.`,
-		Args: cobra.MaximumNArgs(1),
+Use --secret or --secret-env to configure HMAC-SHA256 request signing:
+  --secret <value>      pass directly (visible in shell history)
+  --secret-env <NAME>   read from named env var (RMM-friendly)`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig()
-			if err != nil {
-				return err
-			}
-			url := ""
-			if len(args) > 0 {
-				url = args[0]
-			}
-
 			ov, err := buildOverrides(cmd, true)
 			if err != nil {
 				return err
 			}
-
-			return setNotifyTarget(fileCfg, "webhook", url, ov)
+			return addNotifyTarget(cmd, "webhook", args[0], ov)
 		},
 	}
-	c.Flags().String("secret", "", "HMAC-SHA256 signing secret (empty to clear)")
-	c.Flags().String("secret-env", "", "Name of env var to read the secret from (mutex with --secret)")
-	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this webhook (valid: %s)", triggerList()))
-	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
-	c.Flags().Int("target-index", 0, "0-based index among webhook targets (past end → append)")
+	addCommonAddFlags(c, true)
+	return c
+}
+
+func notifyAddNtfyCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "add-ntfy <url>",
+		Short: "Append a new ntfy.sh notification target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ov, err := buildOverrides(cmd, false)
+			if err != nil {
+				return err
+			}
+			return addNotifyTarget(cmd, "ntfy", args[0], ov)
+		},
+	}
+	addCommonAddFlags(c, false)
+	return c
+}
+
+func notifyAddEmailCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "add-email <smtp-url>",
+		Short: "Append a new SMTP email notification target",
+		Long: `Append a new email target. URL must use smtp:// or smtps://.
+
+Required: --from, --to (one or more comma-separated)
+Optional: --secret or --secret-env for the SMTP password.
+
+The plaintext password is DPAPI-encrypted before being written to config.json.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ov, err := buildOverrides(cmd, true)
+			if err != nil {
+				return err
+			}
+			if err := applyEmailFlags(cmd, &ov); err != nil {
+				return err
+			}
+			return addNotifyTarget(cmd, "email", args[0], ov)
+		},
+	}
+	addCommonAddFlags(c, true)
+	addEmailFlags(c)
+	return c
+}
+
+// ── set-X (in-place update, requires existing target at --target-index) ─────
+
+func notifySetWebhookCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "set-webhook <url>",
+		Short: "Update an existing webhook target by --target-index",
+		Long: `Update an existing webhook target. Errors if no target at --target-index.
+To create a new target, use 'add-webhook'.
+
+Fields not supplied (--secret, --triggers, --repeat-minutes) are preserved.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ov, err := buildOverrides(cmd, true)
+			if err != nil {
+				return err
+			}
+			return updateNotifyTarget(cmd, "webhook", args[0], ov)
+		},
+	}
+	addCommonSetFlags(c, true)
 	return c
 }
 
 func notifySetNtfyCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "set-ntfy [url]",
-		Short: "Set ntfy URL (empty to remove all ntfy targets)",
-		Long: `Set an ntfy.sh notification URL.
-
-When called without optional flags, only the URL is updated and all other
-settings (triggers, repeat interval) are preserved.
-
-Use --target-index N to address the Nth ntfy target (default 0). An index
-past the end appends a new target.
-
-Pass an empty URL ("") to remove ALL ntfy targets at once.`,
-		Args: cobra.MaximumNArgs(1),
+		Use:   "set-ntfy <url>",
+		Short: "Update an existing ntfy target by --target-index",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig()
-			if err != nil {
-				return err
-			}
-			url := ""
-			if len(args) > 0 {
-				url = args[0]
-			}
-
 			ov, err := buildOverrides(cmd, false)
 			if err != nil {
 				return err
 			}
-
-			return setNotifyTarget(fileCfg, "ntfy", url, ov)
+			return updateNotifyTarget(cmd, "ntfy", args[0], ov)
 		},
 	}
-	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
-	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
-	c.Flags().Int("target-index", 0, "0-based index among ntfy targets (past end → append)")
+	addCommonSetFlags(c, false)
 	return c
 }
 
 func notifySetEmailCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "set-email <smtp-url>",
-		Short: "Set an SMTP email notification target",
-		Long: `Configure an SMTP email notification target.
-
-The URL must use the smtp:// or smtps:// scheme (e.g., smtp://mail.example.com:587).
-
-Required on first creation:
-  --from <addr>            sender address
-  --to <addr1,addr2,...>   one or more recipient addresses
-
-Use --secret or --secret-env to set the SMTP password:
-  --secret <value>         pass the password directly (visible in shell history)
-  --secret-env <NAME>      read the password from the named environment variable
-                           (RMM/script-friendly; password never lands on disk)
-
-The plaintext password is DPAPI-encrypted before being written to config.json.
-Use --target-index N to address the Nth email target (default 0). An index
-past the end appends a new target.`,
+		Short: "Update an existing email target by --target-index",
+		Long: `Update an existing email target. URL is required; --from, --to, --secret are
+preserved if not supplied. To create a new target, use 'add-email'.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fileCfg, err := dc.LoadConfig()
-			if err != nil {
-				return err
-			}
-			url := args[0]
-			if strings.TrimSpace(url) == "" {
-				return errors.New("smtp-url is required")
-			}
-
 			ov, err := buildOverrides(cmd, true)
 			if err != nil {
 				return err
 			}
-			if cmd.Flags().Changed("from") {
-				s, _ := cmd.Flags().GetString("from")
-				ov.From = &s
+			if err := applyEmailFlags(cmd, &ov); err != nil {
+				return err
 			}
-			if cmd.Flags().Changed("to") {
-				raw, _ := cmd.Flags().GetString("to")
-				to := splitCSV(raw)
-				if len(to) == 0 {
-					return errors.New("--to must contain at least one address")
-				}
-				ov.To = &to
-			}
-
-			return setNotifyTarget(fileCfg, "email", url, ov)
+			return updateNotifyTarget(cmd, "email", args[0], ov)
 		},
 	}
-	c.Flags().String("from", "", "Sender email address")
-	c.Flags().String("to", "", "Comma-separated recipient email addresses")
-	c.Flags().String("secret", "", "SMTP password (DPAPI-encrypted on disk)")
-	c.Flags().String("secret-env", "", "Name of env var to read the password from (mutex with --secret)")
-	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this notification (valid: %s)", triggerList()))
-	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeated alert/session notifications (0=once, max %d)", dc.MaxRepeatMinutes))
-	c.Flags().Int("target-index", 0, "0-based index among email targets (past end → append)")
+	addCommonSetFlags(c, true)
+	addEmailFlags(c)
 	return c
 }
 
 func notifyRemoveCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "remove",
-		Short: "Remove a single notification target by type and index",
-		Long: `Remove the Nth notification target of a given type.
-
-Use 'drainctl notify status' to see the index of each target.
-
-Examples:
-  drainctl notify remove --type webhook --target-index 1
-  drainctl notify remove --type email   --target-index 0`,
+		Short: "Remove a notification target by type and index",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			typ, _ := cmd.Flags().GetString("type")
 			idx, _ := cmd.Flags().GetInt("target-index")
-
 			fileCfg, err := dc.LoadConfig()
 			if err != nil {
 				return err
@@ -216,7 +208,7 @@ Examples:
 			if err := dc.SaveConfig(fileCfg); err != nil {
 				return err
 			}
-			slog.Info(fmt.Sprintf("removed %s[%d]", typ, idx))
+			slog.Debug("removed notify target", "type", typ, "index", idx)
 			return nil
 		},
 	}
@@ -235,13 +227,58 @@ func notifyTestCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return dc.SendTestNotification(fileCfg.Notifications)
+			results, sendErr := dc.SendTestNotification(fileCfg.Notifications)
+			for _, r := range results {
+				if r.OK {
+					slog.Info("test=ok", "type", r.Type, "url", r.URL)
+				} else {
+					slog.Error("test=fail", "type", r.Type, "url", r.URL, "error", r.Error)
+				}
+			}
+			return sendErr
 		},
 	}
 }
 
-// notifyOverrides holds optional per-field overrides for a notification target.
-// A nil pointer means "preserve the existing value".
+// ── Flag helpers ────────────────────────────────────────────────────────────
+
+func addCommonAddFlags(c *cobra.Command, allowSecret bool) {
+	if allowSecret {
+		c.Flags().String("secret", "", "Signing secret / SMTP password (DPAPI-encrypted on disk)")
+		c.Flags().String("secret-env", "", "Name of env var to read the secret from (mutex with --secret)")
+	}
+	c.Flags().String("triggers", "", fmt.Sprintf("Comma-separated events that fire this target (valid: %s)", triggerList()))
+	c.Flags().Int("repeat-minutes", 0, fmt.Sprintf("Min minutes between repeats (0=once, max %d)", dc.MaxRepeatMinutes))
+}
+
+func addCommonSetFlags(c *cobra.Command, allowSecret bool) {
+	addCommonAddFlags(c, allowSecret)
+	c.Flags().Int("target-index", 0, "0-based index among targets of this type (default 0 = first)")
+}
+
+func addEmailFlags(c *cobra.Command) {
+	c.Flags().String("from", "", "Sender email address")
+	c.Flags().String("to", "", "Comma-separated recipient email addresses")
+}
+
+func applyEmailFlags(cmd *cobra.Command, ov *notifyOverrides) error {
+	if cmd.Flags().Changed("from") {
+		s, _ := cmd.Flags().GetString("from")
+		ov.From = &s
+	}
+	if cmd.Flags().Changed("to") {
+		raw, _ := cmd.Flags().GetString("to")
+		to := splitCSV(raw)
+		if len(to) == 0 {
+			return errors.New("--to must contain at least one address")
+		}
+		ov.To = &to
+	}
+	return nil
+}
+
+// notifyOverrides collects per-flag overrides from the cobra command into the
+// shared NotifyTargetUpdate fields.
 type notifyOverrides struct {
 	Secret        *string
 	From          *string
@@ -251,12 +288,8 @@ type notifyOverrides struct {
 	TargetIndex   int
 }
 
-// buildOverrides reads --secret/--secret-env/--triggers/--repeat-minutes/
-// --target-index from cmd. allowSecret controls whether --secret/--secret-env
-// are consulted (ntfy doesn't accept a secret).
 func buildOverrides(cmd *cobra.Command, allowSecret bool) (notifyOverrides, error) {
 	var ov notifyOverrides
-
 	if allowSecret {
 		secretChanged := cmd.Flags().Changed("secret")
 		secretEnvChanged := cmd.Flags().Changed("secret-env")
@@ -299,36 +332,38 @@ func buildOverrides(cmd *cobra.Command, allowSecret bool) (notifyOverrides, erro
 	return ov, nil
 }
 
-// setNotifyTarget upserts or removes notification targets of typ.
-//
-// Empty url removes ALL targets of typ (legacy CLI semantic preserved for
-// scripts). Non-empty url funnels through dc.SetNotifyTarget so the CLI and
-// the DLL share one mutation path.
-func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) error {
-	if url == "" {
-		filtered := fileCfg.Notifications[:0]
-		for _, t := range fileCfg.Notifications {
-			if t.Type != typ {
-				filtered = append(filtered, t)
-			}
-		}
-		fileCfg.Notifications = filtered
-		if err := dc.SaveConfig(fileCfg); err != nil {
-			return err
-		}
-		slog.Info(typ + "=disabled")
-		return nil
+// addNotifyTarget appends a new target via the shared API.
+func addNotifyTarget(_ *cobra.Command, typ, url string, ov notifyOverrides) error {
+	fileCfg, err := dc.LoadConfig()
+	if err != nil {
+		return err
 	}
-
 	update := dc.NotifyTargetUpdate{
-		Type:          typ,
-		URL:           url,
-		TargetIndex:   ov.TargetIndex,
-		Secret:        ov.Secret,
-		From:          ov.From,
-		To:            ov.To,
-		Triggers:      ov.Triggers,
-		RepeatMinutes: ov.RepeatMinutes,
+		Type: typ, URL: url,
+		Secret: ov.Secret, From: ov.From, To: ov.To,
+		Triggers: ov.Triggers, RepeatMinutes: ov.RepeatMinutes,
+	}
+	if err := dc.AppendNotifyTarget(fileCfg, update); err != nil {
+		return err
+	}
+	if err := dc.SaveConfig(fileCfg); err != nil {
+		return err
+	}
+	slog.Debug("notify target added", "type", typ, "url", url)
+	return nil
+}
+
+// updateNotifyTarget updates an existing target at --target-index via the
+// shared API. Errors clearly if no target exists at that index.
+func updateNotifyTarget(_ *cobra.Command, typ, url string, ov notifyOverrides) error {
+	fileCfg, err := dc.LoadConfig()
+	if err != nil {
+		return err
+	}
+	update := dc.NotifyTargetUpdate{
+		Type: typ, URL: url, TargetIndex: ov.TargetIndex,
+		Secret: ov.Secret, From: ov.From, To: ov.To,
+		Triggers: ov.Triggers, RepeatMinutes: ov.RepeatMinutes,
 	}
 	if err := dc.SetNotifyTarget(fileCfg, update); err != nil {
 		return err
@@ -336,13 +371,118 @@ func setNotifyTarget(fileCfg *dc.Config, typ, url string, ov notifyOverrides) er
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
-	if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
-		dc.PrintResult(os.Stdout, fmt.Sprintf("%s_url=%q", typ, url))
-	}
+	slog.Debug("notify target updated", "type", typ, "index", ov.TargetIndex, "url", url)
 	return nil
 }
 
-// splitCSV splits a comma-separated string and trims whitespace, dropping empties.
+// ── Output formatters ───────────────────────────────────────────────────────
+
+// notifyListRow is the redacted view of a NotificationTarget for list output.
+// Secrets are never serialized — only their presence as a boolean.
+type notifyListRow struct {
+	Index     int      `json:"index"`
+	TypeIndex int      `json:"type_index"`
+	Type      string   `json:"type"`
+	URL       string   `json:"url"`
+	Triggers  []string `json:"triggers"`
+	Repeat    int      `json:"repeat_minutes"`
+	HasSecret bool     `json:"has_secret"`
+	From      string   `json:"from,omitempty"`
+	To        []string `json:"to,omitempty"`
+}
+
+func toListRows(targets []dc.NotificationTarget) []notifyListRow {
+	rows := make([]notifyListRow, 0, len(targets))
+	counts := map[string]int{}
+	for i, t := range targets {
+		effective := t.Triggers
+		if len(effective) == 0 {
+			effective = dc.DefaultTriggers
+		}
+		trigStrs := make([]string, len(effective))
+		for j, tr := range effective {
+			trigStrs[j] = string(tr)
+		}
+		typeIdx := counts[t.Type]
+		counts[t.Type]++
+		rows = append(rows, notifyListRow{
+			Index: i, TypeIndex: typeIdx, Type: t.Type, URL: t.URL,
+			Triggers: trigStrs, Repeat: t.RepeatMinutes,
+			HasSecret: t.Secret != "", From: t.From, To: append([]string{}, t.To...),
+		})
+	}
+	return rows
+}
+
+func writeNotifyList(w *os.File, targets []dc.NotificationTarget, format dc.OutputFormat) error {
+	if len(targets) == 0 {
+		slog.Warn("no notification targets configured")
+		return nil
+	}
+	rows := toListRows(targets)
+
+	switch format {
+	case dc.FormatJSON:
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rows)
+	case dc.FormatCSV:
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"index", "type_index", "type", "url", "triggers", "repeat_minutes", "has_secret", "from", "to"})
+		for _, r := range rows {
+			_ = cw.Write([]string{
+				fmt.Sprint(r.Index), fmt.Sprint(r.TypeIndex), r.Type, r.URL,
+				strings.Join(r.Triggers, "|"), fmt.Sprint(r.Repeat),
+				fmt.Sprint(r.HasSecret), r.From, strings.Join(r.To, "|"),
+			})
+		}
+		cw.Flush()
+		return cw.Error()
+	case dc.FormatTable:
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if _, err := fmt.Fprintln(tw, "IDX\tTYPE[N]\tURL\tTRIGGERS\tREPEAT\tSECRET\tFROM\tTO"); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			secret := "-"
+			if r.HasSecret {
+				secret = "set"
+			}
+			if _, err := fmt.Fprintf(tw, "%d\t%s[%d]\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				r.Index, r.Type, r.TypeIndex, r.URL,
+				strings.Join(r.Triggers, ","), r.Repeat, secret,
+				r.From, strings.Join(r.To, ",")); err != nil {
+				return err
+			}
+		}
+		return tw.Flush()
+	default:
+		// Plain — one slog.Info per row so output respects --log-level.
+		for _, r := range rows {
+			secret := ""
+			switch r.Type {
+			case "webhook":
+				if r.HasSecret {
+					secret = " hmac=set"
+				} else {
+					secret = " hmac=unset"
+				}
+			case "email":
+				if r.HasSecret {
+					secret = " smtp_password=set"
+				} else {
+					secret = " smtp_password=unset"
+				}
+			}
+			slog.Info(fmt.Sprintf("%s[%d] url=%q triggers=[%s] repeat_minutes=%d%s",
+				r.Type, r.TypeIndex, r.URL, strings.Join(r.Triggers, ","), r.Repeat, secret))
+		}
+		return nil
+	}
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 func splitCSV(raw string) []string {
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -355,7 +495,6 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-// parseTriggers splits a comma-separated trigger list and validates each name.
 func parseTriggers(raw string) ([]dc.Trigger, error) {
 	parts := strings.Split(raw, ",")
 	triggers := make([]dc.Trigger, 0, len(parts))
@@ -376,7 +515,6 @@ func parseTriggers(raw string) ([]dc.Trigger, error) {
 	return triggers, nil
 }
 
-// triggerList returns a human-readable comma-separated list of all valid trigger names.
 func triggerList() string {
 	names := make([]string, 0, len(dc.ValidTriggers))
 	for tr := range dc.ValidTriggers {
@@ -386,60 +524,23 @@ func triggerList() string {
 	return strings.Join(names, ", ")
 }
 
-// printNotifyTargets logs each notification target and the overall enabled/disabled
-// status. Used by both "notify status" and "configure show".
+// printNotifyTargets is retained for configure_cmd.go which calls it directly.
+// New CLI list output uses writeNotifyList.
 func printNotifyTargets(targets []dc.NotificationTarget, hasTargets bool) {
-	if len(targets) == 0 {
+	if !hasTargets {
 		slog.Warn("notifications=disabled (no targets configured)")
 		return
 	}
-	// Per-type counters so each line shows the index a user would pass to
-	// --target-index when editing or removing it.
-	counts := map[string]int{}
-	for i, t := range targets {
-		effectiveTriggers := t.Triggers
-		triggerNote := ""
-		if len(effectiveTriggers) == 0 {
-			effectiveTriggers = dc.DefaultTriggers
-			triggerNote = " (default)"
-		}
-		triggers := make([]string, len(effectiveTriggers))
-		for j, tr := range effectiveTriggers {
-			triggers[j] = string(tr)
-		}
-		secretNote := ""
-		switch t.Type {
-		case "webhook":
-			if t.Secret != "" {
-				secretNote = " hmac_secret=set"
-			} else {
-				secretNote = " hmac_secret=unset"
-			}
-		case "email":
-			if t.Secret != "" {
-				secretNote = " smtp_password=set"
-			} else {
-				secretNote = " smtp_password=unset"
-			}
-		}
-		typeIdx := counts[t.Type]
-		counts[t.Type]++
-		slog.Info(fmt.Sprintf("target[%d] %s[%d] type=%s url=%q triggers=[%s]%s repeat_minutes=%d%s",
-			i, t.Type, typeIdx, t.Type, t.URL, strings.Join(triggers, ","), triggerNote, t.RepeatMinutes, secretNote))
-	}
-	if hasTargets {
-		if format, _ := getFormat(dc.FormatPlain); format == dc.FormatPlain {
-			dc.PrintResult(os.Stdout, "notifications=enabled")
-		}
-	} else {
-		slog.Warn("notifications=disabled (no targets with URLs configured)")
-	}
+	_ = writeNotifyList(os.Stdout, targets, dc.FormatPlain)
 }
 
-// upsertNotifyTarget retained as a thin shim over dc.SetNotifyTarget so existing
-// callers in configure_cmd.go and tests keep working.
+// upsertNotifyTarget retained as a thin wrapper for configure_cmd.go's
+// existing call sites that walk the legacy Add/replace path.
 func upsertNotifyTarget(targets []dc.NotificationTarget, typ, url string) []dc.NotificationTarget {
 	cfg := &dc.Config{Notifications: targets}
-	_ = dc.SetNotifyTarget(cfg, dc.NotifyTargetUpdate{Type: typ, URL: url})
+	// Try update first (preserves existing fields), fall back to append.
+	if err := dc.SetNotifyTarget(cfg, dc.NotifyTargetUpdate{Type: typ, URL: url}); err != nil {
+		_ = dc.AppendNotifyTarget(cfg, dc.NotifyTargetUpdate{Type: typ, URL: url})
+	}
 	return cfg.Notifications
 }

@@ -245,7 +245,7 @@ func runConfigureInteractive(fileCfg *dc.Config) error {
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return err
 	}
-	dc.PrintResult(os.Stdout, "configure=done", "mode", "interactive")
+	slog.Debug("configure done", "mode", "interactive")
 	return nil
 }
 
@@ -364,6 +364,6 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	dc.PrintResult(os.Stdout, "configure=done", fmt.Sprintf("mode=%s", mode))
+	slog.Debug("configure done", "mode", mode)
 	return nil
 }
