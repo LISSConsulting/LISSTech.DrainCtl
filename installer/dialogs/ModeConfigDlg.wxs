@@ -24,6 +24,10 @@
         <Control Id="GroupEdit" Type="Edit" X="20" Y="130" Width="200" Height="18"
           Property="DASHBOARD_GROUP" />
 
+        <Control Id="DashOnlyCheck" Type="CheckBox" X="20" Y="165" Width="330" Height="17"
+          Property="DASHBOARD_ONLY" CheckBoxValue="1"
+          Text="Dashboard only — this server is not an RDSH (skip local drain monitoring)" />
+
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
           Text="!(loc.WixUIBack)" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
