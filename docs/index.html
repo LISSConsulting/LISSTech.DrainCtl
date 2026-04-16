@@ -1577,14 +1577,24 @@
 
         <!-- Release Notes -->
         <section class="section section--shaded" id="releases">
-            <div class="wrap" style="text-align:center">
-                <div class="section-label">Release Notes</div>
-                <h2 class="section-title">Actively maintained. Production stable.</h2>
-                <p class="section-desc">
-                    Latest: <strong>v26.105.47</strong> &mdash; real-time SSE streaming, DPAPI-encrypted secrets,
-                    alert sustain windows, brand-new config experience.
-                </p>
-                <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">View all releases &rarr;</a>
+            <div class="wrap">
+                <div class="section-label">Latest Release</div>
+                <h2 class="section-title">v26.105.47</h2>
+                <div style="max-width:640px">
+                    <div class="card" style="padding:20px 24px">
+                        <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
+                            <li><strong>Server-Sent Events</strong> &mdash; dashboard updates in &lt;2s, replaces 30s polling</li>
+                            <li><strong>DPAPI-encrypted secrets</strong> &mdash; webhook keys and SMTP passwords encrypted at rest</li>
+                            <li><strong>Alert sustain windows</strong> &mdash; time-based thresholds replace raw poll counts</li>
+                            <li><strong>Config overhaul</strong> &mdash; preset pills, section icons, per-metric Off controls</li>
+                            <li><strong>Write-only secrets</strong> &mdash; API never returns credentials, only a has_secret flag</li>
+                            <li><strong>Email templates</strong> &mdash; mobile-first HTML with Outlook Classic support</li>
+                        </ul>
+                    </div>
+                </div>
+                <div style="margin-top:20px">
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">All releases &rarr;</a>
+                </div>
             </div>
         </section>
 
