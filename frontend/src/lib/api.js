@@ -337,38 +337,32 @@ export async function saveSettings(config) {
  * decodes it directly from the request body and sends to that target only).
  * Pass null to test all currently saved targets.
  *
- * Always returns the per-target results array so callers can show exactly
- * which target failed and the underlying error. The HTTP status is:
- *  200 — every target succeeded
- *  207 — some targets failed (Multi-Status)
- *  400 — every target failed or no targets configured
+ * The body is parsed regardless of HTTP status — the server returns 200 on
+ * full success, 207 (Multi-Status) when some targets failed, and 400 when
+ * everything failed or no targets are configured. Always shape:
+ *   { ok: boolean, results: [...], error?: string }
+ *
+ * Bypasses apiFetch (which throws on non-2xx) so callers can render
+ * per-target failures from the body itself.
  *
  * @param {NotifyTarget|null} [target=null]
- * @returns {Promise<{ok: boolean, results?: Array<{type:string,url:string,type_index:number,ok:boolean,error?:string}>, error?: string}>}
+ * @returns {Promise<{ok: boolean, results: Array<{type:string,url:string,type_index:number,ok:boolean,error?:string}>, error?: string}>}
  */
 export async function sendNotifyTest(target = null) {
-    let res;
+    const r = await fetch(`${BASE}/notify-test`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: target != null ? JSON.stringify(target) : '{}',
+    });
+    let body;
     try {
-        res = await apiFetch('/notify-test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: target != null ? JSON.stringify(target) : '{}',
-        });
-    } catch (e) {
-        // apiFetch throws on non-2xx — but we want the body either way so we
-        // can show which target failed. Re-issue manually as a fallback.
-        const url = (target != null) ? '/notify-test' : '/notify-test';
-        const r = await fetch(`/api/v1${url}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: target != null ? JSON.stringify(target) : '{}',
-        });
-        try {
-            return await r.json();
-        } catch {
-            throw e;
-        }
+        body = await r.json();
+    } catch {
+        // Server returned non-JSON (e.g. proxy 502). Synthesise an error shape.
+        const txt = await r.text().catch(() => '');
+        body = { ok: false, results: [], error: txt || `${r.status} ${r.statusText}` };
     }
-    return await res.json();
+    if (!body.results) body.results = [];
+    return body;
 }
