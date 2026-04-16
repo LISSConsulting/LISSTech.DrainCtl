@@ -424,7 +424,8 @@ func (c *Config) Validate() {
 		}
 		ct, err := DPAPIEncrypt([]byte(s))
 		if err != nil {
-			slog.Default().Warn("failed to DPAPI-encrypt secret, storing plaintext", "error", err)
+			slog.Default().Error("DPAPI encryption failed, secret will not be saved", "error", err)
+			c.Notifications[i].Secret = ""
 			continue
 		}
 		c.Notifications[i].Secret = dpapiPrefix + base64.StdEncoding.EncodeToString(ct)
@@ -667,10 +668,10 @@ func UpdatePerformanceConfig(perf PerformanceConfig) error {
 }
 
 // UpdateNotifySettings atomically updates notification targets, session warning
-// threshold, grace period, and/or poll interval in a single config load+save cycle.
-// Any nil argument is left unchanged. This is the preferred API for the
-// dashboard PUT /api/v1/settings handler.
-func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int) error {
+// threshold, grace period, poll interval, and/or performance config in a single
+// config load+save cycle. Any nil argument is left unchanged. This is the
+// preferred API for the dashboard PUT /api/v1/settings handler.
+func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *PerformanceConfig) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -695,6 +696,9 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 			return fmt.Errorf("poll interval must be 10-%d seconds, got %d", MaxPollInterval, *pollInterval)
 		}
 		cfg.PollInterval = *pollInterval
+	}
+	if performance != nil {
+		cfg.Performance = *performance
 	}
 	cfg.Validate()
 	return saveConfigToFile(cfg)

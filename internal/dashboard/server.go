@@ -218,7 +218,7 @@ type DashboardServer struct {
 	// instead of dc.UpdateNotifySettings. Receives the parsed request values;
 	// nil notifications means the field was absent from the request body
 	// (no-op for that field). nil threshold/gracePeriod/pollInterval mean the fields were absent.
-	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int) error
+	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *dc.PerformanceConfig) error
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -760,23 +760,16 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 
 	if ds.testPutSettingsFunc != nil {
-		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval); err != nil {
+		if err := ds.testPutSettingsFunc(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
 			slog.Error("update config failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval); err != nil {
+		if err := dc.UpdateNotifySettings(in.Notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
 			slog.Error("update settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-		if in.Performance != nil {
-			if err := dc.UpdatePerformanceConfig(*in.Performance); err != nil {
-				slog.Error("update performance config failed", "error", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 
