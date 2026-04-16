@@ -130,6 +130,9 @@ and saves config.json without prompting.`,
 	cmd.Flags().Int("load-alert-delay", 0, "Seconds CPU/memory must breach before alert fires (default: 60)")
 	cmd.Flags().Int("input-delay-alert-delay", 0, "Seconds input delay must breach before alert fires (default: 90)")
 	cmd.Flags().Int("memory-limit", dc.DefaultMemoryLimitMB, "Go runtime memory limit in MiB (32–4096)")
+	cmd.Flags().String("log-file-level", "", "File log level: debug|info|warn|error (default: info)")
+	cmd.Flags().String("log-event-level", "", "Event log level: debug|info|warn|error (default: info)")
+	cmd.Flags().Bool("dashboard-only", false, "Run dashboard without local drain monitoring")
 
 	return cmd
 }
@@ -333,6 +336,18 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	if cmd.Flags().Changed("input-delay-alert-delay") {
 		v, _ := cmd.Flags().GetInt("input-delay-alert-delay")
 		fileCfg.Performance.InputDelayAlertDelaySec = v
+	}
+	if cmd.Flags().Changed("log-file-level") {
+		v, _ := cmd.Flags().GetString("log-file-level")
+		fileCfg.LogFileLevel = v
+	}
+	if cmd.Flags().Changed("log-event-level") {
+		v, _ := cmd.Flags().GetString("log-event-level")
+		fileCfg.LogEventLevel = v
+	}
+	if cmd.Flags().Changed("dashboard-only") {
+		v, _ := cmd.Flags().GetBool("dashboard-only")
+		fileCfg.DashboardOnly = v
 	}
 
 	// Upsert rather than append: running configure twice with the same URL
