@@ -325,13 +325,17 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		dashboard.InitDashClient(dashCfg.TLSFingerprint)
 
 		// Local self-registration is instant (no network) — safe to do here.
-		if dashState != nil && isLocalDashboard(dashCfg.URL) {
+		// Skip when dashboard_only is set (management server, not an RDSH).
+		if dashState != nil && isLocalDashboard(dashCfg.URL) && !cfg.DashboardOnly {
 			hostname, _ := os.Hostname()
 			if hostname != "" {
 				dashState.Register(hostname)
 				dashRegistered = true
 				slog.Info("dashboard=self-registered", "host", hostname)
 			}
+		}
+		if cfg.DashboardOnly {
+			slog.Info("dashboard_only=true, skipping local drain monitoring")
 		}
 		// Remote registration + config fetch happen on the first poll tick
 		// (lastConfigFetch is zero, dashRegistered is false).
@@ -352,8 +356,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		Accepts: svc.AcceptStop | svc.AcceptShutdown,
 	}
 
-	// Run initial check.
-	svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+	// Run initial check (skip in dashboard-only mode).
+	if !cfg.DashboardOnly {
+		svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
 		"version", dc.Version,
@@ -384,9 +390,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 
 		case <-regCh:
-			slog.Info("trigger=registry_change")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
-			_ = st.Flush() // immediate flush on change
+			if !cfg.DashboardOnly {
+				slog.Info("trigger=registry_change")
+				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				_ = st.Flush() // immediate flush on change
+			}
 
 		case <-dashBootstrap:
 			// First async dashboard registration attempt after startup.
@@ -441,8 +449,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					slog.Debug("diag: step=sync_perf_done")
 				}
 			}
-			slog.Debug("diag: step=svc_run_check")
-			svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+			if !cfg.DashboardOnly {
+				slog.Debug("diag: step=svc_run_check")
+				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+			}
 
 		case <-configCh:
 			newFullCfg, err := dc.LoadConfig()
@@ -519,7 +529,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
-			if syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
+			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
 				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
