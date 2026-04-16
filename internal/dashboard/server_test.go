@@ -1349,7 +1349,7 @@ func TestHandleGetSettings_MultipleTargets(t *testing.T) {
 
 func TestHandlePutSettings_Success_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		return nil
 	}
 
@@ -1378,7 +1378,7 @@ func TestHandlePutSettings_Success_Returns200(t *testing.T) {
 
 func TestHandlePutSettings_InvalidJSON_Returns400(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		return nil
 	}
 
@@ -1393,7 +1393,7 @@ func TestHandlePutSettings_InvalidJSON_Returns400(t *testing.T) {
 
 func TestHandlePutSettings_UpdateError_Returns500(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		return fmt.Errorf("disk full")
 	}
 
@@ -1413,7 +1413,7 @@ func TestHandlePutSettings_CallsUpdateWithCorrectNotifications(t *testing.T) {
 	var capturedNotifs *[]dc.NotificationTarget
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, threshold *int, grace *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, threshold *int, grace *int, _ *int, _ *dc.PerformanceConfig) error {
 		capturedNotifs = notifications
 		capturedThreshold = threshold
 		capturedGrace = grace
@@ -1456,7 +1456,7 @@ func TestHandlePutSettings_PartialUpdate_ThresholdAndGraceOmitted(t *testing.T) 
 
 	var capturedThreshold *int
 	var capturedGrace *int
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, threshold *int, grace *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, threshold *int, grace *int, _ *int, _ *dc.PerformanceConfig) error {
 		capturedThreshold = threshold
 		capturedGrace = grace
 		return nil
@@ -1483,7 +1483,7 @@ func TestHandlePutSettings_WebhookSecretPreserved(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1517,7 +1517,7 @@ func TestHandlePutSettings_AbsentNotifications_PassedAsNil(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1543,7 +1543,7 @@ func TestHandlePutSettings_AbsentNotifications_PassedAsNil(t *testing.T) {
 func TestHandlePutSettings_OutOfRangeThreshold_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1564,7 +1564,7 @@ func TestHandlePutSettings_OutOfRangeThreshold_Returns400(t *testing.T) {
 func TestHandlePutSettings_NegativeThreshold_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1585,7 +1585,7 @@ func TestHandlePutSettings_NegativeThreshold_Returns400(t *testing.T) {
 func TestHandlePutSettings_OutOfRangeGracePeriod_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1606,7 +1606,7 @@ func TestHandlePutSettings_OutOfRangeGracePeriod_Returns400(t *testing.T) {
 func TestHandlePutSettings_ZeroGracePeriod_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1627,7 +1627,7 @@ func TestHandlePutSettings_ZeroGracePeriod_Returns400(t *testing.T) {
 func TestHandlePutSettings_InvalidTargetType_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1648,7 +1648,7 @@ func TestHandlePutSettings_InvalidTargetType_Returns400(t *testing.T) {
 func TestHandlePutSettings_InvalidTargetURLScheme_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1669,7 +1669,7 @@ func TestHandlePutSettings_InvalidTargetURLScheme_Returns400(t *testing.T) {
 func TestHandlePutSettings_InvalidTargetTrigger_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1690,7 +1690,7 @@ func TestHandlePutSettings_InvalidTargetTrigger_Returns400(t *testing.T) {
 func TestHandlePutSettings_OutOfRangeRepeatMinutes_Returns400(t *testing.T) {
 	ds := newTestServer(t)
 	hookCalled := false
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		hookCalled = true
 		return nil
 	}
@@ -1712,7 +1712,7 @@ func TestHandlePutSettings_ClearNotificationsWithEmptyArray(t *testing.T) {
 	ds := newTestServer(t)
 
 	var capturedNotifs *[]dc.NotificationTarget
-	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(notifications *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		capturedNotifs = notifications
 		return nil
 	}
@@ -1739,7 +1739,7 @@ func TestHandlePutSettings_ClearNotificationsWithEmptyArray(t *testing.T) {
 // (the auth != nil branch that logs the username).
 func TestHandlePutSettings_AuthenticatedUser_Returns200(t *testing.T) {
 	ds := newTestServer(t)
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error {
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
 		return nil
 	}
 
@@ -2685,7 +2685,7 @@ func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
 	ds := newTestServer(t)
 
 	// Inject no-op update and a config loader so broadcastSettingsUpdate succeeds.
-	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int) error { return nil }
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error { return nil }
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		return &dc.Config{
 			GracePeriod:             10,

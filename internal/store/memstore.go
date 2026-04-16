@@ -283,8 +283,11 @@ func (m *MemAuditStore) Close() error {
 		return nil
 	}
 
-	_ = m.flushLocked()
-	err := m.file.Close()
+	flushErr := m.flushLocked()
+	closeErr := m.file.Close()
 	m.file = nil
-	return err
+	if flushErr != nil {
+		return fmt.Errorf("flush on close: %w", flushErr)
+	}
+	return closeErr
 }
