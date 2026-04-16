@@ -167,7 +167,18 @@
             const [results, seedData] = await Promise.all([Promise.all(calls), metricSeedPromise]);
             const [servers, health] = results;
 
-            appState.servers = servers || [];
+            // Merge poll results: only update servers where poll data is newer
+            // than what SSE may have delivered while the poll was in flight.
+            if (servers) {
+                const existing = new Map(appState.servers.map((s) => [s.host, s]));
+                appState.servers = servers.map((polled) => {
+                    const cur = existing.get(polled.host);
+                    if (cur?.last_seen && polled.last_seen && new Date(cur.last_seen) > new Date(polled.last_seen)) {
+                        return cur;
+                    }
+                    return polled;
+                });
+            }
             appState.health = health;
             if (needsConfig) appState.config = results[2] ?? null;
             appState.connected = true;

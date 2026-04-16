@@ -220,12 +220,13 @@
         return null;
     }
 
+    /** @returns {Promise<boolean>} true on success */
     async function save() {
-        if (!config) return;
+        if (!config) return false;
         const err = validateThresholds();
         if (err) {
             toast.err(err);
-            return;
+            return false;
         }
         saving = true;
         try {
@@ -233,8 +234,10 @@
             original = JSON.parse(JSON.stringify(config));
             appState.config = JSON.parse(JSON.stringify(config));
             toast.ok('Settings saved');
+            return true;
         } catch (e) {
             toast.err('Save failed: ' + e.message);
+            return false;
         } finally {
             saving = false;
         }
@@ -756,8 +759,7 @@
         oncancel={() => (showConfirmClose = false)}
         onsave={async () => {
             showConfirmClose = false;
-            await save();
-            animateClose();
+            if (await save()) animateClose();
         }}
     />
 {/if}
