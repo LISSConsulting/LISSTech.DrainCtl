@@ -132,7 +132,7 @@ The existing `internal/svc.Run` already handles graceful shutdown, config reload
 1. Status pill on `ServerCard.svelte` shows one of `healthy` / `training` / `disabled` / `error`, pulled from a new `GET /api/evtspike/status?host=<hostname>` endpoint on the dashboard server and also pushed over SSE as a `detector_status` event (so the existing `broker.go` pattern applies; no new transport).
 2. Recent-spikes list on `ServerDetail.svelte` — last 20 confirmed spikes per server, fetched from `GET /api/evtspike/spikes?host=<hostname>&limit=20` and also streamed via SSE as `recent_spike` events. Backed by a bounded in-memory ring buffer on the server side (no new persistence — existing `MemAuditStore` pattern).
 
-State → pill mapping: `healthy` if feature enabled and at least one channel has a mature baseline; `training` if enabled but no channels mature yet (first week post-install); `disabled` if config-gated off; `error` if startup failed (e.g., couldn't open baseline file, couldn't subscribe to any channel at all).
+State → pill mapping: `healthy` if feature enabled and at least one channel has a mature baseline; `training` if enabled but no channels mature yet (first week post-install); `disabled` if config-gated off; `error` if startup failed (e.g., couldn't subscribe to any channel at all — note: a missing/unreadable baseline file is NOT an error; the detector warns and starts fresh per FR-019).
 
 **Rationale**:
 - Reuses the existing SSE broker (Feature 005 pattern — `project_sse_dashboard.md` memory notes SSE is in progress/planned). If SSE isn't yet in `main` at implementation time, falls back cleanly to the 30s poll.

@@ -50,7 +50,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 ### Detector library (lift from POC)
 
-- [ ] T007 [P] Move `cmd/evtspike/detector.go` → `internal/evtspike/detector.go`; update package from `main` to `evtspike`; keep all logic unchanged; keep `//go:build windows` tag
+- [ ] T007 [P] Move `cmd/evtspike/detector.go` → `internal/evtspike/detector.go`; update package from `main` to `evtspike`; keep `//go:build windows` tag. **REQUIRED change during move**: replace the hardcoded `minSlotN = 5` with a parameter sourced from `cfg.SlotMaturityObservations` (default 7 per `data-model.md` §1). This is not optional — keeping the hardcoded value would silently ignore the configurable threshold defined in `EvtSpikeConfig`.
 - [ ] T008 [P] Move `cmd/evtspike/detector_test.go` → `internal/evtspike/detector_test.go`; update package; keep tests passing
 - [ ] T009 [P] Create `internal/evtspike/channels.go` with the 54-channel default list (lifted verbatim from `cmd/evtspike/main.go` lines 32-109) exported as `var Defaults = []string{...}` and a `ResolveChannels(cfg EvtSpikeConfig, securityOptIn bool) []string` function implementing the merge rules from `data-model.md` §4
 - [ ] T010 [P] Create `internal/evtspike/channels_test.go` with table tests for: default-only returns 54 items, disable removes by case-insensitive name, add appends, add of duplicate dedupes, security-opt-in adds `Security` when flag is true
@@ -76,7 +76,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 **Goal**: Enable the detector inside the DrainCtl service, wire confirmed spikes into the existing notification pipeline, and expose the additive dashboard surface (status pill + recent-spikes list). After this phase, an admin who flips `evtspike.enabled: true` and subscribes a webhook to `event_spike` receives a notification on the first confirmed spike, and sees the detector on the dashboard.
 
-**Independent Test**: On a test RDSH with the built-in mode enabled, inject 50 events on `Application` in a sustained burst. Within three scoring windows (≤3 minutes): webhook receives an `event_spike` POST naming the `Application` channel, the dashboard status pill shows `training` (first week) or `healthy` (after), and the detail view shows the spike in the recent-spikes list. No notification fires on a single transient burst that lasts <60 s.
+**Independent Test**: On a test RDSH with the built-in mode enabled, inject 50 events on `Application` in a sustained burst. Within three scoring buckets (≤30 seconds): webhook receives an `event_spike` POST naming the `Application` channel, the dashboard status pill shows `training` (first week) or `healthy` (after), and the detail view shows the spike in the recent-spikes list. No notification fires on a single transient burst that lasts <60 s.
 
 ### Tests for User Story 1
 
@@ -128,7 +128,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 **Goal**: Prove and protect the robust-cap update path. The detector math from the POC already implements this; what's missing is test coverage against the full subsystem so future refactors can't silently break it.
 
-**Independent Test**: Feed a fake subscriber a 30-minute sustained flood on one channel (e.g., 100 events per 60s window for 30 consecutive windows). After the flood ends, feed a single anomalous burst (e.g., 30 events when baseline would previously have been ~1). Assert: (a) the channel's posterior mean after the flood is within 2× of its pre-flood value (not 100×), and (b) the follow-up 30-event burst still triggers an `OnSpike` call.
+**Independent Test**: Feed a fake subscriber a 30-minute sustained flood on one channel (e.g., 100 events per 10s bucket for ~180 consecutive buckets). After the flood ends, feed a single anomalous burst (e.g., 30 events when baseline would previously have been ~1). Assert: (a) the channel's posterior mean after the flood is within 2× of its pre-flood value (not 100×), and (b) the follow-up 30-event burst still triggers an `OnSpike` call.
 
 ### Tests for User Story 2
 
@@ -277,7 +277,7 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 - [ ] T092 [P] Run `quickstart.md` Path B: install standalone as service, verify pipe forwarding, stop DrainCtl, verify local-log fallback, restart DrainCtl, verify reconnect (SC-008: standalone first scoring pass <15 s of launch)
 - [ ] T093 [P] Run `quickstart.md` Path C: install with `ADDLOCAL=SecurityEventLog`, verify marker + privilege + subscription to Security; uninstall feature, verify cleanup
 - [ ] T094 Measure steady-state resource usage on a live RDSH for ≥1 hour: CPU, memory, baseline-write I/O — assert SC-007 (small single-digit % CPU, <50 MB memory)
-- [ ] T095 Induce a genuine anomaly on a real channel; measure time from first anomalous bucket to notification firing — assert SC-002 (≤3 × 60 s = ≤3 min)
+- [ ] T095 Induce a genuine anomaly on a real channel; measure time from first anomalous bucket to notification firing — assert SC-002 (≤3 × 10 s = ≤30 s)
 - [ ] T096 Deliberately misconfigure one webhook target (e.g., URL returning 401) while leaving others working; trigger a spike; verify other targets still receive the notification (SC-009)
 - [ ] T097 Run the baseline-poisoning scenario from US2's Independent Test on real hardware with real events; verify second anomaly is still flagged (SC-004)
 

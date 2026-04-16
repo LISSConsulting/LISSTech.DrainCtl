@@ -31,7 +31,7 @@
 
 ## Validation Notes
 
-The spec leans on several concrete terms from the user's description — "60-second windows," "2-of-3 confirmation," "15-minute slots," "named pipe," "webhook/ntfy/email," and the JSON baseline file. These are included because they describe user-observable behavior and integration surfaces, not internal implementation (e.g., "2-of-3 confirmation" is what the admin sees: transients are suppressed; "named pipe" identifies the existing DrainCtl IPC surface the admin already knows). Algorithm names (Gamma-Poisson, Negative Binomial) are intentionally kept out of requirements and success criteria and are referenced only in the Assumptions section as a pointer to validated POC work.
+The spec leans on several concrete terms from the user's description — "2-of-3 confirmation," "15-minute slots," "named pipe," "webhook/ntfy/email," and the JSON baseline file. Note: the user's original description mentioned "60-second windows"; this was subsequently clarified to 10-second scoring buckets (the POC behavior) — the "60-second rolling window" concept does not appear in normative requirements. These are included because they describe user-observable behavior and integration surfaces, not internal implementation (e.g., "2-of-3 confirmation" is what the admin sees: transients are suppressed; "named pipe" identifies the existing DrainCtl IPC surface the admin already knows). Algorithm names (Gamma-Poisson, Negative Binomial) are intentionally kept out of requirements and success criteria and are referenced only in the Assumptions section as a pointer to validated POC work.
 
 ## Notes
 
