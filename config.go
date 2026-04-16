@@ -145,7 +145,7 @@ type Config struct {
 	AuditPath     string `json:"audit_path"`
 	MemoryLimitMB int    `json:"memory_limit_mb"` // Go runtime soft memory limit (MiB); 0 → default
 
-	LogFileLevel  string `json:"log_file_level,omitempty"`  // min level for file sink: debug|info|warn|error (default: debug)
+	LogFileLevel  string `json:"log_file_level,omitempty"`  // min level for file sink: debug|info|warn|error (default: info)
 	LogEventLevel string `json:"log_event_level,omitempty"` // min level for event log sink: debug|info|warn|error (default: info)
 
 	Notifications []NotificationTarget `json:"notifications"`
@@ -287,7 +287,7 @@ func validateLogLevel(val, fieldName, fallback string) string {
 func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
 
-	c.LogFileLevel = validateLogLevel(c.LogFileLevel, "log_file_level", "debug")
+	c.LogFileLevel = validateLogLevel(c.LogFileLevel, "log_file_level", "info")
 	c.LogEventLevel = validateLogLevel(c.LogEventLevel, "log_event_level", "info")
 
 	if c.GracePeriod < 1 || c.GracePeriod > 1440 {

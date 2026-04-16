@@ -34,8 +34,11 @@
         <Property Id="GRACE_PERIOD" Value="60" Secure="yes" />
         <Property Id="ENABLE_PERF" Value="1" Secure="yes" />
         <Property Id="ENABLE_RFX" Value="1" Secure="yes" />
-        <Property Id="POLL_INTERVAL" Value="300" Secure="yes" />
+        <Property Id="POLL_INTERVAL" Value="60" Secure="yes" />
         <Property Id="SESSION_THRESHOLD" Value="80" Secure="yes" />
+        <Property Id="LOG_FILE_LEVEL" Value="info" Secure="yes" />
+        <Property Id="LOG_EVENT_LEVEL" Value="info" Secure="yes" />
+        <Property Id="DASHBOARD_ONLY" Value="0" Secure="yes" />
         <Property Id="AUTODISCOVER" Value="1" Secure="yes" />
 
         <!-- UI: custom wizard with install mode selection -->
@@ -60,7 +63,7 @@
             The second call loads the config saved by the first and layers on URL flags.
         -->
         <SetProperty Id="ConfigureAction" Before="ConfigureAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX]" />
+            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX] --log-file-level=[LOG_FILE_LEVEL] --log-event-level=[LOG_EVENT_LEVEL] --dashboard-only=[DASHBOARD_ONLY]" />
         <CustomAction Id="ConfigureAction"
             DllEntry="WixQuietExec"
             Execute="commit"
