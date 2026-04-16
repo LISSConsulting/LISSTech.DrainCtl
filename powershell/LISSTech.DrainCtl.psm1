@@ -76,6 +76,15 @@ public static class DrainCtlNative {
         [MarshalAs(UnmanagedType.LPStr)] string keyPath);
 
     [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_NotifySetTarget(
+        [MarshalAs(UnmanagedType.LPStr)] string jsonStr);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr DrainCtl_NotifyRemoveTarget(
+        [MarshalAs(UnmanagedType.LPStr)] string typ,
+        int index);
+
+    [DllImport("$($script:DllPath.Replace('\','\\'))", CallingConvention = CallingConvention.Cdecl)]
     public static extern void DrainCtl_Free(IntPtr ptr);
 
     /// <summary>
@@ -126,6 +135,21 @@ function Get-SafeProperty {
     $prop = $Object.PSObject.Properties[$Name]
     if ($null -ne $prop) { return $prop.Value }
     return $Default
+}
+
+function ConvertFrom-SecureStringToPlainText {
+    # Decrypts a SecureString into a plaintext string. The plaintext lives in
+    # managed memory only as long as the caller holds the result; we marshal
+    # it to drainctl.dll immediately so DPAPI encryption happens before any
+    # garbage-collected copy can persist.
+    param([System.Security.SecureString]$Secure)
+    if ($null -eq $Secure) { return $null }
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+    try {
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
 }
 
 function ConvertTo-NativeDateTime {
@@ -578,33 +602,52 @@ function Add-RDSHDrainNotificationTarget {
     Adds a notification target to DrainCtl.
 
     .DESCRIPTION
-    Appends a new notification target (webhook or ntfy) to the
-    notifications array in config.json.
+    Appends a new notification target (webhook, ntfy, or email) to the
+    notifications array in config.json. The mutation is atomic — drainctl.dll
+    walks the same code path as the CLI, so the dashboard cannot race with
+    this call.
+
+    Pass -Secret as a [SecureString] to set the webhook HMAC key or SMTP
+    password. The plaintext is DPAPI-encrypted by drainctl before it lands
+    on disk.
 
     .PARAMETER Type
-    Target type: 'webhook' or 'ntfy'.
+    Target type: 'webhook', 'ntfy', or 'email'.
 
     .PARAMETER URL
-    Target URL (e.g. 'https://hooks.example.com/drain' or 'https://ntfy.sh/alerts').
+    Target URL. For email use smtp:// or smtps:// (e.g. smtp://mail.example.com:587).
 
     .PARAMETER Triggers
-    Array of trigger names. Valid values: drain_on, drain_off, grace_entered,
-    alert, healthy, session_warning. Default: drain_on, drain_off, alert, healthy.
+    Array of trigger names. Default: drain_on, drain_off, alert, healthy.
 
     .PARAMETER RepeatMinutes
     Minutes between repeated alert notifications. 0 = notify once only. Default: 0.
 
-    .EXAMPLE
-    PS> Add-RDSHDrainNotificationTarget -Type webhook -URL 'https://hooks.example.com/drain'
+    .PARAMETER Secret
+    SecureString containing the HMAC signing secret (webhook) or SMTP password
+    (email). Stored DPAPI-encrypted. Use:
+      $sec = Read-Host -AsSecureString
+      $sec = $env:DRAINCTL_SMTP_PASSWORD | ConvertTo-SecureString -AsPlainText -Force
+
+    .PARAMETER From
+    (email only) Sender address.
+
+    .PARAMETER To
+    (email only) One or more recipient addresses.
 
     .EXAMPLE
-    PS> Add-RDSHDrainNotificationTarget -Type ntfy -URL 'https://ntfy.sh/alerts' -Triggers alert -RepeatMinutes 5
+    PS> Add-RDSHDrainNotificationTarget -Type webhook -URL 'https://hooks.example.com/drain' -Secret (Read-Host -AsSecureString)
+
+    .EXAMPLE
+    PS> $pw = $env:SMTP_PASSWORD | ConvertTo-SecureString -AsPlainText -Force
+    PS> Add-RDSHDrainNotificationTarget -Type email -URL 'smtp://mail.example.com:587' `
+            -From 'alerts@example.com' -To 'ops@example.com','oncall@example.com' -Secret $pw
     #>
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([void])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('webhook', 'ntfy')]
+        [ValidateSet('webhook', 'ntfy', 'email')]
         [string]$Type,
 
         [Parameter(Mandatory)]
@@ -612,73 +655,224 @@ function Add-RDSHDrainNotificationTarget {
         [string]$URL,
 
         [Parameter()]
-        [ValidateSet('drain_on', 'drain_off', 'grace_entered', 'alert', 'healthy', 'session_warning')]
+        [ValidateSet('drain_on', 'drain_off', 'grace_entered', 'alert', 'healthy',
+            'session_warning', 'cpu_warning', 'cpu_critical',
+            'input_delay_warning', 'input_delay_critical',
+            'memory_warning', 'memory_critical')]
         [string[]]$Triggers = @('drain_on', 'drain_off', 'alert', 'healthy'),
 
         [Parameter()]
         [ValidateRange(0, [int]::MaxValue)]
-        [int]$RepeatMinutes = 0
+        [int]$RepeatMinutes = 0,
+
+        [Parameter()]
+        [System.Security.SecureString]$Secret,
+
+        [Parameter()]
+        [string]$From,
+
+        [Parameter()]
+        [string[]]$To
     )
 
     if (-not $PSCmdlet.ShouldProcess("$Type target $URL", 'Add notification target')) {
         return
     }
 
-    # Read current config.
-    $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
-    $raw = Invoke-DrainCtlNative -Ptr $ptr
-    $targets = @(Get-SafeProperty $raw 'notifications' @())
-
-    # Append new target.
-    $newTarget = @{
-        type           = $Type
-        url            = $URL
-        triggers       = @($Triggers)
+    # TargetIndex past-end (huge value) tells the shared API to append.
+    $payload = [ordered]@{
+        type         = $Type
+        url          = $URL
+        target_index = [int]::MaxValue
+        triggers     = @($Triggers)
         repeat_minutes = $RepeatMinutes
     }
-    $targets += $newTarget
+    if ($PSBoundParameters.ContainsKey('Secret')) {
+        $payload['secret'] = ConvertFrom-SecureStringToPlainText -Secure $Secret
+    }
+    if ($PSBoundParameters.ContainsKey('From')) {
+        $payload['from'] = $From
+    }
+    if ($PSBoundParameters.ContainsKey('To')) {
+        $payload['to'] = @($To)
+    }
 
-    # Save via new format.
-    $payload = @{ notifications = @($targets) }
     $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
-    $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
+    $ptr = [DrainCtlNative]::DrainCtl_NotifySetTarget($jsonStr)
     $null = Invoke-DrainCtlNative -Ptr $ptr
 
     Write-Verbose "Added $Type notification target: $URL"
 }
 
+function Set-RDSHDrainNotificationTarget {
+    <#
+    .SYNOPSIS
+    Updates an existing notification target in place.
+
+    .DESCRIPTION
+    Modifies the Nth target of the given type (use Get-RDSHDrainNotificationTarget
+    or 'drainctl notify status' to see indices). Any parameter not supplied is
+    preserved on the target.
+
+    Pass -Secret as a [SecureString] to set the webhook HMAC key or SMTP
+    password. The plaintext is DPAPI-encrypted by drainctl before it lands
+    on disk.
+
+    If TargetIndex is past the end of existing targets of Type, a new target
+    is appended (matching the shared API semantics).
+
+    .PARAMETER Type
+    Target type: 'webhook', 'ntfy', or 'email'.
+
+    .PARAMETER TargetIndex
+    0-based index among targets of Type. Default: 0 (first target of that type).
+
+    .PARAMETER URL
+    Replacement URL. Required by the shared API.
+
+    .PARAMETER Triggers
+    Replacement trigger list (omit to preserve existing).
+
+    .PARAMETER RepeatMinutes
+    Replacement repeat interval (omit to preserve existing).
+
+    .PARAMETER Secret
+    SecureString containing new HMAC secret or SMTP password. Omit to preserve
+    the existing secret.
+
+    .PARAMETER From
+    (email) Sender address (omit to preserve).
+
+    .PARAMETER To
+    (email) Recipient addresses (omit to preserve).
+
+    .EXAMPLE
+    PS> $pw = $env:SMTP_PASSWORD | ConvertTo-SecureString -AsPlainText -Force
+    PS> Set-RDSHDrainNotificationTarget -Type email -TargetIndex 0 `
+            -URL 'smtp://mail.example.com:587' -Secret $pw
+
+    .EXAMPLE
+    PS> Set-RDSHDrainNotificationTarget -Type webhook -TargetIndex 1 `
+            -URL 'https://hooks.example.com/drain' -RepeatMinutes 30
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('webhook', 'ntfy', 'email')]
+        [string]$Type,
+
+        [Parameter()]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$TargetIndex = 0,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$URL,
+
+        [Parameter()]
+        [ValidateSet('drain_on', 'drain_off', 'grace_entered', 'alert', 'healthy',
+            'session_warning', 'cpu_warning', 'cpu_critical',
+            'input_delay_warning', 'input_delay_critical',
+            'memory_warning', 'memory_critical')]
+        [string[]]$Triggers,
+
+        [Parameter()]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$RepeatMinutes,
+
+        [Parameter()]
+        [System.Security.SecureString]$Secret,
+
+        [Parameter()]
+        [string]$From,
+
+        [Parameter()]
+        [string[]]$To
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("$Type target #$TargetIndex", 'Update notification target')) {
+        return
+    }
+
+    $payload = [ordered]@{
+        type         = $Type
+        url          = $URL
+        target_index = $TargetIndex
+    }
+    if ($PSBoundParameters.ContainsKey('Triggers'))      { $payload['triggers']       = @($Triggers) }
+    if ($PSBoundParameters.ContainsKey('RepeatMinutes')) { $payload['repeat_minutes'] = $RepeatMinutes }
+    if ($PSBoundParameters.ContainsKey('Secret'))        { $payload['secret']         = ConvertFrom-SecureStringToPlainText -Secure $Secret }
+    if ($PSBoundParameters.ContainsKey('From'))          { $payload['from']           = $From }
+    if ($PSBoundParameters.ContainsKey('To'))            { $payload['to']             = @($To) }
+
+    $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
+    $ptr = [DrainCtlNative]::DrainCtl_NotifySetTarget($jsonStr)
+    $null = Invoke-DrainCtlNative -Ptr $ptr
+
+    Write-Verbose "Updated $Type[$TargetIndex]: $URL"
+}
+
 function Remove-RDSHDrainNotificationTarget {
     <#
     .SYNOPSIS
-    Removes a notification target from DrainCtl by URL.
+    Removes a notification target from DrainCtl by URL or by (Type, TargetIndex).
 
     .DESCRIPTION
-    Removes the first notification target matching the given URL from
-    config.json. URL matching is case-insensitive.
+    Two parameter sets:
+      - ByURL (default, legacy): removes the first target whose URL matches.
+      - ByIndex: removes the Nth target of the given type — preferred for
+        deterministic scripting against multi-target configurations.
+
+    Both paths are atomic via drainctl.dll.
 
     .PARAMETER URL
-    URL of the target to remove.
+    URL of the target to remove (case-insensitive match). ByURL parameter set.
+
+    .PARAMETER Type
+    Target type ('webhook', 'ntfy', or 'email'). ByIndex parameter set.
+
+    .PARAMETER TargetIndex
+    0-based index among targets of Type. ByIndex parameter set.
 
     .EXAMPLE
     PS> Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'
 
     .EXAMPLE
-    PS> Get-RDSHDrainNotificationTarget | Where-Object Type -eq 'ntfy' | ForEach-Object { Remove-RDSHDrainNotificationTarget -URL $_.URL }
+    PS> Remove-RDSHDrainNotificationTarget -Type webhook -TargetIndex 1
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'ByURL')]
     [OutputType([void])]
     param(
-        [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName = 'ByURL')]
         [ValidateNotNullOrEmpty()]
-        [string]$URL
+        [string]$URL,
+
+        [Parameter(Mandatory, ParameterSetName = 'ByIndex')]
+        [ValidateSet('webhook', 'ntfy', 'email')]
+        [string]$Type,
+
+        [Parameter(Mandatory, ParameterSetName = 'ByIndex')]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$TargetIndex
     )
 
     process {
+        if ($PSCmdlet.ParameterSetName -eq 'ByIndex') {
+            if (-not $PSCmdlet.ShouldProcess("$Type[$TargetIndex]", 'Remove notification target')) {
+                return
+            }
+            $ptr = [DrainCtlNative]::DrainCtl_NotifyRemoveTarget($Type, $TargetIndex)
+            $null = Invoke-DrainCtlNative -Ptr $ptr
+            Write-Verbose "Removed $Type[$TargetIndex]"
+            return
+        }
+
         if (-not $PSCmdlet.ShouldProcess("target $URL", 'Remove notification target')) {
             return
         }
 
-        # Read current config.
+        # Legacy URL-match path: read, filter, write whole notifications array.
         $ptr = [DrainCtlNative]::DrainCtl_GetSettings()
         $raw = Invoke-DrainCtlNative -Ptr $ptr
         $targets = @(Get-SafeProperty $raw 'notifications' @())
@@ -690,7 +884,6 @@ function Remove-RDSHDrainNotificationTarget {
             return
         }
 
-        # Save via new format.
         $payload = @{ notifications = @($filtered) }
         $jsonStr = $payload | ConvertTo-Json -Depth 4 -Compress
         $ptr = [DrainCtlNative]::DrainCtl_SetSettings($jsonStr)
@@ -810,6 +1003,7 @@ Export-ModuleMember -Function @(
     'Set-RDSHDrainNotification'
     'Get-RDSHDrainNotificationTarget'
     'Add-RDSHDrainNotificationTarget'
+    'Set-RDSHDrainNotificationTarget'
     'Remove-RDSHDrainNotificationTarget'
     'Test-RDSHDrainNotification'
     'Enable-RDSHDrainDashboard'

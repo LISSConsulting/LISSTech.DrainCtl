@@ -355,3 +355,145 @@ func TestSetNotifyTarget_SaveError_URL_ReturnsError(t *testing.T) {
 		t.Fatal("expected SaveConfig error, got nil")
 	}
 }
+
+// ── new CLI behaviors: target-index, secret-env, set-email, remove ───────────
+
+// TestSetNotifyTarget_TargetIndexAppends verifies that the CLI's TargetIndex
+// override flows through to the shared API and addresses the Nth target of
+// the requested type.
+func TestSetNotifyTarget_TargetIndexAppends(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook1/", Triggers: dc.DefaultTriggers},
+	}
+	ov := notifyOverrides{TargetIndex: 1}
+	if err := setNotifyTarget(cfg, "webhook", "https://hook2/", ov); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	if len(cfg.Notifications) != 2 {
+		t.Fatalf("len = %d, want 2", len(cfg.Notifications))
+	}
+	if cfg.Notifications[1].URL != "https://hook2/" {
+		t.Errorf("appended target URL = %q", cfg.Notifications[1].URL)
+	}
+}
+
+// TestSetNotifyTarget_EmailFields verifies that email From/To overrides reach
+// the persisted target.
+func TestSetNotifyTarget_EmailFields(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	from := "alerts@example.com"
+	to := []string{"ops@example.com"}
+	ov := notifyOverrides{From: &from, To: &to}
+	if err := setNotifyTarget(cfg, "email", "smtp://mail.example.com:587", ov); err != nil {
+		t.Fatalf("setNotifyTarget: %v", err)
+	}
+	got := cfg.Notifications[0]
+	if got.From != "alerts@example.com" || len(got.To) != 1 || got.To[0] != "ops@example.com" {
+		t.Errorf("email target = %+v", got)
+	}
+}
+
+// TestBuildOverrides_SecretEnv verifies the env-var resolution path.
+func TestBuildOverrides_SecretEnv(t *testing.T) {
+	t.Setenv("DRAINCTL_TEST_SECRET", "from-env")
+
+	cmd := notifySetWebhookCmd()
+	cmd.SetArgs([]string{"--secret-env", "DRAINCTL_TEST_SECRET"})
+	if err := cmd.ParseFlags([]string{"--secret-env", "DRAINCTL_TEST_SECRET"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	ov, err := buildOverrides(cmd, true)
+	if err != nil {
+		t.Fatalf("buildOverrides: %v", err)
+	}
+	if ov.Secret == nil || *ov.Secret != "from-env" {
+		t.Errorf("Secret = %v, want pointer to %q", ov.Secret, "from-env")
+	}
+}
+
+// TestBuildOverrides_SecretEnvUnset_ReturnsError verifies the helper errors when
+// the named env var is missing — RMM operators get a clear failure rather than
+// silently writing an empty secret.
+func TestBuildOverrides_SecretEnvUnset_ReturnsError(t *testing.T) {
+	t.Setenv("DRAINCTL_TEST_SECRET_MISSING", "value")
+	if err := os.Unsetenv("DRAINCTL_TEST_SECRET_MISSING"); err != nil {
+		t.Fatalf("os.Unsetenv: %v", err)
+	}
+
+	cmd := notifySetWebhookCmd()
+	if err := cmd.ParseFlags([]string{"--secret-env", "DRAINCTL_TEST_SECRET_MISSING"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	_, err := buildOverrides(cmd, true)
+	if err == nil || !strings.Contains(err.Error(), "is not set") {
+		t.Errorf("err = %v, want 'is not set'", err)
+	}
+}
+
+// TestBuildOverrides_SecretMutex verifies --secret and --secret-env cannot both
+// be supplied — operators must pick one to avoid ambiguity about the source.
+func TestBuildOverrides_SecretMutex(t *testing.T) {
+	cmd := notifySetWebhookCmd()
+	if err := cmd.ParseFlags([]string{"--secret", "x", "--secret-env", "Y"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	_, err := buildOverrides(cmd, true)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("err = %v, want mutex error", err)
+	}
+}
+
+// TestBuildOverrides_SecretEnvEmpty verifies that --secret-env with whitespace
+// errors rather than reading an empty-named env var.
+func TestBuildOverrides_SecretEnvEmpty(t *testing.T) {
+	cmd := notifySetWebhookCmd()
+	if err := cmd.ParseFlags([]string{"--secret-env", "  "}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	_, err := buildOverrides(cmd, true)
+	if err == nil || !strings.Contains(err.Error(), "non-empty variable name") {
+		t.Errorf("err = %v, want non-empty-name error", err)
+	}
+}
+
+// TestSetEmailCmd_RequiresArgs verifies cobra rejects 'set-email' with no URL.
+func TestSetEmailCmd_RequiresArgs(t *testing.T) {
+	cmd := notifySetEmailCmd()
+	cmd.SetArgs([]string{})
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("expected error for missing smtp-url")
+	}
+}
+
+// TestNotifyRemove_RemovesByIndex verifies the remove subcommand surgically
+// drops one target while leaving siblings intact.
+func TestNotifyRemove_RemovesByIndex(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook1/", Triggers: dc.DefaultTriggers},
+		{Type: "webhook", URL: "https://hook2/", Triggers: dc.DefaultTriggers},
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	cmd := notifyRemoveCmd()
+	if err := cmd.ParseFlags([]string{"--type", "webhook", "--target-index", "0"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	reloaded, err := dc.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(reloaded.Notifications) != 1 || reloaded.Notifications[0].URL != "https://hook2/" {
+		t.Errorf("after remove: %+v", reloaded.Notifications)
+	}
+}
