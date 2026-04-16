@@ -101,10 +101,17 @@ func (m *MemAuditStore) load() error {
 }
 
 // Append adds a record to the in-memory store and marks it dirty.
+// maxInMemoryRecords is a soft cap on in-memory audit records. When exceeded,
+// the oldest records are dropped to keep memory bounded between prune cycles.
+const maxInMemoryRecords = 100000
+
 func (m *MemAuditStore) Append(rec *dc.AuditRecord) {
 	m.mu.Lock()
 	m.records = append(m.records, *rec)
 	m.dirty++
+	if len(m.records) > maxInMemoryRecords {
+		m.records = m.records[len(m.records)-maxInMemoryRecords:]
+	}
 	m.mu.Unlock()
 }
 

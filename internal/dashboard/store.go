@@ -92,7 +92,6 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if registered {
 		s.servers[hostname].LastResult = result
 		s.servers[hostname].LastSeen = time.Now()
-		s.save()
 
 		buf := s.history[hostname]
 		if len(buf) < historyMax {
@@ -103,11 +102,21 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		}
 		s.history[hostname] = buf
 	}
+	// Copy server list under lock for persistence outside lock.
+	var snapshot []ServerInfo
+	if registered {
+		snapshot = make([]ServerInfo, 0, len(s.servers))
+		for _, info := range s.servers {
+			snapshot = append(snapshot, *info)
+		}
+	}
 	cb := s.OnUpdate
 	s.mu.Unlock()
 
-	// Callback AFTER releasing the lock — broadcastServerUpdate calls
-	// state.Get() which needs RLock. Calling it under Lock is a deadlock.
+	// Persist and callback AFTER releasing the lock.
+	if registered {
+		s.saveSnapshot(snapshot)
+	}
 	if registered && cb != nil {
 		cb(hostname)
 	}
@@ -203,11 +212,18 @@ func (s *ServerState) load() {
 	}
 }
 
+// save copies the server list under the current lock and writes to disk.
+// Callers must hold s.mu.
 func (s *ServerState) save() {
 	list := make([]ServerInfo, 0, len(s.servers))
 	for _, info := range s.servers {
 		list = append(list, *info)
 	}
+	s.saveSnapshot(list)
+}
+
+// saveSnapshot writes a pre-built server list to disk without acquiring the lock.
+func (s *ServerState) saveSnapshot(list []ServerInfo) {
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		slog.Error("dashboard: marshal servers failed", "error", err)
