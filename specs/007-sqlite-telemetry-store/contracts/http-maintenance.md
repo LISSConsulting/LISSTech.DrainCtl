@@ -64,8 +64,8 @@ No query parameters.
 | `jobs[].outcome` | `"success"` \| `"failure"` \| `"skipped"` | |
 | `jobs[].reason` | string | Non-empty on failure. |
 | `jobs[].rows_affected` | int | For aggregators: rows inserted. For retention: rows deleted. |
-| `jobs[].overdue` | bool | True when `server_time - finished > 2 * expected_interval_seconds` (FR-031). |
-| `jobs[].expected_interval_seconds` | int | Server-side config echo. |
+| `jobs[].overdue` | bool | True when `expected_interval_seconds > 0` AND `server_time - finished > 2 * expected_interval_seconds` (FR-031). One-shot startup jobs (`jsonl_migration`, `drift_reconciliation`) report `expected_interval_seconds = 0` and are never overdue. |
+| `jobs[].expected_interval_seconds` | int | Server-side config echo. `0` means "one-shot startup job"; UI must not flag as overdue. Field is never null — use `0` as the sentinel. |
 | `server_time` | ISO-8601 | Enables the client to compute its own "freshness" ignoring clock skew. |
 
 ### Errors
