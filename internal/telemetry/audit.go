@@ -71,6 +71,15 @@ func NewAuditStore(ctx context.Context, db *DB) (*AuditStore, error) {
 	return &AuditStore{conn: conn, reader: db.reader}, nil
 }
 
+// NewReadOnlyAuditStore returns an AuditStore backed by a DB opened via
+// OpenReadOnly. The pinned write connection is intentionally nil: Append
+// returns an error, while QueryRange and LatestByHost read through the
+// shared reader pool. Used by the drainctl CLI's history fallback when
+// the service pipe is unreachable (tasks.md T028a).
+func NewReadOnlyAuditStore(db *DB) *AuditStore {
+	return &AuditStore{conn: nil, reader: db.reader}
+}
+
 // Close releases the pinned connection back to the pool. Idempotent.
 func (s *AuditStore) Close() error {
 	if s == nil || s.conn == nil {
@@ -84,7 +93,11 @@ func (s *AuditStore) Close() error {
 // Append inserts a single audit record through the pinned synchronous=FULL
 // connection. ON CONFLICT DO NOTHING on the (ts, host, new_state) primary key
 // makes retry and JSONL re-import idempotent (FR-021, data-model.md).
+// Returns an error on read-only stores (conn == nil) rather than nil-panicking.
 func (s *AuditStore) Append(ctx context.Context, rec AuditRecord) error {
+	if s.conn == nil {
+		return errors.New("telemetry: audit Append called on read-only store")
+	}
 	tsMs := rec.Ts.UTC().UnixMilli()
 
 	var keyModMs sql.NullInt64

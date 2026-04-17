@@ -26,23 +26,26 @@ type HistoryOptions struct {
 // JSONL trail); its parent directory is used as the telemetry data dir so
 // existing callers that pass the legacy audit.jsonl path keep working without
 // a signature change (T028). An empty DBPath selects DefaultDataDir().
+//
+// Opens the store read-only so the CLI never writes to drainctl.db while the
+// service may be running concurrently (tasks.md T028a / research.md §13).
+// Read-only open validates the WAL sidecars (-wal / -shm): a partially-closed
+// writer or an ACL mismatch surfaces as an explicit error rather than silent
+// fallback to stale data.
 func GetHistory(opts HistoryOptions) ([]AuditRecord, error) {
 	dataDir := DefaultDataDir()
 	if opts.DBPath != "" {
 		dataDir = filepath.Dir(opts.DBPath)
 	}
 
-	db, err := telemetry.Open(dataDir)
+	db, err := telemetry.OpenReadOnly(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open audit store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
-	store, err := telemetry.NewAuditStore(ctx, db)
-	if err != nil {
-		return nil, fmt.Errorf("open audit store: %w", err)
-	}
+	store := telemetry.NewReadOnlyAuditStore(db)
 	defer func() { _ = store.Close() }()
 
 	// HistoryOptions.Until is inclusive ("at or before") per the CLI contract,

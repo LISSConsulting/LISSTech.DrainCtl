@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 func openTestDB(t *testing.T) *DB {
@@ -179,6 +182,226 @@ func TestOpen_AllowsLocalFixedDrive(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = db.Close() }()
+}
+
+// seedOneAudit inserts a single audit row on a writer DB. Used by the
+// OpenReadOnly tests so the read-only roundtrip has something to return.
+func seedOneAudit(t *testing.T, db *DB, host string) time.Time {
+	t.Helper()
+	ctx := context.Background()
+	store, err := NewAuditStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ts := time.Now().UTC().Truncate(time.Millisecond)
+	err = store.Append(ctx, AuditRecord{
+		Ts:        ts,
+		Host:      host,
+		PrevState: 0,
+		NewState:  1,
+		ChangedBy: "test",
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	return ts
+}
+
+func TestCLIReadOnly_SidecarsPresent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Leave the writer open during the CLI read — this is the live case
+	// covered by research.md §13(a): service running, CLI reader joins via
+	// WAL. SQLite deletes -wal/-shm on last-connection-close, so we can't
+	// produce this state any other way from a test.
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	wantHost := "host-a"
+	seedOneAudit(t, db, wantHost)
+
+	dbPath := filepath.Join(dir, dbFileName)
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+	if _, err := os.Stat(walPath); err != nil {
+		t.Fatalf("WAL sidecar missing with active writer: %v", err)
+	}
+	if _, err := os.Stat(shmPath); err != nil {
+		t.Fatalf("SHM sidecar missing with active writer: %v", err)
+	}
+
+	roDB, err := OpenReadOnly(dir)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer func() { _ = roDB.Close() }()
+
+	if roDB.writer != nil || roDB.auditDB != nil || roDB.checkpointDB != nil {
+		t.Errorf("read-only DB must not populate write pools (writer=%v audit=%v checkpoint=%v)",
+			roDB.writer != nil, roDB.auditDB != nil, roDB.checkpointDB != nil)
+	}
+
+	store := NewReadOnlyAuditStore(roDB)
+	defer func() { _ = store.Close() }()
+	records, _, err := store.QueryRange(context.Background(), QueryFilter{})
+	if err != nil {
+		t.Fatalf("QueryRange: %v", err)
+	}
+	if len(records) != 1 || records[0].Host != wantHost {
+		t.Fatalf("expected 1 audit record for host=%s, got %+v", wantHost, records)
+	}
+
+	// Append on a read-only store is blocked rather than silently no-op.
+	if err := store.Append(context.Background(), AuditRecord{Host: "x", NewState: 1}); err == nil {
+		t.Error("Append on read-only audit store returned nil; want error")
+	}
+}
+
+func TestCLIReadOnly_SidecarsMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	wantHost := "host-b"
+	seedOneAudit(t, db, wantHost)
+	// TRUNCATE checkpoint before close so data lands in the main file; the
+	// test then deletes the sidecars to simulate "service cleanly shut down
+	// and checkpointed" (research.md §13 case b).
+	if _, err := db.writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, dbFileName)
+	if err := os.Remove(dbPath + "-wal"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove WAL: %v", err)
+	}
+	if err := os.Remove(dbPath + "-shm"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove SHM: %v", err)
+	}
+
+	roDB, err := OpenReadOnly(dir)
+	if err != nil {
+		t.Fatalf("OpenReadOnly without sidecars: %v", err)
+	}
+	defer func() { _ = roDB.Close() }()
+
+	store := NewReadOnlyAuditStore(roDB)
+	defer func() { _ = store.Close() }()
+	records, _, err := store.QueryRange(context.Background(), QueryFilter{})
+	if err != nil {
+		t.Fatalf("QueryRange: %v", err)
+	}
+	if len(records) != 1 || records[0].Host != wantHost {
+		t.Fatalf("expected 1 audit record for host=%s, got %+v", wantHost, records)
+	}
+}
+
+func TestCLIReadOnly_SidecarUnreadableAclError(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	seedOneAudit(t, db, "host-c")
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, dbFileName)
+	walPath := dbPath + "-wal"
+	// SQLite deletes sidecars on clean close. Recreate a placeholder -wal so
+	// the test exercises validateReadOnlySidecars' read-probe branch against
+	// a real file; the content is irrelevant because the exclusive handle
+	// below blocks all other opens before the bytes matter.
+	if err := os.WriteFile(walPath, []byte{0}, 0o600); err != nil {
+		t.Fatalf("seed placeholder WAL: %v", err)
+	}
+
+	// Hold -wal with dwShareMode=0 so any subsequent CreateFile for the file
+	// (including os.Open inside the validator) fails with ERROR_SHARING_VIOLATION.
+	// Models the "CLI process cannot read the sidecar" case — same observable
+	// failure mode as an ACL-denied open.
+	walPtr, err := windows.UTF16PtrFromString(walPath)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		walPtr,
+		windows.GENERIC_READ,
+		0, // no sharing
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile exclusive on WAL: %v", err)
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+
+	_, openErr := OpenReadOnly(dir)
+	if openErr == nil {
+		t.Fatal("OpenReadOnly succeeded with exclusively-locked WAL; want error")
+	}
+	if !strings.Contains(openErr.Error(), walPath) {
+		t.Errorf("error does not cite WAL sidecar path %q: %v", walPath, openErr)
+	}
+	if !strings.Contains(openErr.Error(), "cannot read") {
+		t.Errorf("error does not describe read failure: %v", openErr)
+	}
+	if !strings.Contains(openErr.Error(), "read permission") {
+		t.Errorf("error does not mention required permission: %v", openErr)
+	}
+}
+
+func TestCLIReadOnly_SidecarCorruptError(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	seedOneAudit(t, db, "host-d")
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	dbPath := filepath.Join(dir, dbFileName)
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+	// Clean close deletes sidecars. Plant a -wal placeholder with no matching
+	// -shm to simulate a partially-closed writer (research.md §13 case d):
+	// WAL on disk but shared memory gone.
+	if err := os.WriteFile(walPath, []byte{0}, 0o600); err != nil {
+		t.Fatalf("seed placeholder WAL: %v", err)
+	}
+	if _, err := os.Stat(shmPath); err == nil {
+		t.Fatalf("SHM sidecar unexpectedly present after clean close")
+	}
+
+	_, openErr := OpenReadOnly(dir)
+	if openErr == nil {
+		t.Fatal("OpenReadOnly succeeded with WAL-but-no-SHM; want error")
+	}
+	if !strings.Contains(openErr.Error(), walPath) {
+		t.Errorf("error does not cite WAL path %q: %v", walPath, openErr)
+	}
+	if !strings.Contains(openErr.Error(), shmPath) {
+		t.Errorf("error does not cite SHM path %q: %v", shmPath, openErr)
+	}
+	if !strings.Contains(openErr.Error(), "partially-closed") {
+		t.Errorf("error does not describe partially-closed writer: %v", openErr)
+	}
 }
 
 func TestOpen_CorruptFileReturnsClearError(t *testing.T) {
