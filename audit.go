@@ -32,6 +32,12 @@ type AuditRecord struct {
 	DiskQueue            float64   `json:"disk_queue,omitempty"`
 	TCPRetransSec        float64   `json:"tcp_retrans_sec,omitempty"`
 	ExitCode             int       `json:"exit"`
+	// Reconciliation marks rows written by the drift reconciler at service
+	// startup (T025 / FR-001a). Operators need to see these distinctly from
+	// live, attributable transitions: the service was down, so the state
+	// change is observed only as a before/after delta with no principal.
+	Reconciliation bool   `json:"reconciliation,omitempty"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // AuditStore manages the JSONL-based audit trail.

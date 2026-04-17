@@ -953,6 +953,206 @@ func TestWriteHistory_CSV_IncludesSessionColumns(t *testing.T) {
 	}
 }
 
+// ── Reconciliation row rendering (T030) ───────────────────────────────────────
+
+// makeReconciliationRecords returns two audit records, one live transition and
+// one reconciliation row written by the drift reconciler at service startup.
+func makeReconciliationRecords() []AuditRecord {
+	ts := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	return []AuditRecord{
+		{
+			Timestamp:      ts.Add(5 * time.Minute),
+			Host:           "SRV01",
+			DrainMode:      PreventNewLogon,
+			DrainLabel:     "PreventNewLogon",
+			Changed:        true,
+			Reconciliation: true,
+			Reason:         "service-downtime drift: last-known AllowAll, observed PreventNewLogon",
+			ExitCode:       1,
+		},
+		{
+			Timestamp:  ts,
+			Host:       "SRV01",
+			DrainMode:  AllowAll,
+			DrainLabel: "AllowAll",
+			Changed:    false,
+			ExitCode:   0,
+		},
+	}
+}
+
+func TestWriteHistory_Plain_ReconciliationTag(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeReconciliationRecords(), FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("plain line count = %d, want 2; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "[DRIFT]") {
+		t.Errorf("reconciliation row should carry [DRIFT] tag: %s", lines[0])
+	}
+	if strings.Contains(lines[0], "[INF]") || strings.Contains(lines[0], "[ERR]") {
+		t.Errorf("reconciliation row should not carry INF/ERR level: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "service-downtime drift") {
+		t.Errorf("reconciliation row should include reason: %s", lines[0])
+	}
+	if strings.Contains(lines[1], "[DRIFT]") {
+		t.Errorf("live row should not carry [DRIFT] tag: %s", lines[1])
+	}
+}
+
+func TestWriteHistory_Table_ReconciliationPrefix(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeReconciliationRecords(), FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "[DRIFT] PreventNewLogon") {
+		t.Errorf("table DRAIN MODE column should prefix reconciliation row with [DRIFT]: %s", out)
+	}
+	if !strings.Contains(out, "DRIFT") {
+		t.Errorf("CHANGED column should show DRIFT for reconciliation row: %s", out)
+	}
+	if !strings.Contains(out, "service-downtime drift") {
+		t.Errorf("CHANGED BY column should show reason for reconciliation row: %s", out)
+	}
+}
+
+func TestWriteHistory_CSV_ReconciliationColumns(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeReconciliationRecords(), FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("CSV line count = %d, want ≥ 3; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "reconciliation") {
+		t.Errorf("CSV header missing reconciliation column: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "reason") {
+		t.Errorf("CSV header missing reason column: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "true") {
+		t.Errorf("CSV data row should have reconciliation=true: %s", lines[1])
+	}
+	if !strings.Contains(lines[1], "service-downtime drift") {
+		t.Errorf("CSV data row should carry reason text: %s", lines[1])
+	}
+}
+
+func TestWriteHistory_JSON_ReconciliationFields(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistory(&buf, makeReconciliationRecords(), FormatJSON)
+	var records []HistoryRecord
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(buf.String(), "\n")), &records); err != nil {
+		t.Fatalf("JSON unmarshal error: %v\n%s", err, buf.String())
+	}
+	if len(records) != 2 {
+		t.Fatalf("record count = %d, want 2", len(records))
+	}
+	if !records[0].Reconciliation {
+		t.Errorf("first record should have Reconciliation=true")
+	}
+	if records[0].Reason == "" {
+		t.Errorf("first record should have Reason set")
+	}
+	if records[1].Reconciliation {
+		t.Errorf("second (live) record should have Reconciliation=false")
+	}
+}
+
+func TestAuditToHistory_CopiesReconciliationAndReason(t *testing.T) {
+	dur := 0
+	rec := AuditRecord{
+		Timestamp:      time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC),
+		Host:           "SRV01",
+		DrainMode:      PreventNewLogon,
+		DrainLabel:     "PreventNewLogon",
+		Reconciliation: true,
+		Reason:         "service-downtime drift",
+	}
+	hr := AuditToHistory(rec, &dur)
+	if !hr.Reconciliation {
+		t.Error("HistoryRecord.Reconciliation should be true")
+	}
+	if hr.Reason != "service-downtime drift" {
+		t.Errorf("HistoryRecord.Reason = %q, want %q", hr.Reason, "service-downtime drift")
+	}
+}
+
+func makeReconciliationHistoryRecords() []HistoryRecord {
+	dur0, dur300 := 0, 300
+	return []HistoryRecord{
+		{
+			Timestamp:            "2026-04-01T10:05:00Z",
+			Host:                 "SRV01",
+			DrainMode:            "PreventNewLogon",
+			DrainValue:           1,
+			StateDurationSeconds: &dur0,
+			Changed:              true,
+			Reconciliation:       true,
+			Reason:               "service-downtime drift: last-known AllowAll, observed PreventNewLogon",
+			ExitCode:             1,
+		},
+		{
+			Timestamp:            "2026-04-01T10:00:00Z",
+			Host:                 "SRV01",
+			DrainMode:            "AllowAll",
+			DrainValue:           0,
+			StateDurationSeconds: &dur300,
+			Changed:              false,
+			ExitCode:             0,
+		},
+	}
+}
+
+func TestWriteHistoryRecords_Plain_ReconciliationTag(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeReconciliationHistoryRecords(), FormatPlain)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("plain line count = %d, want 2; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "[DRIFT]") {
+		t.Errorf("reconciliation row should carry [DRIFT] tag: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "service-downtime drift") {
+		t.Errorf("reconciliation row should include reason: %s", lines[0])
+	}
+}
+
+func TestWriteHistoryRecords_Table_ReconciliationPrefix(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeReconciliationHistoryRecords(), FormatTable)
+	out := buf.String()
+	if !strings.Contains(out, "[DRIFT] PreventNewLogon") {
+		t.Errorf("table should prefix reconciliation row drain mode with [DRIFT]: %s", out)
+	}
+	if !strings.Contains(out, "DRIFT") {
+		t.Errorf("CHANGED column should show DRIFT for reconciliation row: %s", out)
+	}
+}
+
+func TestWriteHistoryRecords_CSV_ReconciliationColumns(t *testing.T) {
+	var buf bytes.Buffer
+	WriteHistoryRecords(&buf, makeReconciliationHistoryRecords(), FormatCSV)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("CSV line count = %d, want ≥ 3; output:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "reconciliation") {
+		t.Errorf("CSV header missing reconciliation column: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "true") {
+		t.Errorf("CSV data row should have reconciliation=true: %s", lines[1])
+	}
+	if !strings.Contains(lines[1], "service-downtime drift") {
+		t.Errorf("CSV data row should carry reason text: %s", lines[1])
+	}
+}
+
 func TestWriteHistoryRecords_CSV_IncludesSessionColumns(t *testing.T) {
 	dur := 0
 	records := []HistoryRecord{
