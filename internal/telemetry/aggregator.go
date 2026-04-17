@@ -51,8 +51,13 @@ func (a *Aggregator) Run(ctx context.Context) {
 // Every eligible bucket is unconditionally recomputed so late-arriving raw
 // samples within the watermark window are reflected on the next tick.
 func (a *Aggregator) rollHourly(ctx context.Context) {
-	cutoff := time.Now().UTC().Add(-hourlyWatermark)
+	started := time.Now().UTC()
+	cutoff := started.Add(-hourlyWatermark)
 	maxBucketMs := cutoff.Truncate(time.Hour).UnixMilli()
+
+	var rowsAffected int64
+	outcome := "success"
+	reason := ""
 
 	res, err := a.db.writer.ExecContext(ctx, `
 		INSERT INTO metrics_hourly (bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
@@ -75,9 +80,44 @@ func (a *Aggregator) rollHourly(ctx context.Context) {
 		maxBucketMs,
 	)
 	if err != nil {
+		outcome = "failure"
+		reason = err.Error()
 		slog.Warn("telemetry: hourly aggregator failed", "error", err)
-		return
+	} else {
+		rowsAffected, _ = res.RowsAffected()
+		slog.Info("telemetry: hourly aggregator ran",
+			"rows_affected", rowsAffected, "max_bucket_ms", maxBucketMs)
 	}
-	rows, _ := res.RowsAffected()
-	slog.Info("telemetry: hourly aggregator ran", "rows_affected", rows, "max_bucket_ms", maxBucketMs)
+
+	a.recordMaintenance(ctx, "aggregator_hourly", started, time.Now().UTC(), outcome, reason, rowsAffected)
+}
+
+// recordMaintenance upserts a maintenance_jobs row covering one aggregator run.
+// Full instrumentation (via MaintenanceStore) lands in T048; per FR-032 the
+// ETW + file log record emitted above must be paired with the row written here
+// so the dashboard widget and the logs stay in sync.
+func (a *Aggregator) recordMaintenance(
+	ctx context.Context,
+	name string,
+	started, finished time.Time,
+	outcome, reason string,
+	rowsAffected int64,
+) {
+	_, err := a.db.writer.ExecContext(ctx, `
+		INSERT INTO maintenance_jobs
+			(name, started_ts, finished_ts, duration_ms, outcome, reason, rows_affected)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			started_ts    = excluded.started_ts,
+			finished_ts   = excluded.finished_ts,
+			duration_ms   = excluded.duration_ms,
+			outcome       = excluded.outcome,
+			reason        = excluded.reason,
+			rows_affected = excluded.rows_affected`,
+		name, started.UnixMilli(), finished.UnixMilli(),
+		finished.Sub(started).Milliseconds(), outcome, reason, rowsAffected,
+	)
+	if err != nil {
+		slog.Warn("telemetry: record maintenance_jobs failed", "name", name, "error", err)
+	}
 }
