@@ -153,6 +153,34 @@ func TestOpen_PragmasAppliedToEveryConnection(t *testing.T) {
 	checkPragma("conn2", scan2)
 }
 
+func TestOpen_RefusesNetworkShare(t *testing.T) {
+	// GetDriveType on an unreachable UNC root returns DRIVE_NO_ROOT_DIR (1),
+	// which is not DRIVE_FIXED (3) — the gate must fire before any file I/O.
+	_, err := Open(`\\bogus-drainctl-test-server\share\data`)
+	if err == nil {
+		t.Fatal("Open on UNC path returned nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "FR-004") {
+		t.Errorf("error does not mention FR-004: %v", err)
+	}
+	if !strings.Contains(err.Error(), "non-local") {
+		t.Errorf("error does not mention 'non-local': %v", err)
+	}
+}
+
+func TestOpen_AllowsLocalFixedDrive(t *testing.T) {
+	// t.TempDir() is always on the system DRIVE_FIXED volume; the drive-type
+	// gate must not block a valid local path.
+	db, err := Open(t.TempDir())
+	if err != nil {
+		if strings.Contains(err.Error(), "FR-004") {
+			t.Fatalf("Open incorrectly rejected local fixed drive: %v", err)
+		}
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+}
+
 func TestOpen_CorruptFileReturnsClearError(t *testing.T) {
 	dir := t.TempDir()
 
