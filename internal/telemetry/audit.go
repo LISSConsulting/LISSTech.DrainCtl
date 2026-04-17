@@ -5,9 +5,24 @@ package telemetry
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// ErrInvalidCursor is returned by QueryRange when filter.Cursor cannot be
+// decoded. The dashboard handler maps this to HTTP 400 `invalid_cursor`
+// (contracts/http-audit.md).
+var ErrInvalidCursor = errors.New("telemetry: invalid audit cursor")
+
+// queryRangeUpperLimit caps any positive Limit the caller passes; mirrors the
+// HTTP contract's 5000 ceiling as a defense-in-depth at the store layer.
+// Limit <= 0 is interpreted as "unlimited" (CLI parity with the legacy
+// root-package AuditStore).
+const queryRangeUpperLimit = 5000
 
 // AuditRecord is the telemetry-package representation of a single audit row.
 // Mirrors the columns of the audit table in data-model.md. The root-package
@@ -37,7 +52,8 @@ type AuditRecord struct {
 // Immutable by design (FR-001b): Append is the only write method exposed;
 // retention is handled by the bulk retention worker on its own connection.
 type AuditStore struct {
-	conn *sql.Conn
+	conn   *sql.Conn
+	reader *sql.DB
 }
 
 // NewAuditStore pins a single *sql.Conn from db.auditDB and reinforces
@@ -52,7 +68,7 @@ func NewAuditStore(ctx context.Context, db *DB) (*AuditStore, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("telemetry: audit set synchronous=FULL: %w", err)
 	}
-	return &AuditStore{conn: conn}, nil
+	return &AuditStore{conn: conn, reader: db.reader}, nil
 }
 
 // Close releases the pinned connection back to the pool. Idempotent.
@@ -98,4 +114,159 @@ func (s *AuditStore) Append(ctx context.Context, rec AuditRecord) error {
 			rec.Host, rec.PrevState, rec.NewState, err)
 	}
 	return nil
+}
+
+// QueryFilter selects a subset of audit rows for QueryRange.
+// Zero values are "no filter" — e.g. an empty Host matches every host.
+type QueryFilter struct {
+	From        *time.Time // inclusive lower bound on ts
+	To          *time.Time // exclusive upper bound on ts
+	Host        string
+	Actor       string // matches audit.changed_by (contracts/http-audit.md)
+	Limit       int    // <=0 means unlimited; positive values are clamped to queryRangeUpperLimit
+	Cursor      string // opaque; pass the previous response's NextCursor verbatim
+	ChangesOnly bool   // drops rows where prev_state == new_state
+}
+
+// auditCursor is the decoded form of QueryFilter.Cursor. The serialized form
+// is base64-url(JSON) so it travels safely through HTTP query strings.
+type auditCursor struct {
+	Ts       int64  `json:"ts"`
+	Host     string `json:"host"`
+	NewState int    `json:"ns"`
+}
+
+func encodeAuditCursor(ts int64, host string, newState int) string {
+	b, _ := json.Marshal(auditCursor{Ts: ts, Host: host, NewState: newState})
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func decodeAuditCursor(s string) (auditCursor, error) {
+	var c auditCursor
+	raw, err := base64.URLEncoding.DecodeString(s)
+	if err != nil {
+		return c, ErrInvalidCursor
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return c, ErrInvalidCursor
+	}
+	return c, nil
+}
+
+// QueryRange returns audit rows matching filter in strict DESC order by
+// (ts, host, new_state). Pagination uses the PK row-value comparison
+// `(ts, host, new_state) < (:cts, :chost, :cns)`; under all-DESC ordering
+// SQLite's lexicographic-ASC row-value comparison advances correctly to the
+// next page (see tasks.md T023 rationale). If the PK in data-model.md ever
+// changes, both the cursor payload and the seek predicate must change in
+// lockstep.
+//
+// Reads go through the shared reader pool; the pinned synchronous=FULL
+// connection is reserved for Append so writes never queue behind long-running
+// queries.
+func (s *AuditStore) QueryRange(ctx context.Context, filter QueryFilter) ([]AuditRecord, string, error) {
+	limit := filter.Limit
+	if limit > queryRangeUpperLimit {
+		limit = queryRangeUpperLimit
+	}
+
+	var b strings.Builder
+	b.WriteString(`SELECT ts, host, prev_state, new_state, principal, changed_by, reason,
+            key_modified_ts, reconciliation, before_ts
+         FROM audit
+         WHERE 1=1`)
+	args := make([]any, 0, 8)
+
+	if filter.From != nil {
+		b.WriteString(" AND ts >= ?")
+		args = append(args, filter.From.UTC().UnixMilli())
+	}
+	if filter.To != nil {
+		b.WriteString(" AND ts < ?")
+		args = append(args, filter.To.UTC().UnixMilli())
+	}
+	if filter.Host != "" {
+		b.WriteString(" AND host = ?")
+		args = append(args, filter.Host)
+	}
+	if filter.Actor != "" {
+		b.WriteString(" AND changed_by = ?")
+		args = append(args, filter.Actor)
+	}
+	if filter.ChangesOnly {
+		b.WriteString(" AND prev_state <> new_state")
+	}
+	if filter.Cursor != "" {
+		c, err := decodeAuditCursor(filter.Cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		b.WriteString(" AND (ts, host, new_state) < (?, ?, ?)")
+		args = append(args, c.Ts, c.Host, c.NewState)
+	}
+	b.WriteString(" ORDER BY ts DESC, host DESC, new_state DESC")
+	if limit > 0 {
+		// Fetch limit+1 so we can distinguish "exactly one more page" from
+		// "exact last page" without emitting a spurious trailing cursor.
+		b.WriteString(" LIMIT ?")
+		args = append(args, limit+1)
+	}
+
+	rows, err := s.reader.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("telemetry: audit QueryRange: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	capHint := 0
+	if limit > 0 {
+		capHint = limit + 1
+	}
+	records := make([]AuditRecord, 0, capHint)
+	for rows.Next() {
+		var (
+			tsMs                          int64
+			host, principal, changedBy    string
+			reason                        string
+			prevState, newState, reconInt int
+			keyModifiedMs, beforeTsMs     sql.NullInt64
+		)
+		if err := rows.Scan(
+			&tsMs, &host, &prevState, &newState,
+			&principal, &changedBy, &reason,
+			&keyModifiedMs, &reconInt, &beforeTsMs,
+		); err != nil {
+			return nil, "", fmt.Errorf("telemetry: audit scan: %w", err)
+		}
+		rec := AuditRecord{
+			Ts:             time.UnixMilli(tsMs).UTC(),
+			Host:           host,
+			PrevState:      prevState,
+			NewState:       newState,
+			Principal:      principal,
+			ChangedBy:      changedBy,
+			Reason:         reason,
+			Reconciliation: reconInt == 1,
+		}
+		if keyModifiedMs.Valid {
+			t := time.UnixMilli(keyModifiedMs.Int64).UTC()
+			rec.KeyModifiedTs = &t
+		}
+		if beforeTsMs.Valid {
+			t := time.UnixMilli(beforeTsMs.Int64).UTC()
+			rec.BeforeTs = &t
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("telemetry: audit rows: %w", err)
+	}
+
+	var nextCursor string
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+		last := records[len(records)-1]
+		nextCursor = encodeAuditCursor(last.Ts.UnixMilli(), last.Host, last.NewState)
+	}
+	return records, nextCursor, nil
 }
