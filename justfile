@@ -400,7 +400,7 @@ lint: (header "lint")
 gotest:
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🧪 Running Go tests  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    & go test ./...
+    & go test -p 1 -count=1 ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   ✅ All tests pass" -ForegroundColor Green
 
