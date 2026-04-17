@@ -8,11 +8,11 @@ Resolve every open technical decision the spec and plan left unspecified, so Pha
 
 ## R1. Baseline persistence cadence
 
-**Decision**: Write the baseline JSON file once every 15 minutes (on slot-rollover boundaries) and once on graceful shutdown. Also write whenever a channel's subscription outcome or a config-driven channel-list change occurs, so restart state reflects the current config.
+**Decision**: Write the baseline JSON file once every 15 minutes (slot-rollover aligned at the default cadence) and once on graceful shutdown. Also write whenever a channel's subscription outcome or a config-driven channel-list change occurs, so restart state reflects the current config.
 
 **Rationale**:
-- ~135 KB writes are negligible even on slow disks; 96 writes/day is ~13 MB/day of churn, well within SSD endurance budgets and far below NTFS journal pressure.
-- Slot-rollover alignment keeps the written state coherent — a slot is either fully updated or not, simplifying the on-disk schema (no "partial slot" flag needed).
+- At the default 900s cadence, ~135 KB × 96 writes/day = ~13 MB/day of write volume, well within SSD endurance budgets and far below NTFS journal pressure.
+- Slot-rollover alignment at the default cadence keeps the written state coherent — a slot is either fully updated or not, simplifying the on-disk schema (no "partial slot" flag needed).
 - Worst-case data loss on a hard crash is 15 minutes of learning, which for a detector whose maturity threshold is ~one week is negligible (equivalent to <0.15% of a mature slot's observations).
 - Shutdown-time flush captures the last sub-slot partial observations, so a clean restart has zero learning loss.
 
@@ -22,7 +22,7 @@ Resolve every open technical decision the spec and plan left unspecified, so Pha
 - **On shutdown only**: rejected — hard crashes would lose the entire session's learning, which is the failure mode the spec's SC-005 (no post-restart storm) specifically guards against.
 - **Event-driven (only when a slot matures or an anomaly fires)**: rejected — irregular write cadence complicates reasoning about warm-restart freshness.
 
-**Configurable?** Yes — `evtspike.persist_interval_seconds` with default 900, clamp [60, 86400].
+**Configurable?** Yes — `evtspike.persist_interval_seconds` with default 900, clamp [60, 86400]. Alignment semantics for non-default values are defined in `data-model.md` §PersistIntervalSeconds (multiples of 900 slot-aligned; divisors of 900 wall-clock aligned but not slot-coherent; other values not aligned at all — `ClampEvtSpike` logs a warning for non-multiples).
 
 ---
 
@@ -42,67 +42,40 @@ Resolve every open technical decision the spec and plan left unspecified, so Pha
 
 ---
 
-## R3. Pipe message schema for standalone → service spike forwarding
+## R3. (Removed 2026-04-17)
 
-**Decision**: Extend `PipeRequest` (in `internal/pipe/pipe.go`) with a new `cmd = "spike"` value. Add an inline `Spike *SpikePayload` field (pointer so it's omitted from existing commands). Service handler injects the payload into the same `SendNotification` pipeline the in-service subsystem uses, so standalone and built-in are indistinguishable from the downstream perspective.
-
-`SpikePayload` fields mirror the `spike` sub-object from R2 exactly, plus a `source_host` field (the standalone CLI's hostname — usually equal to the service's hostname, but kept explicit for future cross-host flexibility).
-
-**Rationale**:
-- Reuses the existing `\\.\pipe\drainctl` endpoint, existing authentication model (local-only named-pipe ACL), existing connection handling, existing JSON framing. No new pipe, no new listener, no new auth model.
-- Asymmetric extension (pointer field, new `cmd` value) means older service binaries reading a newer request simply don't match the switch and return an error response — the standalone CLI then falls through to its local-log fallback (FR-016).
-- Service-side dispatch uses the same `SendNotification` function, meaning: same debounce, same per-target repeat intervals, same severity routing, same email template.
-
-**Alternatives considered**:
-- **Separate pipe for spikes**: rejected — two listeners on the same service is unnecessary complexity; the existing broker already handles concurrency.
-- **HTTP POST to the dashboard's existing REST API**: rejected — creates a dependency on dashboard being enabled, introduces TLS cert pinning for standalone-to-service talk, and goes across a different auth model. Pipe is the natural local IPC.
-- **Write a file the service tails**: rejected — file-based IPC is brittle (crashes mid-write, log rotation races).
+Previously specified the pipe message schema for standalone → service spike forwarding. Dropped with the standalone CLI scope reduction. Section intentionally kept as a placeholder to preserve numbering in downstream references.
 
 ---
 
-## R4. Standalone CLI Windows service installation
+## R4. (Removed 2026-04-17)
 
-**Decision**: The standalone `evtspike` binary gains three subcommands:
-- `evtspike install-service` — registers a Windows service named `EvtSpike` using `golang.org/x/sys/windows/svc/mgr`. The service runs as `LocalSystem` by default; admins who want a different account can reconfigure via `sc.exe config` after install.
-- `evtspike uninstall-service` — removes the registered service.
-- `evtspike run-service` — the service entry point; dispatches to `svc.Run` with the same detection loop the foreground mode uses.
-- Foreground mode (no subcommand) remains the POC default, useful for CI/smoke and for "just poke at it" interactive runs.
-
-Service installation is admin-triggered via PowerShell (`evtspike install-service`), not via MSI. This is intentional: the built-in DrainCtl subsystem is the primary path, and the standalone CLI is a tier-2 deployment. An MSI feature for the standalone would bloat the main installer; a separate standalone MSI is deferred to a future release if demand materializes.
-
-**Rationale**:
-- Matches the `kraken` / `squid` skill-driven ops style — admins drive install via CLI, not click-through.
-- `golang.org/x/sys/windows/svc/mgr` is already used in `internal/svc`, so no new dependency.
-- Service name `EvtSpike` is distinctive (not "LISSTech evtspike" or similar) to make it obvious this is an auxiliary service, not a fork of DrainCtl.
-
-**Alternatives considered**:
-- **New MSI for standalone**: rejected for MVP — too much installer work for a minority deployment.
-- **Run standalone as a scheduled task**: rejected — no graceful shutdown signal path, and task-based processes lose the ETW/slog dual-sink setup.
+Previously specified standalone CLI Windows service installation via `install-service` / `uninstall-service` / `run-service` subcommands. Dropped with the standalone scope reduction. Section intentionally kept as a placeholder to preserve numbering in downstream references.
 
 ---
 
-## R5. MSI component for Security opt-in (privilege grant/revoke)
+## R5. Security channel opt-in mechanism
 
-**Decision**: Add a WiX 5 `<Feature Id="SecurityEventLog" Title="Enable Security event log monitoring" Level="1000">` (Level > 100 so it is off by default in the typical UI). The feature owns a single Component containing:
-- A marker file (`%ProgramData%\...\evtspike\security_enabled`) whose presence tells the service to add `Security` to its effective channel list at startup (read by `channels.go` during config merge).
-- Two CA (`CustomAction`) steps scheduled in `InstallExecuteSequence`:
-  - `GrantSeSecurityPrivilege` — scheduled `After="InstallFiles"`, condition `&SecurityEventLog=3 AND NOT Installed OR !SecurityEventLog=2` (i.e., running install of the feature). Calls a managed DLL that P/Invokes `LsaAddAccountRights` to add `SeSecurityPrivilege` to the DrainCtl service account SID.
-  - `RevokeSeSecurityPrivilege` — scheduled `Before="RemoveFiles"`, condition fires when the feature is being uninstalled. Calls `LsaRemoveAccountRights`.
+**Decision**: Add a single boolean field `evtspike.security_channel_enabled` (default `false`) to `EvtSpikeConfig` in `config.json`. When `true`, the subsystem at Start enables `SeSecurityPrivilege` on its own process token via `AdjustTokenPrivileges(SE_SECURITY_NAME, SE_PRIVILEGE_ENABLED)` and adds `"Security"` to the watched channel list via `ResolveChannels`.
 
-The CA DLL is written in C# (net48) — WiX 5 supports managed CAs via `CAQuietExec` or native. Either path works; C# + `LsaAddAccountRights` P/Invoke is the shortest. A fallback that shells to `ntrights.exe` is rejected because `ntrights.exe` is not installed by default on modern Windows Server.
-
-Installer UI wording (exact copy, pulled into the Assumption section of the spec's FR-031): **"Enable Security event log monitoring. This grants the DrainCtl service the privilege to read the Security log, clear the Security log, alter audit policy, and set SACLs. Only enable if you understand and accept this expanded service capability on this host."**
+No MSI component. No WiX `CustomAction`. No `LsaAddAccountRights` / `LsaRemoveAccountRights`. The MSI is unchanged by this feature.
 
 **Rationale**:
-- WiX Feature + Component is the natural expressive unit for an installer opt-in; the admin sees it on the feature-select page with the warning text visible.
-- `LsaAddAccountRights` / `LsaRemoveAccountRights` is the only supported API for granting account rights programmatically; `secedit.exe` and GPO-based paths are either non-silent or not idempotent.
-- Marker file (rather than MSI property alone) means the service can detect the opt-in at startup without reading the MSI registry — consistent with how `config.json` works (service reads its own config, not installer-time state).
-- Opt-out revoking is symmetric: nothing the installer did persists after uninstall of the feature.
+- Verified (2026-04-17 via `whoami /priv` in a LocalSystem-context shell): LocalSystem's token already contains `SeSecurityPrivilege` in the Disabled state. A process running as LocalSystem can enable this privilege at any time via `AdjustTokenPrivileges` without any LSA grant.
+- The research.md-v1 premise — that the MSI must call `LsaAddAccountRights` to grant the privilege — was incorrect for the default service account configuration. Granting to an account that already has the right in its kernel-assembled token is redundant.
+- `LsaRemoveAccountRights(LocalSystem, SeSecurityPrivilege)` would be a **host-global** operation that removes the right from every LocalSystem-running service on the machine. There is no supported API to scope revocation to a single service running as a shared account. Documenting this blast radius as an acceptable risk, or implementing a confirm-on-revoke dialog, both leave the operational footgun in place.
+- A config flag keeps the decision in the same place as every other evtspike knob (sensitivity, cooldown, channel list). Admins who are already familiar with DrainCtl's `config.json` pattern don't need to learn a new opt-in surface.
+
+**Dedicated service account case**:
+- Admins who have reconfigured DrainCtl to run under a dedicated account (non-LocalSystem) will find that account lacks `SeSecurityPrivilege` by default. If they set `security_channel_enabled: true` without first granting the right, `AdjustTokenPrivileges` returns `ERROR_NOT_ALL_ASSIGNED` and the subsystem logs a warning and skips the Security subscription. Other channels continue to work.
+- The admin's path is to grant the right manually via `secedit /configure` or a group policy that assigns "Manage auditing and security log" to their chosen account. Documented in `quickstart.md` Path C.
+- An MSI-based grant for dedicated accounts could be added in a future release if demand materializes; it is out of MVP scope.
 
 **Alternatives considered**:
-- **MSI property + registry key read by the service**: rejected — registry drift between installer and service is exactly the pattern `feedback_msi_cli_sync.md` warns against.
-- **Always grant the privilege, let config.json toggle Security channel**: rejected — violates the spec's FR-001d ("default install must not grant SeSecurityPrivilege").
-- **Separate `evtspike-security.msi`**: rejected — worse admin UX than a feature inside the main MSI.
+- **MSI `<Feature Id="SecurityEventLog">` with `LsaAddAccountRights` grant/revoke**: rejected — the LocalSystem default case makes the grant a no-op and the revoke a host-global footgun. The extra MSI surface adds no value over a config flag for the default account, and for dedicated accounts it introduces a separate cross-installer-and-service drift surface.
+- **Always enable `SeSecurityPrivilege` at Start regardless of flag**: rejected — violates spec FR-001d ("MUST NOT enable `SeSecurityPrivilege` unless Security monitoring is explicitly opted in").
+- **Marker file opt-in signal**: rejected — redundant with `config.json` and creates two sources of truth (MSI-managed marker vs admin-managed config).
+- **Registry key opt-in**: rejected — same dual-source-of-truth problem, plus MSI/service registry drift (per `feedback_msi_cli_sync.md`).
 
 ---
 
@@ -177,14 +150,16 @@ State → pill mapping: `healthy` if feature enabled and at least one channel ha
 ## R9. Testability strategy
 
 **Decision**:
-- **Unit tests** (no Windows APIs, pure logic): detector math, robust-cap update, 2-of-3 confirmation, slot maturity, baseline JSON round-trip, corrupt-file handling, version-tag mismatch, config merge (default + disable + add), channel-name case-insensitive dedup, `ClampEvtSpike`.
-- **Integration tests** (fake subscriber, fake notifier): end-to-end detector → `OnSpike` → notification fired once per cooldown; live-reload of sensitivity without restart; warm-restart smoke (write baseline → re-read → verify baseline matches).
-- **Contract tests**: webhook payload matches schema in `contracts/event_spike-payload.md`; pipe spike command round-trips via `internal/pipe`; MSI custom action grants and revokes (idempotent on second install).
-- **Manual tests** (documented in `quickstart.md`, not automated): subscribing to the real 54 channels on a test RDSH, inducing a spike with PowerShell `New-WinEvent`, verifying the dashboard pill transitions.
+- **Unit tests** (no Windows APIs, pure logic): detector math, robust-cap update, 2-of-3 confirmation, slot maturity, baseline JSON round-trip, corrupt-file handling (distinct from unreadable: see `data-model.md` §3), version-tag mismatch, config merge (default + disable + add + `security_channel_enabled`), channel-name case-insensitive dedup, `ClampEvtSpike`.
+- **Integration tests** (fake subscriber, fake notifier): end-to-end detector → `OnSpike` → notification fired once per cooldown; live-reload of sensitivity without restart; warm-restart smoke (write baseline → re-read → verify baseline matches); mid-run subscription loss + retry transitions (`subscribed → retrying → subscribed/failed`).
+- **Contract tests**: webhook payload matches schema in `contracts/event_spike-payload.md`; email template rendering (MJML → HTML asserts); ntfy priority mapping (warning→3, alert→4).
+- **Manual tests** (documented in `quickstart.md`, not automated): subscribing to the real 54 channels on a test RDSH, inducing a spike with PowerShell `New-WinEvent`, verifying the dashboard pill transitions; enabling `security_channel_enabled` on a LocalSystem deployment and verifying the Security subscription succeeds.
+- **SC validation workloads**: `normal-day-false-positive-workload` (SC-001, SC-003) and `stress-performance-workload` (SC-007) — deterministic fixtures under `specs/006-evtspike-detection/fixtures/`. The simulator MUST exercise production bucket/slot/maturity/fallback/confirmation/cooldown logic end-to-end; compressed-time is allowed for SC-001 provided the slot progression is preserved.
 
 **Rationale**:
-- `EvtSubscribe` and `LsaAddAccountRights` don't mock well inside Go unit tests; those go into integration or manual tiers.
+- `EvtSubscribe` doesn't mock well inside Go unit tests; that path goes into integration or manual tiers.
 - Contract tests pin down the JSON shapes downstream integrators depend on — cheapest place to catch breakage before a release.
+- The SC workloads are named and fixture-backed so independent testers can reproduce them.
 
 **Alternatives considered**:
 - **Full-system end-to-end test in CI**: rejected for MVP — RDSH CI runners aren't a current thing; manual quickstart is acceptable.
