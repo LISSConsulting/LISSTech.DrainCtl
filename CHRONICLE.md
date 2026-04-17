@@ -1,5 +1,19 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## 007 SQLite Telemetry Store — planning review (2026-04-17)
+
+Commits `4c13128` / `e25482e` / `c021f4e` / (this commit) resolve 32 deduplicated findings from an adversarial codex review of the spec/plan/tasks for feature 007. Full artifacts at `docs/reviews/codex-2026-04-17-{synthesis,remediation-plan}.md`. Key lessons worth remembering once implementation starts:
+
+- **Boot-sequence order matters**: `telemetry.Open() → MigrateJSONL (chunked) → drift reconciliation → live ingest`. Reconciliation compares against `LatestByHost`, which is wrong if JSONL hasn't been imported yet.
+- **PRAGMAs are connection-local in SQLite, not database-level**. Using `*sql.DB` (a pool) means PRAGMAs only hit whichever physical connection runs them. Always apply via `driver.Connector`'s `Connect()` so every pooled connection gets them. Don't let a `journal_mode=wal` test fool you — that one IS persistent and will pass even when the others don't.
+- **Aggregator `ON CONFLICT DO NOTHING` freezes buckets on late raw samples**. Use `DO UPDATE` keyed on the full recompute + a watermark (5 min) + source-tier retention as the freeze boundary. Don't gate on `minute = 0` — scheduler jitter will miss hours.
+- **Drift reconciliation on state alone can't see A→B→A oscillations**. Compare registry `LastWriteTime` against last-audit `ts` too.
+- **SQLite row-value comparison is lexicographic-ascending**. A pagination predicate `(ts, host, new_state) < (cursor…)` only works under an **all-DESC** (or all-ASC) ORDER BY, NOT mixed DESC/ASC. If you need mixed ordering, use an explicit `OR`-cascade predicate.
+- **`incremental_vacuum` does not return OS disk space** — only to SQLite's internal free-list. File size stays at high-water mark. Document this for operators; don't promise "file shrinks after retention."
+- **`wal_checkpoint(TRUNCATE)` can block on long readers**. Run it on a dedicated `*sql.Conn` with `busy_timeout=0`, wrap in a 5s context deadline, do `PASSIVE` first and only escalate to `TRUNCATE` when WAL > 16 MB. On `SQLITE_BUSY` log and skip — never retry synchronously.
+- **Audit rows with `principal=""` depend on a partial index** `audit_principal WHERE principal <> ''`. Any future change to the reconciliation principal value silently breaks the index. Guard with a `reconciliationPrincipal` constant referenced by both writer and test.
+- **Codex CLI on Windows** (v0.121.0) — read-only sandbox fails with `CreateProcessWithLogonW 1326` on every `pwsh` spawn. Workaround: pipe file contents inline via bash heredoc + `codex exec --sandbox read-only -`. Relying on codex's own file reads is a non-starter on this host.
+
 ## Svelte 5
 
 - **No `structuredClone()` on `$state` objects.** Svelte 5 wraps reactive state in Proxies that `structuredClone()` can't handle — throws at runtime. Use `JSON.parse(JSON.stringify(...))` instead. Bit us in `ConfigModal` save path.
