@@ -1,6 +1,6 @@
 # Quickstart: evtspike
 
-Stand up the detector on a test RDSH, verify detection and notifications, then (optionally) enable the Security channel opt-in. Assumes you have a build of the DrainCtl MSI that includes this feature.
+Stand up the detector on a test RDSH, verify detection and notifications, then (optionally) enable the Security channel opt-in. Assumes you have a build of the DrainCtl MSI that includes this feature. The feature ships only as an in-service subsystem; there is no standalone CLI in MVP (scope-reduced 2026-04-17).
 
 ---
 
@@ -21,7 +21,7 @@ Stand up the detector on a test RDSH, verify detection and notifications, then (
 msiexec /i drainctl-v26.106.x-x64.msi
 ```
 
-Do **not** select the Security event log monitoring feature. The detector ships disabled.
+The detector ships disabled. No installer-time Security opt-in — that is now a config flag (Path C).
 
 ### 2. Turn the feature on
 
@@ -96,89 +96,63 @@ Flip `enabled: false` in config or remove the block entirely. Baseline file is r
 
 ---
 
-## Path B — Standalone CLI (sidecar / no full-service deployment)
-
-### 1. Drop the CLI on the host
-
-Copy `evtspike.exe` to e.g. `C:\Tools\evtspike\` on a host that either (a) has DrainCtl installed or (b) doesn't but you still want local visibility.
-
-### 2. Interactive smoke
-
-```powershell
-cd C:\Tools\evtspike
-.\evtspike.exe
-```
-
-Watch stdout. Every 10 seconds you'll see one line per subscribed channel showing counts. Induce a spike with the `eventcreate` loop from Path A step 4 and verify `[ALERT]` lines appear on stdout.
-
-If DrainCtl is running on the same host, the CLI also forwards the spike over `\\.\pipe\drainctl` — check DrainCtl's logs / webhook for the same spike arriving via the service. If DrainCtl is not running, the CLI just logs locally (no crash, no retry spin).
-
-### 3. Install as a Windows service
-
-```powershell
-.\evtspike.exe install-service
-Start-Service EvtSpike
-Get-Service EvtSpike
-```
-
-The service is now running under `LocalSystem`. Its config and baseline file locations mirror DrainCtl's, but scoped to this service.
-
-### 4. Uninstall
-
-```powershell
-Stop-Service EvtSpike
-.\evtspike.exe uninstall-service
-```
+## Path B (DROPPED — standalone CLI scope-reduced 2026-04-17)
 
 ---
 
-## Path C — Enable Security channel monitoring (elevated privilege)
+## Path C — Enable Security channel monitoring (config flag)
 
-**Read the Security implications in the spec's Clarifications section before doing this.** You are granting `SeSecurityPrivilege` to the service account, which expands its capability to read and clear the Security log and alter audit policy.
+**Read the Security implications in the spec's Clarifications section before doing this.** This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host. Only enable if you understand and accept this expanded capability.
 
-### 1. Install (or modify install) with the feature selected
+### 1. Flip the flag in config.json
 
-Fresh install:
+Edit `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\config.json`, inside the `evtspike` block:
 
-```powershell
-msiexec /i drainctl-v26.106.x-x64.msi ADDLOCAL=SecurityEventLog
+```json
+"evtspike": {
+  "enabled": true,
+  "security_channel_enabled": true
+}
 ```
 
-Modify an existing install:
+Save. The service detects the change and restarts the evtspike subsystem within a few seconds (logged as `evtspike: restarting for config change`). No service restart is required.
 
-```powershell
-msiexec /i drainctl-v26.106.x-x64.msi ADDLOCAL=SecurityEventLog REINSTALL=ALL REINSTALLMODE=omus
+### 2. Verify
+
+Look for these lines in `drainctl.log`:
+
+```
+evtspike: enabling SeSecurityPrivilege on service token
+evtspike: subscribed to 54/54 channels (Security included)
 ```
 
-Or: run the installer interactively, click Modify on the Features page, and check "Enable Security event log monitoring".
+Confirm the subscribed-channel count moved from 53 to 54, and that `Security` appears in the list.
 
-### 2. Verify the grant
+### 3. If you're running under a dedicated service account
 
-```powershell
-# Marker file placed by the MSI:
-Test-Path 'C:\ProgramData\LISS Technologies\LISSTech DrainCtl\evtspike\security_enabled'
+LocalSystem (DrainCtl's default account) has `SeSecurityPrivilege` present in its token (Disabled state). If you have reconfigured DrainCtl to run under a dedicated account, that account will not have this privilege by default and enabling the flag will produce:
 
-# Privilege granted to the DrainCtl service account (LocalSystem by default):
-whoami /user /priv   # run interactively as LocalSystem via PsExec if needed
+```
+evtspike: AdjustTokenPrivileges returned ERROR_NOT_ALL_ASSIGNED; skipping Security subscription
 ```
 
-### 3. Restart the DrainCtl service
+Grant the privilege manually:
 
 ```powershell
+# Option 1: secedit
+secedit /configure /cfg <policy.inf> /db <temp.sdb>   # where policy.inf assigns SeSecurityPrivilege to your account
+
+# Option 2: group policy (Local Security Policy → Local Policies → User Rights Assignment → Manage auditing and security log)
+
+# Then restart the DrainCtl service
 Restart-Service DrainCtl
 ```
 
-Log should show: `evtspike: security_enabled marker present; Security channel added to watched list` followed by the normal subscription count, now `54/54`.
+Other channels continue to operate regardless — the failure is scoped to Security only.
 
-### 4. Revoke
+### 4. Disable
 
-Remove the feature:
-
-```powershell
-msiexec /i drainctl-v26.106.x-x64.msi REMOVE=SecurityEventLog REINSTALL=ALL REINSTALLMODE=omus
-```
-
-Verify: marker file gone, `whoami /priv` no longer shows `SeSecurityPrivilege`, service log shows `Security` missing from the subscribed list on next restart.
+Set `security_channel_enabled: false` in config.json (or remove the field). On next reload the subsystem restarts and `Security` disappears from the subscribed list. No LSA operation is performed — LocalSystem's built-in `SeSecurityPrivilege` is untouched.
 
 ---
 
@@ -191,6 +165,8 @@ The service account can't read any event log. Verify the service is running as `
 ### "evtspike: baseline file corrupt; renaming to .corrupt-YYYYMMDD-HHMMSS.bak"
 
 Expected after a hard crash mid-write (very rare). The detector re-enters warm-up; the `.bak` file can be deleted once you've confirmed the replacement is good.
+
+If the log instead says `baseline file unreadable; starting fresh` with NO rename, the file was temporarily locked (antivirus, backup agent, indexer) and the detector deliberately left it in place — on the next write the detector will overwrite it normally. If you see this repeatedly, check for an AV exclusion path for `%ProgramData%\LISS Technologies\LISSTech DrainCtl\evtspike-baseline.json`.
 
 ### Webhook gets no POST
 
@@ -215,8 +191,6 @@ Likely explanations, in order of probability:
 - [ ] Path A end-to-end: enable, inject, notification received, dashboard pill transitions.
 - [ ] Path A warm restart: restart service, spikes fire again within one scoring window, no alert storm.
 - [ ] Path A robust cap: inject a 30-minute flood, wait, then inject a small burst — the small burst still alerts.
-- [ ] Path B standalone → service: install CLI, induce spike, service-side webhook fires.
-- [ ] Path B no-service fallback: stop DrainCtl, induce spike, CLI logs locally without crashing.
-- [ ] Path C install-time opt-in: feature selected in UI grants `SeSecurityPrivilege` and adds marker file; service subscribes to Security.
-- [ ] Path C uninstall: feature removal revokes the privilege and removes the marker file.
-- [ ] Steady-state resource usage matches SC-007 (small single-digit % CPU, <50 MB memory).
+- [ ] Path C LocalSystem opt-in: set `security_channel_enabled: true`, verify subscription count goes from 53 to 54, verify no privilege error in logs.
+- [ ] Path C disable: set back to `false`, verify Security is dropped on next reload.
+- [ ] Steady-state resource usage matches SC-007 (<5% of one core, <50 MB memory, ≤13 MB/day baseline write volume).

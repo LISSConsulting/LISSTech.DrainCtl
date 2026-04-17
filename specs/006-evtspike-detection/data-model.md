@@ -15,19 +15,30 @@ Nested under the existing root `Config` struct. Edits `config.go`.
 | Threshold | `float64` | `threshold` | `1e-4` | [1e-9, 0.1] | Tail probability threshold. Anomalous iff `tail < threshold`. |
 | CooldownMinutes | `int` | `cooldown_minutes` | `10` | [1, 1440] | Suppress repeat alerts for same (host, channel) within this window. |
 | SlotMaturityObservations | `int` | `slot_maturity_observations` | `7` | [1, 100] | Observations per 15-minute slot before that slot is trusted (Q1 clarification). |
-| PersistIntervalSeconds | `int` | `persist_interval_seconds` | `900` | [60, 86400] | Baseline write cadence (R1). |
+| PersistIntervalSeconds | `int` | `persist_interval_seconds` | `900` | [60, 86400] | Baseline write cadence (R1). See "Cadence alignment" below. |
 | HalfLifeBuckets | `int` | `half_life_buckets` | `360` | [60, 10000] | Exponential forgetting half-life in 10s buckets (360 × 10 s = ~1 hour). |
-| PriorStrength | `float64` | `prior_strength` | `60` | [1, 10000] | Weakly-informative prior strength in bucket-equivalents. |
-| MeanPerBucketPrior | `float64` | `mean_per_bucket_prior` | `0.1` | [0.0, 1000] | Prior expected events per 10s bucket. |
+| PriorStrength | `float64` | `prior_strength` | `60` | [1, 10000] | Weakly-informative prior strength in bucket-equivalents. **Hot-reload scope: new channels only** — changing this at runtime does NOT rewrite existing `GammaState.Alpha/Beta` (the prior's influence has already been absorbed via observations and fades over time). Affects channels observed AFTER the config change. Admins who want to re-prior a mature detector should delete the baseline file and restart instead. |
+| MeanPerBucketPrior | `float64` | `mean_per_bucket_prior` | `0.1` | [0.0, 1000] | Prior expected events per 10s bucket. **Same hot-reload scope caveat as `PriorStrength`.** |
 | BaselinePath | `string` | `baseline_path` | `""` → default path | — | Override for the baseline file location. Empty string means the default. |
 | DisabledChannels | `[]string` | `disabled_channels` | `[]` | — | Names of default channels to skip on this host (FR-001a). Case-insensitive match. |
 | AddedChannels | `[]string` | `added_channels` | `[]` | — | Extra channel names to subscribe (FR-001b). Case-insensitive dedup. |
+| SecurityChannelEnabled | `bool` | `security_channel_enabled` | `false` | — | Opt-in for Windows `Security` channel monitoring (FR-029). When `true`, the subsystem at Start enables `SeSecurityPrivilege` on its own token via `AdjustTokenPrivileges` and adds `"Security"` to the watched list. LocalSystem (default service account) already has this privilege present (Disabled state). Dedicated service accounts need the right granted manually. |
 
 **Default baseline path**: `%ProgramData%\LISS Technologies\LISSTech DrainCtl\evtspike-baseline.json`.
 
 **Validation**: `ClampEvtSpike(cfg *EvtSpikeConfig)` runs during config load. Values out of range are clamped to the nearest endpoint and a warning is logged (pattern: `ClampRetention()`).
 
-**Live reload**: All fields except `Enabled`, `BaselinePath`, `DisabledChannels`, `AddedChannels` can reload without restart. The three excepted fields require Stop+Start of the subsystem (guarded in `internal/svc`).
+**Cadence alignment for `PersistIntervalSeconds`**:
+- Default (`900`) and multiples of 900 (1800, 2700, 3600, ..., 86400): the ticker is aligned to slot-rollover boundaries (`:00, :15, :30, :45` at the default). Preserves R1's coherence rationale — a slot is either fully updated or not.
+- Divisors of 900 (60, 180, 300, 450): the ticker is aligned to wall-clock sub-boundaries but MAY write mid-slot. R1 coherence is NOT guaranteed at these values. `ClampEvtSpike` logs a warning.
+- Any other value: the ticker fires at a fixed offset from subsystem Start; no alignment; R1 coherence not guaranteed. `ClampEvtSpike` logs a warning.
+
+**Live reload**:
+- Most fields hot-apply to running detectors.
+- `Enabled`: transition starts or stops the subsystem entirely (not a reload of a running subsystem).
+- `BaselinePath`, `DisabledChannels`, `AddedChannels`, `SecurityChannelEnabled`: trigger a Stop+Start cycle of a running subsystem (channel-list change).
+- `PriorStrength`, `MeanPerBucketPrior`: hot-apply, but affect only channels observed after the change (see row notes above).
+- All other scalar fields: hot-apply, takes effect on the next scoring tick.
 
 ---
 
@@ -55,6 +66,9 @@ Lives in `internal/evtspike/baseline.go`.
 | Global | `GammaState` | All-hours fallback used until per-slot maturity. |
 | RecentFlags | `uint8` | Rolling 3-bit window for 2-of-3 confirmation. |
 | LastAlert | `time.Time` | For cooldown suppression. |
+| SubscriptionStatus | `string` | Runtime state: `"subscribed"` / `"retrying"` / `"failed"`. Not persisted. Distinct from `DisabledChannels` config — that's admin intent; this is runtime state. |
+| RetryAttempts | `int` | Consecutive failed subscription attempts. Transitions to `failed` after `SubscriptionMaxRetries = 12` (1 hour at the 5-minute retry cadence). |
+| LastRetryAt | `time.Time` | Last subscription retry timestamp; not persisted. |
 
 ### `GammaState`
 
@@ -95,25 +109,25 @@ Matches `config.go`'s atomic-write pattern — same named-mutex guard, same `Mov
 
 ### Load protocol
 
-1. File missing → log warning, initialize fresh baselines (FR-019).
-2. File unreadable → same as missing.
-3. JSON unmarshal error → log warning, rename corrupt file to `.corrupt-YYYYMMDD-HHMMSS.bak`, initialize fresh (FR-019, edge case #6).
-4. `SchemaVersion > 1` → log warning, rename to `.incompat-...bak`, initialize fresh (FR-019).
+1. File missing → log warning, initialize fresh baselines. **No rename.** (FR-019)
+2. File unreadable (AV lock / transient EACCES) → log warning, initialize fresh baselines. **No rename** — preserves the file for a subsequent read once the lock clears, so a transient error does not permanently lose learned state. (FR-019)
+3. JSON unmarshal error → log warning, rename corrupt file to `.corrupt-YYYYMMDD-HHMMSS.bak`, initialize fresh. (FR-019, edge case)
+4. `SchemaVersion > 1` → log warning, rename to `.incompat-YYYYMMDD-HHMMSS.bak`, initialize fresh. (FR-019)
 5. Valid → populate in-memory baselines for channels present in the file; missing channels (e.g., newly added to config) start fresh.
 
 ---
 
 ## 4. `ChannelList` resolver
 
-Lives in `internal/evtspike/channels.go`. Not an entity per se — a helper. Included here because it drives what ever gets subscribed.
+Lives in `internal/evtspike/channels.go`. Not an entity per se — a helper. Included here because it drives what gets subscribed.
 
 ```go
-func ResolveChannels(cfg EvtSpikeConfig, securityOptIn bool) []string
+func ResolveChannels(cfg EvtSpikeConfig) []string
 ```
 
 Behavior:
 1. Start with `Defaults` (the curated 54-channel list baked into the binary).
-2. If `securityOptIn == true` (i.e., the MSI marker file is present), add `"Security"`.
+2. If `cfg.SecurityChannelEnabled == true`, add `"Security"`.
 3. Remove any channel whose case-insensitive name appears in `cfg.DisabledChannels`.
 4. Append `cfg.AddedChannels`.
 5. Case-insensitive dedup (preserve first occurrence's casing).
@@ -122,6 +136,7 @@ Behavior:
 **Rules**:
 - Channels in `AddedChannels` that are already in `Defaults` are silently deduped, not errors. Makes the config forgiving.
 - Channel names are strings — no structural validation here; invalid names surface as subscription errors at startup and log as skipped (FR-009).
+- The Security channel opt-in is a single source-of-truth: `cfg.SecurityChannelEnabled`. No marker file. No MSI state. An admin who puts `"Security"` directly in `AddedChannels` without setting the flag will have the channel subscribed to but `SeSecurityPrivilege` will not be enabled — subscription will fail and be logged as skipped per FR-009.
 
 ---
 
@@ -161,13 +176,15 @@ Lives in `internal/evtspike/status.go`. Published via REST + SSE per R7.
 | ErrorReason | `string` | `error_reason,omitempty` | Populated only when `state == "error"`. |
 | LastSpikeAt | `time.Time` | `last_spike_at,omitempty` | Zero-value → never. |
 
-**State derivation**:
+**State derivation** (in priority order — first matching rule wins):
 | Condition | State |
 |-----------|-------|
 | `cfg.EvtSpike.Enabled == false` | `disabled` |
-| subsystem failed to start (0 channels subscribed — all failed to subscribe) | `error` |
-| running but `MatureChannels == 0` | `training` |
-| running and `MatureChannels > 0` | `healthy` |
+| `EnabledChannels == 0` (no channel subscriptions succeeded) | `error` |
+| `MatureChannels * 2 >= EnabledChannels` (≥50% mature) | `healthy` |
+| else (running, <50% mature) | `training` |
+
+The threshold uses integer arithmetic (`MatureChannels * 2 >= EnabledChannels`) to avoid floating-point edge cases. The enum remains the four-state `healthy | training | disabled | error` — no new `partial` state is introduced; the transition from `training` to `healthy` is simply gated on more than one mature channel.
 
 ---
 
@@ -184,21 +201,7 @@ Same fields as `SpikePayload` above plus a server-assigned `ID` (monotonic `int6
 
 ---
 
-## 8. `PipeRequest` extension
-
-Edits `internal/pipe/pipe.go`:
-
-```go
-type PipeRequest struct {
-    Cmd         string        `json:"cmd"`                      // existing: "status", "history", "servers", "remove-server", NEW: "spike"
-    Limit       int           `json:"limit,omitempty"`
-    ChangesOnly bool          `json:"changes_only,omitempty"`
-    Hostname    string        `json:"hostname,omitempty"`
-    Spike       *SpikePayload `json:"spike,omitempty"`          // NEW: populated when Cmd == "spike"
-}
-```
-
-Response shape unchanged — standalone CLI checks `PipeResponse.OK` and falls back to local log if `!OK` (FR-016, FR-017).
+## 8. (Removed 2026-04-17 — `PipeRequest` extension was for the standalone CLI, which was scope-reduced out of MVP.)
 
 ---
 
@@ -225,11 +228,10 @@ The double map key `target URL → "host|channel" → time` lets per-target repe
 ┌────────────────────┐
 │ EvtSpikeConfig     │ (read from config.json at load + live reload)
 └─────────┬──────────┘
-          │
+          │   (security_channel_enabled: true?)
           ▼
-┌────────────────────┐   ┌─────────────────────┐
-│ ChannelList        │◀──│ MSI marker file     │ (Security opt-in)
-│ (defaults + diffs) │   └─────────────────────┘
+┌────────────────────┐
+│ ChannelList        │  defaults ± disabled ± added (+ "Security" if flag is set)
 └─────────┬──────────┘
           │ one Subscription + one Detector per channel
           ▼
@@ -254,4 +256,4 @@ The double map key `target URL → "host|channel" → time` lets per-target repe
    webhooks / ntfy / email                    status pill + recent spikes
 ```
 
-Standalone-mode variant: `SpikePayload` → `internal/pipe` client (`"spike"` cmd) → service-side handler → exact same `SendNotification` + broker path.
+All in-process within the DrainCtl service. No inter-process communication. Security opt-in at subsystem Start additionally enables `SeSecurityPrivilege` on the service's own token via `AdjustTokenPrivileges` (LocalSystem has this privilege present in its token by default; Disabled state).

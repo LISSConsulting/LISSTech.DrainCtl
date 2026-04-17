@@ -37,7 +37,8 @@ Nested object under the root `Config`:
     "mean_per_bucket_prior": 0.1,
     "baseline_path": "",
     "disabled_channels": [],
-    "added_channels": []
+    "added_channels": [],
+    "security_channel_enabled": false
   }
 }
 ```
@@ -46,11 +47,15 @@ Nested object under the root `Config`:
 
 See `data-model.md` §1 for the full table (defaults, clamps, live-reload eligibility).
 
-## Interaction with MSI Security opt-in
+## Security channel opt-in
 
-The `Security` channel is **never** listed in `added_channels` by a default install. When the admin opts in via the MSI feature (contract: `msi-security-opt-in.md`), the installer drops a marker file `%ProgramData%\...\evtspike\security_enabled`. The resolver (`data-model.md` §4) reads this marker independently of `config.json` and adds `"Security"` to the effective list.
+The `Security` channel is **never** in the default watched list. Admins opt in by setting `security_channel_enabled: true` in the config block. At subsystem Start, if the flag is set, the service enables `SeSecurityPrivilege` on its own process token via `AdjustTokenPrivileges` and `"Security"` is added to the channel list by `ResolveChannels`.
 
-An admin who manually edits `added_channels` to include `"Security"` but has NOT opted in via the installer will see a subscription failure at startup (insufficient privilege), which is logged as a skipped channel per FR-009. The service does not self-grant privileges.
+The default service account (`LocalSystem`) has `SeSecurityPrivilege` present (Disabled state) in its kernel-assembled token, so enabling it at runtime succeeds. No MSI-time grant is required and no `LsaAddAccountRights` call is ever made.
+
+Admins who have reconfigured DrainCtl to run as a **dedicated service account** must grant `SeSecurityPrivilege` to that account manually (via `secedit /configure` or group policy). If `AdjustTokenPrivileges` returns `ERROR_NOT_ALL_ASSIGNED`, the subsystem logs a warning and skips the Security subscription; other channels continue to operate.
+
+An admin who manually puts `"Security"` into `added_channels` without setting `security_channel_enabled: true` will have the channel subscribed-to but the privilege will not be enabled — subscription will fail and be logged as skipped per FR-009. `security_channel_enabled: true` is the authoritative opt-in.
 
 ## Validation / clamping
 
@@ -69,9 +74,10 @@ When the config file mtime changes (existing `RegNotifyChangeKeyValue` + file wa
 |---------------|--------|
 | `enabled: false → true` | Start subsystem; load baseline. |
 | `enabled: true → false` | Stop subsystem; flush baseline. |
-| `min_count`, `threshold`, `cooldown_minutes`, `slot_maturity_observations`, `persist_interval_seconds`, `half_life_buckets`, `prior_strength`, `mean_per_bucket_prior` | Hot-apply to running detectors (no baseline reset). |
+| `min_count`, `threshold`, `cooldown_minutes`, `slot_maturity_observations`, `persist_interval_seconds`, `half_life_buckets` | Hot-apply to running detectors (no baseline reset). |
+| `prior_strength`, `mean_per_bucket_prior` | Hot-apply, but affects **new channels only**. Existing `GammaState.Alpha/Beta` are not rewritten — the prior's influence fades over time as observations accumulate, so late changes have diminishing effect on mature channels. Admins wanting to re-prior a mature detector should delete the baseline file and restart. |
 | `baseline_path` | Stop subsystem; reload from new path; start. |
-| `disabled_channels`, `added_channels` | Stop subsystem; restart with new channel set. |
+| `disabled_channels`, `added_channels`, `security_channel_enabled` | Stop subsystem; restart with new channel set. For `security_channel_enabled: false → true`, the Start path enables `SeSecurityPrivilege` on the token via `AdjustTokenPrivileges`. For `true → false`, the Stop path simply drops the subscription; no `LsaRemoveAccountRights` is called (LocalSystem's built-in privilege is not touched). |
 
 The "stop, reload, start" path is brief (≤1 s) and logged as an info-level "evtspike: restarting for config change".
 
@@ -125,8 +131,10 @@ Everything else defaults.
 
 ## Contract tests
 
-- `TestEvtSpikeConfig_ZeroValueDisabled`: config without the block → `Enabled == false`, other fields at defaults.
-- `TestClampEvtSpike`: table-driven — each field hit its lower + upper bound.
+- `TestEvtSpikeConfig_ZeroValueDisabled`: config without the block → `Enabled == false`, `SecurityChannelEnabled == false`, other fields at defaults.
+- `TestClampEvtSpike`: table-driven — each clamped field hit its lower + upper bound; non-multiple `persist_interval_seconds` emits a warning.
 - `TestEvtSpikeConfig_LiveReload_Sensitivity`: change `threshold` at runtime, verify running detectors see new value within one scoring window.
 - `TestEvtSpikeConfig_LiveReload_ChannelList`: change `disabled_channels`, verify subsystem restarts.
-- `TestEvtSpikeConfig_SecurityNotInAddedByDefault`: parse a default-install config, assert `"Security"` not in `added_channels`.
+- `TestEvtSpikeConfig_LiveReload_SecurityFlag`: change `security_channel_enabled: false → true`, verify subsystem restarts and `Security` is in the subscribed-channels list; change `true → false`, verify `Security` is dropped.
+- `TestEvtSpikeConfig_SecurityNotInDefaults`: parse a default-install config, assert `security_channel_enabled == false` and `"Security"` not in `added_channels`.
+- `TestEvtSpikeConfig_LiveReload_PriorScope`: change `prior_strength` at runtime; assert existing channels' `GammaState.Alpha/Beta` unchanged; assert newly-added channels observed after the change use the new prior.

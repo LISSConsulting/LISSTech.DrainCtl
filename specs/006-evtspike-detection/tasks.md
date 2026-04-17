@@ -31,7 +31,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 **Purpose**: Prepare the repo for the feature. Most scaffolding already exists; this phase is small.
 
 - [ ] T001 Create empty `internal/evtspike/` package directory with a placeholder `doc.go` file containing `//go:build windows` and a one-line package comment, so subsequent parallel file adds don't race on directory creation
-- [ ] T002 [P] Create empty `msi/SecurityOptIn.wxs` placeholder referenced by the Feature component (content filled in Phase 7)
+- [ ] T002 [P] Create the fixture directory `specs/006-evtspike-detection/fixtures/` with placeholder `normal-day.json` and `stress.json` files (filled during SC-validation tasks in Phase 9)
 - [ ] T003 [P] Update `CLAUDE.md` Architecture section with a single-line note about the new `internal/evtspike` subsystem (additive, non-breaking)
 
 ---
@@ -52,17 +52,18 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 - [ ] T007 [P] Move `cmd/evtspike/detector.go` → `internal/evtspike/detector.go`; update package from `main` to `evtspike`; keep `//go:build windows` tag. **REQUIRED change during move**: replace the hardcoded `minSlotN = 5` with a parameter sourced from `cfg.SlotMaturityObservations` (default 7 per `data-model.md` §1). This is not optional — keeping the hardcoded value would silently ignore the configurable threshold defined in `EvtSpikeConfig`.
 - [ ] T008 [P] Move `cmd/evtspike/detector_test.go` → `internal/evtspike/detector_test.go`; update package; keep tests passing
-- [ ] T009 [P] Create `internal/evtspike/channels.go` with the 54-channel default list (lifted verbatim from `cmd/evtspike/main.go` lines 32-109) exported as `var Defaults = []string{...}` and a `ResolveChannels(cfg EvtSpikeConfig, securityOptIn bool) []string` function implementing the merge rules from `data-model.md` §4
-- [ ] T010 [P] Create `internal/evtspike/channels_test.go` with table tests for: default-only returns 54 items, disable removes by case-insensitive name, add appends, add of duplicate dedupes, security-opt-in adds `Security` when flag is true
+- [ ] T009 [P] Create `internal/evtspike/channels.go` with the 54-channel default list (lifted verbatim from `cmd/evtspike/main.go` lines 32-109) exported as `var Defaults = []string{...}` and a `ResolveChannels(cfg EvtSpikeConfig) []string` function implementing the merge rules from `data-model.md` §4. When `cfg.SecurityChannelEnabled == true`, `"Security"` is added to the list.
+- [ ] T010 [P] Create `internal/evtspike/channels_test.go` with table tests for: default-only returns 54 items, disable removes by case-insensitive name, add appends, add of duplicate dedupes, `SecurityChannelEnabled == true` adds `Security`, `SecurityChannelEnabled == false` does not include `Security` even if default list were to contain it.
 - [ ] T011 [P] Create `internal/evtspike/subscriber_windows.go` by lifting the `subscribe(ctx, channel, query, counter)` function from `cmd/evtspike/main.go` lines 172-235; export as `Subscribe`; keep `//go:build windows`
-- [ ] T012 [P] Create `internal/evtspike/spike.go` defining `SpikePayload` struct with JSON tags exactly matching `contracts/event_spike-payload.md` `spike` sub-object schema plus the top-level `Host` field used by the pipe message
+- [ ] T012 [P] Create `internal/evtspike/spike.go` defining `SpikePayload` struct with JSON tags exactly matching `contracts/event_spike-payload.md` `spike` sub-object schema plus the top-level `Host` field used by the notification envelope. The struct has NO `Severity` field — severity is assigned by notification-target wiring per FR-011a, not carried on the spike itself.
+- [ ] T012a [P] Create `internal/evtspike/privilege_windows.go` with `EnableSecurityPrivilege() error` that calls `LookupPrivilegeValue(SE_SECURITY_NAME)` then `AdjustTokenPrivileges` on the current process token to enable the privilege. Return a typed error (e.g., `ErrPrivilegeNotAssigned`) when `AdjustTokenPrivileges` returns `ERROR_NOT_ALL_ASSIGNED` — callers (subsystem Start) log-and-skip rather than abort.
 
 ### Baseline persistence
 
 - [ ] T013 [P] Create `internal/evtspike/baseline.go` with `BaselineFile`, `ChannelState`, and (re-exported) `GammaState` types per `data-model.md` §3; `SchemaVersion = 1`
 - [ ] T014 [P] Add `WriteBaseline(path string, bf *BaselineFile) error` to `internal/evtspike/baseline.go` using the existing atomic-write primitive from `config.go` (temp file + `MoveFileEx REPLACE_EXISTING`, named-mutex guard)
-- [ ] T015 [P] Add `LoadBaseline(path string) (*BaselineFile, error)` to `internal/evtspike/baseline.go` that handles missing / unreadable / JSON-corrupt / incompatible-SchemaVersion cases by renaming to timestamped `.bak` and returning a fresh `BaselineFile` (per FR-019 + `data-model.md` §3 load protocol)
-- [ ] T016 [P] Create `internal/evtspike/baseline_test.go` with round-trip test (write → read → deep-equal), missing-file fresh-return test, corrupt-JSON rename-and-rebuild test, incompatible-version rename-and-rebuild test
+- [ ] T015 [P] Add `LoadBaseline(path string) (*BaselineFile, error)` to `internal/evtspike/baseline.go` handling four distinct startup cases per `data-model.md` §3 load protocol: (1) file missing → log warning, return fresh `BaselineFile` — NO rename; (2) file unreadable (AV lock / transient EACCES) → log warning, return fresh `BaselineFile` — NO rename (so a transient lock that clears before next write does not permanently lose learned state); (3) JSON unmarshal error → rename to `.corrupt-YYYYMMDD-HHMMSS.bak`, log warning, return fresh; (4) `SchemaVersion > 1` → rename to `.incompat-YYYYMMDD-HHMMSS.bak`, log warning, return fresh.
+- [ ] T016 [P] Create `internal/evtspike/baseline_test.go` with round-trip test (write → read → deep-equal), missing-file fresh-return test (asserts NO `.bak` created), unreadable-file fresh-return test (simulate EACCES; asserts NO `.bak` created and original file untouched), corrupt-JSON rename-and-rebuild test (asserts `.corrupt-*.bak` created), incompatible-version rename-and-rebuild test (asserts `.incompat-*.bak` created).
 
 ### Dashboard status types (shared)
 
@@ -76,11 +77,13 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 **Goal**: Enable the detector inside the DrainCtl service, wire confirmed spikes into the existing notification pipeline, and expose the additive dashboard surface (status pill + recent-spikes list). After this phase, an admin who flips `evtspike.enabled: true` and subscribes a webhook to `event_spike` receives a notification on the first confirmed spike, and sees the detector on the dashboard.
 
-**Independent Test**: On a test RDSH with the built-in mode enabled, inject 50 events on `Application` in a sustained burst. Within three scoring buckets (≤30 seconds): webhook receives an `event_spike` POST naming the `Application` channel, the dashboard status pill shows `training` (first week) or `healthy` (after), and the detail view shows the spike in the recent-spikes list. No notification fires on a single transient burst that lasts <60 s.
+**Independent Test**: On a test RDSH with the built-in mode enabled, inject 50 events on `Application` in a sustained burst. Within three scoring buckets (≤30 seconds): webhook receives an `event_spike` POST naming the `Application` channel, the dashboard status pill shows `training` (first week) or `healthy` (after), and the detail view shows the spike in the recent-spikes list. A single transient burst lasting **one 10-second scoring bucket or less** (covered by the 2-of-3 confirmation suppression, per spec.md US1 Acceptance Scenario 2 and SC-003) does NOT fire a notification.
 
 ### Tests for User Story 1
 
 - [ ] T018 [P] [US1] Contract test in `notify_test.go`: marshal a `SpikePayload` via `SendNotification(..., TriggerEventSpike, "")`; assert the body matches `contracts/event_spike-payload.md` (top-level fields present, `spike` sub-object shape, HMAC header correct when `secret` configured)
+- [ ] T018a [P] [US1] Email template render test in `notify_test.go` (or `email_test.go`): render the MJML template for an `event_spike` payload to HTML; assert the subject emoji matches severity (⚠️ warning, 🚨 alert), preview text contains the channel name and observed/expected values, and the card body lists Observed-vs-Expected and Confirmation-Window rows. Corresponds to `TestEventSpikePayload_EmailTemplate` in `contracts/event_spike-payload.md`.
+- [ ] T018b [P] [US1] Ntfy priority mapping test in `notify_test.go`: assert `status: "warning"` → priority 3, `status: "alert"` → priority 4, tags include `["evtspike", host, channel-basename]`. Corresponds to `TestEventSpikePayload_NtfyPriority` in `contracts/event_spike-payload.md`.
 - [ ] T019 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/status?host=X` returns shape from `contracts/dashboard-sse-events.md`; 404 for unknown host; 401 without session
 - [ ] T020 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/spikes?host=X&limit=20` returns newest-first ring-buffer content; `limit=500` clamped to 50
 - [ ] T021 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: fake `Subscriber` feeds 50-event bursts in 2-of-3 windows; assert `OnSpike` invoked exactly once per cooldown with a `SpikePayload` matching invariants from `data-model.md` §5
@@ -95,7 +98,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 - [ ] T025 [US1] In `internal/evtspike/subsystem.go`, implement the scoring goroutine: 10-second ticker reading per-channel counters (already atomic.Int64), feeding `Detector.ObserveBucket`, and on confirmed spike building a `SpikePayload` and invoking `OnSpike`
 - [ ] T026 [US1] Integrate subsystem into `internal/svc/svc.go`: construct when `cfg.EvtSpike.Enabled == true`; pass an `OnSpike` callback that invokes `drainctl.SendNotification(cfg.Notifications, notifyState, spikeCheckResult, TriggerEventSpike, "")` on the service's existing goroutine pool
 - [ ] T027 [US1] In `internal/svc/svc.go`, add the subsystem to the graceful-shutdown sequence (call `Subsystem.Stop()` before returning from `Run`)
-- [ ] T028 [US1] Detect the Security marker file at subsystem start: `%ProgramData%\LISS Technologies\LISSTech DrainCtl\evtspike\security_enabled` — pass `os.Stat(marker) == nil` as the `securityOptIn` arg to `ResolveChannels`; log at INF level which channels were subscribed vs skipped (FR-024)
+- [ ] T028 [US1] At subsystem Start, if `cfg.SecurityChannelEnabled == true`: call `EnableSecurityPrivilege()` (from T012a) on the service's own process token; if it returns `nil`, proceed to subscribe to Security (resolved by `ResolveChannels` when the flag is set); if it returns `ErrPrivilegeNotAssigned` (admin runs DrainCtl under a dedicated account without the right), log a warning and skip Security subscription — other channels continue. Log at INF level which channels were subscribed vs skipped (FR-024).
 
 #### Notification pipeline integration
 
@@ -146,36 +149,9 @@ No new production code — the POC's `Detector.ObserveBucket` already caps updat
 
 ---
 
-## Phase 5: User Story 3 - Standalone Deployment for Servers Without Full DrainCtl (Priority: P2)
+## Phase 5: User Story 3 (DROPPED — standalone CLI out of MVP scope)
 
-**Goal**: Make the standalone `evtspike` binary a first-class deployment option — runnable as a foreground process OR as a Windows service, forwarding confirmed spikes to a local DrainCtl service over the existing named pipe, and falling back to local logs when DrainCtl is unreachable.
-
-**Independent Test**: On a host with DrainCtl running, launch `evtspike.exe install-service; Start-Service EvtSpike`. Inject a spike and verify the webhook on DrainCtl receives it with the expected `spike` payload. Stop DrainCtl. Inject another spike. Verify the standalone logs it locally without crashing. Start DrainCtl. Inject a third spike. Verify forwarding resumes without restarting `EvtSpike`.
-
-### Tests for User Story 3
-
-- [ ] T047 [P] [US3] Contract test in `internal/pipe/pipe_test.go`: marshal a valid `"spike"` `PipeRequest`; server handler decodes identical `SpikePayload`; asserts `PipeResponse{OK: true}`
-- [ ] T048 [P] [US3] Contract test in `internal/pipe/pipe_test.go`: server that doesn't recognize `"spike"` returns `{OK: false, Error: "unknown command: spike"}`; client logs locally and does NOT retry
-- [ ] T049 [P] [US3] Contract test in `internal/pipe/pipe_test.go`: malformed spike payload (missing Spike field, invalid `TailProbability=1.5`) → server returns error; service does not crash
-- [ ] T050 [P] [US3] Integration test in `internal/pipe/spike_forward_test.go`: forwarder dials closed pipe (service not running) → falls back to local log path within 1 s, no retry loop
-- [ ] T051 [P] [US3] Integration test in `internal/pipe/spike_forward_test.go`: service comes online after forwarder was already running → next spike succeeds (FR-017 reconnect-on-demand)
-
-### Implementation for User Story 3
-
-#### Pipe extension
-
-- [ ] T052 [US3] In `internal/pipe/pipe.go`, add `Spike *SpikePayload` field to `PipeRequest` (pointer so existing commands omit it); add `"spike"` to the accepted `Cmd` values
-- [ ] T053 [US3] In `internal/pipe/pipe.go` server dispatch, add handler for `Cmd == "spike"`: validate payload (non-nil + invariants from `data-model.md` §5), invoke the same `SendNotification` + broker path that the in-service subsystem uses (reuse the callback from T026), return `{OK: true}` on success
-- [ ] T054 [US3] Create `internal/pipe/spike_forward_windows.go` with a `ForwardSpike(ctx, payload SpikePayload) error` client function that dials `\\.\pipe\drainctl`, writes the JSON request, reads the response, and returns `nil` on `OK: true` / `err` on everything else; one-shot per call (no connection pool), 2-second write timeout, no retry
-
-#### Standalone binary productization
-
-- [ ] T055 [US3] Rewrite `cmd/evtspike/main.go` to a thin entry point that reads `os.Args[1]`: no arg = foreground mode (load config, construct subsystem, `OnSpike` prints to stdout AND calls `ForwardSpike`); `install-service` = register service via `golang.org/x/sys/windows/svc/mgr`; `uninstall-service` = deregister; `run-service` = service entry point dispatched to `svc.Run`
-- [ ] T056 [US3] Create `cmd/evtspike/service.go` with the `svc.Handler` implementation: on `Start`, construct the subsystem with the service's config, wire `OnSpike` to `ForwardSpike` (local log on failure); on `Stop/Shutdown`, call `Subsystem.Stop()`; report standard `Running`/`Stopped` states via `svc.Status`
-- [ ] T057 [US3] In `cmd/evtspike/main.go`, have the standalone read its own `config.json` (default path `%ProgramData%\LISS Technologies\LISSTech DrainCtl\evtspike-standalone.json` to avoid colliding with DrainCtl's main config); populate the same `EvtSpikeConfig` struct reused from T004
-- [ ] T058 [US3] In `cmd/evtspike/service.go`, use a separate baseline file (`evtspike-standalone-baseline.json`) so running both built-in and standalone on the same host does not corrupt a single shared file (edge case from spec)
-
-**Checkpoint**: Standalone CLI installable as a Windows service; forwards to DrainCtl over pipe; gracefully degrades when DrainCtl is absent. Covers FR-014, FR-015, FR-016, FR-017.
+Previously described the standalone `evtspike` binary as a Windows service forwarding spikes to DrainCtl over a named pipe. Dropped on 2026-04-17 (see `spec.md` Clarifications). Task IDs T047–T058 are intentionally left as a numbering gap; do not re-use them.
 
 ---
 
@@ -226,30 +202,13 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 
 ---
 
-## Phase 8: Security Channel Opt-In (MSI Feature)
+## Phase 8: Security Channel Opt-In (DROPPED — MSI component out of MVP scope)
 
-**Purpose**: Ship the installer opt-in for Security event log monitoring per FR-029 through FR-033. Depends on US1's subsystem reading the marker file (T028).
+Previously specified an MSI `<Feature Id="SecurityEventLog">` with `LsaAddAccountRights` / `LsaRemoveAccountRights` custom actions. Dropped on 2026-04-17 after verifying that the default `LocalSystem` service account already has `SeSecurityPrivilege` present (Disabled) in its token; the subsystem simply enables it at Start via `AdjustTokenPrivileges` when `security_channel_enabled: true` (see T028, T012a). No MSI changes required for this feature. Task IDs T072–T082 are intentionally left as a numbering gap; do not re-use them.
 
-**Not a user story** — this is cross-cutting installer + privilege-management work that lights up the `Security` channel path.
+The single Security-opt-in test now lives in Phase 3 as part of the subsystem tests (T023a below) rather than as a Phase 8 MSI test.
 
-### Tests
-
-- [ ] T072 [P] MSI test harness invocation in `scripts/msi-test.ps1` (new file): `msiexec /i drainctl-*.msi /qn` → verify marker file ABSENT and `SeSecurityPrivilege` NOT granted to service account (via `LsaEnumerateAccountRights` from PowerShell)
-- [ ] T073 [P] MSI test: `msiexec /i drainctl-*.msi ADDLOCAL=SecurityEventLog /qn` → verify marker file PRESENT and `SeSecurityPrivilege` granted
-- [ ] T074 [P] MSI test: opt-in install → `msiexec /x` → verify privilege revoked and marker removed
-- [ ] T075 [P] MSI test: opt-in install → modify with `REMOVE=SecurityEventLog REINSTALL=ALL REINSTALLMODE=omus` → verify privilege revoked; DrainCtl still installed
-
-### Implementation
-
-- [ ] T076 Create `msi/ca/EvtSpikeSecurityCA.csproj` — .NET Framework 4.8 managed custom action DLL project (per R5 + `contracts/msi-security-opt-in.md`)
-- [ ] T077 Implement `GrantPrivilege` entry point in `msi/ca/EvtSpikeSecurityCA.cs`: lookup DrainCtl service account SID via `QueryServiceConfig`, open LSA policy handle with `POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES`, call `LsaAddAccountRights` with `SeSecurityPrivilege`, close handle, return `ERROR_SUCCESS`
-- [ ] T078 Implement `RevokePrivilege` entry point in `msi/ca/EvtSpikeSecurityCA.cs`: same SID lookup; `LsaRemoveAccountRights` with the specific privilege (NOT `allRights`); close handle
-- [ ] T079 Replace placeholder `msi/SecurityOptIn.wxs` (from T002) with full component per `contracts/msi-security-opt-in.md`: `<Feature Id="SecurityEventLog" Level="1000">` containing the `SecurityOptInMarker` component that installs the `security_enabled` zero-byte marker file in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\evtspike\`
-- [ ] T080 In `msi/product.wxs`, reference the new feature + the custom-action binary; wire `GrantSeSecurityPrivilege` CA `After="InstallFiles"` with the condition from the contract; wire `RevokeSeSecurityPrivilege` CA `Before="RemoveFiles"` with the inverse condition
-- [ ] T081 Update `justfile` `release` recipe to include the new CA DLL in the signing stage (sign before bundling into MSI, per the existing signing order)
-- [ ] T082 Update `msi/*.wixproj` to reference the CA project and the new `SecurityOptIn.wxs` file
-
-**Checkpoint**: MSI feature gates Security channel monitoring behind an informed-consent opt-in; privilege grant is reversible; default installs remain minimum-privilege.
+- [ ] T023a [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: set `cfg.SecurityChannelEnabled = true` on a LocalSystem-compatible mock; assert `EnableSecurityPrivilege()` is called exactly once at Start; if the mock simulates `ERROR_NOT_ALL_ASSIGNED` (dedicated-account scenario), assert Security is skipped from `ResolveChannels` output and a warning is logged, but other channels continue to subscribe.
 
 ---
 
@@ -262,24 +221,29 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 - [ ] T083 CalVer bump: update version in all seven places per CLAUDE.md (`drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `README.md`, `CLAUDE.md`, `docs/index.html`)
 - [ ] T084 Run `just resource` to recompile `.syso` after the `.rc` change
 - [ ] T085 Run `just lint` and fix every warning — zero-tolerance noise policy per `feedback_clean_output.md`
-- [ ] T086 Run `just all` (unsigned) — verify full build produces CLI + DLL + PS module + MSI + `evtspike.exe`
+- [ ] T086 Run `just all` (unsigned) — verify full build produces CLI + DLL + PS module + MSI (no new binaries — the POC `cmd/evtspike` is a dev tool only)
 - [ ] T087 Run `just release` (signed) — requires `CODE_SIGNING_CERTIFICATE_THUMBPRINT` in `.env`; verify signing order binaries → MSI → sign MSI
 
 ### Documentation
 
-- [ ] T088 [P] Add an `## Event Log Anomaly Detection (evtspike)` section to `README.md` covering: what it is, how to enable (link to `quickstart.md`), the Security opt-in note (link to `quickstart.md` Path C)
+- [ ] T088 [P] Add an `## Event Log Anomaly Detection (evtspike)` section to `README.md` covering: what it is, how to enable (link to `quickstart.md`), the Security opt-in note including the canonical capability sentence (link to `quickstart.md` Path C). The canonical capability sentence MUST appear byte-identical to FR-031's canonical sentence across `spec.md`, `README.md`, and `quickstart.md` Path C: **"This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host."**
 - [ ] T089 [P] Add a short feature callout to `docs/index.html` in the same style as existing feature callouts
 - [ ] T090 [P] Write release notes for this bump in the style of `96e28a4` — substance, not just a changelog
 
 ### SC validation on real hardware
 
 - [ ] T091 Run `quickstart.md` Path A end-to-end on a test RDSH; verify webhook receives spike, dashboard pill transitions, recent-spikes list populates; capture screenshots per `feedback_verify_visually.md`
-- [ ] T092 [P] Run `quickstart.md` Path B: install standalone as service, verify pipe forwarding, stop DrainCtl, verify local-log fallback, restart DrainCtl, verify reconnect (SC-008: standalone first scoring pass <15 s of launch)
-- [ ] T093 [P] Run `quickstart.md` Path C: install with `ADDLOCAL=SecurityEventLog`, verify marker + privilege + subscription to Security; uninstall feature, verify cleanup
-- [ ] T094 Measure steady-state resource usage on a live RDSH for ≥1 hour: CPU, memory, baseline-write I/O — assert SC-007 (small single-digit % CPU, <50 MB memory)
+- [ ] T092 (DROPPED — was standalone CLI Path B validation; standalone scope-reduced on 2026-04-17)
+- [ ] T093 [P] Run `quickstart.md` Path C on a LocalSystem-default install: set `evtspike.security_channel_enabled: true` in config.json, restart the DrainCtl service, verify the subsystem log shows `Security` in the subscribed-channels list and no privilege error. Set back to `false`, restart, verify `Security` no longer appears.
+- [ ] T094 Run the `stress-performance-workload` (spec.md §Measurement workloads) for ≥1 hour post-baseline-maturity: assert CPU <5% of one core (1-hour average), RSS <50 MB, and baseline write volume ≤13 MB/day extrapolated (SC-007).
+- [ ] T094a Run a 1-hour idle comparison against a build with the feature config-disabled: assert baseline RSS delta ≤1 MB and CPU delta ≤0.1% (SC-006); assert no baseline file is written and no `EvtSubscribe` calls occur (FR-013).
+- [ ] T094b Statistical transient-suppression test using the `normal-day-false-positive-workload`: inject N ≥ 1000 single-bucket transients at random times during a steady-state period; assert fewer than 1% of them produce notifications (SC-003).
+- [ ] T094c Weekly-cycle SC-001 test using the `normal-day-false-positive-workload` in compressed time (the simulator MUST exercise production bucket/slot/maturity/fallback/confirmation/cooldown logic end-to-end; see spec.md §Measurement workloads): after baseline maturity, run one full weekly cycle and assert zero `event_spike` notifications.
+- [ ] T094d Automated target-isolation test for FR-025/SC-009: configure three `event_spike` notification targets (two healthy mocks + one that returns 500); trigger a spike; assert both healthy targets received the notification and detection continues unaffected.
 - [ ] T095 Induce a genuine anomaly on a real channel; measure time from first anomalous bucket to notification firing — assert SC-002 (≤3 × 10 s = ≤30 s)
-- [ ] T096 Deliberately misconfigure one webhook target (e.g., URL returning 401) while leaving others working; trigger a spike; verify other targets still receive the notification (SC-009)
+- [ ] T096 (Superseded by T094d — kept as an optional manual sanity check on real hardware; not a gate.)
 - [ ] T097 Run the baseline-poisoning scenario from US2's Independent Test on real hardware with real events; verify second anomaly is still flagged (SC-004)
+- [ ] T098 Subscription-retry test on real hardware: subscribe to a channel, then revoke the provider (e.g., `Stop-Service <provider>`); assert the channel transitions to `retrying` within 10 s, retry fires every 5 min, and after 12 failures (1 h) transitions to `failed`; dashboard `mature_channels` excludes the retrying channel. Re-enable the provider mid-test; assert the next retry transitions back to `subscribed` and baseline is preserved. Covers the mid-run channel loss edge case.
 
 ---
 
@@ -288,20 +252,19 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 ### Phase Dependencies
 
 - **Setup (Phase 1)**: no dependencies.
-- **Foundational (Phase 2)**: depends on Setup. **BLOCKS all user stories and Phase 8.**
-- **US1 (Phase 3, P1)**: depends on Foundational. Ships MVP.
+- **Foundational (Phase 2)**: depends on Setup. **BLOCKS all user stories.**
+- **US1 (Phase 3, P1)**: depends on Foundational. Ships MVP. Includes the Security channel opt-in path (T023a, T028, T012a) inline.
 - **US2 (Phase 4, P1)**: depends on Foundational. Independent of US1's integration work — tests sit against the same detector.
-- **US3 (Phase 5, P2)**: depends on Foundational + US1's service-side pipe handler (T053 needs the `SendNotification` integration wired by T026).
-- **US4 (Phase 6, P2)**: depends on Foundational. Can run in parallel with US3.
+- **Phase 5 (US3)**: DROPPED — see above.
+- **US4 (Phase 6, P2)**: depends on Foundational.
 - **US5 (Phase 7, P3)**: depends on Foundational + US1 (reload path calls into the live subsystem built by US1).
-- **Phase 8 (Security Opt-In)**: depends on Foundational (marker file is consumed by `ResolveChannels` from T009) + US1 (T028 reads the marker). Can run in parallel with US3/US4/US5.
-- **Polish (Phase 9)**: depends on all in-scope stories being complete (T083-T090 are prerequisites for release; T091-T097 are post-release validation).
+- **Phase 8 (Security Opt-In MSI)**: DROPPED — see above.
+- **Polish (Phase 9)**: depends on all in-scope stories being complete (T083-T090 are prerequisites for release; T091-T098 are post-release validation).
 
 ### User Story Dependencies
 
 - **US1 (P1, MVP)**: no story dependencies; depends only on Foundational.
 - **US2 (P1)**: no story dependencies; shares the detector with US1.
-- **US3 (P2)**: depends on US1's service-side notification integration (T026, T029-T033).
 - **US4 (P2)**: no story dependencies.
 - **US5 (P3)**: depends on US1 (Reload acts on the running subsystem).
 
@@ -314,9 +277,8 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 ### Parallel Opportunities
 
 - **Within Phase 2 (Foundational)**: T004, T005, T006 must be sequential (same file, `config.go`); T007-T017 are all [P] — different files.
-- **Within Phase 3 (US1)**: all Tests tasks T018-T023 run in parallel; implementation splits into service-side (T024-T028), notify (T029-T033), dashboard backend (T034-T037), UI frontend (T038-T041), logging (T042) — each touches different files.
-- **Within Phase 5 (US3)**: all Tests T047-T051 parallel; pipe changes (T052-T054) are one file chain; standalone binary work (T055-T058) is another file chain.
-- **Across stories** once Foundational is done: US1, US2, US4, Phase 8 can be parallel; US3 and US5 must wait on US1 pieces they depend on.
+- **Within Phase 3 (US1)**: all Tests tasks T018-T023a run in parallel; implementation splits into service-side (T024-T028), notify (T029-T033), dashboard backend (T034-T037), UI frontend (T038-T041), logging (T042) — each touches different files.
+- **Across stories** once Foundational is done: US1, US2, US4 can be parallel; US5 must wait on US1 pieces it depends on. Phases 5 and 8 are dropped.
 
 ---
 
@@ -366,10 +328,9 @@ Task: "Create internal/evtspike/status.go with DetectorStatus + DeriveState"
 
 1. Ship MVP (Foundational + US1 + US2) — built-in detector with notifications and dashboard.
 2. Add **US4 (Warm Restart)** next — low-risk, high-operator-value addition that protects against the post-restart alert storm failure mode. Small task count (T059-T065).
-3. Add **US3 (Standalone)** — widens deployment scope. Medium task count (T047-T058) but self-contained.
-4. Add **Phase 8 (Security Opt-In)** — installer work (T072-T082). Can parallel with US3 if staffed.
-5. Add **US5 (Live Reload)** — P3 polish on config experience (T066-T071).
-6. **Finalize with Phase 9 (Polish)** — CalVer bump, docs, SC validation on real RDSH hardware.
+3. Add **US5 (Live Reload)** — P3 polish on config experience (T066-T071).
+4. **Finalize with Phase 9 (Polish)** — CalVer bump, docs, SC validation on real RDSH hardware.
+(US3 and Phase 8 were dropped from MVP on 2026-04-17.)
 
 ### Parallel Team Strategy
 
