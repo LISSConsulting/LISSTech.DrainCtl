@@ -67,6 +67,32 @@ SELECT 'hourly', COUNT(*) FROM metrics_hourly;
 
 **Important**: The service holds the DB open in WAL mode. Your interactive `sqlite3` session is a *reader* and will see committed data; it will not block the service. Do NOT open the DB with a writer tool while the service is running.
 
+## 4b. WAL-aware backup procedure
+
+The WAL (`drainctl.db-wal`) and shared-memory (`drainctl.db-shm`) sidecars are part of the live database — copying only `drainctl.db` while the service is running will produce a backup that silently omits the most recent commits. Two supported recipes:
+
+**Recipe A — checkpoint-then-copy** (simpler, requires brief exclusive access):
+```powershell
+# Stop the service first, OR invoke wal_checkpoint(TRUNCATE) via a read-only helper
+Stop-Service drainctl
+Copy-Item "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db*" .\backup\
+Start-Service drainctl
+```
+
+**Recipe B — online backup API** (no downtime; preferred for production):
+```powershell
+# Using sqlite3.exe's .backup dot-command against a live WAL DB:
+sqlite3 "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db" `
+        ".backup '$PWD\backup\drainctl-$(Get-Date -Format yyyyMMdd-HHmmss).db'"
+```
+The `.backup` dot-command uses SQLite's online backup API, which correctly snapshots across the WAL without stopping writers.
+
+**Do NOT**: robocopy just `drainctl.db` on its own — you will silently lose every commit currently living in the WAL.
+
+## 4c. File size does not shrink after retention purges
+
+`PRAGMA incremental_vacuum` (run by the retention worker) reclaims freed pages to SQLite's internal free-list. The **file size stays at the high-water mark** until a manual `VACUUM INTO` sweep. A retention purge that deletes 10M rows will NOT make `drainctl.db` smaller on disk — subsequent inserts reuse the freed pages. Stable file size is normal; don't interpret it as "retention isn't running". Check `maintenance_jobs` for actual retention activity.
+
 ## 5. Exercise the HTTP contracts
 
 With the service running and your current Kerberos ticket valid:
@@ -103,7 +129,17 @@ Aggregators and retention run on timers. To test behaviour without waiting an ho
 - Use the `sqlite3` session above to watch `metrics_5min` and `metrics_hourly` populate.
 - Revert the config before committing.
 
-## 8. Before committing
+## 8. Regression checklist (FR-026)
+
+Before declaring the feature done, confirm none of the existing surfaces regressed. This is the manual verification that backs FR-026 "no operator-visible regression":
+
+- [ ] `drainctl history` CLI output column shape and ordering are unchanged vs. pre-feature (run `drainctl history --limit 20` against a seeded audit set; diff against a pre-feature golden if possible).
+- [ ] Dashboard empty state (fresh install, zero samples) still renders the "Collecting data…" placeholder and not an error.
+- [ ] Kerberos / negotiate auth flow still succeeds from a domain-joined browser; no new 401 regressions on `/api/v1/metrics` or `/api/v1/audit`.
+- [ ] Host-add flow (registering a new RDSH) is unchanged — the host appears in `ServerState` and starts collecting metrics on its next sample tick.
+- [ ] Notification triggers (drain on/off, session utilization) still fire correctly and reach their configured SMTP / webhook / ntfy targets.
+
+## 9. Before committing
 
 - Bump CalVer `YY.DOY.patch` in all 7 places (see `CLAUDE.md`).
 - `just resource` if you touched `.rc`.
