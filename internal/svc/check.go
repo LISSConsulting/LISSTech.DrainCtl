@@ -3,6 +3,7 @@
 package svc
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -12,12 +13,16 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 )
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary]) {
+// audit is the persistent SQLite audit writer (T026); st remains the in-memory
+// observation store used for live state tracking (LastObservation, StateSince)
+// until Phase 8 retires it.
+func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.AuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary]) {
 	checkStart := time.Now()
 	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
@@ -29,10 +34,12 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	transition := false
 	transitionFrom := ""
 	changedBy := ""
+	prevState := dc.DrainMode(0)
 
 	if last := st.LastObservation(); last != nil && last.DrainMode != state.Mode {
 		transition = true
 		transitionFrom = last.DrainMode.String()
+		prevState = last.DrainMode
 		slog.Warn("transition=true", "from", last.DrainMode, "to", state.Mode)
 
 		beforeTransition := time.Now().Add(-5 * time.Second)
@@ -118,6 +125,28 @@ func svcRunCheck(st *store.MemAuditStore, cfg *dc.ServiceConfig, targets []dc.No
 	}
 	st.Append(rec)
 	slog.Debug("diag: check=audit_appended")
+
+	// Persist drain-mode transitions to the SQLite audit table (T026, FR-001).
+	// Only transitions are written — audit is "one row per drain-mode transition"
+	// (data-model.md). The MemAuditStore above keeps per-tick observations for
+	// live state tracking until Phase 8 retires it.
+	if transition && audit != nil {
+		trec := telemetry.AuditRecord{
+			Ts:        rec.Timestamp,
+			Host:      rec.Host,
+			PrevState: int(prevState),
+			NewState:  int(rec.DrainMode),
+			Principal: changedBy,
+			ChangedBy: changedBy,
+		}
+		if !rec.KeyModified.IsZero() {
+			km := rec.KeyModified
+			trec.KeyModifiedTs = &km
+		}
+		if err := audit.Append(ctx, trec); err != nil {
+			slog.Warn("telemetry audit append failed", "error", err, "host", rec.Host)
+		}
+	}
 
 	if state.Mode == dc.AllowAll {
 		slog.Info("drain_mode", "mode", state.Mode, "exit", exitCode)
