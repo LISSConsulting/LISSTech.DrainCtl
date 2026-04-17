@@ -1,8 +1,8 @@
 1 ICON "../../assets/drainctl.ico"
 
 1 VERSIONINFO
-FILEVERSION    26,107,5,0
-PRODUCTVERSION 26,107,5,0
+FILEVERSION    26,107,6,0
+PRODUCTVERSION 26,107,6,0
 FILEFLAGSMASK  0x3fL
 FILEOS         0x40004L
 FILETYPE       0x1L
@@ -13,12 +13,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "LISS Consulting, Corp."
             VALUE "FileDescription",  "Remote Desktop Drain Mode Monitor"
-            VALUE "FileVersion",      "26.107.5"
+            VALUE "FileVersion",      "26.107.6"
             VALUE "InternalName",     "drainctl"
             VALUE "LegalCopyright",   "\251 2026 LISS Consulting, Corp."
             VALUE "OriginalFilename", "drainctl.exe"
             VALUE "ProductName",      "LISSTech DrainCtl"
-            VALUE "ProductVersion",   "26.107.5"
+            VALUE "ProductVersion",   "26.107.6"
         END
     END
     BLOCK "VarFileInfo"
