@@ -270,3 +270,81 @@ func (s *AuditStore) QueryRange(ctx context.Context, filter QueryFilter) ([]Audi
 	}
 	return records, nextCursor, nil
 }
+
+// LatestByHost returns the most recent audit record for every host that has at
+// least one row in the audit table, keyed by host. Tie-breaks on new_state DESC
+// to match the PK ordering used by QueryRange.
+//
+// Uses the SQLite MIN/MAX-per-group optimization over the audit_host_ts index
+// (host, ts DESC): the CTE picks max ts per host without a full scan, the outer
+// JOIN is a PK seek per host, and the new_state correlated MAX is a PK seek at
+// a specific (host, ts). Cost is O(hosts), not O(rows) (tasks.md T024, FR-020).
+// A naive ROW_NUMBER window over the whole table would force SQLite to rank
+// every row before filtering, defeating the index.
+//
+// Used by startup drift reconciliation (reconcile.go, T025) as the baseline it
+// compares against current registry state. T044 constrains that LatestByHost
+// MUST NOT be called until JSONL migration has completed, otherwise the
+// baseline is missing pre-SQLite history and every pre-migration host appears
+// as drift.
+func (s *AuditStore) LatestByHost(ctx context.Context) (map[string]AuditRecord, error) {
+	const q = `
+        WITH latest AS (
+            SELECT host, MAX(ts) AS ts FROM audit GROUP BY host
+        )
+        SELECT a.ts, a.host, a.prev_state, a.new_state, a.principal, a.changed_by, a.reason,
+               a.key_modified_ts, a.reconciliation, a.before_ts
+        FROM audit a
+        JOIN latest l ON a.host = l.host AND a.ts = l.ts
+        WHERE a.new_state = (
+            SELECT MAX(new_state) FROM audit
+            WHERE host = a.host AND ts = a.ts
+        )`
+
+	rows, err := s.reader.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: audit LatestByHost: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]AuditRecord)
+	for rows.Next() {
+		var (
+			tsMs                          int64
+			host, principal, changedBy    string
+			reason                        string
+			prevState, newState, reconInt int
+			keyModifiedMs, beforeTsMs     sql.NullInt64
+		)
+		if err := rows.Scan(
+			&tsMs, &host, &prevState, &newState,
+			&principal, &changedBy, &reason,
+			&keyModifiedMs, &reconInt, &beforeTsMs,
+		); err != nil {
+			return nil, fmt.Errorf("telemetry: audit LatestByHost scan: %w", err)
+		}
+		rec := AuditRecord{
+			Ts:             time.UnixMilli(tsMs).UTC(),
+			Host:           host,
+			PrevState:      prevState,
+			NewState:       newState,
+			Principal:      principal,
+			ChangedBy:      changedBy,
+			Reason:         reason,
+			Reconciliation: reconInt == 1,
+		}
+		if keyModifiedMs.Valid {
+			t := time.UnixMilli(keyModifiedMs.Int64).UTC()
+			rec.KeyModifiedTs = &t
+		}
+		if beforeTsMs.Valid {
+			t := time.UnixMilli(beforeTsMs.Int64).UTC()
+			rec.BeforeTs = &t
+		}
+		result[host] = rec
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("telemetry: audit LatestByHost rows: %w", err)
+	}
+	return result, nil
+}
