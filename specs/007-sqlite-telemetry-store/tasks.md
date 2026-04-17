@@ -31,7 +31,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 **Purpose**: Pull dependencies and scaffold the new package.
 
 - [x] T001 Add `modernc.org/sqlite` to `go.mod` (`go get modernc.org/sqlite@latest && go mod tidy`); commit `go.mod` and `go.sum`
-- [ ] T002 [P] Create `internal/telemetry/` directory with empty stub files (each with `//go:build windows` header and `package telemetry`): `db.go`, `schema.go`, `audit.go`, `metrics.go`, `aggregator.go`, `retention.go`, `maintenance.go`, `reconcile.go`, `migrate_jsonl.go`
+- [x] T002 [P] Create `internal/telemetry/` directory with empty stub files (each with `//go:build windows` header and `package telemetry`): `db.go`, `schema.go`, `audit.go`, `metrics.go`, `aggregator.go`, `retention.go`, `maintenance.go`, `reconcile.go`, `migrate_jsonl.go`
 
 ---
 
