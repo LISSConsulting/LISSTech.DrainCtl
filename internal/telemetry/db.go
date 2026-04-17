@@ -129,7 +129,16 @@ func Open(dataDir string) (*DB, error) {
 		_ = writer.Close()
 		_ = reader.Close()
 		_ = checkpointDB.Close()
-		return nil, fmt.Errorf("telemetry: apply schema: %w", err)
+		return nil, fmt.Errorf("telemetry: apply schema %s: %w", path, err)
+	}
+
+	// Integrity check before accepting ingest — catches silent storage corruption.
+	// quick_check is faster than integrity_check and catches structural issues.
+	if err := runQuickCheck(writer, path); err != nil {
+		_ = writer.Close()
+		_ = reader.Close()
+		_ = checkpointDB.Close()
+		return nil, err
 	}
 
 	if err := seedMeta(writer); err != nil {
@@ -221,6 +230,35 @@ func (db *DB) WALCheckpoint(ctx context.Context) {
 		return
 	}
 	db.lastTruncateAt = time.Now()
+}
+
+// runQuickCheck runs PRAGMA quick_check on the open database and returns an
+// error if any row other than "ok" is returned, citing the DB path and the
+// SQLite diagnostics. Kept on the writer connection so it shares the WAL view.
+func runQuickCheck(db *sql.DB, dbPath string) error {
+	rows, err := db.Query("PRAGMA quick_check")
+	if err != nil {
+		return fmt.Errorf("telemetry: quick_check query at %s: %w", dbPath, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return fmt.Errorf("telemetry: quick_check scan at %s: %w", dbPath, err)
+		}
+		if line != "ok" {
+			lines = append(lines, line)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("telemetry: integrity check failed at %s: %w", dbPath, err)
+	}
+	if len(lines) > 0 {
+		return fmt.Errorf("telemetry: integrity check failed at %s: %s", dbPath, strings.Join(lines, "; "))
+	}
+	return nil
 }
 
 func isSQLiteContention(err error) bool {
