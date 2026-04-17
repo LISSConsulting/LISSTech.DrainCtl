@@ -24,14 +24,10 @@ type ServerInfo struct {
 	LastSeen     time.Time       `json:"last_seen,omitempty"`
 }
 
-// historyMax is the maximum number of CheckResult records retained per host.
-const historyMax = 100
-
 // ServerState manages the set of registered servers, persisted to servers.json.
 type ServerState struct {
 	mu      sync.RWMutex
 	servers map[string]*ServerInfo
-	history map[string][]dc.CheckResult
 	path    string
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
 	// Used by DashboardServer to broadcast SSE events.
@@ -46,7 +42,6 @@ type ServerState struct {
 func NewServerState(dataDir string) *ServerState {
 	s := &ServerState{
 		servers: make(map[string]*ServerInfo),
-		history: make(map[string][]dc.CheckResult),
 		path:    filepath.Join(dataDir, "servers.json"),
 	}
 	s.load()
@@ -74,7 +69,6 @@ func (s *ServerState) Remove(hostname string) bool {
 		return false
 	}
 	delete(s.servers, hostname)
-	delete(s.history, hostname)
 	s.save()
 	return true
 }
@@ -87,23 +81,13 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 	return ok
 }
 
-// Update sets the last result and last-seen time for a registered host,
-// and appends the result to the per-host history ring (capped at historyMax).
+// Update sets the last result and last-seen time for a registered host.
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	s.mu.Lock()
 	_, registered := s.servers[hostname]
 	if registered {
 		s.servers[hostname].LastResult = result
 		s.servers[hostname].LastSeen = time.Now()
-
-		buf := s.history[hostname]
-		if len(buf) < historyMax {
-			buf = append(buf, *result)
-		} else {
-			copy(buf, buf[1:])
-			buf[historyMax-1] = *result
-		}
-		s.history[hostname] = buf
 	}
 	// Copy server list under lock for persistence outside lock.
 	var snapshot []ServerInfo
@@ -127,27 +111,6 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if registered && mcb != nil {
 		mcb(*result)
 	}
-}
-
-// HostHistory returns the last n CheckResult records for hostname, newest first.
-// If n <= 0 or n > historyMax, up to historyMax records are returned.
-func (s *ServerState) HostHistory(hostname string, n int) []dc.CheckResult {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	buf := s.history[hostname]
-	if len(buf) == 0 {
-		return nil
-	}
-	if n <= 0 || n > len(buf) {
-		n = len(buf)
-	}
-	// Return newest-first slice of the ring (buf is oldest-first).
-	src := buf[len(buf)-n:]
-	out := make([]dc.CheckResult, n)
-	for i, r := range src {
-		out[n-1-i] = r
-	}
-	return out
 }
 
 // Get returns a snapshot of the named server, or nil if not registered.
