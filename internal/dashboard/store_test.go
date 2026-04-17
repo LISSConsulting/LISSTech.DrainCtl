@@ -171,22 +171,6 @@ func TestRemove_OnlyRemovesTargetServer(t *testing.T) {
 	}
 }
 
-func TestRemove_ClearsHistoryRing(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
-
-	if h := s.HostHistory("SRV01", 0); len(h) == 0 {
-		t.Fatal("expected history before Remove")
-	}
-
-	s.Remove("SRV01")
-
-	if h := s.HostHistory("SRV01", 0); len(h) != 0 {
-		t.Errorf("history ring not cleared after Remove: got %d entries", len(h))
-	}
-}
-
 // ── IsRegistered ──────────────────────────────────────────────────────────────
 
 func TestIsRegistered_TrueForRegistered(t *testing.T) {
@@ -242,135 +226,6 @@ func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
 
 	if len(s.All()) != 0 {
 		t.Error("Update() on unregistered host should not create a ServerInfo entry")
-	}
-}
-
-// ── HostHistory ───────────────────────────────────────────────────────────────
-
-func TestHostHistory_EmptyForUnknownHost(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	if h := s.HostHistory("GHOST", 10); h != nil {
-		t.Errorf("HostHistory for unknown host = %v, want nil", h)
-	}
-}
-
-func TestHostHistory_EmptyForNoReports(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-	if h := s.HostHistory("SRV01", 10); h != nil {
-		t.Errorf("HostHistory with no reports = %v, want nil", h)
-	}
-}
-
-func TestHostHistory_NewestFirst(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-
-	statuses := []string{"Healthy", "Grace", "Alert"}
-	for i, st := range statuses {
-		s.Update("SRV01", &dc.CheckResult{
-			Host:      "SRV01",
-			Status:    st,
-			Timestamp: time.Unix(int64(1000+i), 0),
-		})
-	}
-
-	h := s.HostHistory("SRV01", 10)
-	if len(h) != 3 {
-		t.Fatalf("len(history) = %d, want 3", len(h))
-	}
-	// Newest (Alert, t=1002) should be first.
-	if h[0].Status != "Alert" {
-		t.Errorf("h[0].Status = %q, want Alert", h[0].Status)
-	}
-	if h[1].Status != "Grace" {
-		t.Errorf("h[1].Status = %q, want Grace", h[1].Status)
-	}
-	if h[2].Status != "Healthy" {
-		t.Errorf("h[2].Status = %q, want Healthy", h[2].Status)
-	}
-}
-
-func TestHostHistory_NLimitsResults(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-
-	for i := range 10 {
-		s.Update("SRV01", &dc.CheckResult{
-			Host:      "SRV01",
-			Status:    "Healthy",
-			Timestamp: time.Unix(int64(1000+i), 0),
-		})
-	}
-
-	h := s.HostHistory("SRV01", 3)
-	if len(h) != 3 {
-		t.Errorf("len(history) = %d, want 3 with n=3", len(h))
-	}
-}
-
-func TestHostHistory_NZeroReturnsAll(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-
-	for i := range 5 {
-		s.Update("SRV01", &dc.CheckResult{
-			Host:      "SRV01",
-			Status:    "Healthy",
-			Timestamp: time.Unix(int64(1000+i), 0),
-		})
-	}
-
-	h := s.HostHistory("SRV01", 0)
-	if len(h) != 5 {
-		t.Errorf("len(history) = %d, want 5 with n=0 (return all)", len(h))
-	}
-}
-
-func TestHostHistory_RingCapAtHistoryMax(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-
-	// Insert more than historyMax records.
-	for i := range historyMax + 20 {
-		s.Update("SRV01", &dc.CheckResult{
-			Host:      "SRV01",
-			Status:    "Healthy",
-			Timestamp: time.Unix(int64(1000+i), 0),
-		})
-	}
-
-	h := s.HostHistory("SRV01", 0)
-	if len(h) > historyMax {
-		t.Errorf("len(history) = %d, want <= %d (ring cap)", len(h), historyMax)
-	}
-}
-
-func TestHostHistory_RingRetainsNewest(t *testing.T) {
-	s := NewServerState(t.TempDir())
-	s.Register("SRV01")
-
-	// Insert historyMax Healthy records, then one Alert.
-	for i := range historyMax {
-		s.Update("SRV01", &dc.CheckResult{
-			Host:      "SRV01",
-			Status:    "Healthy",
-			Timestamp: time.Unix(int64(1000+i), 0),
-		})
-	}
-	s.Update("SRV01", &dc.CheckResult{
-		Host:      "SRV01",
-		Status:    "Alert",
-		Timestamp: time.Unix(int64(2000), 0),
-	})
-
-	h := s.HostHistory("SRV01", 1)
-	if len(h) != 1 {
-		t.Fatalf("len(history) = %d, want 1 with n=1", len(h))
-	}
-	// Newest record (Alert) must be retained.
-	if h[0].Status != "Alert" {
-		t.Errorf("newest record = %q, want Alert (ring must evict oldest)", h[0].Status)
 	}
 }
 
@@ -605,7 +460,6 @@ func TestSave_MkdirAllError(t *testing.T) {
 	// filepath.Dir(s.path) == blocker (a file, not a directory).
 	s := &ServerState{
 		servers: make(map[string]*ServerInfo),
-		history: make(map[string][]dc.CheckResult),
 		path:    filepath.Join(blocker, "servers.json"),
 	}
 	s.servers["SRV01"] = &ServerInfo{Hostname: "SRV01", RegisteredAt: time.Now()}
