@@ -79,6 +79,19 @@ var auditPragmas = []string{
 	"PRAGMA temp_store = MEMORY",
 }
 
+// readOnlyPragmas is applied on CLI fallback reads (tasks.md T028a,
+// research.md §13). Only connection-local pragmas that are legal on a
+// read-only connection — journal_mode, synchronous, wal_autocheckpoint,
+// and auto_vacuum cannot be modified without write access so we inherit
+// whatever the file has persisted.
+var readOnlyPragmas = []string{
+	"PRAGMA foreign_keys = ON",
+	"PRAGMA busy_timeout = 5000",
+	"PRAGMA temp_store = MEMORY",
+	"PRAGMA cache_size = -20480",
+	"PRAGMA mmap_size = 67108864",
+}
+
 // pragmaConnector implements driver.Connector so that every connection obtained
 // from either pool receives the specified pragma block before use.
 // modernc.org/sqlite's Driver implements driver.Driver but not DriverContext,
@@ -201,12 +214,23 @@ func Open(dataDir string) (*DB, error) {
 	return db, nil
 }
 
-// Close releases all database connections.
+// Close releases all database connections. OpenReadOnly populates only the
+// reader pool, so Close tolerates nil fields for the write/audit/checkpoint
+// pools rather than panicking.
 func (db *DB) Close() error {
-	cerr := db.checkpointDB.Close()
-	aerr := db.auditDB.Close()
-	werr := db.writer.Close()
-	rerr := db.reader.Close()
+	var cerr, aerr, werr, rerr error
+	if db.checkpointDB != nil {
+		cerr = db.checkpointDB.Close()
+	}
+	if db.auditDB != nil {
+		aerr = db.auditDB.Close()
+	}
+	if db.writer != nil {
+		werr = db.writer.Close()
+	}
+	if db.reader != nil {
+		rerr = db.reader.Close()
+	}
 	if cerr != nil {
 		return cerr
 	}
@@ -217,6 +241,139 @@ func (db *DB) Close() error {
 		return werr
 	}
 	return rerr
+}
+
+// OpenReadOnly opens drainctl.db in read-only mode for CLI fallback queries
+// (tasks.md T028a, research.md §13). The returned *DB has only the reader
+// pool populated; writer, auditDB, and checkpointDB are nil. Use
+// NewReadOnlyAuditStore to query through this DB — calling the write-path
+// constructors against a read-only DB will nil-panic.
+//
+// WAL sidecar cases:
+//
+//	(a) -wal and -shm both present and readable → normal WAL read open
+//	(b) both sidecars missing → rollback-journal read mode; live writer
+//	    data may be ≤1 commit stale (logged at INFO)
+//	(c) -wal present but the CLI process cannot open it (ACL, exclusive
+//	    lock, etc.) → explicit error naming the sidecar path; no silent
+//	    fallback
+//	(d) -wal present but -shm missing / unreadable / corrupt → explicit
+//	    error; no silent fallback
+//
+// The DSN is a SQLite URI with `mode=ro&_txlock=deferred`; `_journal_mode`
+// is deliberately NOT forced so SQLite inherits the file's persisted mode.
+func OpenReadOnly(dataDir string) (*DB, error) {
+	if err := checkDriveType(dataDir); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dataDir, dbFileName)
+	if err := validateReadOnlySidecars(path); err != nil {
+		return nil, err
+	}
+
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_txlock=deferred"
+	drv := &sqlite.Driver{}
+	connector := &pragmaConnector{dsn: dsn, drv: drv, pragmas: readOnlyPragmas}
+
+	reader := sql.OpenDB(connector)
+	reader.SetConnMaxLifetime(readerMaxLifetime)
+
+	// Force an actual connection so pragma failures and SQLite-level errors
+	// (e.g. a malformed -shm header that slipped past the stat check) surface
+	// here with the DB path in the wrapping error, rather than from the first
+	// query at the call site.
+	pingCtx, cancel := context.WithTimeout(context.Background(), checkpointDeadline)
+	defer cancel()
+	if err := reader.PingContext(pingCtx); err != nil {
+		_ = reader.Close()
+		return nil, fmt.Errorf(
+			"telemetry: read-only open of %s failed (possible sidecar corruption): %w",
+			path, err,
+		)
+	}
+
+	return &DB{reader: reader, path: path}, nil
+}
+
+// validateReadOnlySidecars enforces the (b), (c), (d) cases in OpenReadOnly's
+// contract before SQLite touches the files. Cheap local stat/open probes so
+// the CLI surfaces ACL or partial-writer state with a clear operator-facing
+// error instead of a generic "io error" from deep inside SQLite.
+//
+// os.Stat failures that are NOT os.ErrNotExist (ACL denied, sharing violation,
+// etc.) must not be silently coerced into "missing" — that would misroute case
+// (c) into case (b) and let SQLite proceed against the possibly-stale main
+// file. Any non-ENOENT stat failure surfaces as a case (c) error naming the
+// sidecar.
+func validateReadOnlySidecars(dbPath string) error {
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+
+	walExists, err := sidecarExists(walPath)
+	if err != nil {
+		return sidecarAccessError(dbPath, "WAL", walPath, err)
+	}
+	shmExists, err := sidecarExists(shmPath)
+	if err != nil {
+		return sidecarAccessError(dbPath, "SHM", shmPath, err)
+	}
+
+	if !walExists && !shmExists {
+		slog.Info(
+			"telemetry: read-only open without WAL sidecars; live writer data may be ≤1 commit stale",
+			"path", dbPath,
+		)
+		return nil
+	}
+
+	if walExists {
+		f, err := os.Open(walPath)
+		if err != nil {
+			return sidecarAccessError(dbPath, "WAL", walPath, err)
+		}
+		_ = f.Close()
+	}
+
+	if walExists && !shmExists {
+		return fmt.Errorf(
+			"telemetry: read-only open of %s blocked: WAL sidecar %s present but SHM sidecar %s missing "+
+				"(partially-closed writer) — refusing silent fallback to stale main file",
+			dbPath, walPath, shmPath,
+		)
+	}
+
+	if shmExists {
+		f, err := os.Open(shmPath)
+		if err != nil {
+			return sidecarAccessError(dbPath, "SHM", shmPath, err)
+		}
+		_ = f.Close()
+	}
+
+	return nil
+}
+
+// sidecarExists distinguishes "file not present" (ok, returns false/nil) from
+// any other stat error (returns false + the underlying error for the caller to
+// wrap). os.IsNotExist handles both POSIX ENOENT and Windows
+// ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND.
+func sidecarExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func sidecarAccessError(dbPath, kind, sidecarPath string, err error) error {
+	return fmt.Errorf(
+		"telemetry: read-only open of %s blocked: cannot read %s sidecar %s: %w "+
+			"(CLI process needs read permission on the drainctl data directory)",
+		dbPath, kind, sidecarPath, err,
+	)
 }
 
 // WALCheckpoint runs a PASSIVE checkpoint, escalating to TRUNCATE when the WAL
