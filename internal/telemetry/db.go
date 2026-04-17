@@ -108,9 +108,36 @@ func execDriverConn(ctx context.Context, conn driver.Conn, query string) error {
 	return err
 }
 
+// checkDriveType returns an error if dataDir does not reside on a DRIVE_FIXED
+// volume. Network shares, RAM disks, removable media, and unknown volumes are
+// rejected per FR-004 — SQLite WAL mode is unsafe on non-local file systems.
+func checkDriveType(dataDir string) error {
+	// GetDriveTypeW needs the volume root (e.g. "C:\"), not the full path.
+	abs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return fmt.Errorf("telemetry: resolve data dir %s: %w", dataDir, err)
+	}
+	root := filepath.VolumeName(abs) + `\`
+	rootPtr, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		return fmt.Errorf("telemetry: encode volume root %s: %w", root, err)
+	}
+	dt := windows.GetDriveType(rootPtr)
+	if dt != windows.DRIVE_FIXED {
+		return fmt.Errorf(
+			"telemetry: data dir %s is on a non-local volume (drive type %d); "+
+				"drainctl.db requires a local fixed drive (FR-004)", dataDir, dt,
+		)
+	}
+	return nil
+}
+
 // Open opens or creates drainctl.db in dataDir, applies the schema and pragmas,
 // seeds initial schema_meta rows, and restricts file ACLs.
 func Open(dataDir string) (*DB, error) {
+	if err := checkDriveType(dataDir); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dataDir, dbFileName)
 	drv := &sqlite.Driver{}
 
