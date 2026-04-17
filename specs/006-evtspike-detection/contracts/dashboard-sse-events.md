@@ -20,7 +20,7 @@ Returns the current detector status for one registered server.
   "state": "healthy",
   "enabled_channels": 54,
   "mature_channels": 41,
-  "last_spike_at": "2026-04-16T14:23:42-05:00"
+  "last_spike_at": "2026-04-16T14:22:52-05:00"
 }
 ```
 
@@ -46,12 +46,12 @@ Returns the most recent confirmed spikes for one host, newest first, from the in
     "host": "RDSH-04",
     "channel": "Microsoft-Windows-Winlogon/Operational",
     "window_start": "2026-04-16T14:22:42-05:00",
-    "window_end": "2026-04-16T14:23:42-05:00",
+    "window_end": "2026-04-16T14:22:52-05:00",
     "observed": 47,
     "expected": 3.2,
     "tail_probability": 2.1e-7,
     "confirmation_count": 3,
-    "first_seen_at": "2026-04-16T14:20:42-05:00"
+    "first_seen_at": "2026-04-16T14:22:32-05:00"
   }
 ]
 ```

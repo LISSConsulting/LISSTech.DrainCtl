@@ -14,7 +14,7 @@ Identical to the existing notification envelope (see `notify.go` → `SendNotifi
 |-------|------|---------|-------|
 | `event` | string | `"event_spike"` | **NEW value** on the existing `event` field. |
 | `host` | string | `"RDSH-04"` | Hostname of the server that detected the spike. |
-| `timestamp` | RFC 3339 | `"2026-04-16T14:23:42-05:00"` | When the alert was fired (post-confirmation). |
+| `timestamp` | RFC 3339 | `"2026-04-16T14:22:52-05:00"` | When the alert was fired (post-confirmation). |
 | `subject` | string | `"⚠️ RDSH-04: Event spike on Microsoft-Windows-Winlogon/Operational (47 events, expected ~3.2)"` | Email subject line; reuses the existing subject-building path with an evtspike-specific template. |
 | `status` | string | `"warning"` / `"alert"` | Echoed from the target's configured severity (Q4 D clarification). |
 | `message` | string | `"Event count 47 in 10s bucket; expected ~3.2 at this time-of-day; tail probability 2.1e-7."` | Human-readable single sentence. |
@@ -42,7 +42,7 @@ Identical to the existing notification envelope (see `notify.go` → `SendNotifi
 {
   "event": "event_spike",
   "host": "RDSH-04",
-  "timestamp": "2026-04-16T14:23:42-05:00",
+  "timestamp": "2026-04-16T14:22:52-05:00",
   "subject": "⚠️ RDSH-04: Event spike on Microsoft-Windows-Winlogon/Operational",
   "status": "alert",
   "message": "Event count 47 in 10s bucket; expected ~3.2 at this time-of-day; tail probability 2.1e-7.",

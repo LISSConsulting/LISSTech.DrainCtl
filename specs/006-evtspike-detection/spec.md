@@ -13,7 +13,8 @@
 - Q: What dashboard visibility must MVP ship with? → A: Additive-minimal on the existing dashboard — per-server detector status pill (healthy / training / disabled / error) plus a recent-spikes list for the selected server. No new dashboard construction; no per-channel drilldown, heatmap, or baseline-editing UI in MVP.
 - Q: What operations can an administrator perform on the watched-channels list in `config.json`? → A: Additive + suppressive. The 54-channel default list ships in code and remains authoritative; admins can (a) disable specific defaults by channel name and (b) add extra channels not on the default list. Admins do not restate the full default list. Per-channel sensitivity/cooldown overrides are out of scope for MVP.
 - Q: How should `event_spike` alerts map to DrainCtl's existing severity levels? → A: Admin-configured per notification target, same model as existing trigger types — the admin picks the severity when they wire up a notification. No automatic escalation in MVP: persistence is handled by the existing per-target repeat interval; intensity-based severity bumping is out of scope for MVP. Admins who want "wake me up" can pick Alert from the start.
-- Q: Is the Windows `Security` channel watched by default, and how do admins enable it if they want it? → A: Excluded by default. Enablement is an explicit installer opt-in — a single checkbox "Enable Security event log monitoring" that (a) adds `Security` to the watched list and (b) grants `SeSecurityPrivilege` to the DrainCtl service account. The installer copy names the expanded capabilities (read Security log, clear Security log, alter audit policy) so the admin accepts informed risk. Single process, single config, single baseline; no privilege-isolated sidecar. Opting out via the installer removes `Security` from the watched list and revokes `SeSecurityPrivilege`, restoring minimum-privilege posture.
+- Q: Is the Windows `Security` channel watched by default, and how do admins enable it if they want it? → A: Excluded by default. Enablement is a config-level opt-in via `evtspike.security_channel_enabled: true` in `config.json`. The DrainCtl service runs as `LocalSystem` by default, which already has `SeSecurityPrivilege` present in its token (Disabled state); when the flag is set, the service enables that privilege on its own token via `AdjustTokenPrivileges` at subsystem start and subscribes to the `Security` channel. No MSI component and no `LsaAddAccountRights` / `LsaRemoveAccountRights` operations — LocalSystem's built-in privilege is sufficient. Admins who have reconfigured DrainCtl to run under a dedicated service account must grant `SeSecurityPrivilege` to that account manually via `secedit` or group policy (out of MVP scope — the subsystem logs a warning and skips Security subscription if `AdjustTokenPrivileges` returns `ERROR_NOT_ALL_ASSIGNED`).
+- Q: Should evtspike ship as a standalone CLI in addition to the in-service subsystem? → A: No. MVP ships only as the config-gated subsystem inside the DrainCtl service. The dual-deployment cost (pipe contract, separate baseline file, separate service install, double-run coordination, separate MSI) is not justified by the three originally-proposed use cases (not-yet-onboarded hosts, minimal footprint, isolation). If a thin RMM-deployable CLI is needed later, it is a separate project.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -49,25 +50,19 @@ An administrator enables the detector. A genuine incident (runaway driver, misco
 
 ---
 
-### User Story 3 - Standalone Deployment for Servers Without Full DrainCtl (Priority: P2)
+### User Story 3 - Standalone Deployment (DROPPED — out of MVP scope)
 
-An administrator wants to monitor event activity on a server where running the full DrainCtl service is not appropriate (e.g., a server outside the drain workflow, or a sensitive host where admins prefer the minimum footprint). They deploy the evtspike CLI as a standalone process. The CLI detects spikes locally and, when a DrainCtl service is available on the same machine, forwards spike events to it for consolidated notification routing. When no DrainCtl is reachable, the CLI still logs spikes locally so the admin retains visibility.
+Previously a P2 story for deploying `evtspike` as a standalone CLI that forwards spikes to DrainCtl over a named pipe. Dropped in the 2026-04-17 clarification round: the dual-deployment cost (separate pipe contract, separate baseline file, separate service install, double-run coordination, separate MSI packaging) is not justified by the three originally-proposed use cases (not-yet-onboarded hosts, minimal footprint, isolation from main service). If a thin RMM-deployable CLI is needed in a future release, it will be scoped as a separate project that can reuse the `internal/evtspike/` detector library without reopening the built-in-vs-standalone coordination questions.
 
-**Why this priority**: The built-in mode covers the primary deployment, but operators have asked for a standalone packaging for hosts not yet onboarded, for minimal-footprint monitoring, and for isolation from the main service. It is not required on day one, but shipping it materially widens adoption.
+Historical acceptance scenarios (NOT implemented):
 
-**Independent Test**: On a host with a running DrainCtl service, run the evtspike CLI and verify spikes appear in DrainCtl's alert stream. Stop the DrainCtl service and verify the CLI continues to detect spikes and emits them to its local log without crashing.
-
-**Acceptance Scenarios**:
-
-1. **Given** DrainCtl is running on the same machine, **When** the standalone CLI detects a confirmed spike, **Then** DrainCtl receives the spike event and routes it through the normal notification pipeline as if it had detected it natively.
-2. **Given** DrainCtl is not running on the same machine, **When** the standalone CLI detects a confirmed spike, **Then** the CLI logs the spike locally and continues operating; it does not crash, retry in a tight loop, or block detection.
-3. **Given** the standalone CLI is running, **When** DrainCtl later becomes available, **Then** subsequent spikes are forwarded without requiring a restart of the CLI.
+(historical acceptance scenarios removed — see the Dropped note above)
 
 ---
 
 ### User Story 4 - Warm Restart Without Retraining (Priority: P2)
 
-An administrator restarts the DrainCtl service (or the standalone CLI) — for a version upgrade, a scheduled reboot, or a config change. When the detector comes back up, it resumes with the baseline it had already learned. It does not spend another day in a warm-up period, and it does not generate a flood of alerts immediately after restart while it re-learns normal.
+An administrator restarts the DrainCtl service — for a version upgrade, a scheduled reboot, or a config change. When the detector comes back up, it resumes with the baseline it had already learned. It does not spend another day in a warm-up period, and it does not generate a flood of alerts immediately after restart while it re-learns normal.
 
 **Why this priority**: Without persistence, every restart throws away the detector's learned sense of normal. For an operations tool, this turns routine maintenance into an alert storm and wastes days of observation. P2 because the feature still works without it (it just retrains after restart) — but in production, it's close to mandatory.
 
@@ -103,12 +98,13 @@ An administrator wants to turn detection on, pick which servers participate, tun
 
 - A configured event channel does not exist on the host (e.g., optional Windows role not installed): the channel is skipped with a warning; detection continues on the remaining channels.
 - A configured channel exists but the service lacks permission to subscribe: the channel is skipped with a warning; detection continues on the remaining channels.
-- An event channel becomes unavailable mid-run (provider unloaded, permissions changed): the detector logs and continues; it does not bring down the whole subsystem.
-- The host clock changes (DST transition, manual adjustment, NTP correction): the detector uses the new wall-clock time going forward; per-slot baselines remain meaningful because they key on time-of-day, not elapsed time.
-- The baseline state file becomes corrupt during a crash: on next start, the detector treats it as missing and rebuilds from scratch.
-- Two processes try to own the baseline file simultaneously (built-in mode and standalone CLI on the same host): the detector must either coordinate or refuse to double-run; it must not silently overwrite each other's state.
+- An event channel becomes unavailable mid-run (provider unloaded, permissions changed): the channel transitions from `subscribed` to `retrying` in the in-memory subscription state, its baseline is preserved, and the detector retries the subscription every 5 minutes; after 12 consecutive failures (1 hour) the channel transitions to `failed`. The dashboard `mature_channels` count excludes channels not currently in `subscribed` state. The detector does not bring down the whole subsystem.
+- The host clock changes (DST transition, manual adjustment, NTP correction): the detector uses the new wall-clock time going forward; per-slot baselines remain meaningful because they key on time-of-day, not elapsed time. Specifically:
+  - Backward wall-clock jump within an in-progress 10s bucket: drop the bucket counter, resume on the next 10s boundary.
+  - DST fall-back (same 15-min slot visited twice in one day): both visits update the same `GammaState.N` — acceptable because per-slot stats accumulate observations regardless of calendar date.
+  - DST spring-forward (one 15-min slot skipped that day): no harm — the slot simply gets one fewer observation that day.
+- The baseline state file becomes corrupt during a crash: on next start, the detector renames the file to `.corrupt-<ts>.bak` and rebuilds from scratch. A file that is merely unreadable (AV lock, transient EACCES) is treated as missing — no rename, no data loss if the lock clears before the next write.
 - A channel produces zero events for long stretches (rare provider): the detector handles this without flagging silence as anomalous.
-- The standalone CLI loses its pipe connection mid-stream: it reconnects on the next spike without losing in-flight spikes already emitted.
 - An alert target is misconfigured (webhook 401, ntfy unreachable, SMTP down): delivery failure for one target does not suppress the other targets, and does not disable detection.
 
 ## Requirements *(mandatory)*
@@ -121,15 +117,16 @@ An administrator wants to turn detection on, pick which servers participate, tun
 - **FR-001a**: Administrators MUST be able to disable specific channels from the default list by name in `config.json` (suppression).
 - **FR-001b**: Administrators MUST be able to add extra channels not on the default list in `config.json` (addition).
 - **FR-001c**: Per-channel sensitivity or cooldown overrides are out of scope for MVP; sensitivity and cooldown apply globally to all watched channels on a host.
-- **FR-001d**: The Windows `Security` channel MUST be excluded from the default watched list. The DrainCtl service account MUST NOT receive `SeSecurityPrivilege` as a side effect of a default install.
+- **FR-001d**: The Windows `Security` channel MUST be excluded from the default watched list. The service MUST NOT enable `SeSecurityPrivilege` on its own token unless Security monitoring is explicitly opted in via config.
 
-#### Optional Security channel monitoring (installer opt-in)
+#### Optional Security channel monitoring (config-level opt-in)
 
-- **FR-029**: The installer MUST present a clearly labeled optional component "Enable Security event log monitoring" that is off by default.
-- **FR-030**: When the admin opts in, the installer MUST (a) add `Security` to the watched channel list for this host and (b) grant `SeSecurityPrivilege` to the DrainCtl service account.
-- **FR-031**: The installer UI for this option MUST state plainly that `SeSecurityPrivilege` additionally allows the DrainCtl service to read the Security log, clear the Security log, alter SACLs, and manage audit policy — so the admin is accepting informed risk.
-- **FR-032**: When the admin opts out of this component on re-run of the installer, the installer MUST (a) remove `Security` from the watched channel list on this host and (b) revoke `SeSecurityPrivilege` from the DrainCtl service account, restoring minimum-privilege posture.
-- **FR-033**: The detector MUST run as a single process with a single configuration and a single baseline state file regardless of whether Security monitoring is enabled — Security is an extra channel inside the same detector, not a separate sidecar service.
+- **FR-029**: The detector MUST expose a single `config.json` boolean field `evtspike.security_channel_enabled` (default `false`) that controls whether the Windows `Security` channel is added to the watched list.
+- **FR-030**: When `security_channel_enabled` is `true`, the subsystem at Start MUST (a) add `Security` to the watched channel list for this host and (b) enable `SeSecurityPrivilege` on its own token via `AdjustTokenPrivileges(SE_SECURITY_NAME, ENABLE)`. The default LocalSystem service account already has this privilege present (Disabled state) in its kernel-assembled token, so enabling succeeds without `LsaAddAccountRights`.
+- **FR-031**: Documentation (README and the Settings UI help text) MUST state plainly that enabling `security_channel_enabled` lets the DrainCtl service read the Security log, clear the Security log, manage audit policy, and set SACLs — so the admin accepts informed risk. The canonical capability sentence is: "This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host."
+- **FR-032**: When `security_channel_enabled` transitions from `true` to `false` via live config reload, the subsystem MUST Stop+Start: remove `Security` from the watched channel list and skip enabling `SeSecurityPrivilege` on its token. No `LsaRemoveAccountRights` call is ever made — LocalSystem's built-in privilege is not revoked; it simply goes back to its default Disabled state on the next token assembly.
+- **FR-032a**: Admins running DrainCtl under a dedicated service account (non-LocalSystem) must grant `SeSecurityPrivilege` to that account manually via `secedit` or group policy before enabling `security_channel_enabled`. If `AdjustTokenPrivileges` returns `ERROR_NOT_ALL_ASSIGNED`, the subsystem MUST log a warning and skip the Security subscription — it MUST NOT crash, and other channels MUST continue to operate.
+- **FR-033**: The detector MUST run as a single process with a single configuration and a single baseline state file regardless of whether Security monitoring is enabled — Security is an extra channel inside the same detector.
 - **FR-002**: The detector MUST count event arrivals on each subscribed channel into 10-second buckets and score each bucket directly against the channel's baseline. There is no further aggregation into longer windows; the 10-second bucket is the atomic scoring unit.
 - **FR-003**: The detector MUST maintain a separate expected-rate baseline per channel per 15-minute time-of-day slot (96 slots covering 24 hours) so that rates that are normal during one part of the day but unusual during another are scored correctly.
 - **FR-004**: The detector MUST flag a window as anomalous only when the observed count both exceeds a configured absolute floor and is statistically unlikely given the channel's baseline.
@@ -150,10 +147,7 @@ An administrator wants to turn detection on, pick which servers participate, tun
 #### Deployment modes
 
 - **FR-013**: The detector MUST ship as an optional, config-gated subsystem inside the DrainCtl service. When disabled in configuration, the subsystem MUST create no subscriptions, write no baseline file, and consume no measurable steady-state resources.
-- **FR-014**: The detector MUST also ship as a standalone command-line program that can run without the full DrainCtl service installed.
-- **FR-015**: When the standalone CLI detects a confirmed spike and a local DrainCtl service is reachable via the existing named-pipe channel, it MUST forward the spike event to DrainCtl, which then routes it through the normal notification pipeline.
-- **FR-016**: When the standalone CLI detects a confirmed spike and the DrainCtl service is unreachable, it MUST log the spike to its own output and continue operating; it MUST NOT crash, spin, or stop detecting.
-- **FR-017**: The standalone CLI MUST reconnect to a DrainCtl service that becomes available after it has been unavailable, without requiring a CLI restart.
+- **FR-014 through FR-017**: (Removed in the 2026-04-17 scope reduction — standalone CLI dropped from MVP. See Clarifications for rationale. IDs intentionally left as a gap to preserve numbering in downstream docs.)
 
 #### Persistence
 
@@ -180,36 +174,44 @@ An administrator wants to turn detection on, pick which servers participate, tun
 
 ### Key Entities
 
-- **Watched Channel**: A single Windows Event Log channel on a single host that the detector is subscribed to. Has a name (e.g., `Microsoft-Windows-Winlogon/Operational`), a subscription status, and a learned baseline.
+- **Watched Channel**: A single Windows Event Log channel on a single host that the detector is subscribed to. Has a name (e.g., `Microsoft-Windows-Winlogon/Operational`), a runtime subscription status (`subscribed` / `retrying` / `failed`), and a learned baseline.
 - **Baseline**: The detector's learned sense of "normal" for one channel. Composed of one small numeric summary per 15-minute time-of-day slot (96 total), plus an all-hours global summary used while slots are immature.
 - **Scoring Window**: A 10-second event-count bucket for one channel. The atomic unit that gets scored and contributes (possibly capped) to the baseline.
-- **Spike Event**: The detector's output. Carries server, channel, observed count, expected count, window timestamps, and a severity. Delivered to the notification pipeline (built-in mode) or over the named pipe to DrainCtl (standalone mode).
+- **Spike Event**: The detector's output. Carries server, channel, observed count, expected count, and window timestamps. Severity is assigned by notification-target wiring (FR-011a), not by the detector; the Spike Event itself does not carry a severity field. Delivered to the notification pipeline in-process.
 - **Notification Trigger (`event_spike`)**: A new entry in the existing notification trigger taxonomy. Alongside the existing triggers, it can be associated with any mix of webhook, ntfy, and email targets, with per-target repeat intervals.
 - **Baseline State File**: The on-disk JSON file holding the full set of learned baselines for all watched channels on this host, written atomically on a cadence the service controls.
 
 ## Success Criteria *(mandatory)*
 
+### Measurement workloads
+
+Two named workloads underpin the numeric Success Criteria:
+
+- **`normal-day-false-positive-workload`**: 4-core Windows Server 2019+ VM running the 54-channel default list. Event-generation trace averages 100–500 events/hour aggregate across watched channels, with one morning logon storm (sustained 60 s elevated rate on logon-related channels), a steady-state work-hours period, an evening logoff burst, and an overnight idle period. Runs for a full 7-day cycle. Deterministic fixture under `specs/006-evtspike-detection/fixtures/normal-day.json`. Validates **SC-001** and **SC-003**.
+- **`stress-performance-workload`**: Same host shape. Sustained 200 events/sec aggregate across the default channel list for 1 hour after baseline maturity. Deterministic fixture under `specs/006-evtspike-detection/fixtures/stress.json`. Validates **SC-007**.
+
+The validating test/simulator MUST exercise the production bucket/slot/maturity/fallback/confirmation/cooldown logic end-to-end — no mocking of detector internals. Compressed-time simulators are allowed for SC-001 provided slot boundaries, observation counts, and per-slot maturity progression are preserved.
+
 ### Measurable Outcomes
 
-- **SC-001**: On a representative RDSH host, routine daily operation (morning logon storm, steady-state work hours, evening logoff, overnight idle) produces zero `event_spike` notifications over a full weekly cycle once the baseline is mature.
+- **SC-001**: Running the `normal-day-false-positive-workload` produces zero `event_spike` notifications over a full weekly cycle once the baseline is mature.
 - **SC-002**: When a genuine sustained anomaly is present on a watched channel, the administrator receives a notification within three 10-second scoring buckets (≤30 seconds) from the moment the anomaly begins.
-- **SC-003**: A single transient burst that lasts under one scoring window does not produce a notification in at least 99% of cases observed during steady-state operation.
+- **SC-003**: Under the `normal-day-false-positive-workload`, a single transient burst that lasts under one scoring window does not produce a notification in at least 99% of injection cases.
 - **SC-004**: After the detector experiences a sustained artificial flood on one channel, a subsequent smaller-but-still-anomalous event on the same channel is still detected — the baseline is not poisoned by the prior flood.
 - **SC-005**: Restarting the service does not produce a post-restart alert storm, and does not re-enter the warm-up period for channels whose baseline was already mature before the restart.
-- **SC-006**: When the feature is disabled in configuration, the service's steady-state CPU and memory footprint is indistinguishable from a build without the feature.
-- **SC-007**: When enabled with the default channel list, the feature's steady-state CPU is a small single-digit percentage of one core under normal event loads, and its memory footprint is well under 50 MB.
-- **SC-008**: The standalone CLI starts, subscribes, and emits its first scoring pass within 15 seconds of launch.
+- **SC-006**: When the feature is disabled in configuration, the service's steady-state resource use is within tolerance of a build without the feature: **baseline RSS delta ≤1 MB and CPU delta ≤0.1% of one core over a 1-hour idle measurement window**.
+- **SC-007**: Running the `stress-performance-workload` with the default channel list, the feature's steady-state CPU is **<5% of one core (1-hour average)**, memory footprint is **<50 MB RSS**, and baseline write volume extrapolates to **≤13 MB/day** at the default 15-minute persistence cadence.
+- **SC-008**: (Removed with the standalone CLI scope reduction on 2026-04-17.)
 - **SC-009**: Alert delivery failure on one target (e.g., misconfigured webhook) does not delay or prevent delivery to the other configured targets.
 
 ## Assumptions
 
 - **Platform**: The target platform is Windows Server running Remote Desktop Session Host, consistent with the rest of DrainCtl. Non-Windows hosts are out of scope.
-- **Existing infrastructure**: The existing DrainCtl notification pipeline (multi-target webhook/ntfy/email, per-target repeat intervals, slog-based logging, `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json`, named-pipe service interface) is reused. The feature adds to these, not alongside them.
-- **Privileges**: By default the DrainCtl service runs with its existing privilege set, which is sufficient for every channel on the default watched list. The only channel requiring additional privilege — `Security`, which needs `SeSecurityPrivilege` — is excluded from the default list. Admins who want Security monitoring opt in at install time via a dedicated installer component; the installer grants the privilege on opt-in and revokes it on opt-out. The detector itself remains a single process with a single configuration.
+- **Existing infrastructure**: The existing DrainCtl notification pipeline (multi-target webhook/ntfy/email, per-target repeat intervals, slog-based logging, `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json`) is reused. The feature adds to this, not alongside it. The detector runs in-process as a subsystem of the DrainCtl service and dispatches notifications via direct function calls to `SendNotification` — no inter-process communication is needed.
+- **Privileges**: By default the DrainCtl service runs as `LocalSystem`, whose token includes `SeSecurityPrivilege` (Disabled). The 53 default channels do not require this privilege. When Security monitoring is opted in via `evtspike.security_channel_enabled: true`, the subsystem enables the privilege on its own token via `AdjustTokenPrivileges` at Start. No `LsaAddAccountRights` or `LsaRemoveAccountRights` operations are performed; the privilege is already present in LocalSystem's token. Admins running under a dedicated service account must grant the privilege manually (out of MVP scope).
 - **Channel list**: The 54-channel default list is curated for RDSH/Citrix workloads and ships in code as the authoritative default. Administrators tailor it by naming specific channels to disable and/or adding extra channels — they do not restate the default list. This keeps admin configs small and lets the default list improve across versions without touching existing deployments.
 - **Warm-up**: A per-slot baseline is considered mature after a configurable number of observations, default seven (approximately one week of wall-clock observation, since each 15-minute slot is visited once per day). During warm-up, the detector falls back to the global all-hours baseline; alerts fired during this period are directionally correct but noisier. Admins should expect the first week after install at default settings to produce more false positives than steady state, and may raise or lower the threshold via `config.json`.
-- **Standalone pipe scope**: The standalone CLI's named-pipe target is a DrainCtl service on the same host. Cross-machine forwarding is out of scope for this feature.
-- **Validation**: The POC on `feat/evtspike-poc` has validated the statistical approach (Gamma-Poisson posterior, Negative Binomial tail, 2-of-3 confirmation, time-of-day slots, robust capped updates). This specification treats the algorithm as committed; productization — deployment modes, persistence, configuration, notification integration — is the remaining work.
+- **Validation**: The POC on `feat/evtspike-poc` has validated the statistical approach (Gamma-Poisson posterior, Negative Binomial tail, 2-of-3 confirmation, time-of-day slots, robust capped updates). This specification treats the algorithm as committed; productization — config, persistence, notification integration, dashboard — is the remaining work.
 
 ## Architectural Note: Reusable Scoring Engine
 
