@@ -38,7 +38,7 @@ An RDSH farm operator opens the dashboard and sees performance-counter trends fo
 
 **Why this priority**: This is the headline value of the feature. Without durable metrics history, operators cannot correlate user-reported slowness with the farm's actual state yesterday, last night, or over the weekend. Every other story builds on the persistent store being in place.
 
-**Independent Test**: Install the service, let it collect samples for at least two days, restart the service, then open the dashboard — the chart must still show the pre-restart samples as a continuous line. Can be validated with a scripted service restart in a staging farm.
+**Independent Test**: Install the service, let it collect samples for at least two days, restart the service, then open the dashboard — the chart must still show the pre-restart samples with no gap larger than 2 × sampling interval. Can be validated with a scripted service restart in a staging farm.
 
 **Acceptance Scenarios**:
 
@@ -54,7 +54,7 @@ A compliance reviewer asks, *"Show every drain-on event across the farm in the l
 
 **Why this priority**: Audit durability and searchability are the second half of the feature's value. Without it, the JSONL file remains the only record, grep remains the only tool, and the in-memory copy keeps consuming RAM proportional to uptime.
 
-**Independent Test**: Simulate drain-on/drain-off events across several hosts over several days (including service restarts), then run a time-range audit query and verify every event is returned in chronological order with host, actor, and transition fields intact.
+**Independent Test**: Simulate drain-on/drain-off events across several hosts over several days (including service restarts), then run a time-range audit query and verify every event is returned in reverse-chronological (newest-first) order with host, actor, and transition fields intact.
 
 **Acceptance Scenarios**:
 
@@ -70,7 +70,7 @@ A troubleshooter sees a suspicious bump in CPU on the 5-day overview, drags to z
 
 **Why this priority**: The history is only useful if operators can navigate it. A 5-day chart at raw resolution is too dense to read; an averaged 5-day chart hides the detail that matters. Adaptive resolution turns the same dataset into both a trend view and a detail view.
 
-**Independent Test**: With several days of data present, open the dashboard, zoom incrementally from 5 days → 24 hours → 1 hour → 10 minutes, and verify the chart re-renders with smooth transitions and the visible data resolution increases at each step.
+**Independent Test**: With several days of data present, open the dashboard, zoom incrementally from 5 days → 24 hours → 1 hour → 10 minutes, and verify each re-render completes in under 500 ms, the next frame starts within one animation frame, and the visible data resolution increases at each step.
 
 **Acceptance Scenarios**:
 
@@ -162,7 +162,7 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 
 - **FR-014**: The dashboard MUST be able to request metrics for a given host and time range, specifying the desired resolution tier (raw / 5-minute / hourly).
 - **FR-015**: When a caller omits the resolution, the system MUST select an appropriate tier automatically based on the requested time span.
-- **FR-016**: The audit API MUST support querying by time range, by host, and by actor, with results ordered chronologically.
+- **FR-016**: The audit API MUST support querying by time range, by host, and by actor, with results ordered newest-first (reverse chronological).
 
 #### Chart Behaviour
 
