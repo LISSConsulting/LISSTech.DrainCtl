@@ -43,14 +43,17 @@ var connectionPragmas = []string{
 	"PRAGMA auto_vacuum = INCREMENTAL",
 }
 
-// pragmaConnector wraps a driver.Connector so that every connection obtained
+// pragmaConnector implements driver.Connector so that every connection obtained
 // from either pool receives the full connectionPragmas block before use.
+// modernc.org/sqlite's Driver implements driver.Driver but not DriverContext,
+// so we call drv.Open(dsn) directly and apply pragmas on the resulting conn.
 type pragmaConnector struct {
-	inner driver.Connector
+	dsn string
+	drv driver.Driver
 }
 
 func (c *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := c.inner.Connect(ctx)
+	conn, err := c.drv.Open(c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +64,7 @@ func (c *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	return conn, nil
 }
 
-func (c *pragmaConnector) Driver() driver.Driver { return c.inner.Driver() }
+func (c *pragmaConnector) Driver() driver.Driver { return c.drv }
 
 func applyConnectionPragmas(ctx context.Context, conn driver.Conn) error {
 	for _, p := range connectionPragmas {
@@ -89,16 +92,7 @@ func execDriverConn(ctx context.Context, conn driver.Conn, query string) error {
 func Open(dataDir string) (*DB, error) {
 	path := filepath.Join(dataDir, dbFileName)
 
-	drv := &sqlite.Driver{}
-	dc, ok := interface{}(drv).(driver.DriverContext)
-	if !ok {
-		return nil, fmt.Errorf("telemetry: sqlite driver does not implement DriverContext")
-	}
-	inner, err := dc.OpenConnector(path)
-	if err != nil {
-		return nil, fmt.Errorf("telemetry: open connector: %w", err)
-	}
-	connector := &pragmaConnector{inner: inner}
+	connector := &pragmaConnector{dsn: path, drv: &sqlite.Driver{}}
 
 	writer := sql.OpenDB(connector)
 	writer.SetMaxOpenConns(1)
