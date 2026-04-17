@@ -1,6 +1,7 @@
 <script>
     import RingGauge from './RingGauge.svelte';
     import Sparkline from './Sparkline.svelte';
+    import Chart from '../lib/chart.svelte';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
     import { rel, dur, modeLabel, formatTs } from '../lib/utils.js';
@@ -412,6 +413,12 @@
             {/if}
         </div>
     </div>
+
+    <!-- Tile 4: Durable CPU history (5-day chart from /api/v1/metrics/{host}) -->
+    <div class="d-tile d-tile-chart">
+        <div class="d-tile-label">5-Day CPU History</div>
+        <Chart host={server.host} counter="cpu_pct" height={140} refreshMs={30_000} />
+    </div>
 </div>
 
 <style>
@@ -457,6 +464,10 @@
     .d-tile-details {
         flex: 1;
         min-width: 180px;
+    }
+    .d-tile-chart {
+        flex: 1 0 100%;
+        min-width: 0;
     }
 
     /* Ring row */
