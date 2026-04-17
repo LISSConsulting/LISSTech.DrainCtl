@@ -28,6 +28,8 @@ tags:
     description: Machine-to-machine (agent registration and reporting)
   - name: history
     description: Per-server event history
+  - name: metrics
+    description: Per-host time-series metrics
   - name: notifications
     description: Notification target testing
 
@@ -281,6 +283,64 @@ components:
         perf:
           $ref: "#/components/schemas/PerfSnapshot"
           nullable: true
+
+    MetricsSeries:
+      type: object
+      properties:
+        t:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: "Unix-ms timestamps, parallel to avg/min/max."
+        avg:
+          type: array
+          items:
+            type: number
+            format: double
+        min:
+          type: array
+          items:
+            type: number
+            format: double
+        max:
+          type: array
+          items:
+            type: number
+            format: double
+      required: [t, avg, min, max]
+
+    MetricsResponse:
+      type: object
+      properties:
+        host:
+          type: string
+        tier:
+          type: string
+          enum: [raw, 5min, hourly]
+          description: "Tier the server actually served. May differ from the requested resolution when `auto` was used or the finer tier has been purged (FR-019)."
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        oldest_available:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Oldest timestamp at which the chosen tier holds data for this host. null when the tier is empty."
+        newest_available:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Newest timestamp at which the chosen tier holds data for this host. null when the tier is empty."
+        series:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricsSeries"
+          description: "Per-counter time-series. Empty map when the tier holds no rows for the requested window (empty-state shape — FR-019a)."
+      required: [host, tier, from, to, oldest_available, newest_available, series]
 
     HistoryView:
       type: object
@@ -928,6 +988,85 @@ paths:
           description: Not authenticated.
         "429":
           description: Too many concurrent SSE connections (limit 100).
+
+  /metrics/{host}:
+    get:
+      tags: [metrics]
+      summary: Get per-host time-series metrics
+      description: |
+        Returns per-counter time-series for a single host at a chosen resolution tier.
+
+        `resolution=auto` picks the coarsest tier yielding ≥ 240 points in the
+        window. During the US1 phase the `5min` tier is not yet materialized,
+        so `auto` and an explicit `5min` request both degrade to `hourly`; the
+        `tier` field in the response always reflects what was actually served
+        (FR-019). When the tier holds zero rows for the host+window, the
+        response is 200 OK with an empty `series` map and `oldest_available`
+        / `newest_available` set to `null` (FR-019a — drives the dashboard's
+        "Collecting data…" state).
+      operationId: getMetrics
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          description: "URL-encoded hostname. Must exist in `ServerState` or a 404 is returned."
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          description: "Inclusive lower bound, ISO-8601 / RFC 3339 UTC."
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          description: "Exclusive upper bound, ISO-8601 / RFC 3339 UTC. Must be > `from`; the window must not exceed 90 days."
+          schema:
+            type: string
+            format: date-time
+        - name: resolution
+          in: query
+          description: "Tier selection."
+          schema:
+            type: string
+            enum: [raw, 5min, hourly, auto]
+            default: auto
+        - name: counters
+          in: query
+          description: "Comma-separated counter names (e.g. `cpu_pct,mem_avail_mb`). Unknown names are silently skipped. Defaults to all known counters."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Metrics series for the requested window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "400":
+          description: "`invalid_range` (unparseable timestamps, `to` ≤ `from`, or window > 90 days) or `invalid_resolution`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: "`unknown_host` — host is not registered."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "`storage_error` — DB open or query failure."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /history/{host}:
     get:
