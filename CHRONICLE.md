@@ -1,5 +1,21 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## BUILD.md for Ralph loops + per-commit codex review (2026-04-17)
+
+Rewrote `BUILD.md` from a 9-line generic agent prompt into a staged Ralph-loop runbook: Orient → Implement → Verify → Codex review → Commit → Stop. Captures the project rules (Windows build tag, CalVer in 7 places, `just lint` zero-tolerance, named mutex ≠ SQLite WAL locking) so each fresh Opus iteration doesn't have to re-derive them from `CLAUDE.md`.
+
+Added a **light-weight codex pre-commit step** (BUILD.md §4): pipe the staged diff through `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -` under a single correctness-and-side-effects lens. Crucially — one cycle max per task, verify findings against the actual code (codex hallucinates), fix-or-note-and-proceed. Never loop past one codex fix round; if codex is still red, stop and escalate.
+
+Why YOLO flag: codex 0.121.0's Windows sandbox fails with `CreateProcessWithLogonW 1326` on every PowerShell spawn (see `reference_codex_yolo_windows` memory). `--dangerously-bypass-approvals-and-sandbox` is the only reliable invocation on this host; safe because `codex exec` is `approval: never` non-interactive.
+
+Key Ralph-friendly discipline encoded in the runbook:
+- Stop conditions are explicit: all-tasks-done, design drift, test-fail-after-3-tries, codex-confirmed-and-unresolved, lint-loop, diff > 1000 lines.
+- Pre-commit hook failure **aborts the commit** (nothing is created); fix, re-stage, retry. Never `--amend` (rewrites the prior commit), never `--no-verify`.
+- Tick `- [ ]` → `- [x]` in `tasks.md` **in the same commit** as the implementation, never separately.
+- Do NOT push. Ralph decides when to push.
+
+**Dogfood**: the codex review step caught two HIGH-confidence bugs in the first draft of this very file — (1) a shell-pipe-vs-heredoc bug where `git diff --cached | codex exec - <<'PROMPT'` silently sends the prompt but not the diff (the heredoc overrides the pipe), and (2) misleading "create a new commit" wording for pre-commit hook failure (hook failure aborts — there's nothing to compare against). Both were fixed before this commit landed. First iteration paid its own keep.
+
 ## 007 SQLite Telemetry Store — planning review (2026-04-17)
 
 Commits `4c13128` / `e25482e` / `c021f4e` / (this commit) resolve 32 deduplicated findings from an adversarial codex review of the spec/plan/tasks for feature 007. Full artifacts at `docs/reviews/codex-2026-04-17-{synthesis,remediation-plan}.md`. Key lessons worth remembering once implementation starts:
