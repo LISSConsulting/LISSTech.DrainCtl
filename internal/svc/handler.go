@@ -252,6 +252,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	defer func() { _ = telDB.Close() }()
 	metricsStore := telemetry.NewMetricsStore(telDB)
 
+	auditStore, err := telemetry.NewAuditStore(ctx, telDB)
+	if err != nil {
+		slog.Error("service=failed", "error", err)
+		return false, 1
+	}
+	defer func() { _ = auditStore.Close() }()
+
 	// Start registry watcher.
 	regCh, err := watcher.WatchDrainModeKey(ctx)
 	if err != nil {
@@ -368,7 +375,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Run initial check (skip in dashboard-only mode).
 	if !cfg.DashboardOnly {
-		svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+		svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
@@ -402,7 +409,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		case <-regCh:
 			if !cfg.DashboardOnly {
 				slog.Info("trigger=registry_change")
-				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 				_ = st.Flush() // immediate flush on change
 			}
 
@@ -461,7 +468,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
-				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			}
 
 		case <-configCh:
@@ -540,7 +547,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
 			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
-				svcRunCheck(st, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 
