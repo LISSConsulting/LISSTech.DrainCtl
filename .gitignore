@@ -50,6 +50,7 @@ prune_*.html
 .ralph/
 .superpowers/
 .playwright-mcp/
+.claude/settings.local.json
 
 # Ephemeral working directory (patches, scratch output, coverage runs)
 .tmp/
