@@ -25,15 +25,21 @@ const (
 	ServiceDescription = "Monitors Remote Desktop Session Host drain mode (TSServerDrainMode) and maintains an audit trail of state changes."
 	ParametersKeyPath  = `SYSTEM\CurrentControlSet\Services\DrainCtl\Parameters`
 
-	DefaultGracePeriod            = 60 // minutes
-	DefaultRetentionDays          = 90
-	MaxRetentionDays              = 365
-	MinRetentionDays              = 1
-	DefaultPollInterval           = 60    // seconds
-	MaxPollInterval               = 86400 // seconds (1 day)
-	DefaultDashboardPort          = 49470
-	DefaultDashboardGroup         = "Domain Admins"
-	DefaultDashboardFetchInterval = 300 // seconds (5 minutes)
+	DefaultGracePeriod    = 60 // minutes
+	DefaultRetentionDays  = 90
+	MaxRetentionDays      = 365
+	MinRetentionDays      = 1
+	MaxAuditRetentionDays = 3650
+
+	DefaultMetricsDays               = 30
+	DefaultAuditDays                 = 365
+	DefaultAggregatorIntervalSeconds = 60
+	DefaultRetentionIntervalMinutes  = 15
+	DefaultPollInterval              = 60    // seconds
+	MaxPollInterval                  = 86400 // seconds (1 day)
+	DefaultDashboardPort             = 49470
+	DefaultDashboardGroup            = "Domain Admins"
+	DefaultDashboardFetchInterval    = 300 // seconds (5 minutes)
 
 	DefaultSessionWarningThreshold = 80 // percent
 
@@ -137,6 +143,18 @@ type PerformanceConfig struct {
 	SampleIntervalSec       int    `json:"sample_interval_sec"`              // default: 30, range 10–300
 }
 
+// RetentionConfig holds per-tier retention windows for the telemetry store.
+type RetentionConfig struct {
+	MetricsDays int `json:"metrics_days"` // hourly-tier retention, 1–365 days (default 30)
+	AuditDays   int `json:"audit_days"`   // audit-trail retention, 1–3650 days (default 365)
+}
+
+// TelemetryConfig holds background-worker cadence settings.
+type TelemetryConfig struct {
+	AggregatorIntervalSeconds int `json:"aggregator_interval_seconds"` // aggregator tick, default 60
+	RetentionIntervalMinutes  int `json:"retention_interval_minutes"`  // retention sweep cadence, default 15
+}
+
 // Config is the top-level config file structure (config.json).
 type Config struct {
 	GracePeriod   int    `json:"grace_period"` // minutes
@@ -156,6 +174,8 @@ type Config struct {
 	SessionWarningThreshold int `json:"session_warning_threshold"` // 0=disabled, 1-100
 
 	Performance PerformanceConfig `json:"performance"`
+	Retention   RetentionConfig   `json:"retention"`
+	Telemetry   TelemetryConfig   `json:"telemetry"`
 }
 
 // DashboardJSON holds dashboard settings in config.json.
@@ -216,6 +236,8 @@ func DefaultConfig() *Config {
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
 		MemoryLimitMB:           DefaultMemoryLimitMB,
 		Performance:             PerformanceConfig{CollectPerSession: true},
+		Retention:               RetentionConfig{MetricsDays: DefaultMetricsDays, AuditDays: DefaultAuditDays},
+		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
 	}
 }
 
@@ -286,6 +308,21 @@ func validateLogLevel(val, fieldName, fallback string) string {
 // Validate clamps and corrects config values in place.
 func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
+	c.Retention.MetricsDays = ClampRetention(c.Retention.MetricsDays)
+	if c.Retention.AuditDays < MinRetentionDays {
+		slog.Default().Warn("audit retention below minimum, clamping", "requested", c.Retention.AuditDays, "min", MinRetentionDays)
+		c.Retention.AuditDays = MinRetentionDays
+	}
+	if c.Retention.AuditDays > MaxAuditRetentionDays {
+		slog.Default().Warn("audit retention exceeds maximum, clamping", "requested", c.Retention.AuditDays, "max", MaxAuditRetentionDays)
+		c.Retention.AuditDays = MaxAuditRetentionDays
+	}
+	if c.Telemetry.AggregatorIntervalSeconds < 10 || c.Telemetry.AggregatorIntervalSeconds > 3600 {
+		c.Telemetry.AggregatorIntervalSeconds = DefaultAggregatorIntervalSeconds
+	}
+	if c.Telemetry.RetentionIntervalMinutes < 1 || c.Telemetry.RetentionIntervalMinutes > 1440 {
+		c.Telemetry.RetentionIntervalMinutes = DefaultRetentionIntervalMinutes
+	}
 
 	c.LogFileLevel = validateLogLevel(c.LogFileLevel, "log_file_level", "info")
 	c.LogEventLevel = validateLogLevel(c.LogEventLevel, "log_event_level", "info")
