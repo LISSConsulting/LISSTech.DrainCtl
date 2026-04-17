@@ -16,6 +16,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 // newTestServer creates a DashboardServer backed by a temp directory.
@@ -2674,5 +2675,202 @@ func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnUpdate was not called — possible deadlock")
+	}
+}
+
+// ── handleMetrics ─────────────────────────────────────────────────────────────
+
+// newTestServerWithStore returns a DashboardServer wired to a real on-disk
+// telemetry store. The returned cleanup closes the DB; t.TempDir() reaps the
+// file itself. Used by handleMetrics contract tests that need QueryRange to
+// round-trip real rows through SQLite.
+func newTestServerWithStore(t *testing.T) (*DashboardServer, *telemetry.MetricsStore, func()) {
+	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	ms := telemetry.NewMetricsStore(db)
+	ds := &DashboardServer{
+		state:  NewServerState(t.TempDir()),
+		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
+		broker: NewBroker(),
+		ms:     ms,
+	}
+	return ds, ms, func() { _ = db.Close() }
+}
+
+func TestMetricsHandler_ContractShape(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	ds.state.Register("SRV01")
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-10 * time.Minute)
+	samples := []telemetry.Sample{
+		{Ts: base, Host: "SRV01", Counter: "cpu_pct", Value: 12.4},
+		{Ts: base.Add(30 * time.Second), Host: "SRV01", Counter: "cpu_pct", Value: 15.1},
+		{Ts: base.Add(60 * time.Second), Host: "SRV01", Counter: "cpu_pct", Value: 13.7},
+	}
+	if err := ms.Append(context.Background(), samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	from := base.Add(-time.Minute).Format(time.RFC3339)
+	to := base.Add(5 * time.Minute).Format(time.RFC3339)
+	url := "/api/v1/metrics/SRV01?from=" + from + "&to=" + to + "&resolution=raw"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var resp struct {
+		Host            string  `json:"host"`
+		Tier            string  `json:"tier"`
+		From            string  `json:"from"`
+		To              string  `json:"to"`
+		OldestAvailable *string `json:"oldest_available"`
+		NewestAvailable *string `json:"newest_available"`
+		Series          map[string]struct {
+			T   []int64   `json:"t"`
+			Avg []float64 `json:"avg"`
+			Min []float64 `json:"min"`
+			Max []float64 `json:"max"`
+		} `json:"series"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Host != "SRV01" {
+		t.Errorf("host = %q, want SRV01", resp.Host)
+	}
+	if resp.Tier != "raw" {
+		t.Errorf("tier = %q, want raw", resp.Tier)
+	}
+	if resp.From == "" || resp.To == "" {
+		t.Errorf("from/to missing: from=%q to=%q", resp.From, resp.To)
+	}
+	if resp.OldestAvailable == nil || resp.NewestAvailable == nil {
+		t.Fatalf("oldest/newest should be set when data exists: oldest=%v newest=%v",
+			resp.OldestAvailable, resp.NewestAvailable)
+	}
+	cpu, ok := resp.Series["cpu_pct"]
+	if !ok {
+		t.Fatalf("series.cpu_pct missing; got keys=%v", resp.Series)
+	}
+	if len(cpu.T) != 3 || len(cpu.Avg) != 3 || len(cpu.Min) != 3 || len(cpu.Max) != 3 {
+		t.Fatalf("series arrays wrong length: t=%d avg=%d min=%d max=%d",
+			len(cpu.T), len(cpu.Avg), len(cpu.Min), len(cpu.Max))
+	}
+	// Contract: for raw tier, avg == min == max == original value (http-metrics.md).
+	for i := range cpu.T {
+		if cpu.Avg[i] != cpu.Min[i] || cpu.Avg[i] != cpu.Max[i] {
+			t.Errorf("raw tier avg/min/max should be equal at i=%d: avg=%v min=%v max=%v",
+				i, cpu.Avg[i], cpu.Min[i], cpu.Max[i])
+		}
+	}
+}
+
+func TestMetricsHandler_EmptyStateReturns200(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	ds.state.Register("SRV01")
+
+	from := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
+	to := time.Now().UTC().Format(time.RFC3339)
+	url := "/api/v1/metrics/SRV01?from=" + from + "&to=" + to + "&resolution=raw"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	// Empty-state contract: oldest_available / newest_available are JSON null,
+	// series is an empty object. Re-decode as raw JSON to distinguish null from
+	// missing and {} from null.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, w.Body.String())
+	}
+	if got := string(raw["oldest_available"]); got != "null" {
+		t.Errorf("oldest_available = %s, want null", got)
+	}
+	if got := string(raw["newest_available"]); got != "null" {
+		t.Errorf("newest_available = %s, want null", got)
+	}
+	if got := strings.TrimSpace(string(raw["series"])); got != "{}" {
+		t.Errorf("series = %s, want {}", got)
+	}
+}
+
+func TestMetricsHandler_InvalidRangeReturns400(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		code  string
+	}{
+		{"missing from", "?to=2026-04-16T00:00:00Z&resolution=raw", "invalid_range"},
+		{"missing to", "?from=2026-04-15T00:00:00Z&resolution=raw", "invalid_range"},
+		{"missing both", "?resolution=raw", "invalid_range"},
+		{"unparseable from", "?from=nope&to=2026-04-16T00:00:00Z&resolution=raw", "invalid_range"},
+		{"unparseable to", "?from=2026-04-15T00:00:00Z&to=nope&resolution=raw", "invalid_range"},
+		{"to equals from", "?from=2026-04-15T00:00:00Z&to=2026-04-15T00:00:00Z&resolution=raw", "invalid_range"},
+		{"to before from", "?from=2026-04-16T00:00:00Z&to=2026-04-15T00:00:00Z&resolution=raw", "invalid_range"},
+		{"range exceeds 90 days", "?from=2025-01-01T00:00:00Z&to=2025-07-01T00:00:00Z&resolution=raw", "invalid_range"},
+		{"bad resolution", "?from=2026-04-15T00:00:00Z&to=2026-04-16T00:00:00Z&resolution=yearly", "invalid_resolution"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds, _, closeDB := newTestServerWithStore(t)
+			defer closeDB()
+			ds.state.Register("SRV01")
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/SRV01"+tc.query, nil)
+			r.SetPathValue("host", "SRV01")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			var body map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body["error"] != tc.code {
+				t.Errorf("error = %q, want %q", body["error"], tc.code)
+			}
+		})
+	}
+}
+
+func TestMetricsHandler_UnknownHostReturns404(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	// Deliberately do not register any host.
+
+	url := "/api/v1/metrics/GHOST?from=2026-04-15T00:00:00Z&to=2026-04-16T00:00:00Z&resolution=raw"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "GHOST")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusNotFound, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "unknown_host" {
+		t.Errorf("error = %q, want unknown_host", body["error"])
 	}
 }
