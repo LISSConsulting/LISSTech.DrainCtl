@@ -36,6 +36,9 @@ type ServerState struct {
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
 	// Used by DashboardServer to broadcast SSE events.
 	OnUpdate func(hostname string)
+	// OnMetrics, if non-nil, is called after every state update with the full
+	// CheckResult so that both the HTTP and local-report paths write metrics.
+	OnMetrics func(result dc.CheckResult)
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.
@@ -111,14 +114,18 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		}
 	}
 	cb := s.OnUpdate
+	mcb := s.OnMetrics
 	s.mu.Unlock()
 
-	// Persist and callback AFTER releasing the lock.
+	// Persist and callbacks AFTER releasing the lock.
 	if registered {
 		s.saveSnapshot(snapshot)
 	}
 	if registered && cb != nil {
 		cb(hostname)
+	}
+	if registered && mcb != nil {
+		mcb(*result)
 	}
 }
 
