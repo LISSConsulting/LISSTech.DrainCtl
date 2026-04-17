@@ -44,17 +44,18 @@ Goal: cheap second opinion on correctness, not a full review. One call, act on c
 
 ## 5. Commit
 
-16. Bump CalVer `YY.DOY.patch` in all 7 places per `CLAUDE.md`. If `.rc` changed, run `just resource` and include the regenerated `.syso` in the commit.
+16. Bump CalVer `YY.DOY.patch` in the 7 places per `CLAUDE.md` **only if this commit changed build output** — any new/modified `*.go`, `*.rc`, `*.psd1`, `*.wixproj`, or `frontend/src/**`. Spec-kit artifacts, CHRONICLE entries, `docs/` prose, review notes, and edits to this `BUILD.md` file itself do NOT change build output and leave the version **unchanged**. If `.rc` changed, run `just resource` and include the regenerated `.syso` in the commit.
 17. Commit message format:
     ```
-    v<YY>.<DOY>.<patch>: <type>(<scope>) <imperative one-line summary>
+    <type>(<scope>): <imperative one-line summary>
 
-    2–5 line body: WHY this change, not WHAT (diff shows what). Mention task ID.
+    2–5 line body: WHY this change, not WHAT. Mention task ID.
     If codex flagged anything and you rejected it, record the reason here.
 
     Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
     ```
     Types: `feat` / `fix` / `spec` / `docs` / `chore` / `refactor`. Scope is the feature number (`007`) or the package touched.
+    **Do NOT prefix the subject with `v<VERSION>:`**. That marker is reserved for Kraken release commits and their matching `git tag`. Implementation agents never run `git tag`. If you think you need to tag something, stop and escalate — it's a release decision.
 18. Tick the completed task's `- [ ]` → `- [x]` in `tasks.md` **in the same commit** as the implementation. If the task needed two commits (rare, split only when the diff is genuinely unreviewable as one), tick only after the last one.
 19. Update `CHRONICLE.md` **in the same commit** if — and only if — the task taught you something a future loop should know. Format: one bullet under the active feature's section, `T### — <what> — <non-obvious lesson>`. Do NOT add trivial "did X" bullets; grep of the code shows those.
 20. Pre-commit hooks (`prek`) run automatically on `git commit`. A hook failure **aborts the commit** — nothing is created, working tree and staged changes stay as they were. Fix whatever the hook flagged, re-stage the corrected files, then run `git commit` again. Never `--amend` (it rewrites the prior successful commit, which is NOT what you want), never `--no-verify` (skips the hooks you're trying to satisfy).
