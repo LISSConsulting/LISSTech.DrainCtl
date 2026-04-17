@@ -3,12 +3,14 @@
 package drainctl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"golang.org/x/sys/windows"
 )
 
@@ -860,17 +862,46 @@ func TestScanRecords_OpenError(t *testing.T) {
 
 // ── GetHistory ────────────────────────────────────────────────────────────────
 
-// TestGetHistory_ReturnsAllRecords verifies the basic happy path: records written
-// to the JSONL file are returned in newest-first order.
-func TestGetHistory_ReturnsAllRecords(t *testing.T) {
-	store, cleanup := writeTestRecords(t, []AuditRecord{
-		ptr(time.Now().Add(-2*time.Hour), false),
-		ptr(time.Now().Add(-time.Hour), false),
-		ptr(time.Now(), true),
-	})
-	defer cleanup()
+// seedTelemetryAudit opens a telemetry store in a fresh temp dir, writes the
+// supplied records, and returns (dataDir, audit-trail-path-inside-dataDir)
+// so callers can drive GetHistory through its DBPath parameter. The returned
+// path mimics the legacy audit.jsonl location — GetHistory derives the data
+// dir from its parent.
+func seedTelemetryAudit(t *testing.T, recs []telemetry.AuditRecord) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	db, err := telemetry.Open(dataDir)
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 
-	recs, err := GetHistory(HistoryOptions{DBPath: store.path})
+	ctx := context.Background()
+	store, err := telemetry.NewAuditStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	for i, r := range recs {
+		if err := store.Append(ctx, r); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	return filepath.Join(dataDir, "audit.jsonl")
+}
+
+// TestGetHistory_ReturnsAllRecords verifies the basic happy path: rows written
+// to the SQLite audit table are returned in newest-first order.
+func TestGetHistory_ReturnsAllRecords(t *testing.T) {
+	now := time.Now().UTC()
+	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{
+		{Ts: now.Add(-2 * time.Hour), Host: "h", PrevState: 0, NewState: 1},
+		{Ts: now.Add(-time.Hour), Host: "h", PrevState: 1, NewState: 0},
+		{Ts: now, Host: "h", PrevState: 0, NewState: 1},
+	})
+
+	recs, err := GetHistory(HistoryOptions{DBPath: dbPath})
 	if err != nil {
 		t.Fatalf("GetHistory: %v", err)
 	}
@@ -879,39 +910,44 @@ func TestGetHistory_ReturnsAllRecords(t *testing.T) {
 	}
 }
 
-// TestGetHistory_ChangesOnly verifies that setting ChangesOnly=true returns only
-// records where Changed is true.
+// TestGetHistory_ChangesOnly verifies the ChangesOnly filter maps through to
+// the underlying QueryFilter. In the telemetry table every row is a transition,
+// so this asserts the filter plumbing is wired rather than the distinction
+// visible in the legacy JSONL store.
 func TestGetHistory_ChangesOnly(t *testing.T) {
-	store, cleanup := writeTestRecords(t, []AuditRecord{
-		ptr(time.Now().Add(-2*time.Hour), false),
-		ptr(time.Now().Add(-time.Hour), true),
-		ptr(time.Now(), false),
+	now := time.Now().UTC()
+	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{
+		{Ts: now.Add(-time.Hour), Host: "h", PrevState: 0, NewState: 1},
 	})
-	defer cleanup()
 
-	recs, err := GetHistory(HistoryOptions{DBPath: store.path, ChangesOnly: true})
+	recs, err := GetHistory(HistoryOptions{DBPath: dbPath, ChangesOnly: true})
 	if err != nil {
 		t.Fatalf("GetHistory: %v", err)
 	}
 	if len(recs) != 1 {
-		t.Errorf("len = %d, want 1 (only changed records)", len(recs))
+		t.Fatalf("len = %d, want 1", len(recs))
 	}
 	if !recs[0].Changed {
-		t.Error("expected Changed=true on returned record")
+		t.Error("expected Changed=true on returned transition")
 	}
 }
 
 // TestGetHistory_LimitRespected verifies that the Limit field caps results.
 func TestGetHistory_LimitRespected(t *testing.T) {
-	var raws []AuditRecord
-	base := time.Now()
+	base := time.Now().UTC().Add(-10 * time.Minute)
+	var seeds []telemetry.AuditRecord
 	for i := range 5 {
-		raws = append(raws, ptr(base.Add(time.Duration(i)*time.Second), false))
+		// Alternate new_state so each (ts, host, new_state) PK is unique.
+		seeds = append(seeds, telemetry.AuditRecord{
+			Ts:        base.Add(time.Duration(i) * time.Second),
+			Host:      "h",
+			PrevState: i % 2,
+			NewState:  (i + 1) % 2,
+		})
 	}
-	store, cleanup := writeTestRecords(t, raws)
-	defer cleanup()
+	dbPath := seedTelemetryAudit(t, seeds)
 
-	recs, err := GetHistory(HistoryOptions{DBPath: store.path, Limit: 2})
+	recs, err := GetHistory(HistoryOptions{DBPath: dbPath, Limit: 2})
 	if err != nil {
 		t.Fatalf("GetHistory: %v", err)
 	}
@@ -920,12 +956,30 @@ func TestGetHistory_LimitRespected(t *testing.T) {
 	}
 }
 
-// TestGetHistory_InvalidPath verifies that GetHistory returns an error when the
-// audit file directory cannot be created (a file already exists at the would-be
-// directory path), exercising the "open audit store" error return.
+// TestGetHistory_UntilBoundaryIsInclusive verifies that a row whose timestamp
+// equals Until is returned — the CLI advertises --until as "at or before",
+// and the adapter must translate to the exclusive telemetry.QueryFilter.To.
+func TestGetHistory_UntilBoundaryIsInclusive(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{
+		{Ts: now, Host: "h", PrevState: 0, NewState: 1},
+	})
+
+	until := now
+	recs, err := GetHistory(HistoryOptions{DBPath: dbPath, Until: &until})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("len = %d, want 1 (row at Until boundary must be included)", len(recs))
+	}
+}
+
+// TestGetHistory_InvalidPath verifies that GetHistory surfaces an "open audit
+// store" error when the data dir cannot host the SQLite database — here, by
+// placing a file where the data directory would need to exist.
 func TestGetHistory_InvalidPath(t *testing.T) {
 	dir := t.TempDir()
-	// Place a file where the directory would need to exist so MkdirAll fails.
 	blockingFile := filepath.Join(dir, "blocked")
 	if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
