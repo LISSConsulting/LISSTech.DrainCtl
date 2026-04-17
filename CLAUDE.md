@@ -11,8 +11,8 @@ Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 
 ## Key Rules
 - Every `.go` file needs `//go:build windows`
-- Version is CalVer `YY.DOY.patch` — update in **7 places**: `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `README.md`, `CLAUDE.md`, `docs/index.html`
-- After changing `.rc`: run `just resource` to recompile `.syso`
+- Version is CalVer `YY.DOY.patch` — bump with **`just bump`** (handles all 8 files + recompiles `.syso`). Never edit version strings by hand.
+- After changing `.rc` directly (not via `just bump`): run `just resource` to recompile `.syso`
 - Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
 - No viper — config lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` (encoding/json)
 - Retention capped 1–365 days via `ClampRetention()`
