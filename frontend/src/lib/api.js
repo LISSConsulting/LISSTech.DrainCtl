@@ -264,6 +264,56 @@ export async function fetchAllServerMetrics() {
     return /** @type {Record<string, any[]>} */ (await res.json());
 }
 
+/**
+ * CounterSeries is one counter's parallel arrays inside a metrics response.
+ * For tier=raw, avg === min === max === the raw sample value.
+ *
+ * @typedef {Object} CounterSeries
+ * @property {number[]} t   - Unix-ms timestamps (parallel to avg/min/max).
+ * @property {number[]} avg
+ * @property {number[]} min
+ * @property {number[]} max
+ */
+
+/**
+ * MetricsResponse is the shape returned by GET /api/v1/metrics/{host}.
+ * Per contracts/http-metrics.md: on empty windows the server returns 200
+ * with series === {} and oldest_available/newest_available === null so the
+ * UI can render the FR-019a "Collecting data…" state.
+ *
+ * @typedef {Object} MetricsResponse
+ * @property {string} host
+ * @property {'raw'|'5min'|'hourly'} tier          - tier the server actually served (may differ from requested)
+ * @property {string} from                         - ISO-8601 UTC (echo of request)
+ * @property {string} to                           - ISO-8601 UTC (echo of request)
+ * @property {string|null} oldest_available        - ISO-8601 UTC; null when the tier holds no rows for this host
+ * @property {string|null} newest_available        - ISO-8601 UTC; null when the tier holds no rows for this host
+ * @property {Record<string, CounterSeries>} series
+ */
+
+/**
+ * GET /api/v1/metrics/{host}
+ *
+ * @param {string} host
+ * @param {Date|string} from                         - inclusive lower bound
+ * @param {Date|string} to                           - exclusive upper bound (must be > from)
+ * @param {'raw'|'5min'|'hourly'|'auto'} [resolution='auto']
+ * @param {string[]} [counters]                      - omitted → all known counters
+ * @returns {Promise<MetricsResponse>}
+ */
+export async function fetchMetrics(host, from, to, resolution = 'auto', counters) {
+    const params = new URLSearchParams({
+        from: from instanceof Date ? from.toISOString() : from,
+        to: to instanceof Date ? to.toISOString() : to,
+        resolution,
+    });
+    if (counters && counters.length > 0) {
+        params.set('counters', counters.join(','));
+    }
+    const res = await apiFetch(`/metrics/${encodeURIComponent(host)}?${params}`);
+    return /** @type {MetricsResponse} */ (await res.json());
+}
+
 // ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
