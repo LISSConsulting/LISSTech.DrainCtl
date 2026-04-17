@@ -10,21 +10,34 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
 	sqlite "modernc.org/sqlite"
 )
 
-const dbFileName = "drainctl.db"
+const (
+	dbFileName = "drainctl.db"
 
-// DB holds the writer and reader sql.DB pools for drainctl.db.
+	walSizeEscalateBytes = 16 * 1024 * 1024 // 16 MB — escalate to TRUNCATE above this
+	walSizeWarnBytes     = 64 * 1024 * 1024 // 64 MB — log WARN above this
+	walTruncateHoldoff   = time.Hour        // minimum gap between TRUNCATE escalations
+	readerMaxLifetime    = 60 * time.Second // max read-transaction lifetime (WAL pin guard)
+	checkpointDeadline   = 5 * time.Second  // per-checkpoint call budget
+)
+
+// DB holds the writer, reader, and checkpoint sql.DB pools for drainctl.db.
 type DB struct {
-	writer *sql.DB
-	reader *sql.DB
-	path   string
+	writer         *sql.DB
+	reader         *sql.DB
+	checkpointDB   *sql.DB // separate pool, busy_timeout=0, used only for WAL checkpoints
+	path           string
+	lastTruncateAt time.Time // when the last TRUNCATE escalation ran
 }
 
 // connectionPragmas is issued on every new pooled connection — both writer and
@@ -43,13 +56,24 @@ var connectionPragmas = []string{
 	"PRAGMA auto_vacuum = INCREMENTAL",
 }
 
+// checkpointPragmas is the same as connectionPragmas except busy_timeout=0 so
+// the checkpoint connection never blocks writers when the WAL is contended.
+var checkpointPragmas = []string{
+	"PRAGMA journal_mode = WAL",
+	"PRAGMA synchronous = NORMAL",
+	"PRAGMA foreign_keys = ON",
+	"PRAGMA busy_timeout = 0",
+	"PRAGMA temp_store = MEMORY",
+}
+
 // pragmaConnector implements driver.Connector so that every connection obtained
-// from either pool receives the full connectionPragmas block before use.
+// from either pool receives the specified pragma block before use.
 // modernc.org/sqlite's Driver implements driver.Driver but not DriverContext,
 // so we call drv.Open(dsn) directly and apply pragmas on the resulting conn.
 type pragmaConnector struct {
-	dsn string
-	drv driver.Driver
+	dsn     string
+	drv     driver.Driver
+	pragmas []string
 }
 
 func (c *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -57,23 +81,20 @@ func (c *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := applyConnectionPragmas(ctx, conn); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("telemetry: connection pragmas: %w", err)
+	pragmas := c.pragmas
+	if pragmas == nil {
+		pragmas = connectionPragmas
+	}
+	for _, p := range pragmas {
+		if err := execDriverConn(ctx, conn, p); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("telemetry: connection pragma %s: %w", p, err)
+		}
 	}
 	return conn, nil
 }
 
 func (c *pragmaConnector) Driver() driver.Driver { return c.drv }
-
-func applyConnectionPragmas(ctx context.Context, conn driver.Conn) error {
-	for _, p := range connectionPragmas {
-		if err := execDriverConn(ctx, conn, p); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
-	}
-	return nil
-}
 
 // execDriverConn issues a single no-arg statement on a raw driver.Conn.
 // modernc.org/sqlite always implements ExecerContext; if a future driver does
@@ -91,26 +112,34 @@ func execDriverConn(ctx context.Context, conn driver.Conn, query string) error {
 // seeds initial schema_meta rows, and restricts file ACLs.
 func Open(dataDir string) (*DB, error) {
 	path := filepath.Join(dataDir, dbFileName)
+	drv := &sqlite.Driver{}
 
-	connector := &pragmaConnector{dsn: path, drv: &sqlite.Driver{}}
-
+	connector := &pragmaConnector{dsn: path, drv: drv}
 	writer := sql.OpenDB(connector)
 	writer.SetMaxOpenConns(1)
+
 	reader := sql.OpenDB(connector)
+	reader.SetConnMaxLifetime(readerMaxLifetime)
+
+	checkpointConnector := &pragmaConnector{dsn: path, drv: drv, pragmas: checkpointPragmas}
+	checkpointDB := sql.OpenDB(checkpointConnector)
+	checkpointDB.SetMaxOpenConns(1)
 
 	if err := applySchema(writer); err != nil {
 		_ = writer.Close()
 		_ = reader.Close()
+		_ = checkpointDB.Close()
 		return nil, fmt.Errorf("telemetry: apply schema: %w", err)
 	}
 
 	if err := seedMeta(writer); err != nil {
 		_ = writer.Close()
 		_ = reader.Close()
+		_ = checkpointDB.Close()
 		return nil, err
 	}
 
-	db := &DB{writer: writer, reader: reader, path: path}
+	db := &DB{writer: writer, reader: reader, checkpointDB: checkpointDB, path: path}
 
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		restrictFileACL(path + suffix)
@@ -120,12 +149,91 @@ func Open(dataDir string) (*DB, error) {
 
 // Close releases all database connections.
 func (db *DB) Close() error {
+	cerr := db.checkpointDB.Close()
 	werr := db.writer.Close()
 	rerr := db.reader.Close()
+	if cerr != nil {
+		return cerr
+	}
 	if werr != nil {
 		return werr
 	}
 	return rerr
+}
+
+// WALCheckpoint runs a PASSIVE checkpoint, escalating to TRUNCATE when the WAL
+// exceeds walSizeEscalateBytes. Called by the retention goroutine each cycle.
+//
+// busy_timeout=0 on checkpointDB means SQLITE_BUSY/SQLITE_LOCKED surfaces
+// immediately as an error; we log WARN and skip rather than blocking writers.
+//
+// wal_checkpoint returns a (busy, log, checkpointed) row. Contention is
+// signalled via busy>0 in that row — not always as a Go error — so we scan
+// the row rather than relying on err alone.
+func (db *DB) WALCheckpoint(ctx context.Context) {
+	walPath := db.path + "-wal"
+	walInfo, statErr := os.Stat(walPath)
+
+	if statErr == nil && walInfo.Size() > walSizeWarnBytes {
+		slog.Warn("telemetry: WAL size exceeds 64 MB", "size_mb", walInfo.Size()>>20, "path", walPath)
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, checkpointDeadline)
+	defer cancel()
+
+	var passiveBusy, passiveLog, passiveDone int
+	err := db.checkpointDB.QueryRowContext(callCtx, "PRAGMA wal_checkpoint(PASSIVE)").
+		Scan(&passiveBusy, &passiveLog, &passiveDone)
+	if err != nil {
+		if isSQLiteContention(err) || isDeadlineExceeded(err) {
+			slog.Warn("telemetry: WAL checkpoint(PASSIVE) skipped", "reason", err)
+			return
+		}
+		slog.Warn("telemetry: WAL checkpoint(PASSIVE) error", "error", err)
+		return
+	}
+
+	// Escalate to TRUNCATE only when WAL is still large and we haven't tried recently.
+	if statErr != nil || walInfo.Size() <= walSizeEscalateBytes {
+		return
+	}
+	if time.Since(db.lastTruncateAt) < walTruncateHoldoff {
+		return
+	}
+
+	callCtx2, cancel2 := context.WithTimeout(ctx, checkpointDeadline)
+	defer cancel2()
+
+	var truncBusy, truncLog, truncDone int
+	err = db.checkpointDB.QueryRowContext(callCtx2, "PRAGMA wal_checkpoint(TRUNCATE)").
+		Scan(&truncBusy, &truncLog, &truncDone)
+	if err != nil {
+		if isSQLiteContention(err) || isDeadlineExceeded(err) {
+			slog.Warn("telemetry: WAL checkpoint(TRUNCATE) skipped", "reason", err)
+			return
+		}
+		slog.Warn("telemetry: WAL checkpoint(TRUNCATE) error", "error", err)
+		return
+	}
+	if truncBusy > 0 {
+		// Readers are still active; don't record as successful — retry next cycle.
+		slog.Warn("telemetry: WAL checkpoint(TRUNCATE) partially blocked", "busy", truncBusy, "log", truncLog)
+		return
+	}
+	db.lastTruncateAt = time.Now()
+}
+
+func isSQLiteContention(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "SQLITE_BUSY") || strings.Contains(s, "SQLITE_LOCKED")
+}
+
+func isDeadlineExceeded(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "context deadline exceeded") ||
+		strings.Contains(err.Error(), "context canceled"))
 }
 
 // seedMeta inserts initial schema_meta rows on first open. INSERT OR IGNORE
