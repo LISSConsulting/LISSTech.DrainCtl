@@ -31,10 +31,11 @@ const (
 	checkpointDeadline   = 5 * time.Second  // per-checkpoint call budget
 )
 
-// DB holds the writer, reader, and checkpoint sql.DB pools for drainctl.db.
+// DB holds the writer, reader, audit, and checkpoint sql.DB pools for drainctl.db.
 type DB struct {
 	writer         *sql.DB
 	reader         *sql.DB
+	auditDB        *sql.DB // separate single-conn pool, synchronous=FULL, used by AuditStore (FR-001b)
 	checkpointDB   *sql.DB // separate pool, busy_timeout=0, used only for WAL checkpoints
 	path           string
 	lastTruncateAt time.Time // when the last TRUNCATE escalation ran
@@ -63,6 +64,18 @@ var checkpointPragmas = []string{
 	"PRAGMA synchronous = NORMAL",
 	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 0",
+	"PRAGMA temp_store = MEMORY",
+}
+
+// auditPragmas upgrades the audit write path to synchronous=FULL so that
+// commits are durable against OS crash / power loss (research.md §2).
+// Metrics writes stay at NORMAL; audit volume is low enough to absorb the
+// extra fsync cost.
+var auditPragmas = []string{
+	"PRAGMA journal_mode = WAL",
+	"PRAGMA synchronous = FULL",
+	"PRAGMA foreign_keys = ON",
+	"PRAGMA busy_timeout = 5000",
 	"PRAGMA temp_store = MEMORY",
 }
 
@@ -148,34 +161,39 @@ func Open(dataDir string) (*DB, error) {
 	reader := sql.OpenDB(connector)
 	reader.SetConnMaxLifetime(readerMaxLifetime)
 
+	auditConnector := &pragmaConnector{dsn: path, drv: drv, pragmas: auditPragmas}
+	auditDB := sql.OpenDB(auditConnector)
+	auditDB.SetMaxOpenConns(1)
+
 	checkpointConnector := &pragmaConnector{dsn: path, drv: drv, pragmas: checkpointPragmas}
 	checkpointDB := sql.OpenDB(checkpointConnector)
 	checkpointDB.SetMaxOpenConns(1)
 
-	if err := applySchema(writer); err != nil {
+	closeAll := func() {
 		_ = writer.Close()
 		_ = reader.Close()
+		_ = auditDB.Close()
 		_ = checkpointDB.Close()
+	}
+
+	if err := applySchema(writer); err != nil {
+		closeAll()
 		return nil, fmt.Errorf("telemetry: apply schema %s: %w", path, err)
 	}
 
 	// Integrity check before accepting ingest — catches silent storage corruption.
 	// quick_check is faster than integrity_check and catches structural issues.
 	if err := runQuickCheck(writer, path); err != nil {
-		_ = writer.Close()
-		_ = reader.Close()
-		_ = checkpointDB.Close()
+		closeAll()
 		return nil, err
 	}
 
 	if err := seedMeta(writer); err != nil {
-		_ = writer.Close()
-		_ = reader.Close()
-		_ = checkpointDB.Close()
+		closeAll()
 		return nil, err
 	}
 
-	db := &DB{writer: writer, reader: reader, checkpointDB: checkpointDB, path: path}
+	db := &DB{writer: writer, reader: reader, auditDB: auditDB, checkpointDB: checkpointDB, path: path}
 
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		restrictFileACL(path + suffix)
@@ -186,10 +204,14 @@ func Open(dataDir string) (*DB, error) {
 // Close releases all database connections.
 func (db *DB) Close() error {
 	cerr := db.checkpointDB.Close()
+	aerr := db.auditDB.Close()
 	werr := db.writer.Close()
 	rerr := db.reader.Close()
 	if cerr != nil {
 		return cerr
+	}
+	if aerr != nil {
+		return aerr
 	}
 	if werr != nil {
 		return werr
