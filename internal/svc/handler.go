@@ -21,6 +21,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
 	"golang.org/x/sys/windows/svc"
@@ -241,6 +242,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	} else if pruned > 0 {
 		slog.Info("startup_prune", "count", pruned)
 	}
+
+	// Open SQLite telemetry store before the named pipe and HTTP servers.
+	telDB, err := telemetry.Open(dc.DefaultDataDir())
+	if err != nil {
+		slog.Error("service=failed", "error", err)
+		return false, 1
+	}
+	defer func() { _ = telDB.Close() }()
 
 	// Start registry watcher.
 	regCh, err := watcher.WatchDrainModeKey(ctx)
