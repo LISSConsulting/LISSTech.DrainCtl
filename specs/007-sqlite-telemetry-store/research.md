@@ -117,6 +117,8 @@ PRAGMA auto_vacuum = INCREMENTAL; -- set once before first write
 - Incremental vacuum amortizes space reclamation; a full `VACUUM` would require a write lock on the whole file and briefly block everything.
 - Jitter (±30 s) prevents thundering-herd behaviour if multiple DrainCtl instances ever share a host (not expected, but cheap defensive move).
 
+**High-water behavior**: `incremental_vacuum` reclaims free pages to SQLite's **internal free-list**, not to the OS. The `drainctl.db` file size stays at its high-water mark after large retention purges. This is documented behavior that operators must be aware of — don't interpret a stable file size as "retention isn't running". A proper shrink requires an offline `VACUUM` or `VACUUM INTO` sweep, which is out of scope for this feature.
+
 **Alternatives considered**:
 - Full `VACUUM` on schedule — blocks writers for the duration; unacceptable.
 - Drop-partition-style retention (requires ATTACH layout) — rejected in §3.
@@ -151,15 +153,16 @@ PRAGMA auto_vacuum = INCREMENTAL; -- set once before first write
 **Decision**: During first DB open:
 1. Check `schema_meta` for key `jsonl_migrated`. If present, skip.
 2. Check for `audit.jsonl` in the data directory. If absent, record `jsonl_migrated = true` and skip.
-3. Open the JSONL, stream records through a single transaction with `INSERT … ON CONFLICT(ts, host) DO NOTHING` (primary key on `audit` is `(ts, host, new_state)`).
-4. On success, rename `audit.jsonl` → `audit.jsonl.bak.<UTC-timestamp>` and set `jsonl_migrated = true`.
-5. On partial failure, leave the JSONL in place, log the error, and retry on next start (idempotent because of the ON CONFLICT).
+3. Open the JSONL, stream records in **chunked transactions of 10,000 records each** with `INSERT … ON CONFLICT(ts, host, new_state) DO NOTHING`. Each chunk updates `schema_meta[jsonl_migrated_line_count]` (count of source lines consumed so far — NOT byte offset, because line length varies and JSONL is line-oriented). Malformed trailing records at EOF are treated as skipped and counted separately in `schema_meta[jsonl_migrate_skipped]`.
+4. On EOF, rename `audit.jsonl` → `audit.jsonl.bak.<UTC-timestamp>` and set `jsonl_migrated = true`. Drift reconciliation runs only after this flag is set (not after partial resume) — see FR-020 and tasks.md T044.
+5. On partial failure (crash mid-chunk), leave the JSONL in place, log the error. Next start resumes from `jsonl_migrated_line_count`; the ON CONFLICT DO NOTHING makes it safe even if the chunk boundary was ambiguous.
 
 **Rationale**:
+- Chunked import avoids holding a 100+ MB transaction open with a correspondingly large WAL; each chunk commits cleanly.
 - Idempotent retry by construction; satisfies FR-021.
 - Rename preserves the original for forensic comparison.
 - Unique key on `(ts, host, new_state)` handles rare duplicate entries in degenerate JSONL without failing.
-- Single transaction keeps the audit table consistent: either the full import succeeded or no changes applied.
+- Reconciliation-after-full-migration invariant means `LatestByHost` baseline is never computed against partial data.
 
 **Alternatives considered**:
 - Streaming without a transaction — faster but leaves the table in a partially imported state on failure, complicating retry logic.
@@ -270,12 +273,18 @@ with matching clamps in `ClampRetention()` (extended or renamed — pick one, do
 
 ## 13. CLI history behaviour when the service is stopped
 
-**Decision**: `drainctl history` opens the DB file **read-only** (SQLite open flag `SQLITE_OPEN_READONLY`) when it can't reach the service pipe. This lets the CLI read historical data even when the service is down, without risk of competing writes (which remain illegal).
+**Decision**: `drainctl history` opens the DB file **read-only** using SQLite URI `?mode=ro&_txlock=deferred` (do NOT force `_journal_mode` — inherit the file's persisted mode) when it can't reach the service pipe. Behavior cases:
+
+- (a) `-wal` and `-shm` present and readable — normal WAL read open, live writer data visible up to the last committed transaction.
+- (b) `-wal` / `-shm` missing (service was cleanly shut down and checkpointed) — SQLite opens the main file in rollback-journal read mode automatically; CLI proceeds but logs at INFO that live writer data may be ≤1 commit stale.
+- (c) `-wal` present but CLI user cannot open it (ACL mismatch) — open fails with a clear error citing the sidecar path and required permissions; no silent fallback.
+- (d) `-wal` exists but `-shm` is stale or corrupt — explicit failure, no silent fallback.
 
 **Rationale**:
 - Preserves the existing UX where the CLI can answer history queries off-box or with the service stopped.
 - Read-only open does not require exclusive access; WAL allows readers without a writer too.
 - Consistent with the clarify decision that the service is the single writer (Q1).
+- Explicit-fail on sidecar permission / corruption errors prevents a CLI that silently shows stale data an operator might trust.
 
 **Alternatives considered**:
 - CLI requires the service — regression from today's behaviour.
@@ -314,6 +323,8 @@ with matching clamps in `ClampRetention()` (extended or renamed — pick one, do
 - Downgrade is the standard MSI operation, not a bespoke rollback script.
 - The new file is inert to the old binary; leaving it in place is harmless.
 
+**Important: post-migration downgrade caveat**. If v26.107+ has been running for days/weeks after a successful migration, audit events recorded into SQLite in that window are **invisible to pre-007 binaries** — the pre-007 binary only reads `audit.jsonl`. Rolling back v26.107+ → v26.106 then restores the `.bak` JSONL, but every audit event recorded in the new store since the migration is effectively hidden from the old binary (the data is still there in `drainctl.db` for later forensics). Operators who anticipate potentially long-lived downgrades should export audit data to JSONL before downgrade (an export tool is a follow-up feature per the spec Clarifications Q4 decision — deliberately not in this feature).
+
 **Alternatives considered**:
 - Keep writing JSONL in parallel during a soft-launch window — doubles write cost and tempts operators to diverge. Not worth it given the clean JSONL backup path.
 
@@ -324,3 +335,15 @@ with matching clamps in `ClampRetention()` (extended or renamed — pick one, do
 **Decision**: CalVer `YY.DOY.patch` advances on every commit per CLAUDE.md. The /speckit-tasks phase will produce one task per commit boundary that reminds the implementer to run the version-bump ritual (7 places) before `just lint`.
 
 **Rationale**: Non-negotiable project convention. Recording it in research to avoid a later "oops".
+
+---
+
+## 17. Network-share data directory
+
+**Decision**: Only **local fixed-disk volumes** (NTFS / ReFS) are supported for `drainctl.db`. SMB / UNC / mapped network drives are NOT supported. On `Open()` the service resolves the data-dir volume via `GetDriveTypeW` and, if the result is not `DRIVE_FIXED`, refuses to start with a clear operator-actionable error naming the path and the policy (FR-004). A WARN log entry is written before the abort so the error is visible in Event Viewer.
+
+**Rationale**: SQLite WAL's `-shm` shared memory file has undefined semantics on most SMB implementations. Allowing WAL on a share risks silent data corruption. The policy is "refuse to start" rather than "log warning and continue" because WAL correctness cannot be guaranteed on SMB — continuing would give operators false confidence that their farm is monitored durably.
+
+**Alternatives considered**:
+- Log warning + continue — rejected. An operator running on SMB by accident should be loudly refused, not allowed to silently corrupt audit data.
+- Force `journal_mode=DELETE` on detected SMB — re-introduces reader-blocking which FR-005 explicitly forbids.
