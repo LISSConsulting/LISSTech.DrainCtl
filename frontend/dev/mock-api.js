@@ -683,6 +683,75 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: reversed.slice(0, limit) };
   }
 
+  // GET /api/v1/metrics/:host — durable per-host time-series for chart.svelte
+  // (spec 007 / FR-019). Maps counter names to the perfHistory ring buffer
+  // fields so the new chart renders during dev without a real SQLite store.
+  const metricsMatch = matchRoute('/api/v1/metrics/:host', pathname);
+  if (method === 'GET' && metricsMatch) {
+    const host = metricsMatch.host;
+    if (!state.has(host)) {
+      return { status: 404, body: { error: 'unknown_host' } };
+    }
+    const from = query.from ? Date.parse(query.from) : NaN;
+    const to = query.to ? Date.parse(query.to) : NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      return { status: 400, body: { error: 'invalid_range' } };
+    }
+    const reqRes = query.resolution || 'auto';
+    if (!['raw', '5min', 'hourly', 'auto'].includes(reqRes)) {
+      return { status: 400, body: { error: 'invalid_resolution' } };
+    }
+    const counters = (query.counters || '').split(',').map(s => s.trim()).filter(Boolean);
+    const wanted = counters.length > 0 ? counters : null;
+    // perfHistory keys → counter names per contract/checkResultSamples().
+    const counterMap = {
+      cpu_pct:            'cpu',
+      cpu_p95_pct:        'cpuP95',
+      mem_avail_mb:       null, // derived below
+      pages_sec:          'pagesPerSec',
+      disk_queue:         'diskQueue',
+      tcp_retrans_sec:    'tcpRetrans',
+      input_delay_p95_ms: 'inputDelay',
+      sessions_active:    'sessionsActive',
+    };
+    const hist = perfHistory.get(host) ?? [];
+    const windowed = hist.filter(s => s.time >= from && s.time < to);
+    const series = {};
+    for (const [counter, field] of Object.entries(counterMap)) {
+      if (wanted && !wanted.includes(counter)) continue;
+      const t = [];
+      const avg = [];
+      for (const s of windowed) {
+        let v;
+        if (counter === 'mem_avail_mb') {
+          v = 16384 * (1 - (s.mem ?? 0) / 100);
+        } else {
+          v = s[field];
+        }
+        if (v == null || !Number.isFinite(v)) continue;
+        t.push(s.time);
+        avg.push(Math.round(v * 10) / 10);
+      }
+      if (t.length === 0) continue;
+      series[counter] = { t, avg, min: avg.slice(), max: avg.slice() };
+    }
+    const oldest = hist.length > 0 ? new Date(hist[0].time).toISOString() : null;
+    const newest = hist.length > 0 ? new Date(hist[hist.length - 1].time).toISOString() : null;
+    const tier = reqRes === 'auto' ? 'raw' : reqRes;
+    return {
+      status: 200,
+      body: {
+        host,
+        tier,
+        from: new Date(from).toISOString(),
+        to: new Date(to).toISOString(),
+        oldest_available: Object.keys(series).length === 0 ? null : oldest,
+        newest_available: Object.keys(series).length === 0 ? null : newest,
+        series,
+      },
+    };
+  }
+
   // GET /api/v1/metrics — returns per-server perf history for sparkline seeding
   if (method === 'GET' && pathname === '/api/v1/metrics') {
     const result = Object.fromEntries(perfHistory);
