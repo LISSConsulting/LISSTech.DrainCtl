@@ -169,6 +169,7 @@ type DashboardServer struct {
 	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
 	sessionStore *SessionStore // in-memory dashboard session store
 	broker       *Broker       // SSE event broker for real-time updates
+	ms           *telemetry.MetricsStore
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -198,6 +199,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		cfg:          cfg,
 		sessionStore: NewSessionStore(ctx),
 		broker:       NewBroker(),
+		ms:           ms,
 	}
 
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
@@ -294,6 +296,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	})))
 
 	// Management / UI routes — require a valid dashboard session cookie.
+	mux.Handle("GET /api/v1/metrics/{host}", rlw(rs(http.HandlerFunc(ds.handleMetrics))))
 	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
 	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
 	mux.Handle("GET /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleGetServer))))
@@ -992,6 +995,143 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, _ *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": "use /api/v1/metrics/{host} or /api/v1/audit",
 	})
+}
+
+// writeJSONError writes a JSON body {"error":"<code>"} with the given HTTP status.
+func writeJSONError(w http.ResponseWriter, code string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+// handleMetrics serves GET /api/v1/metrics/{host} per contracts/http-metrics.md.
+// tier=auto falls back to hourly in this phase; real auto selection is added in T037 (US3).
+func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	host := r.PathValue("host")
+	if host == "" || !ds.state.IsRegistered(host) {
+		writeJSONError(w, "unknown_host", http.StatusNotFound)
+		return
+	}
+
+	q := r.URL.Query()
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	if fromStr == "" || toStr == "" {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	from, err := time.Parse(time.RFC3339, fromStr)
+	if err != nil {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	to, err := time.Parse(time.RFC3339, toStr)
+	if err != nil {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+
+	resStr := q.Get("resolution")
+	if resStr == "" {
+		resStr = "auto"
+	}
+	var tier telemetry.Tier
+	switch resStr {
+	case "auto", "5min":
+		// 5-min tier is implemented in T036 (US3); degrade to hourly until then.
+		// Response tier field reflects what was actually served (FR-019).
+		tier = telemetry.TierHourly
+	case "raw":
+		tier = telemetry.TierRaw
+	case "hourly":
+		tier = telemetry.TierHourly
+	default:
+		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
+		return
+	}
+
+	var counters []string
+	if csv := q.Get("counters"); csv != "" {
+		for _, c := range strings.Split(csv, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				counters = append(counters, c)
+			}
+		}
+	}
+
+	if ds.ms == nil {
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	sr, err := ds.ms.QueryRange(ctx, host, from, to, tier, counters)
+	if err != nil {
+		slog.Error("metrics: query failed", "host", host, "error", err) //nolint:gosec // host is validated against registered server list
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	type counterJSON struct {
+		T   []int64   `json:"t"`
+		Avg []float64 `json:"avg"`
+		Min []float64 `json:"min"`
+		Max []float64 `json:"max"`
+	}
+	type metricsResp struct {
+		Host            string                  `json:"host"`
+		Tier            string                  `json:"tier"`
+		From            string                  `json:"from"`
+		To              string                  `json:"to"`
+		OldestAvailable *string                 `json:"oldest_available"`
+		NewestAvailable *string                 `json:"newest_available"`
+		Series          map[string]*counterJSON `json:"series"`
+	}
+
+	resp := metricsResp{
+		Host:   host,
+		Tier:   sr.Tier.TierName(),
+		From:   from.UTC().Format(time.RFC3339),
+		To:     to.UTC().Format(time.RFC3339),
+		Series: make(map[string]*counterJSON, len(sr.Data)),
+	}
+	if sr.OldestAvailable != nil {
+		s := sr.OldestAvailable.UTC().Format(time.RFC3339)
+		resp.OldestAvailable = &s
+	}
+	if sr.NewestAvailable != nil {
+		s := sr.NewestAvailable.UTC().Format(time.RFC3339)
+		resp.NewestAvailable = &s
+	}
+	for name, cs := range sr.Data {
+		t := cs.T
+		if t == nil {
+			t = []int64{}
+		}
+		avg := cs.Avg
+		if avg == nil {
+			avg = []float64{}
+		}
+		min := cs.Min
+		if min == nil {
+			min = []float64{}
+		}
+		max := cs.Max
+		if max == nil {
+			max = []float64{}
+		}
+		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // mustMarshal marshals v to JSON, returning nil on error (caller checks SSEEvent marshal).
