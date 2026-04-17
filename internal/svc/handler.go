@@ -313,7 +313,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// Start dashboard if enabled.
 	var dashState *dashboard.ServerState
 	if dashCfg.Enabled {
-		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore)
+		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore, auditStore)
 		if err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
@@ -521,7 +521,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Start dashboard on hot-reload if it was just enabled.
 			// Also self-register the local host if dashboard URL points here.
 			if newDashCfg.Enabled && !dashCfg.Enabled {
-				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore); err != nil {
+				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
 					dashState = st
