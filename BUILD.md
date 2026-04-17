@@ -44,7 +44,7 @@ Goal: cheap second opinion on correctness, not a full review. One call, act on c
 
 ## 5. Commit
 
-16. Bump CalVer `YY.DOY.patch` in the 7 places per `CLAUDE.md` **only if this commit changed build output** — any new/modified `*.go`, `*.rc`, `*.psd1`, `*.wixproj`, or `frontend/src/**`. Spec-kit artifacts, CHRONICLE entries, `docs/` prose, review notes, and edits to this `BUILD.md` file itself do NOT change build output and leave the version **unchanged**. If `.rc` changed, run `just resource` and include the regenerated `.syso` in the commit.
+16. Bump CalVer `YY.DOY.patch` with **`just bump`** **only if this commit changed build output** — any new/modified `*.go`, `*.rc`, `*.psd1`, `*.wixproj`, or `frontend/src/**`. Spec-kit artifacts, CHRONICLE entries, `docs/` prose, review notes, and edits to this `BUILD.md` file itself do NOT change build output and leave the version **unchanged**. `just bump` edits all 8 version-bearing files and recompiles `.syso` — never edit version strings by hand.
 17. Commit message format:
     ```
     <type>(<scope>): <imperative one-line summary>
