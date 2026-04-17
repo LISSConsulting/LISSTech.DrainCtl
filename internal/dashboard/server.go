@@ -17,7 +17,6 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -60,24 +59,6 @@ type ServerView struct {
 	ChangedBy            string           `json:"changed_by,omitempty"`
 	GraceDeadline        *time.Time       `json:"grace_deadline"`
 	Perf                 *dc.PerfSnapshot `json:"perf"`
-}
-
-// HistoryView is the per-entry shape returned by GET /api/v1/history/{host}.
-// It normalises CheckResult.Status to the lowercase frontend tokens so the
-// Svelte component can use the value directly as a CSS class name.
-type HistoryView struct {
-	Timestamp            time.Time          `json:"timestamp"`
-	Host                 string             `json:"host"`
-	Status               string             `json:"status"` // "ok"/"grace"/"alert"/"off"
-	DrainMode            string             `json:"drain_mode"`
-	StateDurationSeconds *float64           `json:"state_duration_seconds"`
-	Transition           bool               `json:"transition"`
-	TransitionFrom       string             `json:"transition_from,omitempty"`
-	ChangedBy            string             `json:"changed_by,omitempty"`
-	Version              string             `json:"version"`
-	Message              string             `json:"message"`
-	Sessions             *dc.SessionSummary `json:"sessions,omitempty"`
-	Performance          *dc.PerfSnapshot   `json:"performance,omitempty"`
 }
 
 // statusToken converts a CheckResult.Status value ("Healthy"/"Warning"/"Grace"/"Alert")
@@ -138,24 +119,6 @@ func toServerView(info ServerInfo) ServerView {
 		v.GraceDeadline = &deadline
 	}
 	return v
-}
-
-// toHistoryView converts a CheckResult to the HistoryView with normalised status.
-func toHistoryView(r dc.CheckResult) HistoryView {
-	return HistoryView{
-		Timestamp:            r.Timestamp,
-		Host:                 r.Host,
-		Status:               statusToken(r.Status),
-		DrainMode:            r.DrainModeLabel,
-		StateDurationSeconds: r.StateDurationSeconds,
-		Transition:           r.Transition,
-		TransitionFrom:       r.TransitionFrom,
-		ChangedBy:            r.ChangedBy,
-		Version:              r.Version,
-		Message:              r.Message,
-		Sessions:             r.Sessions,
-		Performance:          r.Performance,
-	}
 }
 
 // isAuthorizedForHost checks whether the authenticated identity is allowed to
@@ -1021,72 +984,14 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 }
 
 // handleHistory serves GET /api/v1/history/{host}.
-// Returns the last N CheckResult records for the named host, newest first.
-// Optional query params:
-//   - limit:        1–100, default 20
-//   - changes_only: "1" or "true" — return only records where Transition=true
-//
-// Requires group membership. Returns 404 if the host is not registered.
-func (ds *DashboardServer) handleHistory(w http.ResponseWriter, r *http.Request) {
-	host := r.PathValue("host")
-	if host == "" {
-		http.Error(w, "host parameter required", http.StatusBadRequest)
-		return
-	}
-
-	if !ds.state.IsRegistered(host) {
-		http.Error(w, "host not found", http.StatusNotFound)
-		return
-	}
-
-	limit := 20
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > historyMax {
-			http.Error(w, fmt.Sprintf("limit must be 1–%d", historyMax), http.StatusBadRequest)
-			return
-		}
-		limit = n
-	}
-
-	changesOnly := false
-	if v := r.URL.Query().Get("changes_only"); v == "1" || v == "true" {
-		changesOnly = true
-	}
-
-	// For changes_only, fetch the full ring so filtering has the full picture.
-	// For the plain case, fetch only the requested limit — no need to allocate more.
-	fetchN := limit
-	if changesOnly {
-		fetchN = historyMax
-	}
-	records := ds.state.HostHistory(host, fetchN)
-	if records == nil {
-		records = []dc.CheckResult{}
-	}
-
-	if changesOnly {
-		filtered := records[:0]
-		for _, rec := range records {
-			if rec.Transition {
-				filtered = append(filtered, rec)
-			}
-		}
-		records = filtered
-		if limit < len(records) {
-			records = records[:limit]
-		}
-	}
-
-	views := make([]HistoryView, len(records))
-	for i, rec := range records {
-		views[i] = toHistoryView(rec)
-	}
-
+// The in-memory ring was removed in favour of the SQLite telemetry store.
+// This route is retained for one release to give callers time to migrate.
+func (ds *DashboardServer) handleHistory(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(views)
+	w.WriteHeader(http.StatusGone)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "use /api/v1/metrics/{host} or /api/v1/audit",
+	})
 }
 
 // mustMarshal marshals v to JSON, returning nil on error (caller checks SSEEvent marshal).
