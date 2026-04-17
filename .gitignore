@@ -49,6 +49,10 @@ prune_*.html
 # Tool state
 .ralph/
 .superpowers/
+.playwright-mcp/
+
+# Ephemeral working directory (patches, scratch output, coverage runs)
+.tmp/
 
 # Scratch / temp files
 MSG00409.bin
