@@ -82,11 +82,13 @@ func GetHistory(opts HistoryOptions) ([]AuditRecord, error) {
 // observation (data-model.md, T026).
 func auditFromTelemetry(r telemetry.AuditRecord) AuditRecord {
 	rec := AuditRecord{
-		Timestamp: r.Ts,
-		Host:      r.Host,
-		DrainMode: DrainMode(r.NewState),
-		ChangedBy: r.ChangedBy,
-		Changed:   r.PrevState != r.NewState,
+		Timestamp:      r.Ts,
+		Host:           r.Host,
+		DrainMode:      DrainMode(r.NewState),
+		ChangedBy:      r.ChangedBy,
+		Changed:        r.PrevState != r.NewState,
+		Reconciliation: r.Reconciliation,
+		Reason:         r.Reason,
 	}
 	rec.DrainLabel = rec.DrainMode.String()
 	if r.KeyModifiedTs != nil {
