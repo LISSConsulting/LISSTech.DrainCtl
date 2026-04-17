@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -150,4 +151,50 @@ func TestOpen_PragmasAppliedToEveryConnection(t *testing.T) {
 	}
 	checkPragma("conn1", scan1)
 	checkPragma("conn2", scan2)
+}
+
+func TestOpen_CorruptFileReturnsClearError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a valid DB with data and force a checkpoint so the main file
+	// contains actual page content (not just the WAL).
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := db.writer.Exec(
+		`INSERT OR IGNORE INTO schema_meta(key,value) VALUES('test_key','test_value')`,
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// Force WAL to flush into the main file so corruption is detectable.
+	if _, err := db.writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Corrupt page 2 of the main file (bytes 4096..8191) with zeroes.
+	dbPath := filepath.Join(dir, dbFileName)
+	f, err := os.OpenFile(dbPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open for corruption: %v", err)
+	}
+	if _, err := f.WriteAt(make([]byte, 512), 4096); err != nil {
+		_ = f.Close()
+		t.Fatalf("write corruption: %v", err)
+	}
+	_ = f.Close()
+
+	_, openErr := Open(dir)
+	if openErr == nil {
+		t.Fatal("Open on corrupt DB returned nil error, want error")
+	}
+	if !strings.Contains(openErr.Error(), dbPath) {
+		t.Errorf("error does not contain DB path %q: %v", dbPath, openErr)
+	}
+	if !strings.Contains(openErr.Error(), "integrity") {
+		t.Errorf("error does not contain 'integrity': %v", openErr)
+	}
 }
