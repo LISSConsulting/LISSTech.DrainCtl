@@ -197,6 +197,8 @@ type HistoryRecord struct {
 	DiskQueue            *float64 `json:"disk_queue,omitempty"`
 	TCPRetransSec        *float64 `json:"tcp_retrans_sec,omitempty"`
 	ExitCode             int      `json:"exit_code"`
+	Reconciliation       bool     `json:"reconciliation,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
 }
 
 // ComputeStateDurations annotates records (newest-first) with state duration.
@@ -241,6 +243,8 @@ func AuditToHistory(rec AuditRecord, stateDur *int) HistoryRecord {
 		TotalSessions:        rec.TotalSessions,
 		MaxSessions:          rec.MaxSessions,
 		ExitCode:             rec.ExitCode,
+		Reconciliation:       rec.Reconciliation,
+		Reason:               rec.Reason,
 	}
 	if rec.CPUPct != 0 {
 		v := rec.CPUPct
@@ -295,6 +299,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
 			"cpu_pct", "input_delay_max_ms",
 			"exit_code",
+			"reconciliation", "reason",
 		})
 		for i, r := range records {
 			hr := AuditToHistory(r, &durations[i])
@@ -309,6 +314,10 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			if hr.InputDelayMax != nil {
 				delayStr = fmt.Sprintf("%.1f", *hr.InputDelayMax)
 			}
+			rec := ""
+			if hr.Reconciliation {
+				rec = "true"
+			}
 			_ = cw.Write([]string{
 				hr.Timestamp, hr.Host, hr.DrainMode,
 				fmt.Sprintf("%d", hr.DrainValue),
@@ -321,6 +330,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 				fmt.Sprintf("%d", hr.MaxSessions),
 				cpuStr, delayStr,
 				fmt.Sprintf("%d", hr.ExitCode),
+				rec, hr.Reason,
 			})
 		}
 		cw.Flush()
@@ -334,9 +344,18 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			if r.Changed {
 				ch = "YES"
 			}
+			if r.Reconciliation {
+				ch = "DRIFT"
+			}
 			by := r.ChangedBy
-			if by == "" {
+			if r.Reconciliation && r.Reason != "" {
+				by = r.Reason
+			} else if by == "" {
 				by = "-"
+			}
+			mode := r.DrainLabel
+			if r.Reconciliation {
+				mode = "[DRIFT] " + mode
 			}
 			dur := (time.Duration(durations[i]) * time.Second).String()
 			sess := "-"
@@ -354,7 +373,7 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			}
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
 				r.Timestamp.Local().Format("2006-01-02 15:04:05"),
-				r.DrainLabel, dur, ch, by, sess, cpuStr, delayStr, r.ExitCode,
+				mode, dur, ch, by, sess, cpuStr, delayStr, r.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -371,6 +390,9 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			if r.ChangedBy != "" {
 				fields = append(fields, fmt.Sprintf("changed_by=%s", r.ChangedBy))
 			}
+			if r.Reconciliation && r.Reason != "" {
+				fields = append(fields, fmt.Sprintf("reason=%q", r.Reason))
+			}
 			if r.TotalSessions > 0 || r.MaxSessions > 0 {
 				fields = append(fields,
 					fmt.Sprintf("sessions=%d/%d", r.TotalSessions, r.MaxSessions),
@@ -384,6 +406,9 @@ func WriteHistory(w io.Writer, records []AuditRecord, format OutputFormat) {
 			tag := "INF"
 			if r.ExitCode > 0 {
 				tag = "ERR"
+			}
+			if r.Reconciliation {
+				tag = "DRIFT"
 			}
 			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", ts, tag, strings.Join(fields, " "))
 		}
@@ -408,6 +433,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			"active_sessions", "disconnected_sessions", "total_sessions", "max_sessions",
 			"cpu_pct", "input_delay_max_ms",
 			"exit_code",
+			"reconciliation", "reason",
 		})
 		for _, hr := range records {
 			ch := ""
@@ -425,6 +451,10 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.InputDelayMax != nil {
 				delayStr = fmt.Sprintf("%.1f", *hr.InputDelayMax)
 			}
+			rec := ""
+			if hr.Reconciliation {
+				rec = "true"
+			}
 			_ = cw.Write([]string{
 				hr.Timestamp, hr.Host, hr.DrainMode,
 				fmt.Sprintf("%d", hr.DrainValue),
@@ -436,6 +466,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 				fmt.Sprintf("%d", hr.MaxSessions),
 				cpuStr, delayStr,
 				fmt.Sprintf("%d", hr.ExitCode),
+				rec, hr.Reason,
 			})
 		}
 		cw.Flush()
@@ -449,9 +480,18 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.Changed {
 				ch = "YES"
 			}
+			if hr.Reconciliation {
+				ch = "DRIFT"
+			}
 			by := hr.ChangedBy
-			if by == "" {
+			if hr.Reconciliation && hr.Reason != "" {
+				by = hr.Reason
+			} else if by == "" {
 				by = "-"
+			}
+			mode := hr.DrainMode
+			if hr.Reconciliation {
+				mode = "[DRIFT] " + mode
 			}
 			dur := "0s"
 			if hr.StateDurationSeconds != nil {
@@ -475,7 +515,7 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 				delayStr = fmt.Sprintf("%.0fms", *hr.InputDelayMax)
 			}
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-				ts, hr.DrainMode, dur, ch, by, sess, cpuStr, delayStr, hr.ExitCode,
+				ts, mode, dur, ch, by, sess, cpuStr, delayStr, hr.ExitCode,
 			)
 		}
 		_ = tw.Flush()
@@ -492,6 +532,9 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			if hr.ChangedBy != "" {
 				fields = append(fields, fmt.Sprintf("changed_by=%s", hr.ChangedBy))
 			}
+			if hr.Reconciliation && hr.Reason != "" {
+				fields = append(fields, fmt.Sprintf("reason=%q", hr.Reason))
+			}
 			if hr.CPUPct != nil {
 				fields = append(fields, fmt.Sprintf("cpu=%.0f%%", *hr.CPUPct))
 			}
@@ -502,6 +545,9 @@ func WriteHistoryRecords(w io.Writer, records []HistoryRecord, format OutputForm
 			tag := "INF"
 			if hr.ExitCode > 0 {
 				tag = "ERR"
+			}
+			if hr.Reconciliation {
+				tag = "DRIFT"
 			}
 			_, _ = fmt.Fprintf(w, "%s [%s] %s\n", hr.Timestamp, tag, strings.Join(fields, " "))
 		}
