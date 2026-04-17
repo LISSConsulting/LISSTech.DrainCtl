@@ -17,7 +17,7 @@ Technical approach in one sentence: pure-Go SQLite driver (`modernc.org/sqlite`)
 **Testing**: `go test` against a temp-directory database per test. `just lint` (gofmt, go vet, golangci-lint) gates all commits. `prek` runs gitleaks.
 **Target Platform**: Windows only. Service runs as `NT SERVICE\DrainCtl`. Dashboard hosted in-process via `net/http` with Kerberos SSO.
 **Project Type**: Single Go module with a CLI (`cmd/drainctl`), a DLL shim (`cmd/cshared`), and an embedded dashboard (Svelte 5 + uPlot) served from `internal/dashboard`.
-**Performance Goals**: 50 hosts × 6 counters × 15-second sampling sustained indefinitely (≈ 8.6M raw rows per 5 days before downsample purge). Dashboard 5-day chart render < 2 s on a cold LAN fetch. Zoom to 1-hour window < 500 ms re-render.
+**Performance Goals**: 50 hosts × 6 counters × 15-second sampling sustained indefinitely (≈ 1.44M raw rows in the 25h retention window — matches data-model.md storage-footprint estimate). Dashboard 5-day chart render < 2 s on a cold LAN fetch. Zoom to 1-hour window < 500 ms re-render.
 **Constraints**:
 - No CGO in the shipped binaries (rules out all cgo SQLite drivers and libsql embedded).
 - No system-level DB engine or extra runtime installer (rules out PostgreSQL/TimescaleDB, MySQL, sqld).

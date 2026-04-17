@@ -50,8 +50,14 @@ PRAGMA auto_vacuum = INCREMENTAL; -- set once before first write
 - `auto_vacuum = INCREMENTAL` enables `PRAGMA incremental_vacuum(N)` to reclaim space after retention deletes without rewriting the whole file.
 - `mmap_size` speeds repeated range scans for the chart without raising RSS unboundedly.
 
+**Application strategy**: PRAGMAs are applied per connection (not once per open) because most of the above are connection-local in SQLite. Implementation uses `sql.OpenDB` with a `driver.Connector` whose `Connect()` issues the full PRAGMA block. The writer `*sql.DB` is pinned to `SetMaxOpenConns(1)`; readers use a separate `*sql.DB` with the same connector and rely on WAL for concurrency. DSN-embedded `_pragma=` is explicitly NOT used for this codebase — the connector path is the single supported approach so behaviour is one place to audit.
+
+**Audit durability**: audit writes upgrade to `PRAGMA synchronous = FULL` for commit-durability on OS crash / power loss (low volume). Implementation: `AuditStore` owns a dedicated `*sql.Conn` obtained from the writer `*sql.DB` for its lifetime; on first acquisition it issues `PRAGMA synchronous = FULL` on that connection, then keeps it. Audit writes are routed exclusively through that pinned connection. Metrics writes stay at `synchronous = NORMAL` (SC-004 allows ≤1 sample loss).
+
+**WAL checkpoint policy**: a dedicated `*sql.Conn` (separate from the writer and reader pools) with `busy_timeout=0` applied at `Connect` time is used by the retention goroutine to drive checkpoints. On each cycle it runs `PRAGMA wal_checkpoint(PASSIVE)` first (non-blocking, handles most of the work), then only escalates to `wal_checkpoint(TRUNCATE)` when the WAL still exceeds 16 MB. Each call is wrapped in a 5-second `context.Context` deadline. `SQLITE_BUSY` / `SQLITE_LOCKED` / deadline-exceeded are logged at WARN and the cycle is skipped — never retried within the same call, never blocks writers or readers. Any read transaction older than 60s is cancelled with a logged notice so it cannot pin the WAL snapshot indefinitely. WARN when WAL file size > 64 MB, repeat escalation hourly.
+
 **Alternatives considered**:
-- `synchronous = FULL` — unnecessary given we accept a <= 1-sample loss window.
+- `synchronous = FULL` everywhere — unnecessary for metrics given SC-004 allows ≤1 sample loss; used only for audit writes where durability matters more than throughput.
 - `journal_mode = DELETE` (rollback journal) — blocks readers during writes; WAL is the feature we explicitly need (FR-005).
 
 ---
@@ -82,13 +88,16 @@ PRAGMA auto_vacuum = INCREMENTAL; -- set once before first write
 ## 4. Aggregator worker cadence
 
 **Decision**: A single background goroutine owned by `internal/telemetry` wakes every 60 seconds and:
-1. Advances the 5-min tier by inserting any complete 5-minute buckets not yet materialized, from `metrics_raw`. Uses `INSERT … ON CONFLICT(bucket_ts, host, counter) DO NOTHING` for idempotency.
-2. Every hour boundary (when `minute = 0`), advances the hourly tier by aggregating completed 5-min buckets into `metrics_hourly`. Same conflict strategy.
+1. Advances the 5-min tier by inserting any eligible 5-minute buckets from `metrics_raw`. Uses `INSERT … ON CONFLICT(host, bucket_ts, counter) DO UPDATE SET avg_value=excluded.avg_value, min_value=excluded.min_value, max_value=excluded.max_value, sample_count=excluded.sample_count`. The conflict target matches the primary key declared in data-model.md for all three metrics tables.
+2. On every tick, materializes every hourly bucket whose end-boundary + watermark ≤ now and whose source rows (in `metrics_5min` for the hourly tier, in `metrics_raw` for the 5-min tier) still exist; unconditional recompute via ON CONFLICT DO UPDATE. No wall-clock `minute = 0` gate.
+3. **Watermark**: aggregator only rolls a bucket whose upper bound is older than `now - 5 minutes`, so late raw samples land before the bucket becomes eligible. After the source-tier retention horizon the bucket becomes ineligible (source purged) and further updates are impossible by construction.
+4. **UTC-only bucket floors**: bucket start timestamps are computed using `time.UTC` with `Truncate(5*time.Minute)` / `Truncate(time.Hour)` so DST transitions do not corrupt boundaries.
 
 **Rationale**:
 - Both tiers built by upward rollup (raw → 5min → hourly) so each pass reads a small bounded window and commits a small batch.
 - One goroutine, one connection, serialized writes — no need for a cross-goroutine lock beyond SQLite's internal serialization.
-- `ON CONFLICT DO NOTHING` makes restart-safe: after a crash mid-aggregation, re-running produces the same final state (FR-008).
+- `ON CONFLICT DO UPDATE` keyed on full bucket contents is restart-safe AND robust to late-arriving raw samples: after a crash mid-aggregation or a delayed raw sample for an already-materialized bucket, the next pass recomputes and overwrites. Watermark + source-retention horizon provides the freeze guarantee operators can trust (FR-008).
+- Tick missing exact minute=0 boundaries no longer matters — every eligible bucket is caught on the next tick regardless of wall-clock alignment.
 
 **Alternatives considered**:
 - Streaming aggregation on every insert (trigger-based) — simpler logic but writes amplify per-sample cost; not free at 50 hosts × 6 counters × 4 samples/min.
@@ -116,10 +125,15 @@ PRAGMA auto_vacuum = INCREMENTAL; -- set once before first write
 
 ## 6. Drift reconciliation on startup (FR-001a)
 
+(After JSONL migration has completed so `LatestByHost` sees imported rows.)
+
+
 **Decision**: After opening the DB and before the service begins subscribing to registry changes or opening the named pipe:
 1. For each known host in `ServerState`, read the current registry drain state (existing `registry.go` code).
 2. Look up the most recent `audit` row for that host.
-3. If the current drain state differs from that row's `new_state` (or no prior row exists but drain is non-default), insert a single reconciliation audit row: `principal = "reconciliation"`, `changed_by = ""`, `reason = "service-downtime drift: last-known X, observed Y"`. Timestamp = current time; `key_modified` = current-row registry timestamp; record a `before_ts` == last audit ts so the uncertainty window is inspectable.
+3. If the current drain state differs from that row's `new_state` (or no prior row exists but drain is non-default), insert a single reconciliation audit row: `principal = ""` (empty; matches the `audit_principal` partial index `WHERE principal <> ''` in data-model.md; defined once as the `reconciliationPrincipal` constant in `reconcile.go` so any future mutation breaks the partial-index semantics loudly), `changed_by = ""`, `reason = "service-downtime drift: last-known X, observed Y"`. Timestamp = current time; `key_modified` = current-row registry timestamp; record a `before_ts` == last audit ts so the uncertainty window is inspectable.
+4. Additionally: if registry `LastWriteTime` (`key_modified_ts`) is newer than the last audit record's `ts` for that host, emit a reconciliation row marking a downtime-activity window regardless of current-vs-last equality — this detects A→B→A oscillations where endpoints match but intermediate changes occurred while the service was down.
+5. Write one `maintenance_jobs` row `name="drift_reconciliation"` capturing started/finished/duration/outcome/rows_affected for the full pass.
 
 **Rationale**:
 - Single row per host per gap (not one per polling miss) keeps the audit trail readable.
