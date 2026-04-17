@@ -16,6 +16,11 @@ Key Ralph-friendly discipline encoded in the runbook:
 
 **Dogfood**: the codex review step caught two HIGH-confidence bugs in the first draft of this very file — (1) a shell-pipe-vs-heredoc bug where `git diff --cached | codex exec - <<'PROMPT'` silently sends the prompt but not the diff (the heredoc overrides the pipe), and (2) misleading "create a new commit" wording for pre-commit hook failure (hook failure aborts — there's nothing to compare against). Both were fixed before this commit landed. First iteration paid its own keep.
 
+## 007 SQLite Telemetry Store — implementation notes (2026-04-17)
+
+- **T019 — aggregator maintenance_jobs bleed from T048**. The US1 test list (`TestHourlyAggregator_RecordsMaintenanceRow`, `TestAggregator_EmitsLogsAndMaintenanceRowPerRun`) requires the aggregator to already upsert a `maintenance_jobs` row per run. T048 (US5) covers the broader instrumentation via `MaintenanceStore`, but the minimal per-run upsert had to land in T019 so its tests pass. Future T048 replaces the inline SQL in `aggregator.recordMaintenance` with a call through `MaintenanceStore.UpsertJob`; the log+row pairing (FR-032) is already wired.
+- **T019 — hourlyWatermark semantics**. `hourlyWatermark = 1h + 5min` is subtracted from `now` and then **truncated to the hour boundary**, producing `maxBucketMs`. A bucket is eligible iff `bucket_ts ≤ maxBucketMs`. This is not "bucket_end + 5min ≤ now" — the truncation makes the effective freeze window range from 5 min (near a boundary) to ~1h5min (just after a boundary). A test that seeds a bucket that ended just a few minutes before `now` will non-deterministically get aggregated, so `TestHourlyAggregator_SkipsIncompleteHours` sticks to the current in-progress hour (bucket_ts > maxBucketMs under every clock phase).
+
 ## 007 SQLite Telemetry Store — planning review (2026-04-17)
 
 Commits `4c13128` / `e25482e` / `c021f4e` / (this commit) resolve 32 deduplicated findings from an adversarial codex review of the spec/plan/tasks for feature 007. Full artifacts at `docs/reviews/codex-2026-04-17-{synthesis,remediation-plan}.md`. Key lessons worth remembering once implementation starts:
