@@ -6,9 +6,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
+
+// futureSkewThreshold is the maximum permitted clock skew into the future
+// before Append logs a WARN. Samples are stored regardless — clock sync is
+// the operator's responsibility (spec.md §Assumptions, spec.md:121).
+const futureSkewThreshold = 5 * time.Minute
 
 // Tier identifies the resolution tier of a metrics query.
 type Tier int
@@ -92,16 +98,36 @@ func (s *MetricsStore) Append(ctx context.Context, samples []Sample) error {
 	}
 	defer func() { _ = stmt.Close() }()
 
+	now := time.Now().UTC()
+	skewCutoff := now.Add(futureSkewThreshold)
+	skewCount := 0
+	firstSkewIdx := -1
+
 	for i := range samples {
 		sm := &samples[i]
-		tsMs := sm.Ts.UTC().UnixMilli()
-		if _, err = stmt.ExecContext(ctx, tsMs, sm.Host, sm.Counter, sm.Value); err != nil {
+		ts := sm.Ts.UTC()
+		if ts.After(skewCutoff) {
+			if firstSkewIdx < 0 {
+				firstSkewIdx = i
+			}
+			skewCount++
+		}
+		if _, err = stmt.ExecContext(ctx, ts.UnixMilli(), sm.Host, sm.Counter, sm.Value); err != nil {
 			return fmt.Errorf("telemetry: metrics Append insert [%s %s]: %w",
 				sm.Host, sm.Counter, err)
 		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("telemetry: metrics Append commit: %w", err)
+	}
+	if skewCount > 0 {
+		sm := &samples[firstSkewIdx]
+		slog.Warn("telemetry: metrics Append received future-dated samples",
+			"count", skewCount,
+			"host", sm.Host,
+			"counter", sm.Counter,
+			"ts", sm.Ts.UTC().Format(time.RFC3339),
+			"skew_seconds", int(sm.Ts.UTC().Sub(now).Seconds()))
 	}
 	return nil
 }
