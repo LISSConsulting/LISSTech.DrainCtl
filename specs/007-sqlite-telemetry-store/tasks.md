@@ -154,7 +154,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 
 ### Implementation
 
-- [ ] T047 [P] [US5] Implement `MaintenanceStore.UpsertJob(name, run Result)` and `.ListJobs()` in `internal/telemetry/maintenance.go` using `INSERT … ON CONFLICT(name) DO UPDATE`
+- [x] T047 [P] [US5] Implement `MaintenanceStore.UpsertJob(name, run Result)` and `.ListJobs()` in `internal/telemetry/maintenance.go` using `INSERT … ON CONFLICT(name) DO UPDATE`
 - [ ] T048 [US5] Instrument the aggregator (both tiers) in `internal/telemetry/aggregator.go` to write `maintenance_jobs` rows (`aggregator_5min`, `aggregator_hourly`) via `MaintenanceStore.UpsertJob` at the end of every run (success and failure)
 - [ ] T049 [US5] Implement retention worker in `internal/telemetry/retention.go`: every `cfg.Telemetry.RetentionIntervalMinutes` (jittered ±30s) delete rows older than the per-tier threshold in chunks of `LIMIT 10000`; run `PRAGMA incremental_vacuum(5000)` once per pass; write a `maintenance_jobs` row (`name="retention"`). Note: `incremental_vacuum` reclaims freed pages to SQLite's internal free-list, not to the OS — the file size stays at high-water mark until a manual `VACUUM INTO`-based compaction. Document this expectation in README + quickstart (handled in Commit 4). Worker also drives T004a's WAL checkpoint policy on its dedicated connection.
 - [ ] T049a [US5] Document the high-water file-size behavior in `specs/007-sqlite-telemetry-store/quickstart.md` and in `README.md` (retention section): operators should expect `drainctl.db` to NOT shrink after large retention purges; compaction via `VACUUM INTO` is a follow-up feature.
