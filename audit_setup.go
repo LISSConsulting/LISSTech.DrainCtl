@@ -71,7 +71,7 @@ Write-Output 'SACL configured successfully'
 	}
 	slog.Info("step=2/2 result=sacl_configured")
 
-	slog.Info("audit_setup=complete msg=\"Registry modifications to TSServerDrainMode will now be attributed to the acting user\"")
+	slog.Info("audit_setup=complete msg=\"Registry modifications to TSServerDrainMode and fDenyTSConnections will now be attributed to the acting user\"")
 	return nil
 }
 
