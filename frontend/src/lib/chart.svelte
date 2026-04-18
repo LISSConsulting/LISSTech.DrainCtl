@@ -263,6 +263,19 @@
     });
 
     let tier = $derived(response?.tier ?? resolution);
+
+    // FR-019: flag when the requested window reaches further into the past
+    // than the chosen tier still retains. `oldest_available` is the oldest
+    // row in the tier for this host (not just within the request window);
+    // if it's strictly newer than the left edge of the view, the chart is
+    // missing data the user asked for because retention has already purged it.
+    let retentionTruncated = $derived.by(() => {
+        const oa = response?.oldest_available;
+        if (!oa) return false;
+        const oldestMs = Date.parse(oa);
+        if (!Number.isFinite(oldestMs)) return false;
+        return oldestMs > viewFrom.getTime();
+    });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -284,7 +297,16 @@
     {:else if loading && !response}
         <div class="chart-status">Loading…</div>
     {:else if isEmpty}
-        <div class="chart-status">Collecting data…</div>
+        <!-- When the whole visible window is before oldest_available the server
+             returns an empty series even though data exists — surface retention
+             as the reason instead of the misleading "Collecting data…" state. -->
+        {#if retentionTruncated}
+            <div class="chart-status retention" title="oldest_available={response?.oldest_available}">
+                Data beyond this range is not retained
+            </div>
+        {:else}
+            <div class="chart-status">Collecting data…</div>
+        {/if}
     {:else}
         <LayerCake
             data={points}
@@ -301,6 +323,11 @@
             <span class="meta-counter">{counter}</span>
             <span class="meta-tier">tier={tier}</span>
         </div>
+        {#if retentionTruncated}
+            <div class="retention-badge" title="oldest_available={response?.oldest_available}">
+                Data beyond this range is not retained
+            </div>
+        {/if}
     {/if}
 </div>
 
@@ -335,6 +362,10 @@
         color: var(--color-red);
     }
 
+    .chart-status.retention {
+        color: var(--color-amber);
+    }
+
     .chart-meta {
         position: absolute;
         top: 6px;
@@ -352,5 +383,21 @@
 
     .meta-tier {
         color: var(--color-subtle);
+    }
+
+    .retention-badge {
+        position: absolute;
+        top: 6px;
+        left: 8px;
+        padding: 2px 6px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-amber);
+        border-radius: var(--radius-default);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-amber);
+        pointer-events: none;
     }
 </style>
