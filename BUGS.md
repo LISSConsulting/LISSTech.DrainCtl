@@ -118,17 +118,9 @@ Tests: `TestDrainMode_String` in `registry_test.go`. `go test ./...` green, `jus
 
 ---
 
-### 7. `change logon /enable` transition lacks attribution (user-reported)
+### 7. `change logon /enable` transition lacks attribution — DUPLICATE of #8, FIXED 2026-04-18
 
-**Surfaced:** 2026-04-18 during T067 validation on MDS-LDC1-RDS12 — user-reported; not directly visible in the paste (later `/enable` rows in the same session *did* attribute `MDS\lissadmin`, so the failure may be intermittent or tied to a specific earlier run).
-
-**Symptom:** An `/enable` transition appears in `drainctl history` with `changed_by = -` instead of the principal who invoked the command.
-
-**Candidate root causes:**
-- Event 4657 (registry SACL) records the setter for the registry value write, but `change logon /enable` may perform two sequential writes (clear `fDenyTSConnections` + possibly reset `TSServerDrainMode`), and if the audit correlator picks the wrong event the attribution can be lost.
-- Audit SACL was set on the key, not each value; if the 4657 event arrives late, the transition row may already be written with empty `changed_by`.
-
-**Next step:** reproduce with Security log open (Event ID 4657) and match timestamps against the audit row. Worth tracing the end-to-end path in `internal/telemetry/reconcile.go` or wherever transitions are correlated with 4657 events.
+**Status:** Duplicate. The "missing attribution" symptom was the same bug as item 8 (attribution reverts from user to `-` on later refresh) surfacing through the CLI instead of the dashboard. Both were caused by `changedBy` being re-initialized to `""` on every non-transition tick in `internal/svc/check.go` and flowing into `CheckResult.ChangedBy`. See item 8 for the root cause and fix.
 
 ---
 
