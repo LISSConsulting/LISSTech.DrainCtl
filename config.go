@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -566,6 +567,18 @@ func saveConfigToFile(cfg *Config) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
+	// Pin this goroutine to its current OS thread for the entire acquire-use-
+	// release window. Windows named mutexes are owned by the THREAD that called
+	// WaitForSingleObject; only that thread may call ReleaseMutex. Go's
+	// scheduler migrates goroutines freely across OS threads, so without
+	// LockOSThread the deferred ReleaseMutex can land on a different thread,
+	// fail with ERROR_NOT_OWNER (silently discarded below), and strand the
+	// named mutex until process exit. Concurrent SaveConfig calls then block
+	// forever waiting on an abandoned kernel object — observed as a CI-only
+	// test flake on GitHub Actions' slower Windows runners.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Acquire cross-process mutex.
 	// windows.CreateMutex returns ERROR_ALREADY_EXISTS (as an error) when the
 	// named mutex already exists in the kernel object namespace — the handle is
@@ -577,14 +590,7 @@ func saveConfigToFile(cfg *Config) error {
 	}
 	defer func() { _ = windows.CloseHandle(mutex) }()
 
-	// 30s timeout. Real saves complete in milliseconds; this budget only matters
-	// under contention (concurrent PUTs from the settings handler, or a rare
-	// config-reload vs save race). Was 5s, which was too tight for GitHub
-	// Actions Windows runners under load — the concurrent-PUT regression test
-	// intermittently timed out there. 30s is still much shorter than any
-	// user-visible request deadline, and a real 30s hold indicates a bug worth
-	// failing loudly on.
-	event, _ := windows.WaitForSingleObject(mutex, 30_000)
+	event, _ := windows.WaitForSingleObject(mutex, 5000) // 5s timeout
 	if event == uint32(windows.WAIT_TIMEOUT) {
 		return fmt.Errorf("config mutex timeout")
 	}
