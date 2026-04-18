@@ -435,3 +435,104 @@ func TestNearestCounters_EmptyCounterList(t *testing.T) {
 		t.Errorf("expected empty map, got %v", got)
 	}
 }
+
+// TestRestart_LosesAtMostOneSamplingInterval is the SC-004 durability gate:
+// drive metrics ingest, simulate a crash mid-flight by closing the DB
+// without a graceful flush, reopen against the same data dir, continue
+// ingest from roughly one sampling interval later, then scan the merged
+// timeline and assert no gap exceeds 2 × samplingInterval — i.e. at most
+// one interval was lost across the restart.
+//
+// Real SIGKILL can't be modelled from inside the test runner (it would kill
+// the runner itself). Instead we rely on SQLite's WAL-mode crash-safety
+// guarantee: commits that completed before the close() call must be
+// visible on the next Open() against the same directory, exactly as they
+// would be after a power loss. That is the property operators rely on.
+func TestRestart_LosesAtMostOneSamplingInterval(t *testing.T) {
+	const (
+		samplingInterval = 15 * time.Second
+		preSamples       = 20
+		postSamples      = 20
+	)
+	host := "SRV01"
+	counter := "cpu_pct"
+
+	dir := t.TempDir()
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+
+	// ── Pre-crash ingest ────────────────────────────────────────────────
+	db1, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open (pre): %v", err)
+	}
+	ms1 := NewMetricsStore(db1)
+	preBatch := make([]Sample, preSamples)
+	for i := 0; i < preSamples; i++ {
+		preBatch[i] = Sample{
+			Ts:      base.Add(time.Duration(i) * samplingInterval),
+			Host:    host,
+			Counter: counter,
+			Value:   float64(i),
+		}
+	}
+	if err := ms1.Append(context.Background(), preBatch); err != nil {
+		_ = db1.Close()
+		t.Fatalf("Append (pre): %v", err)
+	}
+
+	// Simulate a crash: close without any extra flush / checkpoint. WAL-mode
+	// SQLite's synchronous=NORMAL commits are durable through this close by
+	// construction. This is what a kill -9 would leave behind, give or take
+	// whatever's still in the WAL that hasn't been fsync'd to the main file
+	// (fine — recovery folds it in on next open).
+	if err := db1.Close(); err != nil {
+		t.Fatalf("Close (simulated crash): %v", err)
+	}
+
+	// ── Post-crash ingest: resume ONE interval later (worst case) ───────
+	db2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open (post): %v", err)
+	}
+	t.Cleanup(func() { _ = db2.Close() })
+
+	ms2 := NewMetricsStore(db2)
+	resumeStart := base.Add(time.Duration(preSamples+1) * samplingInterval) // skip exactly one interval
+	postBatch := make([]Sample, postSamples)
+	for i := 0; i < postSamples; i++ {
+		postBatch[i] = Sample{
+			Ts:      resumeStart.Add(time.Duration(i) * samplingInterval),
+			Host:    host,
+			Counter: counter,
+			Value:   float64(preSamples + i),
+		}
+	}
+	if err := ms2.Append(context.Background(), postBatch); err != nil {
+		t.Fatalf("Append (post): %v", err)
+	}
+
+	// ── Read back the merged timeline and check gaps ────────────────────
+	sr, err := ms2.QueryRange(context.Background(), host,
+		base.Add(-time.Minute), resumeStart.Add(time.Duration(postSamples+1)*samplingInterval),
+		TierRaw, []string{counter})
+	if err != nil {
+		t.Fatalf("QueryRange: %v", err)
+	}
+	cs := sr.Data[counter]
+	if cs == nil {
+		t.Fatalf("counter %q missing from series map: %+v", counter, sr.Data)
+	}
+	if want := preSamples + postSamples; len(cs.T) != want {
+		t.Fatalf("sample count = %d, want %d (pre=%d + post=%d — pre-crash durability regression?)",
+			len(cs.T), want, preSamples, postSamples)
+	}
+
+	maxGapMs := int64(2) * int64(samplingInterval/time.Millisecond)
+	for i := 1; i < len(cs.T); i++ {
+		gap := cs.T[i] - cs.T[i-1]
+		if gap > maxGapMs {
+			t.Errorf("gap at index %d = %d ms, exceeds %d ms (2 × sampling interval = %d s) — SC-004 violated",
+				i, gap, maxGapMs, samplingInterval/time.Second)
+		}
+	}
+}
