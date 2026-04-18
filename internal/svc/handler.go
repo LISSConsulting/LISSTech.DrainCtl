@@ -21,7 +21,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
@@ -83,12 +82,23 @@ type drainService struct {
 	etwLevel  *slog.LevelVar // min level for the ETW sink
 }
 
+// observation is the latest per-tick sample of the local host's drain mode.
+// The persistent record of transitions lives in the SQLite audit table; this
+// struct is an in-memory cache used by the pipe handler to answer live status
+// queries and by svcRunCheck to detect transitions between ticks.
+type observation struct {
+	Timestamp  time.Time
+	DrainMode  dc.DrainMode
+	StateSince time.Time
+}
+
 // serviceHandler is the pipe handler bridge between the service state
 // and the named pipe server.
 // cfg is accessed from two goroutines (Execute loop + pipe server) and
 // must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
-	store        *store.MemAuditStore
+	audit        *telemetry.AuditStore
+	observed     atomic.Pointer[observation]
 	cfg          atomic.Pointer[dc.ServiceConfig]
 	dashState    *dashboard.ServerState // nil if dashboard not enabled
 	lastPerf     atomic.Pointer[dc.PerfSnapshot]
@@ -122,11 +132,15 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 	connAllowed := !drainActive
 	res.ConnectionsAllowed = &connAllowed
 
-	// State duration from in-memory store.
-	if since := h.store.StateSince(state.Mode); since != nil {
-		s := since.Local()
+	// State duration from the observed cache — only trust it when the cached
+	// mode still matches what we just read from the registry. A mismatch means
+	// the state changed between the last tick and this pipe request; the next
+	// tick will refresh the cache.
+	obs := h.observed.Load()
+	if obs != nil && obs.DrainMode == state.Mode {
+		s := obs.StateSince.Local()
 		res.StateSince = &s
-		dur := time.Since(*since).Seconds()
+		dur := time.Since(obs.StateSince).Seconds()
 		res.StateDurationSeconds = &dur
 	}
 
@@ -147,19 +161,58 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 	res.Performance = h.lastPerf.Load()
 
 	// Check for transition.
-	if last := h.store.LastObservation(); last != nil && last.DrainMode != state.Mode {
+	if obs != nil && obs.DrainMode != state.Mode {
 		res.Transition = true
-		res.TransitionFrom = last.DrainMode.String()
+		res.TransitionFrom = obs.DrainMode.String()
 	}
 
 	return res
 }
 
+// HandleHistory returns the most recent audit rows from the SQLite audit
+// table. Only drain-mode transitions (and startup reconciliation rows) are
+// stored — per-tick observations are no longer persisted (T059). The
+// changesOnly filter drops reconciliation-style no-op rows.
 func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRecord {
-	if changesOnly {
-		return h.store.Changes(limit)
+	if h.audit == nil {
+		return nil
 	}
-	return h.store.History(limit)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	recs, _, err := h.audit.QueryRange(ctx, telemetry.QueryFilter{
+		Limit:       limit,
+		ChangesOnly: changesOnly,
+	})
+	if err != nil {
+		slog.Warn("pipe history query failed", "error", err)
+		return nil
+	}
+	out := make([]dc.AuditRecord, len(recs))
+	for i, r := range recs {
+		out[i] = auditFromTelemetry(r)
+	}
+	return out
+}
+
+// auditFromTelemetry maps a telemetry audit row to the public dc.AuditRecord
+// shape for the pipe handler. Internal-package mirror of the identically-named
+// helper in root-package history.go; duplicated because internal/svc cannot
+// reach unexported root helpers.
+func auditFromTelemetry(r telemetry.AuditRecord) dc.AuditRecord {
+	rec := dc.AuditRecord{
+		Timestamp:      r.Ts,
+		Host:           r.Host,
+		DrainMode:      dc.DrainMode(r.NewState),
+		ChangedBy:      r.ChangedBy,
+		Changed:        r.PrevState != r.NewState,
+		Reconciliation: r.Reconciliation,
+		Reason:         r.Reason,
+	}
+	rec.DrainLabel = rec.DrainMode.String()
+	if r.KeyModifiedTs != nil {
+		rec.KeyModified = *r.KeyModifiedTs
+	}
+	return rec
 }
 
 func (h *serviceHandler) HandleServers() json.RawMessage {
@@ -227,22 +280,6 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 
 	slog.Info("service=starting", "version", dc.Version, "grace", cfg.GracePeriod, "poll", cfg.PollInterval, "retention_days", cfg.RetentionDays, "fetch_interval", dashCfg.FetchInterval, "memory_limit_mb", memLimitMB)
-
-	// Open in-memory audit store.
-	st, err := store.OpenMemAuditStore(cfg.AuditPath)
-	if err != nil {
-		slog.Error("service=failed", "error", err)
-		return false, 1
-	}
-	defer func() { _ = st.Close() }()
-
-	// Prune on startup.
-	retention := time.Duration(cfg.RetentionDays) * 24 * time.Hour
-	if pruned, err := st.Prune(retention); err != nil {
-		slog.Warn("startup prune failed", "error", err)
-	} else if pruned > 0 {
-		slog.Info("startup_prune", "count", pruned)
-	}
 
 	// Open SQLite telemetry store before the named pipe and HTTP servers.
 	telDB, err := telemetry.Open(dc.DefaultDataDir())
@@ -349,8 +386,25 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}()
 
 	// Start pipe server.
-	handler := &serviceHandler{store: st}
+	handler := &serviceHandler{audit: auditStore}
 	handler.cfg.Store(&cfg)
+
+	// Seed the in-memory observation from the latest audit row for this host
+	// so HandleStatus can report a state duration before the first poll tick
+	// lands. If the mode on disk diverged from the registry while the service
+	// was down, the first tick will see a mismatch and record a transition.
+	if hostname, _ := os.Hostname(); hostname != "" {
+		if latest, err := auditStore.LatestByHost(ctx); err != nil {
+			slog.Warn("observation seed: audit query failed", "error", err)
+		} else if row, ok := latest[hostname]; ok {
+			handler.observed.Store(&observation{
+				Timestamp:  row.Ts,
+				DrainMode:  dc.DrainMode(row.NewState),
+				StateSince: row.Ts,
+			})
+		}
+	}
+
 	go pipe.ServePipe(ctx, handler)
 
 	// Start dashboard if enabled.
@@ -405,9 +459,6 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	pollTicker := time.NewTicker(cfg.PollInterval)
 	defer pollTicker.Stop()
 
-	flushTicker := time.NewTicker(30 * time.Second)
-	defer flushTicker.Stop()
-
 	// Report running immediately so the SCM doesn't wait on network I/O.
 	// Dashboard registration + config fetch happen asynchronously on the
 	// first poll tick (fired immediately below).
@@ -418,7 +469,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Run initial check (skip in dashboard-only mode).
 	if !cfg.DashboardOnly {
-		svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
 	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
@@ -443,7 +494,6 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
 				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
-				_ = st.Flush()
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
@@ -453,8 +503,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		case <-regCh:
 			if !cfg.DashboardOnly {
 				slog.Info("trigger=registry_change")
-				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
-				_ = st.Flush() // immediate flush on change
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
 			}
 
 		case <-dashBootstrap:
@@ -512,7 +561,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
-				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
 			}
 
 		case <-configCh:
@@ -591,12 +640,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
 			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
-				svcRunCheck(ctx, st, auditStore, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, &handler.lastPerf, &handler.lastSessions)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
-
-		case <-flushTicker.C:
-			_ = st.FlushIfDirty()
 		}
 	}
 }

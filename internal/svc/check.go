@@ -6,23 +6,21 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 )
 
 // svcRunCheck performs a single check cycle in service mode.
 // dashState is non-nil when the dashboard runs in this process (local reporting).
-// audit is the persistent SQLite audit writer (T026); st remains the in-memory
-// observation store used for live state tracking (LastObservation, StateSince)
-// until Phase 8 retires it.
-func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.AuditStore, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, lastPerf *atomic.Pointer[dc.PerfSnapshot], lastSessions *atomic.Pointer[dc.SessionSummary]) {
+// The handler owns the in-memory observation cache (transition detection,
+// live state duration) and the persistent SQLite audit writer (T026/T059);
+// drain-mode transitions are appended there, never to JSONL.
+func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState) {
 	checkStart := time.Now()
 	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
@@ -36,11 +34,12 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 	changedBy := ""
 	prevState := dc.DrainMode(0)
 
-	if last := st.LastObservation(); last != nil && last.DrainMode != state.Mode {
+	prev := h.observed.Load()
+	if prev != nil && prev.DrainMode != state.Mode {
 		transition = true
-		transitionFrom = last.DrainMode.String()
-		prevState = last.DrainMode
-		slog.Warn("transition=true", "from", last.DrainMode, "to", state.Mode)
+		transitionFrom = prev.DrainMode.String()
+		prevState = prev.DrainMode
+		slog.Warn("transition=true", "from", prev.DrainMode, "to", state.Mode)
 
 		beforeTransition := time.Now().Add(-5 * time.Second)
 
@@ -51,8 +50,8 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 		if changedBy == "" {
 			// Fallback: query wevtutil (covers cases where EvtSubscribe
 			// missed the event or wasn't available).
-			if lookback := time.Since(last.Timestamp); lookback < 24*time.Hour {
-				changedBy = dc.QueryRegistryChangeUser(last.Timestamp)
+			if lookback := time.Since(prev.Timestamp); lookback < 24*time.Hour {
+				changedBy = dc.QueryRegistryChangeUser(prev.Timestamp)
 			}
 		}
 		if changedBy != "" {
@@ -62,13 +61,14 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 
 	// Determine exit code and status.
 	drainActive := state.Mode != dc.AllowAll
-	stateDur := time.Duration(0)
-	var stateSince *time.Time
-	if since := st.StateSince(state.Mode); since != nil {
-		stateDur = time.Since(*since).Truncate(time.Second)
-		s := since.Local()
-		stateSince = &s
+	tickTime := time.Now()
+	stateBegan := tickTime
+	if prev != nil && prev.DrainMode == state.Mode {
+		stateBegan = prev.StateSince
 	}
+	stateDur := time.Since(stateBegan).Truncate(time.Second)
+	s := stateBegan.Local()
+	stateSince := &s
 
 	var status, message string
 	var exitCode int
@@ -80,9 +80,7 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 	if sess == nil {
 		slog.Warn("session enumeration failed", "hint", "verify service runs as LocalSystem")
 	}
-	if lastSessions != nil {
-		lastSessions.Store(sess)
-	}
+	h.lastSessions.Store(sess)
 
 	// Performance counters (service-mode only).
 	slog.Debug("diag: check=perfmon", "collector_nil", perfCollector == nil)
@@ -93,9 +91,7 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 			slog.Warn("perfmon collect failed", "error", err)
 		} else {
 			perfSnap = snap
-			if lastPerf != nil {
-				lastPerf.Store(snap)
-			}
+			h.lastPerf.Store(snap)
 		}
 	}
 
@@ -123,14 +119,21 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 		rec.DiskQueue = perfSnap.DiskQueue
 		rec.TCPRetransSec = perfSnap.TCPRetrans
 	}
-	st.Append(rec)
-	slog.Debug("diag: check=audit_appended")
+	// Update the in-memory observation cache so the next tick (and concurrent
+	// HandleStatus calls) see this sample. StateSince stays pinned to when the
+	// current state began: preserved from prev on no transition, reset to now
+	// when the mode flipped.
+	h.observed.Store(&observation{
+		Timestamp:  tickTime,
+		DrainMode:  state.Mode,
+		StateSince: stateBegan,
+	})
+	slog.Debug("diag: check=observed_updated")
 
 	// Persist drain-mode transitions to the SQLite audit table (T026, FR-001).
 	// Only transitions are written — audit is "one row per drain-mode transition"
-	// (data-model.md). The MemAuditStore above keeps per-tick observations for
-	// live state tracking until Phase 8 retires it.
-	if transition && audit != nil {
+	// (data-model.md).
+	if transition && h.audit != nil {
 		trec := telemetry.AuditRecord{
 			Ts:        rec.Timestamp,
 			Host:      rec.Host,
@@ -143,7 +146,7 @@ func svcRunCheck(ctx context.Context, st *store.MemAuditStore, audit *telemetry.
 			km := rec.KeyModified
 			trec.KeyModifiedTs = &km
 		}
-		if err := audit.Append(ctx, trec); err != nil {
+		if err := h.audit.Append(ctx, trec); err != nil {
 			slog.Warn("telemetry audit append failed", "error", err, "host", rec.Host)
 		}
 	}
