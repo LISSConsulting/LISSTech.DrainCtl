@@ -170,3 +170,17 @@ Original report below for historical context.
 **Deploy note:** operators who relied on the old label text in log-scraping scripts or downstream dashboards will see the strings swap. The short frontend labels in `frontend/src/lib/utils.js` continue to map the same strings; they now correctly associate "Drain (Restart)" with the temporary (value 1) state instead of the persistent one.
 
 Tests: `TestDrainMode_String` (including deprecated-alias compat cases), `go test ./...` green, `just lint` clean.
+
+---
+
+### 10. 5-day chart renders as solid black rectangle — FIXED 2026-04-18
+
+**Status:** Fixed.
+
+**Symptom:** the per-server `5-DAY CPU HISTORY` chart on the dashboard renders as a solid black rectangle with no visible line, no axis labels, no zoom/pan interactivity. The `DATA BEYOND THIS RANGE IS NOT RETAINED` badge and `CPU_PCT TIER=HOURLY` meta label show correctly on top of the black area — so the chart component *did* run and *did* receive data, but the drawn content was invisible.
+
+**Root cause:** `frontend/src/components/chart/LinePath.svelte:18` built the fill color by string-concatenating a hex alpha suffix onto the caller-supplied color: `fill="{color}33"`. This works when the caller passes a hex literal (e.g. `#fd6cbb` becomes `#fd6cbb33` — valid 8-digit hex with ~20% alpha), but `chart.svelte:45` passes the default `color = 'var(--color-accent)'`. Concatenation produced the attribute string `var(--color-accent)33`, which is NOT a valid CSS color — `var()` invocations cannot have a suffix. Browsers fall back to **black** for unparseable `fill` attributes. At the 5-day zoom, the filled polygon extends under every sample point and effectively covers the chart area.
+
+**Change:** decouple alpha from color using the SVG `fill-opacity` attribute. `fill={color} fill-opacity="0.2"` is equivalent visually to the old `#NNN33` (≈0.2 alpha) and works for both hex literals AND `var()` references. One-line fix in `LinePath.svelte`.
+
+**Verification:** `npm run build` in `frontend/` succeeds clean. Visual verification pending operator restart of dashboard with rebuilt bundle.
