@@ -140,6 +140,19 @@ cli: frontend-copy resource
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
 
+# Build the Windows service host binary.
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+daemon: frontend-copy
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Building service host  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctld.exe" ./cmd/drainctld/
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctld.exe").Length / 1MB)
+    Write-Host "   drainctld.exe ($size) — v$ver" -ForegroundColor DarkGray
+
 # Build the C-shared DLL (requires CGo + MinGW)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
@@ -159,7 +172,7 @@ dll:
 # ModuleVersion is injected from scripts/version.ps1.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-psmodule: cli dll
+psmodule: cli daemon dll
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n📦 Copying PowerShell module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1"

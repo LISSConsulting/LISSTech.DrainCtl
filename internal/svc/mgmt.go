@@ -40,7 +40,7 @@ func installServiceImpl(exePath string) error {
 		ErrorControl:     mgr.ErrorNormal,
 		ServiceType:      windows.SERVICE_WIN32_OWN_PROCESS,
 		ServiceStartName: "NT SERVICE\\" + dc.ServiceName,
-	}, "service", "run") // args passed to binary: drainctl.exe service run
+	})
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}

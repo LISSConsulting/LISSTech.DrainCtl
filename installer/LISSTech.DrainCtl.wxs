@@ -151,7 +151,7 @@
             </Directory>
         </StandardDirectory>
 
-        <!-- drainctl.exe: CLI + service binary, PATH entry -->
+        <!-- drainctl.exe: CLI/client binary, PATH entry -->
         <Component Id="MainExe" Directory="BinFolder"
             Guid="d4e2f1a0-8c37-4b5e-9d6a-1f3c7e2b8a4d">
             <File Id="drainctl.exe"
@@ -164,6 +164,14 @@
                 Part="last"
                 Action="set"
                 System="yes" />
+        </Component>
+
+        <!-- drainctld.exe: Windows service host -->
+        <Component Id="ServiceExe" Directory="BinFolder"
+            Guid="b645b4fd-3d62-45aa-a1cc-00d12d7af5cf">
+            <File Id="drainctld.exe"
+                Source="..\dist\LISSTech.DrainCtl\bin\drainctld.exe"
+                KeyPath="yes" />
             <ServiceInstall Id="DrainCtlService"
                 Name="DrainCtl"
                 DisplayName="Remote Desktop Drain Mode Monitor"
@@ -171,7 +179,6 @@
                 Type="ownProcess"
                 Start="auto"
                 ErrorControl="normal"
-                Arguments="service run"
                 Account="LocalSystem" />
             <ServiceControl Id="DrainCtlServiceControl"
                 Name="DrainCtl"
@@ -301,6 +308,7 @@
     <Fragment>
         <ComponentGroup Id="AllComponents">
             <ComponentRef Id="MainExe" />
+            <ComponentRef Id="ServiceExe" />
             <ComponentRef Id="MainDll" />
             <ComponentRef Id="ETWProvider" />
             <ComponentRef Id="DefaultConfig" />
