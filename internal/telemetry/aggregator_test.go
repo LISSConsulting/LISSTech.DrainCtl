@@ -52,13 +52,17 @@ func TestHourlyAggregator_IsIdempotent(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	agg.rollHourly(ctx)
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 	avg1, min1, max1, count1, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
 	if !ok {
 		t.Fatalf("first run: bucket not materialised")
 	}
 
-	agg.rollHourly(ctx)
+	now = time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 	avg2, min2, max2, count2, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
 	if !ok {
 		t.Fatalf("second run: bucket missing")
@@ -94,7 +98,9 @@ func TestHourlyAggregator_SkipsIncompleteHours(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	agg.rollHourly(ctx)
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 
 	var count int
 	if err := db.reader.QueryRow(
@@ -114,6 +120,15 @@ func TestHourlyAggregator_SkipsIncompleteHours(t *testing.T) {
 	if count != 0 {
 		t.Errorf("metrics_hourly has %d rows despite only in-progress samples", count)
 	}
+
+	// Same applies one tier down: the in-progress 5-minute bucket holding the
+	// freshly written sample must not have been materialised either.
+	if err := db.reader.QueryRow(`SELECT COUNT(*) FROM metrics_5min`).Scan(&count); err != nil {
+		t.Fatalf("count 5min: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("metrics_5min has %d rows despite only in-progress samples", count)
+	}
 }
 
 func TestHourlyAggregator_RecordsMaintenanceRow(t *testing.T) {
@@ -121,7 +136,7 @@ func TestHourlyAggregator_RecordsMaintenanceRow(t *testing.T) {
 	ctx := context.Background()
 
 	before := time.Now().UTC().Add(-time.Millisecond)
-	agg.rollHourly(ctx)
+	agg.rollHourly(ctx, time.Now().UTC())
 	after := time.Now().UTC().Add(time.Millisecond)
 
 	var startedMs, finishedMs, durationMs, rowsAffected int64
@@ -165,7 +180,9 @@ func TestAggregator_LateSampleUpdatesBucket(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Append initial: %v", err)
 	}
-	agg.rollHourly(ctx)
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 
 	avg, min, max, count, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
 	if !ok {
@@ -181,7 +198,9 @@ func TestAggregator_LateSampleUpdatesBucket(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Append late: %v", err)
 	}
-	agg.rollHourly(ctx)
+	now = time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 
 	avg, min, max, count, ok = readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
 	if !ok {
@@ -209,7 +228,9 @@ func TestAggregator_EmitsLogsAndMaintenanceRowPerRun(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	agg.rollHourly(ctx)
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
 
 	var loggedRows int64 = -1
 	var foundLog bool
