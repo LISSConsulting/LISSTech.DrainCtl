@@ -22,6 +22,12 @@ const (
 	migrationScanBufMax = 1 << 20 // 1 MiB — legacy audit lines with perf+session fields
 )
 
+// jsonlMigrationJobName is the maintenance_jobs.name written by MigrateJSONL.
+// The dashboard widget renders whatever names it finds, so this string is the
+// stable identifier for the one-shot migration job (T051 reports it as a
+// never-overdue job by setting expected_interval_seconds=0).
+const jsonlMigrationJobName = "jsonl_migration"
+
 // MigrationResult reports the outcome of a single MigrateJSONL invocation.
 type MigrationResult struct {
 	JSONLFound bool   // audit.jsonl existed at migration time
@@ -83,15 +89,64 @@ type legacyAuditRecord struct {
 // If the rename fails, the flag stays false and the next start resumes
 // scanning from schema_meta[jsonl_migrated_line_count]; since every INSERT
 // uses ON CONFLICT DO NOTHING the retry is idempotent (FR-021).
-func MigrateJSONL(ctx context.Context, db *DB, dataDir string) (MigrationResult, error) {
+func MigrateJSONL(ctx context.Context, db *DB, dataDir string) (res MigrationResult, err error) {
 	started := time.Now()
-	res := MigrationResult{}
+	alreadyMigrated := false
+
+	// A maintenance_jobs row is upserted on every invocation. The
+	// already-migrated early exit preserves the historical success row — but
+	// backfills a row when none exists, so DBs whose migration ran against an
+	// earlier build (before this job name was instrumented) still surface in
+	// the dashboard widget on next start (T045, FR-029). Reporting failures
+	// in the backfill path are logged and do not fail startup, because the
+	// migration itself is already durably marked complete.
+	defer func() {
+		finished := time.Now()
+		if alreadyMigrated {
+			var exists int
+			if qerr := db.reader.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM maintenance_jobs WHERE name = ?`,
+				jsonlMigrationJobName).Scan(&exists); qerr != nil {
+				slog.Warn("telemetry: maintenance_jobs lookup failed",
+					"job", jsonlMigrationJobName, "error", qerr)
+				return
+			}
+			if exists > 0 {
+				return
+			}
+			if jobErr := recordJSONLMigrationJob(ctx, db, started, finished,
+				"success", "backfill: migration completed prior to dashboard instrumentation", 0); jobErr != nil {
+				slog.Warn("telemetry: maintenance_jobs backfill failed",
+					"job", jsonlMigrationJobName, "error", jobErr)
+			}
+			return
+		}
+		outcome := "success"
+		reason := ""
+		rows := res.Imported
+		switch {
+		case err != nil:
+			outcome = "failure"
+			reason = err.Error()
+		case !res.JSONLFound:
+			outcome = "skipped"
+			reason = "no audit.jsonl present"
+			rows = 0
+		case res.Skipped > 0:
+			reason = fmt.Sprintf("imported %d, skipped %d malformed lines",
+				res.Imported, res.Skipped)
+		}
+		if jobErr := recordJSONLMigrationJob(ctx, db, started, finished, outcome, reason, rows); jobErr != nil && err == nil {
+			err = fmt.Errorf("telemetry: migrate maintenance row: %w", jobErr)
+		}
+	}()
 
 	migrated, err := readSchemaMeta(ctx, db.writer, "jsonl_migrated")
 	if err != nil {
 		return res, fmt.Errorf("telemetry: migrate read marker: %w", err)
 	}
 	if migrated == "true" {
+		alreadyMigrated = true
 		return res, nil
 	}
 
@@ -326,6 +381,31 @@ func readSchemaMetaInt(ctx context.Context, db *sql.DB, key string) (int, error)
 		return n, nil
 	}
 	return 0, nil
+}
+
+// recordJSONLMigrationJob upserts the jsonl_migration maintenance_jobs row so
+// the dashboard widget reflects the most recent migration outcome (FR-029).
+// T047 introduces MaintenanceStore.UpsertJob; until that lands we write the
+// row inline, matching reconcile.go's recordDriftJob pattern.
+func recordJSONLMigrationJob(ctx context.Context, db *DB, started, finished time.Time, outcome, reason string, rowsAffected int) error {
+	startMs := started.UTC().UnixMilli()
+	finishMs := finished.UTC().UnixMilli()
+	durMs := finishMs - startMs
+	if durMs < 0 {
+		durMs = 0
+	}
+	_, err := db.writer.ExecContext(ctx,
+		`INSERT INTO maintenance_jobs (name, started_ts, finished_ts, duration_ms, outcome, reason, rows_affected)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET
+            started_ts=excluded.started_ts,
+            finished_ts=excluded.finished_ts,
+            duration_ms=excluded.duration_ms,
+            outcome=excluded.outcome,
+            reason=excluded.reason,
+            rows_affected=excluded.rows_affected`,
+		jsonlMigrationJobName, startMs, finishMs, durMs, outcome, reason, rowsAffected)
+	return err
 }
 
 // latestNewStatePerHost returns, for each host that has at least one audit
