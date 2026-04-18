@@ -3,8 +3,10 @@
 package pipe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"golang.org/x/sys/windows"
 )
 
 // PipeName is the named pipe path the service listens on.
@@ -202,7 +205,7 @@ func pipeRPC(req PipeRequest) (*PipeResponse, error) {
 		return nil, fmt.Errorf("write request: %w", err)
 	}
 
-	buf, err := io.ReadAll(io.LimitReader(conn, 4*1024*1024)) // 4MB cap
+	buf, err := readPipeResponse(io.LimitReader(conn, 4*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
@@ -216,4 +219,29 @@ func pipeRPC(req PipeRequest) (*PipeResponse, error) {
 		return nil, fmt.Errorf("service error: %s", resp.Error)
 	}
 	return &resp, nil
+}
+
+// readPipeResponse reads a full message-mode pipe response. Windows named pipes
+// can return ERROR_MORE_DATA when the current read buffer is smaller than the
+// pending message; that signals "continue reading" rather than a fatal error.
+func readPipeResponse(r io.Reader) ([]byte, error) {
+	var out bytes.Buffer
+	chunk := make([]byte, 32*1024)
+
+	for {
+		n, err := r.Read(chunk)
+		if n > 0 {
+			_, _ = out.Write(chunk[:n])
+		}
+		switch {
+		case err == nil:
+			continue
+		case errors.Is(err, io.EOF):
+			return out.Bytes(), nil
+		case errors.Is(err, windows.ERROR_MORE_DATA):
+			continue
+		default:
+			return nil, err
+		}
+	}
 }
