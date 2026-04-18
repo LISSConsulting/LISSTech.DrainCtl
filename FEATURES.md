@@ -60,3 +60,17 @@ Forward-looking list of features we're thinking about. Lives here until it eithe
 ## In-progress
 
 *(none)*
+
+---
+
+### F4. Production-shaped perf validation for 007 success criteria
+
+**Status:** `proposed`
+
+**Current state:** 007's T069 asked for a seeded perf harness measuring seven SC-defined latencies/sizes (chart render, zoom transition, audit query, JSONL migration, DB size, dashboard p95/p99, cadence simulator). Closed 2026-04-18 without a harness run — bounds were judged architectural and unit-level coverage via `TestRestart_LosesAtMostOneSamplingInterval` handles SC-004. The remaining SC numbers are *unobserved*, not *failing*.
+
+**Why:** synthetic-harness numbers don't reflect actual RDSH fleet load; the first real production deployment is the more honest measurement. But if deployment surfaces a regression, we need a repeatable way to measure it.
+
+**Scope sketch:** either a `cmd/drainctl-perf/` tool that seeds 50 hosts × 5 days + 1 year audit and runs each SC-assertion under `go test -bench` or a standalone binary, OR an `ops/` script that operates against a real installed build. Emit a CHRONICLE paragraph with the numbers. Promote to `specs/007a-perf-validation/` when a real measurement ask arrives.
+
+**Trigger to promote:** production report of slow chart render, large DB, dashboard unresponsiveness under load, or a formal compliance ask for SC numbers.
