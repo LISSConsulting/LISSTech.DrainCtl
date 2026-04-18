@@ -240,6 +240,42 @@
         load(from, to);
     }
 
+    // ── Zoom preset pills ────────────────────────────────────────────────
+    // Operators rarely know to scroll-wheel a chart — surface the common
+    // windows as clickable affordances. Tolerance when matching current span
+    // to a preset is 1 % to account for float drift from wheel zoom.
+    const PRESETS = [
+        { label: 'MIN', ms: 60 * 1000 },
+        { label: 'HOUR', ms: 60 * 60 * 1000 },
+        { label: 'DAY', ms: 24 * 60 * 60 * 1000 },
+        { label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
+        { label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
+    ];
+
+    /** @param {number} spanMs */
+    function applyPreset(spanMs) {
+        const to = new Date();
+        const from = new Date(to.getTime() - spanMs);
+        viewFrom = from;
+        viewTo = to;
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        load(from, to);
+    }
+
+    // Compute which preset matches the current viewFrom→viewTo span. Nothing
+    // matches when the user has zoomed to a custom range (returns null).
+    let activePresetMs = $derived.by(() => {
+        const span = viewTo.getTime() - viewFrom.getTime();
+        if (span <= 0) return null;
+        for (const p of PRESETS) {
+            if (Math.abs(span - p.ms) / p.ms < 0.01) return p.ms;
+        }
+        return null;
+    });
+
     let series = $derived(response?.series?.[counter] ?? null);
     let isEmpty = $derived.by(() => {
         if (!response) return true;
@@ -279,72 +315,135 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-    class="chart-wrap"
-    class:dragging={isDragging}
-    style="height:{height}px"
-    onwheel={onWheel}
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-    onpointercancel={onPointerUp}
-    ondblclick={onDoubleClick}
-    role="img"
-    aria-label="{counter} history for {host}"
->
-    {#if error}
-        <div class="chart-status err">Error: {error}</div>
-    {:else if loading && !response}
-        <div class="chart-status">Loading…</div>
-    {:else if isEmpty}
-        <!-- When the whole visible window is before oldest_available the server
-             returns an empty series even though data exists — surface retention
-             as the reason instead of the misleading "Collecting data…" state. -->
-        {#if retentionTruncated}
-            <div class="chart-status retention" title="oldest_available={response?.oldest_available}">
-                Data beyond this range is not retained
-            </div>
-        {:else}
-            <div class="chart-status">Collecting data…</div>
-        {/if}
-    {:else}
-        <LayerCake
-            data={points}
-            x="t"
-            y="v"
-            xDomain={[viewFrom.getTime(), viewTo.getTime()]}
-            yDomain={[0, null]}
-            padding={{ top: 12, right: 16, bottom: 28, left: 52 }}
-        >
-            <Svg>
-                <InteractiveTimeChart {points} {counter} {color} hideHover={isDragging} />
-            </Svg>
-        </LayerCake>
-        <div class="chart-meta">
+<div class="chart-wrap" style="height:{height}px" role="img" aria-label="{counter} history for {host}">
+    <div class="chart-controls">
+        <span class="chart-meta-inline">
             <span class="meta-counter">{counter}</span>
             <span class="meta-tier">tier={tier}</span>
+        </span>
+        <div class="zoom-pills" role="group" aria-label="Zoom preset">
+            {#each PRESETS as p}
+                <button
+                    type="button"
+                    class="btn-brutal zoom-pill"
+                    class:active={activePresetMs === p.ms}
+                    onclick={() => applyPreset(p.ms)}
+                    aria-pressed={activePresetMs === p.ms}
+                >
+                    {p.label}
+                </button>
+            {/each}
         </div>
-        <div class="chart-hint" aria-hidden="true">scroll · drag · dbl-click</div>
-        {#if retentionTruncated}
-            <div class="retention-badge" title="oldest_available={response?.oldest_available}">
-                Data beyond this range is not retained
-            </div>
+    </div>
+
+    <div
+        class="chart-canvas"
+        class:dragging={isDragging}
+        onwheel={onWheel}
+        onpointerdown={onPointerDown}
+        onpointermove={onPointerMove}
+        onpointerup={onPointerUp}
+        onpointercancel={onPointerUp}
+        ondblclick={onDoubleClick}
+    >
+        {#if error}
+            <div class="chart-status err">Error: {error}</div>
+        {:else if loading && !response}
+            <div class="chart-status">Loading…</div>
+        {:else if isEmpty}
+            <!-- When the whole visible window is before oldest_available the server
+                 returns an empty series even though data exists — surface retention
+                 as the reason instead of the misleading "Collecting data…" state. -->
+            {#if retentionTruncated}
+                <div class="chart-status retention" title="oldest_available={response?.oldest_available}">
+                    Data beyond this range is not retained
+                </div>
+            {:else}
+                <div class="chart-status">Collecting data…</div>
+            {/if}
+        {:else}
+            <LayerCake
+                data={points}
+                x="t"
+                y="v"
+                xDomain={[viewFrom.getTime(), viewTo.getTime()]}
+                yDomain={[0, null]}
+                padding={{ top: 12, right: 16, bottom: 28, left: 52 }}
+            >
+                <Svg>
+                    <InteractiveTimeChart {points} {counter} {color} hideHover={isDragging} />
+                </Svg>
+            </LayerCake>
+            <div class="chart-hint" aria-hidden="true">scroll · drag · dbl-click</div>
+            {#if retentionTruncated}
+                <div class="retention-badge" title="oldest_available={response?.oldest_available}">
+                    Data beyond this range is not retained
+                </div>
+            {/if}
         {/if}
-    {/if}
+    </div>
 </div>
 
 <style>
     .chart-wrap {
-        position: relative;
+        display: flex;
+        flex-direction: column;
         width: 100%;
         background: var(--color-surface);
         border-radius: var(--radius-default);
-        cursor: grab;
-        touch-action: none;
         user-select: none;
     }
 
-    .chart-wrap.dragging {
+    /* ── Controls bar (counter/tier meta + zoom preset pills) ── */
+    .chart-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 8px 4px;
+        flex-wrap: wrap;
+    }
+    .chart-meta-inline {
+        display: flex;
+        gap: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-muted);
+        opacity: 0.7;
+    }
+    .chart-meta-inline .meta-tier {
+        color: var(--color-subtle);
+    }
+
+    .zoom-pills {
+        display: flex;
+        gap: 4px;
+    }
+    .zoom-pill {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.6rem;
+        font-weight: 700;
+        padding: 3px 8px;
+        color: var(--color-muted);
+        letter-spacing: 0.06em;
+    }
+    .zoom-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
+    }
+
+    /* ── Canvas area (the SVG + overlays) ── */
+    .chart-canvas {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        cursor: grab;
+        touch-action: none;
+    }
+    .chart-canvas.dragging {
         cursor: grabbing;
     }
 
@@ -366,25 +465,6 @@
 
     .chart-status.retention {
         color: var(--color-amber);
-    }
-
-    .chart-meta {
-        position: absolute;
-        top: 6px;
-        right: 8px;
-        display: flex;
-        gap: 8px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.55rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--color-muted);
-        opacity: 0.7;
-        pointer-events: none;
-    }
-
-    .meta-tier {
-        color: var(--color-subtle);
     }
 
     .retention-badge {
