@@ -27,9 +27,11 @@ tags:
   - name: agent
     description: Machine-to-machine (agent registration and reporting)
   - name: history
-    description: Per-server event history
+    description: Per-server event history (deprecated — use `audit` + `metrics`)
   - name: metrics
     description: Per-host time-series metrics
+  - name: audit
+    description: Drain-mode change audit trail (time-range query, cursor pagination)
   - name: notifications
     description: Notification target testing
 
@@ -344,6 +346,8 @@ components:
 
     HistoryView:
       type: object
+      deprecated: true
+      description: "Legacy shape returned by the removed in-memory history ring. Retained for schema completeness; no endpoint returns this body after v26.107."
       properties:
         timestamp:
           type: string
@@ -374,6 +378,72 @@ components:
         performance:
           $ref: "#/components/schemas/PerfSnapshot"
           nullable: true
+
+    AuditRecord:
+      type: object
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: "Event timestamp in UTC (ms precision)."
+        host:
+          type: string
+        prev_state:
+          type: integer
+          description: "Prior drain mode enum value."
+        prev_state_label:
+          type: string
+          description: "Human-readable label for `prev_state`."
+        new_state:
+          type: integer
+          description: "New drain mode enum value."
+        new_state_label:
+          type: string
+          description: "Human-readable label for `new_state`."
+        principal:
+          type: string
+          description: "Windows principal that caused the change. Empty string for reconciliation rows (FR-001a)."
+        changed_by:
+          type: string
+          description: "Display name of the actor (may equal `principal`)."
+        reason:
+          type: string
+          description: "Optional human reason. For reconciliation rows, carries the drift summary."
+        key_modified_ts:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Registry key LastWriteTime if known; null for reconciliation rows."
+        reconciliation:
+          type: boolean
+          description: "True when the row was synthesized during startup drift reconciliation (FR-001a)."
+        before_ts:
+          type: string
+          format: date-time
+          description: "Only present when `reconciliation=true`. Timestamp of the last known audit row before the drift was observed."
+      required:
+        [ts, host, prev_state, prev_state_label, new_state, new_state_label, principal, changed_by, reason, key_modified_ts, reconciliation]
+
+    AuditResponse:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditRecord"
+          description: "Ordered by `ts DESC`."
+        next_cursor:
+          type: string
+          nullable: true
+          description: "Opaque cursor for the next page; null when no more results. Bound to the filter set — reusing a cursor with a different filter yields `invalid_cursor`."
+        tier:
+          type: string
+          const: audit
+          description: "Constant `\"audit\"`; future-proofs alongside `/metrics` which varies tier."
+        total_returned:
+          type: integer
+          description: "Equals `len(records)`."
+      required: [records, next_cursor, tier, total_returned]
 
     Trigger:
       type: string
@@ -1068,11 +1138,109 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /audit:
+    get:
+      tags: [audit]
+      summary: Query drain-mode audit trail
+      description: |
+        Time-range query over the audit table with cursor-based pagination. Replaces
+        the audit portion of the retired `/api/v1/history/{host}` endpoint.
+
+        `records` are ordered by `ts DESC`. Pagination cursors are bound to the
+        filter set (`host`, `actor`, `from`, `to`, `changes_only`); reusing a
+        cursor across different filters returns `invalid_cursor` rather than
+        silently skipping pages.
+
+        Reconciliation rows (`reconciliation=true`) are synthesized on service
+        startup when the registry drain state diverged from the last audit
+        record while the service was down (FR-001a). They carry
+        `principal=""`, `key_modified_ts=null`, and a populated `before_ts`.
+      operationId: queryAudit
+      security:
+        - session: []
+      parameters:
+        - name: from
+          in: query
+          description: "Inclusive lower bound (ISO-8601 UTC). Omit to query from the oldest retained record."
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: "Exclusive upper bound (ISO-8601 UTC). Must be > `from` when both are set."
+          schema:
+            type: string
+            format: date-time
+        - name: host
+          in: query
+          description: "Filter to one host."
+          schema:
+            type: string
+        - name: actor
+          in: query
+          description: "Filter to one principal. Matches against `changed_by` (the display actor), not `principal`."
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: "Page size (1..5000, default 500). Larger values are clamped."
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+        - name: cursor
+          in: query
+          description: "Opaque pagination cursor; pass verbatim from a previous response's `next_cursor`."
+          schema:
+            type: string
+        - name: changes_only
+          in: query
+          description: "When true (default, matches CLI), drop no-op records where `prev_state == new_state`."
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+            default: "true"
+      responses:
+        "200":
+          description: Audit page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditResponse"
+        "400":
+          description: "`invalid_range` (unparseable timestamps or `to` ≤ `from`) or `invalid_cursor` (malformed / filter-bound mismatch)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: "`storage_error` — DB open or query failure."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /history/{host}:
     get:
       tags: [history]
-      summary: Get server history
-      description: Returns the last N check results for a server, newest first.
+      summary: (Removed) Get server history
+      deprecated: true
+      description: |
+        **Deprecated.** The in-memory history ring was removed in v26.107. This
+        route now returns `410 Gone` with a body pointing callers to the
+        replacement endpoints and is retained for one release to surface the
+        migration message; it will be deleted in a follow-up.
+
+        Use [`GET /api/v1/metrics/{host}`](#/metrics/getMetrics) for time-series
+        counters and [`GET /api/v1/audit`](#/audit/queryAudit) for drain-mode
+        change history.
+      x-deprecated: true
+      x-replaced-by:
+        - /api/v1/metrics/{host}
+        - /api/v1/audit
       operationId: getHistory
       security:
         - session: []
@@ -1084,34 +1252,20 @@ paths:
             type: string
         - name: limit
           in: query
-          description: "Number of records to return (1–100, default 20)."
+          description: "(Ignored — route always returns 410 Gone.)"
           schema:
             type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
         - name: changes_only
           in: query
-          description: "Set to `1` or `true` to return only state transitions."
+          description: "(Ignored — route always returns 410 Gone.)"
           schema:
             type: string
-            enum: ["0", "1", "true", "false"]
       responses:
-        "200":
-          description: History records.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/HistoryView"
-        "400":
-          description: Invalid limit parameter.
+        "410":
+          description: |
+            Gone. Body carries `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`
+            to direct clients to the replacement endpoints.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "401":
-          description: Not authenticated.
-        "404":
-          description: Server not found.
