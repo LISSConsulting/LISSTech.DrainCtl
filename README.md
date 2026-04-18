@@ -12,7 +12,7 @@
 [![Version](https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?label=Version&color=green)](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
-Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, maintains a 90-day audit trail, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
+Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, persists audit events and performance metrics to a local SQLite store, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
 
 ---
 
@@ -43,7 +43,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | Feature | Description |
 |---------|-------------|
 | 🔔 **Real-time detection** | `RegNotifyChangeKeyValue` fires the instant drain mode flips -- zero polling delay |
-| 📋 **90-day audit trail** | Every state observation and transition, persisted as JSONL with automatic rotation |
+| 📋 **Durable telemetry store** | Drain events, session counts, and performance samples persisted to a local SQLite database with WAL mode, per-tier retention, and hourly/5-minute rollups |
 | 🕵️ **Change attribution** | `EvtSubscribe` on Event ID 4657 -- knows exactly *who* ran `chglogon /drain` |
 | 🖥️ **Windows Service** | Runs as `DrainCtl` with auto-start; poll ticker as safety net in case events are lost |
 | ⚡ **Named pipe IPC** | CLI and PowerShell get answers in <1 ms via `\\.\pipe\drainctl` -- no file I/O |
@@ -68,7 +68,7 @@ graph TB
         POLL["Poll Ticker 60s"] -->|"safety net"| CHECK
         CFG["config.json Watcher (RDCW+poll)"] -->|"config changed"| RELOAD["ReloadConfig()"]
         CHECK --> SESS["WTS Session Enum"]
-        SESS --> STORE["MemAuditStore"]
+        SESS --> STORE["SQLite Telemetry Store<br/>(audit + metrics + maintenance)"]
         CHECK --> PERF["PDH Counters"]
         CHECK --> STORE
         CHECK --> ELOG["Event Log"]
@@ -77,6 +77,8 @@ graph TB
         NOTIFY --> NTFY["ntfy 1..M"]
         NOTIFY --> EMAIL["Email (SMTP)"]
         STORE --> PIPE["Named Pipe"]
+        AGG["Aggregator<br/>(5-min + hourly rollups)"] --> STORE
+        RET["Retention Worker<br/>(per-tier purge + WAL checkpoint)"] --> STORE
     end
 
     CLI["drainctl.exe"] -->|"pipe"| PIPE
@@ -201,7 +203,7 @@ drainctl notify test        Send a test notification to all targets
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--db` | `%ProgramData%\...\audit.jsonl` | Audit trail path |
+| `--db` | `%ProgramData%\...\audit.jsonl` | Legacy audit-path flag kept for backwards compatibility; the CLI uses the file's **parent directory** as the telemetry data dir and always opens `drainctl.db` inside it (read-only — the service owns the writer) |
 | `--format` | `plain` (check) / `table` (history) | Output: `plain`, `table`, `csv`, `json` |
 | `--quiet` | `false` | Suppress intermediate log lines |
 
@@ -210,7 +212,7 @@ drainctl notify test        Send a test notification to all targets
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--grace` | `60` | Minutes drain mode must persist before alerting |
-| `--retention` | `90` | Days to retain audit records (max: 365) |
+| `--retention` | `90` | Legacy flag; retention is configured in `config.json` (`retention.metrics_days`, `retention.audit_days`) when the service is running |
 
 ### History Flags
 
@@ -289,8 +291,8 @@ The `DrainCtl` Windows Service provides:
 - **Change attribution** via `EvtSubscribe` on Security Event ID 4657 (~200ms)
 - **Safety-net polling** every 5 minutes (configurable)
 - **Session tracking** via `WTSEnumerateSessionsW` — active, disconnected, and total counts
-- **Exclusive audit file** ownership — no corruption from concurrent access
-- **In-memory store** — CLI/PS queries are instant (named pipe, no file I/O)
+- **SQLite telemetry store** (`drainctl.db`, WAL mode) — single writer owned by the service; CLI opens it read-only
+- **Named-pipe IPC** — CLI/PS status queries get instant answers without touching the DB
 - **Event Log entries** — warnings for grace, errors for alerts, info for transitions
 - **Auto-discovery** via DNS SRV (`_drainctl._tcp.<domain>`) — agents find the dashboard with zero per-machine config
 - **Auto-registration** with dashboard on startup (via SRV discovery or explicit `dashboard.url`)
@@ -446,8 +448,15 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 {
   "grace_period_minutes": 60,
   "retention_days": 90,
+  "retention": {
+    "metrics_days": 30,
+    "audit_days": 365
+  },
+  "telemetry": {
+    "aggregator_interval_seconds": 60,
+    "retention_interval_minutes": 15
+  },
   "poll_interval_seconds": 300,
-  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
   "session_warning_threshold": 80,
   "performance": {
     "enabled": true,
@@ -493,9 +502,12 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `grace_period_minutes` | int | `60` | Minutes before alerting on drain mode |
-| `retention_days` | int | `90` | Days to keep audit records (1–365) |
+| `retention_days` | int | `90` | Legacy audit-retention knob preserved for pre-007 installs; new fields below supersede it |
+| `retention.metrics_days` | int | `30` | Days to keep rolled-up **hourly** metric samples, 1–365. Raw and 5-min tiers have fixed retention (25 h and 6 d respectively) — only the hourly tier is operator-tunable |
+| `retention.audit_days` | int | `365` | Days to keep audit records, 1–3650 |
+| `telemetry.aggregator_interval_seconds` | int | `60` | Tick interval for 5-min and hourly rollup aggregators |
+| `telemetry.retention_interval_minutes` | int | `15` | Cadence of the retention + WAL-checkpoint worker |
 | `poll_interval_seconds` | int | `300` | Seconds between safety-net polls |
-| `audit_path` | string | `%ProgramData%\...\audit.jsonl` | Audit file path |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled) |
 | `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration (or leave empty for SRV discovery) |
 | `dashboard.tls_cert` | string | *(empty)* | Path to PEM certificate file (auto-generated if empty) |
@@ -526,11 +538,34 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 
 ### Retention & Storage
 
-Telemetry lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.db` (SQLite, WAL mode). A background retention worker deletes rows older than each tier's configured window and then issues `PRAGMA incremental_vacuum` to reclaim freed pages.
+Telemetry lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.db` (SQLite, WAL mode). The service is the single writer; the CLI opens the file read-only. Retention is split per record class:
+
+- **Raw metric samples** — fixed **25 hours** (not operator-tunable; sized to back zoom-to-raw on the dashboard).
+- **5-minute rollups** — fixed **6 days** (backs mid-range zoom; not operator-tunable).
+- `retention.metrics_days` (default `30`, range `1..365`) — hourly rollups, the long-horizon tier operators configure.
+- `retention.audit_days` (default `365`, range `1..3650`) — drain-mode audit events (including reconciliation rows).
+
+A background retention worker runs every `telemetry.retention_interval_minutes` (default `15`), deletes expired rows in chunks, then issues `PRAGMA incremental_vacuum`. The same worker owns a dedicated WAL-checkpoint connection — `PASSIVE` on every pass, escalating to `TRUNCATE` when the WAL file exceeds 16 MB.
 
 **The database file does NOT shrink on disk after a retention purge.** `incremental_vacuum` returns freed pages to SQLite's internal free-list; subsequent inserts reuse those pages, so the file stays at its high-water mark. A stable `drainctl.db` size after a large purge is expected — not a sign that retention is broken. To verify retention is actually running, check the `maintenance_jobs` table or the dashboard maintenance widget.
 
 Full compaction (shrinking the file back to its minimal size) requires a `VACUUM INTO` sweep and is a planned follow-up. Until then, plan capacity against the high-water mark a long retention window can reach, not against steady-state row count.
+
+#### Upgrading from the JSONL store
+
+Installs that previously wrote `audit.jsonl` migrate automatically on first service start after the 007 release: records are imported into the SQLite audit table (idempotent — duplicates are ignored), and the old file is renamed to `audit.jsonl.bak.<UTC-timestamp>`. No operator action is required. Migration progress and outcome are recorded in the `maintenance_jobs` table under `name="jsonl_migration"`.
+
+### Dashboard API
+
+The service exposes an authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener. All endpoints return JSON. Full request/response schemas live in `internal/dashboard/openapi.yaml`.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/metrics/{host}` | Per-host time-series of counters (`cpu_pct`, `mem_avail_mb`, …) at raw / 5-min / hourly resolution; `resolution=auto` picks a tier from the requested window |
+| `GET /api/v1/audit` | Time-range query over drain-mode audit events with `host` / `actor` / `changes_only` filters and cursor pagination |
+| `GET /api/v1/maintenance/status` | Last-run timestamp, duration, outcome, and `overdue` flag for every background job (aggregator tiers, retention, jsonl_migration, drift_reconciliation) |
+
+The legacy `GET /api/v1/history/{host}` endpoint was removed in the 007 release and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`. Consumers should split their calls: metrics to `/api/v1/metrics/{host}`, audit events to `/api/v1/audit`.
 
 ---
 
@@ -593,9 +628,9 @@ LISSTech.DrainCtl/
 ├── drainctl.go              # Package root: version, defaults
 ├── registry.go              # ReadDrainMode(), DrainMode, RegistryState
 ├── eventlog.go              # QueryRegistryChangeUser() (wevtutil fallback)
-├── audit.go                 # AuditRecord, AuditStore (file-based)
+├── audit.go                 # Public AuditRecord type (marshaled over DLL/CLI)
 ├── check.go                 # Check() — core monitoring logic
-├── history.go               # GetHistory() — audit trail query
+├── history.go               # GetHistory() — reads audit trail from SQLite
 ├── audit_setup.go           # RunAuditSetup() — auditpol + SACL
 ├── format.go                # Output formatting (plain/table/csv/json)
 ├── log.go                   # LogFunc, DefaultLogger, DiscardLogger
@@ -605,7 +640,8 @@ LISSTech.DrainCtl/
 ├── internal/
 │   ├── svc/                 # Windows Service handler + install/uninstall
 │   ├── pipe/                # Named pipe IPC server + client
-│   ├── store/               # MemAuditStore (in-memory + JSONL flush)
+│   ├── telemetry/           # SQLite store: db, schema, audit, metrics, aggregator, retention, maintenance, reconcile, migrate_jsonl
+│   ├── dashboard/           # HTTPS listener + JSON API (metrics, audit, maintenance)
 │   ├── perfmon/             # PDH performance counter collection
 │   └── watcher/             # RegNotifyChangeKeyValue + EvtSubscribe
 ├── cmd/
