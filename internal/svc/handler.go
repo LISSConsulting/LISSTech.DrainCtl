@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -281,6 +282,25 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 	defer func() { _ = auditStore.Close() }()
 
+	// Shutdown is bounded at 10s via waitTelemetryWorkers so a stuck worker
+	// cannot stall svc.Stop past the SCM's wait hint.
+	aggregator := telemetry.NewAggregator(telDB, fullCfg.Telemetry.AggregatorIntervalSeconds)
+	retentionWorker := telemetry.NewRetention(telDB, fullCfg.Telemetry.RetentionIntervalMinutes, newRetentionProvider(fullCfg))
+
+	var telemetryWG sync.WaitGroup
+	telemetryWG.Add(2)
+	go func() {
+		defer telemetryWG.Done()
+		aggregator.Run(ctx)
+	}()
+	go func() {
+		defer telemetryWG.Done()
+		retentionWorker.Run(ctx)
+	}()
+	slog.Info("telemetry=workers_started",
+		"aggregator_interval_seconds", fullCfg.Telemetry.AggregatorIntervalSeconds,
+		"retention_interval_minutes", fullCfg.Telemetry.RetentionIntervalMinutes)
+
 	// Start registry watcher.
 	regCh, err := watcher.WatchDrainModeKey(ctx)
 	if err != nil {
@@ -421,6 +441,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("service=stopping")
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
+				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
 				_ = st.Flush()
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
@@ -687,6 +708,48 @@ func RunService() error {
 	fileH := logging.NewFileHandler(fw, fileLevel)
 	slog.SetDefault(slog.New(logging.NewMultiHandler(fileH, etwH)))
 	return svc.Run(dc.ServiceName, &drainService{etw: etwH, fileLevel: fileLevel, etwLevel: etwLevel})
+}
+
+// newRetentionProvider returns a closure the retention worker calls at the
+// start of every pass to fetch current per-tier retention windows. Reloading
+// config from disk keeps the worker honoring live edits to config.json
+// without a separate hot-reload path; if the reload fails the startup values
+// are reused so a transient disk error cannot widen retention.
+func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings {
+	startupMetrics := startup.Retention.MetricsDays
+	startupAudit := startup.Retention.AuditDays
+	return func() telemetry.RetentionSettings {
+		c, err := dc.LoadConfig()
+		if err != nil {
+			slog.Warn("telemetry: retention provider load config failed, using startup values",
+				"error", err, "metrics_days", startupMetrics, "audit_days", startupAudit)
+			return telemetry.RetentionSettings{
+				MetricsDays: startupMetrics,
+				AuditDays:   startupAudit,
+			}
+		}
+		return telemetry.RetentionSettings{
+			MetricsDays: c.Retention.MetricsDays,
+			AuditDays:   c.Retention.AuditDays,
+		}
+	}
+}
+
+// waitTelemetryWorkers blocks until wg signals done or timeout elapses. A log
+// warning is emitted when the bound is exceeded so operators see a stuck
+// worker rather than a silent service-stop hang.
+func waitTelemetryWorkers(wg *sync.WaitGroup, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("telemetry: workers did not exit within shutdown budget",
+			"timeout", timeout, slog.Int("event_id", EvtGenericWarning))
+	}
 }
 
 // isLocalDashboard returns true if the dashboard URL points to this machine.
