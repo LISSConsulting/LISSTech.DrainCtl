@@ -122,7 +122,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 - [x] T038 [US3] Add debounced (150 ms) zoom/pan handlers in `frontend/src/lib/chart.svelte` that call `fetchMetrics` with the new visible window and `resolution=auto`; cancel in-flight requests when a newer zoom arrives
 - [x] T039 [US3] Render a "Data beyond this range is not retained" badge when `oldest_available > from` in the chart component
 - [x] T040 [P] [US3] Unit test: `internal/telemetry/aggregator_test.go` — `TestFiveMinuteAggregator_IsIdempotent`, `TestFiveMinuteAggregator_BucketBoundaries`, `TestHourlyFromFiveMin_Matches_HourlyFromRaw`, `TestAggregator_MissedMinuteZeroTickStillMaterializes` (simulate ticks at 00:59 and 01:59; assert the 01:00 bucket is materialized on the 01:59 pass), `TestAggregator_LateSampleAfterWatermarkIsIgnored` (samples arriving after watermark closes do NOT overwrite the bucket), `TestAggregator_DSTCrossoverBuckets` (verify UTC-truncation keeps bucket boundaries correct across DST transitions in a non-UTC local time zone)
-- [ ] T041 [P] [US3] HTTP test: `internal/dashboard/server_test.go` — `TestMetricsHandler_ResolutionAutoMatrix` (table-driven: (window, expected_tier) for every decision boundary), `TestMetricsHandler_ExplicitResolutionOverrides`, `TestMetricsHandler_DegradesWhenRawPurged`
+- [x] T041 [P] [US3] HTTP test: `internal/dashboard/server_test.go` — `TestMetricsHandler_ResolutionAutoMatrix` (table-driven: (window, expected_tier) for every decision boundary), `TestMetricsHandler_ExplicitResolutionOverrides`, `TestMetricsHandler_DegradesWhenRawPurged`
 
 **Checkpoint**: Zoom works smoothly across tiers. Chart remains responsive during drag. Server is the single source of tier-selection truth.
 
