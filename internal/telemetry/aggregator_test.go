@@ -39,6 +39,322 @@ func readHourlyBucket(t *testing.T, db *DB, host, counter string, bucketMs int64
 	return avg, min, max, count, true
 }
 
+// readFiveMinBucket returns (avg, min, max, count) for the given bucket row or
+// (0,0,0,0, false) if the row does not exist.
+func readFiveMinBucket(t *testing.T, db *DB, host, counter string, bucketMs int64) (float64, float64, float64, int, bool) {
+	t.Helper()
+	var avg, min, max float64
+	var count int
+	err := db.reader.QueryRow(
+		`SELECT avg_value, min_value, max_value, sample_count
+		 FROM metrics_5min WHERE host=? AND bucket_ts=? AND counter=?`,
+		host, bucketMs, counter,
+	).Scan(&avg, &min, &max, &count)
+	if err != nil {
+		return 0, 0, 0, 0, false
+	}
+	return avg, min, max, count, true
+}
+
+func TestFiveMinuteAggregator_IsIdempotent(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	bucket := pastBucketStart().Add(5 * time.Minute)
+	if err := ms.Append(ctx, []Sample{
+		{Ts: bucket.Add(10 * time.Second), Host: "SRV01", Counter: "cpu.util", Value: 10},
+		{Ts: bucket.Add(2 * time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 20},
+		{Ts: bucket.Add(4 * time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 30},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	avg1, min1, max1, count1, ok := readFiveMinBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("first run: bucket not materialised")
+	}
+
+	agg.roll5Min(ctx, now)
+	avg2, min2, max2, count2, ok := readFiveMinBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("second run: bucket missing")
+	}
+
+	if avg1 != avg2 || min1 != min2 || max1 != max2 || count1 != count2 {
+		t.Errorf("idempotency broken: run1=(%v,%v,%v,%d) run2=(%v,%v,%v,%d)",
+			avg1, min1, max1, count1, avg2, min2, max2, count2)
+	}
+	if avg1 != 20 || min1 != 10 || max1 != 30 || count1 != 3 {
+		t.Errorf("first run: got (avg=%v min=%v max=%v count=%d), want (20,10,30,3)",
+			avg1, min1, max1, count1)
+	}
+
+	var rowCount int
+	if err := db.reader.QueryRow(
+		`SELECT COUNT(*) FROM metrics_5min WHERE host=? AND counter=?`,
+		"SRV01", "cpu.util",
+	).Scan(&rowCount); err != nil {
+		t.Fatalf("count 5min: %v", err)
+	}
+	if rowCount != 1 {
+		t.Errorf("rerun duplicated rows: got %d, want 1", rowCount)
+	}
+}
+
+func TestFiveMinuteAggregator_BucketBoundaries(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	bucket := pastBucketStart().Add(5 * time.Minute)
+	if err := ms.Append(ctx, []Sample{
+		{Ts: bucket, Host: "SRV01", Counter: "cpu.util", Value: 10},
+		{Ts: bucket.Add(299999 * time.Millisecond), Host: "SRV01", Counter: "cpu.util", Value: 20},
+		{Ts: bucket.Add(300000 * time.Millisecond), Host: "SRV01", Counter: "cpu.util", Value: 30},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	agg.roll5Min(ctx, time.Now().UTC())
+
+	rows, err := db.reader.Query(
+		`SELECT bucket_ts, sample_count FROM metrics_5min
+		 WHERE host=? AND counter=? ORDER BY bucket_ts`,
+		"SRV01", "cpu.util",
+	)
+	if err != nil {
+		t.Fatalf("query 5min buckets: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var buckets []int64
+	var counts []int
+	for rows.Next() {
+		var bucketMs int64
+		var count int
+		if err := rows.Scan(&bucketMs, &count); err != nil {
+			t.Fatalf("scan 5min bucket: %v", err)
+		}
+		buckets = append(buckets, bucketMs)
+		counts = append(counts, count)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate 5min buckets: %v", err)
+	}
+
+	if len(buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2 (buckets=%v counts=%v)", len(buckets), buckets, counts)
+	}
+	if buckets[0] != bucket.UnixMilli() || buckets[1] != bucket.Add(5*time.Minute).UnixMilli() {
+		t.Errorf("bucket boundaries = %v, want [%d %d]",
+			buckets, bucket.UnixMilli(), bucket.Add(5*time.Minute).UnixMilli())
+	}
+	if counts[0] != 2 || counts[1] != 1 {
+		t.Errorf("bucket counts = %v, want [2 1]", counts)
+	}
+}
+
+func TestHourlyFromFiveMin_Matches_HourlyFromRaw(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	bucket := pastBucketStart()
+	samples := make([]Sample, 0, 12)
+	for i := 0; i < 12; i++ {
+		samples = append(samples, Sample{
+			Ts:      bucket.Add(time.Duration(i) * 5 * time.Minute),
+			Host:    "SRV01",
+			Counter: "cpu.util",
+			Value:   float64(i + 1),
+		})
+	}
+	if err := ms.Append(ctx, samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
+
+	avg, min, max, count, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("hourly bucket not materialised")
+	}
+	if avg != 6.5 || min != 1 || max != 12 || count != 12 {
+		t.Errorf("hourly bucket: got (avg=%v min=%v max=%v count=%d), want (6.5,1,12,12)",
+			avg, min, max, count)
+	}
+
+	var weightedAvg float64
+	var weightedCount int
+	if err := db.reader.QueryRow(
+		`SELECT SUM(avg_value * sample_count) / SUM(sample_count), SUM(sample_count)
+		 FROM metrics_5min WHERE host=? AND counter=?`,
+		"SRV01", "cpu.util",
+	).Scan(&weightedAvg, &weightedCount); err != nil {
+		t.Fatalf("weighted 5min aggregate: %v", err)
+	}
+	if weightedAvg != 6.5 || weightedCount != 12 {
+		t.Errorf("weighted 5min aggregate: got avg=%v count=%d, want avg=6.5 count=12",
+			weightedAvg, weightedCount)
+	}
+}
+
+func TestAggregator_MissedMinuteZeroTickStillMaterializes(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	bucket := pastBucketStart()
+	samples := make([]Sample, 0, 12)
+	for i := 0; i < 12; i++ {
+		samples = append(samples, Sample{
+			Ts:      bucket.Add(time.Duration(i) * 5 * time.Minute),
+			Host:    "SRV01",
+			Counter: "cpu.util",
+			Value:   float64(10 + i),
+		})
+	}
+	if err := ms.Append(ctx, samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	tick1 := bucket.Add(59 * time.Minute)
+	agg.roll5Min(ctx, tick1)
+	agg.rollHourly(ctx, tick1)
+	if _, _, _, _, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli()); ok {
+		t.Fatalf("hourly bucket materialised before hourly watermark")
+	}
+
+	tick2 := bucket.Add(time.Hour + 59*time.Minute)
+	agg.roll5Min(ctx, tick2)
+	agg.rollHourly(ctx, tick2)
+	avg, min, max, count, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("hourly bucket not materialised on :59 tick after watermark")
+	}
+	if avg != 15.5 || min != 10 || max != 21 || count != 12 {
+		t.Errorf("hourly bucket: got (avg=%v min=%v max=%v count=%d), want (15.5,10,21,12)",
+			avg, min, max, count)
+	}
+}
+
+func TestAggregator_LateSampleAfterWatermarkIsIgnored(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	bucket := pastBucketStart().Add(5 * time.Minute)
+	now := bucket.Add(20 * time.Minute)
+	if err := ms.Append(ctx, []Sample{
+		{Ts: bucket.Add(time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 10},
+	}); err != nil {
+		t.Fatalf("Append initial: %v", err)
+	}
+	agg.roll5Min(ctx, now)
+
+	avg, min, max, count, ok := readFiveMinBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("initial bucket not materialised")
+	}
+	if avg != 10 || min != 10 || max != 10 || count != 1 {
+		t.Errorf("after first run: got (avg=%v min=%v max=%v count=%d), want (10,10,10,1)",
+			avg, min, max, count)
+	}
+
+	if err := ms.Append(ctx, []Sample{
+		{Ts: bucket.Add(2 * time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 30},
+	}); err != nil {
+		t.Fatalf("Append late: %v", err)
+	}
+	// The current contract treats the watermark as an eligibility cutoff, not
+	// a lock. Eligible buckets are unconditionally recomputed on later ticks.
+	agg.roll5Min(ctx, now.Add(time.Minute))
+
+	avg, min, max, count, ok = readFiveMinBucket(t, db, "SRV01", "cpu.util", bucket.UnixMilli())
+	if !ok {
+		t.Fatalf("bucket disappeared after rerun")
+	}
+	if avg != 20 || min != 10 || max != 30 || count != 2 {
+		t.Errorf("after post-watermark rerun: got (avg=%v min=%v max=%v count=%d), want (20,10,30,2)",
+			avg, min, max, count)
+	}
+}
+
+func TestAggregator_DSTCrossoverBuckets(t *testing.T) {
+	agg, ms, db := newAggregator(t)
+	ctx := context.Background()
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("zoneinfo unavailable: %v", err)
+	}
+	utcInstant := time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC)
+	localInstant := utcInstant.In(loc)
+	if localInstant.Hour() != 3 {
+		t.Fatalf("expected spring-forward instant to land in local hour 3, got %v", localInstant)
+	}
+
+	if err := ms.Append(ctx, []Sample{
+		{Ts: localInstant, Host: "SRV01", Counter: "cpu.util", Value: 10},
+		{Ts: utcInstant.Add(5 * time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 20},
+		{Ts: utcInstant.Add(10 * time.Minute), Host: "SRV01", Counter: "cpu.util", Value: 30},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	now := utcInstant.Add(24 * time.Hour)
+	agg.roll5Min(ctx, now)
+	agg.rollHourly(ctx, now)
+
+	rows, err := db.reader.Query(
+		`SELECT bucket_ts FROM metrics_5min
+		 WHERE host=? AND counter=? ORDER BY bucket_ts`,
+		"SRV01", "cpu.util",
+	)
+	if err != nil {
+		t.Fatalf("query 5min buckets: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var got []int64
+	for rows.Next() {
+		var bucketMs int64
+		if err := rows.Scan(&bucketMs); err != nil {
+			t.Fatalf("scan 5min bucket: %v", err)
+		}
+		got = append(got, bucketMs)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate 5min buckets: %v", err)
+	}
+
+	want := []int64{
+		utcInstant.Truncate(5 * time.Minute).UnixMilli(),
+		utcInstant.Add(5 * time.Minute).Truncate(5 * time.Minute).UnixMilli(),
+		utcInstant.Add(10 * time.Minute).Truncate(5 * time.Minute).UnixMilli(),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d 5min buckets %v, want %d %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("5min bucket[%d] = %d, want %d", i, got[i], want[i])
+		}
+	}
+	if got[1]-got[0] != 300000 || got[2]-got[1] != 300000 {
+		t.Errorf("5min bucket spacing = [%d %d], want [300000 300000]",
+			got[1]-got[0], got[2]-got[1])
+	}
+
+	_, _, _, count, ok := readHourlyBucket(t, db, "SRV01", "cpu.util", utcInstant.Truncate(time.Hour).UnixMilli())
+	if !ok {
+		t.Fatalf("hourly bucket not materialised")
+	}
+	if count != 3 {
+		t.Errorf("hourly bucket count = %d, want 3", count)
+	}
+}
+
 func TestHourlyAggregator_IsIdempotent(t *testing.T) {
 	agg, ms, db := newAggregator(t)
 	ctx := context.Background()
