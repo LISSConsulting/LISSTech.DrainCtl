@@ -31,68 +31,16 @@ header recipe:
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-# Bump patch version (CalVer YY.DOY.patch) across all 8 files + recompile .syso
-# Usage: just bump       (bump by 1)
-#        just bump 5     (bump by 5)
+# Print the version that the next build will embed.
+# Derived from the HEAD commit's date and same-day commit count by
+# scripts/version.ps1; no files are modified.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-bump n="1": (header "bump")
-    $exePath = "{{bin_dir}}/drainctl.exe"
-    $bumpBy = [int]"{{n}}"
-
-    # Determine current version from source
-    $src = Get-Content "drainctl.go" -Raw
-    if ($src -match 'Version\s*=\s*"([^"]+)"') {
-        $current = $Matches[1]
-    } else {
-        Write-Error "Could not read version from drainctl.go"
-        exit 1
-    }
-
-    # Parse and bump patch
-    $parts = $current -split '\.'
-    $yy = (Get-Date).Year % 100
-    $doy = (Get-Date).DayOfYear
-    if ([int]$parts[0] -eq $yy -and [int]$parts[1] -eq $doy) {
-        $patch = [int]$parts[2] + $bumpBy
-    } else {
-        $patch = 0 + ($bumpBy - 1)
-    }
-    $new = "$yy.$doy.$patch"
-
-    Write-Host "`n🔖 Bumping version: $current → $new" -ForegroundColor Cyan
-
-    # Update all version-bearing files
-    $files = @(
-        "drainctl.go",
-        "installer/LISSTech.DrainCtl.wxs",
-        "installer/LISSTech.DrainCtl.wixproj",
-        "powershell/LISSTech.DrainCtl.psd1",
-        "README.md",
-        "CLAUDE.md",
-        "docs/index.html"
-    )
-    foreach ($f in $files) {
-        (Get-Content $f -Raw) -replace [regex]::Escape($current), $new | Set-Content $f -NoNewline
-        Write-Host "   $f" -ForegroundColor DarkGray
-    }
-
-    # RC file has comma-separated version too
-    $rc = Get-Content "cmd/drainctl/drainctl.rc" -Raw
-    $oldComma = $current -replace '\.', ','
-    $newComma = $new -replace '\.', ','
-    $rc = $rc -replace [regex]::Escape("$oldComma,0"), "$newComma,0"
-    $rc = $rc -replace [regex]::Escape($current), $new
-    $rc | Set-Content "cmd/drainctl/drainctl.rc" -NoNewline
-    Write-Host "   cmd/drainctl/drainctl.rc" -ForegroundColor DarkGray
-
-    # Recompile .syso
-    & windres cmd/drainctl/drainctl.rc -o cmd/drainctl/drainctl.syso
-    if ($LASTEXITCODE -ne 0) { Write-Error "windres failed"; exit $LASTEXITCODE }
-    Write-Host "   cmd/drainctl/drainctl.syso (recompiled)" -ForegroundColor DarkGray
-
-    Write-Host "   ✅ Version is now $new" -ForegroundColor Green
-    Write-Host ""
+version:
+    $clean = & "{{justfile_directory()}}/scripts/version.ps1"
+    $full  = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    Write-Host "   clean: $clean" -ForegroundColor DarkGray
+    Write-Host "   full:  $full"  -ForegroundColor DarkGray
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
