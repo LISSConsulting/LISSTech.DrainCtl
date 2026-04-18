@@ -398,6 +398,33 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 	defer func() { _ = auditStore.Close() }()
 
+	// Drift reconciliation (T025, FR-001a): detect drain-state divergence
+	// that happened while the service was down and emit exactly one
+	// reconciliation audit row per host when needed. MUST run AFTER
+	// MigrateJSONL AND NewAuditStore (so LatestByHost sees imported
+	// history) and BEFORE live ingest starts (aggregator/retention/
+	// svcRunCheck all below). A registry-read failure or reconcile error
+	// is not fatal — the service proceeds in degraded mode and the next
+	// live tick will catch up.
+	if regState, regErr := dc.ReadDrainMode(); regErr != nil {
+		slog.Warn("drift_reconciliation=skipped reason=registry_read_failed", "error", regErr)
+	} else {
+		probe := telemetry.DrainProbe{
+			Host:        regState.Host,
+			ModeValue:   int(regState.Mode),
+			KeyModified: regState.KeyModified,
+		}
+		reconcileStart := time.Now()
+		if rerr := telemetry.Reconcile(ctx, telDB, auditStore, probe, reconcileStart); rerr != nil {
+			slog.Warn("drift_reconciliation=failed", "error", rerr)
+		} else {
+			slog.Info("drift_reconciliation=complete",
+				"host", regState.Host,
+				"observed_mode", regState.Mode,
+				"duration", time.Since(reconcileStart))
+		}
+	}
+
 	// Shutdown is bounded at 10s via waitTelemetryWorkers so a stuck worker
 	// cannot stall svc.Stop past the SCM's wait hint.
 	aggregator := telemetry.NewAggregator(telDB, fullCfg.Telemetry.AggregatorIntervalSeconds)
