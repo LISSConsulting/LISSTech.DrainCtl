@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2872,5 +2873,491 @@ func TestMetricsHandler_UnknownHostReturns404(t *testing.T) {
 	}
 	if body["error"] != "unknown_host" {
 		t.Errorf("error = %q, want unknown_host", body["error"])
+	}
+}
+
+// ── handleAudit ──────────────────────────────────────────────────────────────
+
+// newTestServerWithAudit wires a DashboardServer to a real on-disk telemetry
+// store with an AuditStore attached. The returned cleanup closes the store and
+// the underlying DB; t.TempDir() reaps the files themselves.
+func newTestServerWithAudit(t *testing.T) (*DashboardServer, *telemetry.AuditStore, func()) {
+	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	as, err := telemetry.NewAuditStore(context.Background(), db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	ds := &DashboardServer{
+		state:  NewServerState(t.TempDir()),
+		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
+		broker: NewBroker(),
+		as:     as,
+	}
+	return ds, as, func() {
+		_ = as.Close()
+		_ = db.Close()
+	}
+}
+
+func TestAuditHandler_ContractShape(t *testing.T) {
+	ds, as, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	ts := time.Now().UTC().Truncate(time.Millisecond)
+	keyMod := ts.Add(-time.Second)
+	beforeTs := ts.Add(-time.Hour)
+
+	// Row 1: a normal state change (reconciliation=false, before_ts absent).
+	normal := telemetry.AuditRecord{
+		Ts: ts, Host: "SRV01", PrevState: 0, NewState: 1,
+		Principal: "DOMAIN\\alice", ChangedBy: "alice",
+		KeyModifiedTs: &keyMod,
+	}
+	// Row 2: a reconciliation/drift row (reconciliation=true, before_ts present).
+	drift := telemetry.AuditRecord{
+		Ts: ts.Add(-30 * time.Minute), Host: "SRV01", PrevState: 1, NewState: 0,
+		Reason:         "service-downtime drift: last-known DrainAll, observed Off",
+		Reconciliation: true, BeforeTs: &beforeTs,
+	}
+	if err := as.Append(ctx, normal); err != nil {
+		t.Fatalf("Append normal: %v", err)
+	}
+	if err := as.Append(ctx, drift); err != nil {
+		t.Fatalf("Append drift: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	ds.handleAudit(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var resp struct {
+		Records []struct {
+			Ts             time.Time  `json:"ts"`
+			Host           string     `json:"host"`
+			PrevState      int        `json:"prev_state"`
+			PrevStateLabel string     `json:"prev_state_label"`
+			NewState       int        `json:"new_state"`
+			NewStateLabel  string     `json:"new_state_label"`
+			Principal      string     `json:"principal"`
+			ChangedBy      string     `json:"changed_by"`
+			Reason         string     `json:"reason"`
+			KeyModifiedTs  *time.Time `json:"key_modified_ts"`
+			Reconciliation bool       `json:"reconciliation"`
+			BeforeTs       *time.Time `json:"before_ts,omitempty"`
+		} `json:"records"`
+		NextCursor    *string `json:"next_cursor"`
+		Tier          string  `json:"tier"`
+		TotalReturned int     `json:"total_returned"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Tier != "audit" {
+		t.Errorf("tier = %q, want audit", resp.Tier)
+	}
+	if resp.TotalReturned != 2 || len(resp.Records) != 2 {
+		t.Fatalf("total_returned=%d records=%d, want 2 and 2", resp.TotalReturned, len(resp.Records))
+	}
+	if resp.NextCursor != nil {
+		t.Errorf("next_cursor = %v, want null on exhausted result", *resp.NextCursor)
+	}
+	// DESC order by ts — normal (ts) comes before drift (ts-30m).
+	if !resp.Records[0].Ts.Equal(ts) {
+		t.Errorf("records[0].ts = %v, want %v (DESC order)", resp.Records[0].Ts, ts)
+	}
+	r0 := resp.Records[0]
+	if r0.PrevStateLabel != dc.DrainMode(0).String() || r0.NewStateLabel != dc.DrainMode(1).String() {
+		t.Errorf("state labels = %q/%q, want %q/%q",
+			r0.PrevStateLabel, r0.NewStateLabel, dc.DrainMode(0).String(), dc.DrainMode(1).String())
+	}
+	if r0.Reconciliation {
+		t.Errorf("records[0].reconciliation = true, want false for normal row")
+	}
+	// Normal-row before_ts must be omitted (contract: only present when reconciliation=true).
+	if r0.BeforeTs != nil {
+		t.Errorf("records[0].before_ts = %v, want nil for non-reconciliation row", *r0.BeforeTs)
+	}
+	if r0.KeyModifiedTs == nil || !r0.KeyModifiedTs.Equal(keyMod) {
+		t.Errorf("records[0].key_modified_ts = %v, want %v", r0.KeyModifiedTs, keyMod)
+	}
+
+	r1 := resp.Records[1]
+	if !r1.Reconciliation {
+		t.Errorf("records[1].reconciliation = false, want true for drift row")
+	}
+	if r1.BeforeTs == nil || !r1.BeforeTs.Equal(beforeTs) {
+		t.Errorf("records[1].before_ts = %v, want %v", r1.BeforeTs, beforeTs)
+	}
+}
+
+func TestAuditHandler_FilterByHost(t *testing.T) {
+	ds, as, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	for i, host := range []string{"SRV01", "SRV02", "SRV01", "SRV03"} {
+		rec := telemetry.AuditRecord{
+			Ts: base.Add(time.Duration(i) * time.Minute), Host: host,
+			PrevState: 0, NewState: 1,
+		}
+		if err := as.Append(ctx, rec); err != nil {
+			t.Fatalf("Append %s: %v", host, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/audit?host=SRV01", nil)
+	ds.handleAudit(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var resp struct {
+		Records []struct {
+			Host string `json:"host"`
+		} `json:"records"`
+		TotalReturned int `json:"total_returned"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.TotalReturned != 2 {
+		t.Fatalf("total_returned = %d, want 2 (only SRV01 rows)", resp.TotalReturned)
+	}
+	for i, rec := range resp.Records {
+		if rec.Host != "SRV01" {
+			t.Errorf("records[%d].host = %q, want SRV01", i, rec.Host)
+		}
+	}
+}
+
+func TestAuditHandler_CursorPagination(t *testing.T) {
+	ds, as, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	const total = 5
+	for i := 0; i < total; i++ {
+		rec := telemetry.AuditRecord{
+			Ts: base.Add(time.Duration(i) * time.Minute), Host: "SRV01",
+			PrevState: 0, NewState: 1,
+		}
+		if err := as.Append(ctx, rec); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+
+	seenHosts := make(map[int64]int)
+	cursor := ""
+	pages := 0
+	for {
+		url := "/api/v1/audit?limit=2"
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, url, nil)
+		ds.handleAudit(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("page %d status = %d, body=%s", pages, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Records []struct {
+				Ts time.Time `json:"ts"`
+			} `json:"records"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("page %d decode: %v", pages, err)
+		}
+		for _, rec := range resp.Records {
+			seenHosts[rec.Ts.UnixMilli()]++
+		}
+		pages++
+		if pages > total+1 {
+			t.Fatalf("cursor walk did not terminate after %d pages", pages)
+		}
+		if resp.NextCursor == nil {
+			break
+		}
+		cursor = *resp.NextCursor
+	}
+	if len(seenHosts) != total {
+		t.Errorf("seen %d unique rows, want %d", len(seenHosts), total)
+	}
+	for ts, count := range seenHosts {
+		if count != 1 {
+			t.Errorf("row ts=%d returned %d times, want 1", ts, count)
+		}
+	}
+	if pages < 3 {
+		t.Errorf("pages = %d, want ≥ 3 to exercise cursor advance", pages)
+	}
+}
+
+func TestHistoryHandler_Returns410(t *testing.T) {
+	ds, _, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/history/SRV01", nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleHistory(w, r)
+
+	if w.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d (Gone) even with audit store live", w.Code, http.StatusGone)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "use /api/v1/metrics/{host} or /api/v1/audit" {
+		t.Errorf("error = %q, want migration message", body["error"])
+	}
+}
+
+func TestAuditHandler_ChangesOnlyDefaultsTrue(t *testing.T) {
+	ds, as, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Millisecond)
+
+	// Row A: real state change.
+	change := telemetry.AuditRecord{
+		Ts: base, Host: "SRV01", PrevState: 0, NewState: 1,
+	}
+	// Row B: no-op (prev == new) — filtered out under changes_only=true default.
+	noop := telemetry.AuditRecord{
+		Ts: base.Add(time.Minute), Host: "SRV01", PrevState: 1, NewState: 1,
+	}
+	if err := as.Append(ctx, change); err != nil {
+		t.Fatalf("Append change: %v", err)
+	}
+	if err := as.Append(ctx, noop); err != nil {
+		t.Fatalf("Append noop: %v", err)
+	}
+
+	// Default: changes_only is absent → must behave as true → noop dropped.
+	{
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+		ds.handleAudit(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("default status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp struct {
+			Records []struct {
+				PrevState int `json:"prev_state"`
+				NewState  int `json:"new_state"`
+			} `json:"records"`
+			TotalReturned int `json:"total_returned"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("default decode: %v", err)
+		}
+		if resp.TotalReturned != 1 {
+			t.Errorf("default total_returned = %d, want 1 (noop filtered)", resp.TotalReturned)
+		}
+		// Guard against an inverted filter returning the noop row instead of
+		// the change row: the one returned record must have prev_state != new_state.
+		if len(resp.Records) != 1 || resp.Records[0].PrevState == resp.Records[0].NewState {
+			t.Errorf("default returned noop row (prev==new); records=%+v", resp.Records)
+		}
+	}
+
+	// Explicit changes_only=false → noop returned too.
+	{
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/audit?changes_only=false", nil)
+		ds.handleAudit(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("explicit false status = %d, body=%s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			TotalReturned int `json:"total_returned"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("explicit false decode: %v", err)
+		}
+		if resp.TotalReturned != 2 {
+			t.Errorf("changes_only=false total_returned = %d, want 2", resp.TotalReturned)
+		}
+	}
+}
+
+// TestAuditHandler_CursorPaginationStableAcrossSameMsEvents is the regression
+// gate for the row-value tuple-comparison seek predicate. Two audit rows with
+// identical `ts` on two different hosts must each be returned exactly once
+// across paginated requests; if the predicate collapsed the tuple to a scalar
+// `ts < cursor_ts` the second row at the same ts would be silently skipped.
+func TestAuditHandler_CursorPaginationStableAcrossSameMsEvents(t *testing.T) {
+	ds, as, cleanup := newTestServerWithAudit(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	ts := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, host := range []string{"SRV01", "SRV02"} {
+		rec := telemetry.AuditRecord{
+			Ts: ts, Host: host, PrevState: 0, NewState: 1,
+		}
+		if err := as.Append(ctx, rec); err != nil {
+			t.Fatalf("Append %s: %v", host, err)
+		}
+	}
+
+	type hostEntry struct {
+		Host string `json:"host"`
+	}
+	seen := map[string]int{}
+	cursor := ""
+	pages := 0
+	for {
+		url := "/api/v1/audit?limit=1"
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, url, nil)
+		ds.handleAudit(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("page %d status = %d, body=%s", pages, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Records    []hostEntry `json:"records"`
+			NextCursor *string     `json:"next_cursor"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("page %d decode: %v", pages, err)
+		}
+		for _, rec := range resp.Records {
+			seen[rec.Host]++
+		}
+		pages++
+		if pages > 4 {
+			t.Fatalf("cursor walk did not terminate after %d pages", pages)
+		}
+		if resp.NextCursor == nil {
+			break
+		}
+		cursor = *resp.NextCursor
+	}
+
+	for _, host := range []string{"SRV01", "SRV02"} {
+		if seen[host] != 1 {
+			t.Errorf("host %s returned %d times across pages, want 1", host, seen[host])
+		}
+	}
+	if len(seen) != 2 {
+		t.Errorf("distinct hosts = %d, want 2", len(seen))
+	}
+}
+
+// TestSettingsHandler_ConcurrentRetentionPUTIsSerialized is a regression gate
+// on the config.json named Windows mutex (`Global\DrainCtlConfig`). Two PUTs
+// driven concurrently through the handler must both return 200 and leave
+// config.json reflecting exactly one of the two intents.
+//
+// Without the mutex, `saveConfigToFile`'s two-step write (WriteFile to a fixed
+// tmp path, then MoveFileEx atomic rename) is unsafe under concurrency: the
+// second writer's tmp can clobber the first's before the first renames, or
+// the first's rename can delete the tmp out from under the second → one of
+// the PUTs returns a 500. Both-200 with a valid final value is the invariant.
+//
+// The handler normally calls `dc.UpdateNotifySettings` which does a LoadConfig
+// BEFORE entering the mutex; on Windows, ReadFile (no FILE_SHARE_DELETE) can
+// collide with a peer's MoveFileEx with ERROR_ACCESS_DENIED. That race is
+// orthogonal to the mutex being tested here, so we use `testPutSettingsFunc`
+// to call `dc.SaveConfig` directly — same mutex-protected save path, without
+// the load-side noise that would otherwise force flaky retries.
+//
+// `grace_period` is the payload field because handlePutSettings does not yet
+// expose a retention field; the mutex being exercised is the same one that
+// will cover retention PUTs in the US5 settings-widget work.
+func TestSettingsHandler_ConcurrentRetentionPUTIsSerialized(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ProgramData", dir)
+	if err := dc.SaveConfig(dc.DefaultConfig()); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	const (
+		intentA = 10
+		intentB = 30
+	)
+
+	ds := newTestServer(t)
+	// Bypass the handler's LoadConfig front-half and exercise only the
+	// mutex-protected save. Route grace_period directly to dc.SaveConfig.
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, grace *int, _ *int, _ *dc.PerformanceConfig) error {
+		cfg := dc.DefaultConfig()
+		if grace != nil {
+			cfg.GracePeriod = *grace
+		}
+		return dc.SaveConfig(cfg)
+	}
+	// Broadcast's LoadConfig is a post-save notification side-effect; stub it
+	// so a trailing ReadFile doesn't create a load-vs-rename race in reverse
+	// against the peer goroutine's save.
+	ds.testLoadConfigFunc = func() (*dc.Config, error) { return dc.DefaultConfig(), nil }
+
+	runOne := func(value int) (int, string) {
+		body := fmt.Sprintf(`{"grace_period":%d}`, value)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		ds.handlePutSettings(w, r)
+		return w.Code, w.Body.String()
+	}
+
+	var wg sync.WaitGroup
+	codes := [2]int{}
+	bodies := [2]string{}
+	start := make(chan struct{})
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		codes[0], bodies[0] = runOne(intentA)
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		codes[1], bodies[1] = runOne(intentB)
+	}()
+	close(start)
+	wg.Wait()
+
+	for i, code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("PUT #%d status = %d (body=%s), want 200 — mutex did not serialize",
+				i, code, bodies[i])
+		}
+	}
+
+	final, err := dc.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v — config.json may be torn", err)
+	}
+	if final.GracePeriod != intentA && final.GracePeriod != intentB {
+		t.Fatalf("grace_period = %d, want one of {%d, %d} — final state is neither intent",
+			final.GracePeriod, intentA, intentB)
 	}
 }
