@@ -69,25 +69,50 @@ SELECT 'hourly', COUNT(*) FROM metrics_hourly;
 
 ## 4b. WAL-aware backup procedure
 
-The WAL (`drainctl.db-wal`) and shared-memory (`drainctl.db-shm`) sidecars are part of the live database — copying only `drainctl.db` while the service is running will produce a backup that silently omits the most recent commits. Two supported recipes:
+The WAL (`drainctl.db-wal`) and shared-memory (`drainctl.db-shm`) sidecars are part of the live database. Copying only `drainctl.db` while the service is running will produce a backup that silently omits every commit still in the WAL. Two supported recipes — pick one based on whether you can take downtime.
 
-**Recipe A — checkpoint-then-copy** (simpler, requires brief exclusive access):
+**Recipe A — service-stopped checkpoint + copy** (one-shot, simplest, requires ~5 s downtime):
 ```powershell
-# Stop the service first, OR invoke wal_checkpoint(TRUNCATE) via a read-only helper
+$data   = "$env:ProgramData\LISS Technologies\LISSTech DrainCtl"
+$backup = "$PWD\backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
+New-Item -ItemType Directory -Force -Path $backup | Out-Null
+
 Stop-Service drainctl
-Copy-Item "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db*" .\backup\
+
+# TRUNCATE checkpoint folds pending WAL frames into drainctl.db and empties the
+# sidecar, so a straight file copy captures the complete state.
+sqlite3 "$data\drainctl.db" "PRAGMA wal_checkpoint(TRUNCATE);"
+
+# Copy the DB plus any sidecars that remain (-shm may still exist; -wal should
+# be zero-sized after TRUNCATE). Copy the whole set to stay robust against
+# checkpoint-skew edge cases.
+Copy-Item "$data\drainctl.db"     $backup\
+Copy-Item "$data\drainctl.db-wal" $backup\ -ErrorAction SilentlyContinue
+Copy-Item "$data\drainctl.db-shm" $backup\ -ErrorAction SilentlyContinue
+
 Start-Service drainctl
+
+# Smoke test: open the backup read-only and verify it answers a basic query.
+sqlite3 "$backup\drainctl.db" "SELECT COUNT(*) AS audit_rows FROM audit;"
 ```
 
-**Recipe B — online backup API** (no downtime; preferred for production):
+**Recipe B — online backup API** (no downtime, preferred for production):
 ```powershell
-# Using sqlite3.exe's .backup dot-command against a live WAL DB:
-sqlite3 "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db" `
-        ".backup '$PWD\backup\drainctl-$(Get-Date -Format yyyyMMdd-HHmmss).db'"
-```
-The `.backup` dot-command uses SQLite's online backup API, which correctly snapshots across the WAL without stopping writers.
+$data   = "$env:ProgramData\LISS Technologies\LISSTech DrainCtl"
+$backup = "$PWD\backup-$(Get-Date -Format yyyyMMdd-HHmmss).db"
 
-**Do NOT**: robocopy just `drainctl.db` on its own — you will silently lose every commit currently living in the WAL.
+# sqlite3.exe's `.backup` dot-command uses SQLite's online backup API. It
+# snapshots the live database cross-WAL without stopping writers — pages are
+# copied page-by-page while the service keeps committing.
+sqlite3 "$data\drainctl.db" ".backup '$backup'"
+
+# Smoke test: verify the backup opens and matches the live schema.
+sqlite3 $backup "SELECT COUNT(*) AS audit_rows FROM audit;"
+```
+
+**Do NOT** robocopy just `drainctl.db` on its own — the live WAL can hold many seconds of commits that would be silently absent from the copy. Copy the full `drainctl.db*` set (Recipe A) or use the online backup API (Recipe B).
+
+**Restore**: stop the service, replace `drainctl.db*` at the data dir with the backup file(s), start the service. Recipe B produces a single `.db` file; the service's first open reconstructs its own WAL/SHM.
 
 ## 4c. File size does not shrink after retention purges
 

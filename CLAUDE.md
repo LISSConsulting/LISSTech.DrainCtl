@@ -29,7 +29,7 @@ Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 Root package = public API. `cmd/drainctl/` = CLI (cobra). `cmd/cshared/` = DLL (P/Invoke).
 Service uses `RegNotifyChangeKeyValue` + `EvtSubscribe` + poll ticker + config file watcher.
 CLI/DLL try named pipe to service first, fall back to direct registry read.
-`MemAuditStore` = in-memory + JSONL flush. `AuditStore` = file-only (CLI fallback).
+Telemetry: single SQLite DB (`drainctl.db`, WAL, via `modernc.org/sqlite` — no cgo) backs both metrics and audit. Metrics flow `metrics_raw` → `metrics_5min` → `metrics_hourly` via a watermarked aggregator; retention is configurable per tier. Audit is append-only (`telemetry.AuditStore`, `PRAGMA synchronous=FULL` on a dedicated `*sql.Conn`) with one row per drain-mode transition; CLI/DLL read the same DB `?mode=ro`. Startup path: `Open → MigrateJSONL → drift reconciliation → live ingest`. `MemAuditStore` and the file-only root-package `AuditStore` were retired in feature 007.
 Config: JSON file with atomic writes (named mutex + MoveFileEx). Scoped updaters for dashboard API.
 Notifications: multi-target (N webhook + M ntfy), granular triggers, per-target repeat intervals.
 Sessions: `WTSEnumerateSessionsW` via wtsapi32.dll, utilization alerts at configurable threshold.
