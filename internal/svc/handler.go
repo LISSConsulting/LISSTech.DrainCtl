@@ -250,6 +250,28 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		return false, 1
 	}
 	defer func() { _ = telDB.Close() }()
+
+	// Import the legacy audit.jsonl into the SQLite audit table before any
+	// audit writer (NewAuditStore + svcRunCheck) or drift reconciliation runs,
+	// so LatestByHost baselines include pre-upgrade history (FR-020). Failure
+	// is fatal: continuing would let live audit writes land before the legacy
+	// import completes, contaminating the baseline that MigrateJSONL seeds
+	// from latestNewStatePerHost on the next resume. The JSONL stays on disk
+	// and the migration is idempotent, so the operator can restart and retry.
+	migRes, migErr := telemetry.MigrateJSONL(ctx, telDB, dc.DefaultDataDir())
+	if migErr != nil {
+		slog.Error("service=failed", "error", fmt.Errorf("audit jsonl migration: %w", migErr))
+		return false, 1
+	}
+	if migRes.JSONLFound {
+		slog.Info("audit JSONL migration",
+			"lines", migRes.LineCount,
+			"imported", migRes.Imported,
+			"skipped", migRes.Skipped,
+			"backup", migRes.BackupPath,
+			"duration", migRes.Duration)
+	}
+
 	metricsStore := telemetry.NewMetricsStore(telDB)
 
 	auditStore, err := telemetry.NewAuditStore(ctx, telDB)
