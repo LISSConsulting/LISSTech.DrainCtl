@@ -195,3 +195,19 @@ Tests: `TestDrainMode_String` (including deprecated-alias compat cases), `go tes
 **Verification:** `pnpm run build` clean. Playwright visual check: Y-axis ticks 0-100% rendered, X-axis date ticks APR 13 → APR 18 rendered, hover at 70% of chart width produced a crosshair + dot + tooltip with `"Apr 18, 15:27:51 / cpu_pct: 87%"`, hint text visible.
 
 **Not done (follow-up):** visible +/- zoom buttons. The text hint is sufficient for now; buttons can come when operators ask for them.
+
+---
+
+### 12. Drift reconciliation never ran — T025 was unwired despite `[x]` status — FIXED 2026-04-18
+
+**Status:** Fixed.
+
+**Symptom:** T067 B5 walk — stop service, run `change logon /drain`, start service, grep `drainctl.log` for `reconcil|drift|maintenance_job` → zero matches. A drain-state change made while the service was down was completely invisible: no reconciliation audit row, no `maintenance_jobs` row, no operator-facing log line.
+
+**Root cause:** `specs/007-sqlite-telemetry-store/tasks.md:95` T025 was marked `[x]` (done), and `internal/telemetry/reconcile.go` did contain a fully implemented `Reconcile` function plus unit tests. But `grep -r telemetry.Reconcile` in production code returned zero hits — the wiring from `internal/svc/handler.go` boot → `telemetry.Reconcile(...)` was never added. The reconciler existed on paper but was never called at runtime. A checkbox-level false positive in the task list.
+
+**Fix:** `internal/svc/handler.go` now calls `telemetry.Reconcile` between `NewAuditStore` and the aggregator/retention goroutines. Reads current drain state via `dc.ReadDrainMode()`, builds a `DrainProbe`, invokes `Reconcile`. Registry-read or reconcile errors log `WARN` and the service continues (degraded-mode pattern matching `MigrateJSONL` failure handling). Success emits `drift_reconciliation=complete` at `INFO` including host + observed mode + duration, so operators can verify the job ran regardless of whether a drift row was actually written.
+
+**Verification:** `go test ./internal/svc/ ./internal/telemetry/` green (existing reconcile_test.go already covered the function itself; the gap was the call site). Operator verification: repeat T067 B5 — the log should now show `drift_reconciliation=complete` and the audit table should gain a row with `reconciliation=1` when an offline drain toggle happened.
+
+**Related:** T025's text in tasks.md was accurate about WHERE the call should happen ("from service boot after `telemetry.Open()` AND after `MigrateJSONL` has completed ... and before live ingest starts"); only the implementation was missing.
