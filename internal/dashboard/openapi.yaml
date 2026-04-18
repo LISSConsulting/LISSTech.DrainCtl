@@ -32,6 +32,8 @@ tags:
     description: Per-host time-series metrics
   - name: audit
     description: Drain-mode change audit trail (time-range query, cursor pagination)
+  - name: maintenance
+    description: Background maintenance job status (aggregator, retention, one-shot startup jobs)
   - name: notifications
     description: Notification target testing
 
@@ -444,6 +446,54 @@ components:
           type: integer
           description: "Equals `len(records)`."
       required: [records, next_cursor, tier, total_returned]
+
+    MaintenanceJob:
+      type: object
+      properties:
+        name:
+          type: string
+          description: "Job identifier. Known names: `aggregator_5min`, `aggregator_hourly`, `retention`, `jsonl_migration`, `drift_reconciliation`. New names may appear without client changes."
+        started:
+          type: string
+          format: date-time
+        finished:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          format: int64
+        outcome:
+          type: string
+          enum: [success, failure, skipped]
+        reason:
+          type: string
+          description: "Non-empty on failure."
+        rows_affected:
+          type: integer
+          format: int64
+          description: "For aggregators: rows inserted. For retention: rows deleted."
+        overdue:
+          type: boolean
+          description: "True when `expected_interval_seconds > 0` AND `server_time - finished > 2 * expected_interval_seconds` (FR-031). One-shot startup jobs report `expected_interval_seconds = 0` and are never overdue."
+        expected_interval_seconds:
+          type: integer
+          format: int64
+          description: "Server-side config echo. `0` = one-shot startup job (never overdue). Never null — use `0` as the sentinel."
+      required:
+        [name, started, finished, duration_ms, outcome, reason, rows_affected, overdue, expected_interval_seconds]
+
+    MaintenanceStatusResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/MaintenanceJob"
+        server_time:
+          type: string
+          format: date-time
+          description: "Lets clients compute freshness independently of clock skew."
+      required: [jobs, server_time]
 
     Trigger:
       type: string
@@ -1218,6 +1268,43 @@ paths:
           description: Not authenticated.
         "500":
           description: "`storage_error` — DB open or query failure."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /maintenance/status:
+    get:
+      tags: [maintenance]
+      summary: Background maintenance job status
+      description: |
+        Returns the last-run state of every background maintenance job, plus the
+        server's current time so clients can compute freshness without trusting
+        their own clock.
+
+        Backs the dashboard's maintenance widget (FR-030). Overdue flagging is
+        computed server-side: a job is `overdue` when
+        `expected_interval_seconds > 0` AND
+        `server_time - finished > 2 * expected_interval_seconds` (FR-031).
+        One-shot startup jobs (`jsonl_migration`, `drift_reconciliation`) report
+        `expected_interval_seconds = 0` and are never overdue.
+
+        Dashboard polling cadence is once per 15 seconds; no dedicated rate-limit
+        bucket.
+      operationId: getMaintenanceStatus
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current job roster.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenanceStatusResponse"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: "`storage_error` — DB open, query failure, or config load failure."
           content:
             application/json:
               schema:
