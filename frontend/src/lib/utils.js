@@ -66,6 +66,7 @@ export function modeLabel(m) {
         ALLOW_ALL_CONNECTIONS: 'Open',
         ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS: 'Drain',
         ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS_UNTIL_RESTART: 'Drain (Restart)',
+        DENY_ALL_CONNECTIONS: 'Denied',
         none: 'Open',
         graceful: 'Graceful',
         immediate: 'Immediate',

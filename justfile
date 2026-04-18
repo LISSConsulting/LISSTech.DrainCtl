@@ -5,6 +5,7 @@ set dotenv-load
 dist_dir     := justfile_directory() / "dist"
 module_dir   := dist_dir / "LISSTech.DrainCtl"
 bin_dir      := module_dir / "bin"
+ca_dir       := dist_dir / "customactions"
 installer_dir := justfile_directory() / "installer"
 
 # Code signing (set CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env or environment)
@@ -39,8 +40,10 @@ header recipe:
 version:
     $clean = & "{{justfile_directory()}}/scripts/version.ps1"
     $full  = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    $msi   = & "{{justfile_directory()}}/scripts/msi-version.ps1"
     Write-Host "   clean: $clean" -ForegroundColor DarkGray
     Write-Host "   full:  $full"  -ForegroundColor DarkGray
+    Write-Host "   msi:   $msi"   -ForegroundColor DarkGray
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -49,7 +52,7 @@ version:
 [extension('.ps1')]
 dev: (header "dev")
     Write-Host "`n⚠️  Building DEV mode (auth bypassed)" -ForegroundColor Yellow
-    & go build -tags devmode -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    & go build -trimpath -buildvcs=false -tags devmode -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — SSPI auth DISABLED" -ForegroundColor Yellow
@@ -132,7 +135,7 @@ cli: frontend-copy resource
     Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & go build -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    & go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
@@ -146,7 +149,7 @@ dll:
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $env:CGO_ENABLED = "1"
-    & go build -buildmode=c-shared -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
+    & go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Remove-Item -ErrorAction SilentlyContinue "{{bin_dir}}/drainctl.h"
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.dll").Length / 1MB)
@@ -168,18 +171,34 @@ psmodule: cli dll
     Write-Host "   LISSTech.DrainCtl.psd1 — v$ver" -ForegroundColor DarkGray
     Write-Host "   LISSTech.DrainCtl.psm1" -ForegroundColor DarkGray
 
+# Build the MSI custom action DLL.
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+msica:
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Building MSI custom action  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    New-Item -ItemType Directory -Force "{{ca_dir}}" | Out-Null
+    $env:CGO_ENABLED = "1"
+    & go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags "-s -w" -o "{{ca_dir}}/drainctl-msica.dll" ./cmd/msica/
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Remove-Item -ErrorAction SilentlyContinue "{{ca_dir}}/drainctl-msica.h"
+    $size = "{0:N1} MB" -f ((Get-Item "{{ca_dir}}/drainctl-msica.dll").Length / 1MB)
+    Write-Host "   drainctl-msica.dll ($size)" -ForegroundColor DarkGray
+
 # Build the WiX MSI installer
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-msi: psmodule
+msi: psmodule msica
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n📦 Building MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    $ver = & "{{justfile_directory()}}/scripts/version.ps1"
+    $appVer = & "{{justfile_directory()}}/scripts/version.ps1"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 "-p:ProductVersion=$ver" -nologo -v:q
+    $msiVer = & "{{justfile_directory()}}/scripts/msi-version.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 "-p:ProductVersion=$msiVer" "-p:AppVersion=$appVer" -nologo -v:q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi").Length / 1MB)
-    Write-Host "   LISSTech.DrainCtl.msi ($size) — v$ver" -ForegroundColor DarkGray
+    Write-Host "   LISSTech.DrainCtl.msi ($size) — app v$appVer, msi v$msiVer" -ForegroundColor DarkGray
 
 # ── Sign ─────────────────────────────────────────────────────────────────────
 

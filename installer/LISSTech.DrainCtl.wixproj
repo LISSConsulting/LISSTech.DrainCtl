@@ -9,11 +9,13 @@
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
   <PropertyGroup>
-    <!-- ProductVersion is injected by `just msi` via -p:ProductVersion=YY.DOY.N
-         (computed by scripts/version.ps1). The default lets a bare `dotnet build`
-         still produce an MSI, labelled 0.0.0 so it is obviously non-release. -->
+    <!-- ProductVersion is MSI-specific and monotonic across repeated installer
+         builds from the same commit. AppVersion remains the git-derived CalVer
+         shown to users in package naming. Defaults keep bare dotnet builds
+         obviously non-release. -->
     <ProductVersion Condition="'$(ProductVersion)'==''">0.0.0</ProductVersion>
-    <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
+    <AppVersion Condition="'$(AppVersion)'==''">0.0.0</AppVersion>
+    <DefineConstants>ProductVersion=$(ProductVersion);AppVersion=$(AppVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
