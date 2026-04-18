@@ -1579,16 +1579,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.107.26</h2>
+                <h2 class="section-title">v26.108.29</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Server-Sent Events</strong> &mdash; dashboard updates in &lt;2s, replaces 30s polling</li>
-                            <li><strong>DPAPI-encrypted secrets</strong> &mdash; webhook keys and SMTP passwords encrypted at rest</li>
-                            <li><strong>Alert sustain windows</strong> &mdash; time-based thresholds replace raw poll counts</li>
-                            <li><strong>Config overhaul</strong> &mdash; preset pills, section icons, per-metric Off controls</li>
-                            <li><strong>Write-only secrets</strong> &mdash; API never returns credentials, only a has_secret flag</li>
-                            <li><strong>Email templates</strong> &mdash; mobile-first HTML with Outlook Classic support</li>
+                            <li><strong>Durable metrics history</strong> &mdash; CPU, memory, and session samples survive service restarts</li>
+                            <li><strong>Audit log moved to SQLite</strong> &mdash; fast queries over months of drain history, no more JSONL scans</li>
+                            <li><strong>Chart zoom across tiers</strong> &mdash; raw samples, 5-minute, and hourly aggregates in one seamless view</li>
+                            <li><strong>JSONL auto-migration</strong> &mdash; existing audit files imported on first start, original kept as <code>.bak</code></li>
+                            <li><strong>Retention worker</strong> &mdash; bounded chunked purge keeps the database inside per-tier windows</li>
+                            <li><strong>Maintenance widget</strong> &mdash; dashboard surfaces aggregator and retention job health at a glance</li>
                         </ul>
                     </div>
                 </div>
