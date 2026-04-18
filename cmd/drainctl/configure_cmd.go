@@ -263,41 +263,31 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	retentionDays, _ := cmd.Flags().GetInt("retention-days")
 	autoPin, _ := cmd.Flags().GetBool("auto-pin")
 
+	input := dc.InstallerConfigInput{Mode: mode}
 	if cmd.Flags().Changed("grace-period") {
-		fileCfg.GracePeriod = grace
+		input.GracePeriod = &grace
 	}
 	if cmd.Flags().Changed("session-warning-threshold") {
-		fileCfg.SessionWarningThreshold = sessionThreshold
+		input.SessionThreshold = &sessionThreshold
 	}
 	if cmd.Flags().Changed("poll-interval") {
-		fileCfg.PollInterval = pollInterval
+		input.PollInterval = &pollInterval
 	}
 	if cmd.Flags().Changed("retention-days") {
 		fileCfg.RetentionDays = retentionDays
 	}
-
-	switch mode {
-	case "dashboard":
-		fileCfg.Dashboard.Enabled = true
-		if cmd.Flags().Changed("dashboard-port") {
-			fileCfg.Dashboard.Port = dashPort
-		}
-		if cmd.Flags().Changed("dashboard-group") {
-			fileCfg.Dashboard.Group = dashGroup
-		}
-		// Dashboard servers need more headroom for HTTP/TLS and multi-server state.
-		if !cmd.Flags().Changed("memory-limit") && fileCfg.MemoryLimitMB < dc.DefaultDashboardMemoryLimitMB {
-			fileCfg.MemoryLimitMB = dc.DefaultDashboardMemoryLimitMB
-		}
-	case "registration":
-		if dashURL != "" {
-			fileCfg.Dashboard.URL = dashURL
-		}
+	if cmd.Flags().Changed("dashboard-url") {
+		input.DashboardURL = &dashURL
 	}
-
+	if cmd.Flags().Changed("dashboard-port") {
+		input.DashboardPort = &dashPort
+	}
+	if cmd.Flags().Changed("dashboard-group") {
+		input.DashboardGroup = &dashGroup
+	}
 	if cmd.Flags().Changed("memory-limit") {
 		memLimit, _ := cmd.Flags().GetInt("memory-limit")
-		fileCfg.MemoryLimitMB = memLimit
+		input.MemoryLimitMB = &memLimit
 	}
 
 	if cmd.Flags().Changed("auto-pin") {
@@ -306,24 +296,15 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 
 	if cmd.Flags().Changed("perf-enabled") {
 		perfEnabled, _ := cmd.Flags().GetBool("perf-enabled")
-		fileCfg.Performance.Enabled = perfEnabled
-		if perfEnabled {
-			fileCfg.Performance.ForceDisabled = false
-			if !fileCfg.Performance.CollectPerSession {
-				fileCfg.Performance.CollectPerSession = true // default on
-			}
-		}
+		input.PerfEnabled = &perfEnabled
 	}
 	if cmd.Flags().Changed("perf-disabled") {
 		perfDisabled, _ := cmd.Flags().GetBool("perf-disabled")
-		if perfDisabled {
-			fileCfg.Performance.Enabled = false
-			fileCfg.Performance.ForceDisabled = true
-		}
+		input.PerfDisabled = &perfDisabled
 	}
 	if cmd.Flags().Changed("perf-rfx") {
 		perfRFX, _ := cmd.Flags().GetBool("perf-rfx")
-		fileCfg.Performance.CollectRemoteFX = perfRFX
+		input.PerfRFX = &perfRFX
 	}
 	if cmd.Flags().Changed("input-delay-percentile") {
 		pct, _ := cmd.Flags().GetString("input-delay-percentile")
@@ -339,16 +320,18 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	}
 	if cmd.Flags().Changed("log-file-level") {
 		v, _ := cmd.Flags().GetString("log-file-level")
-		fileCfg.LogFileLevel = v
+		input.LogFileLevel = &v
 	}
 	if cmd.Flags().Changed("log-event-level") {
 		v, _ := cmd.Flags().GetString("log-event-level")
-		fileCfg.LogEventLevel = v
+		input.LogEventLevel = &v
 	}
 	if cmd.Flags().Changed("dashboard-only") {
 		v, _ := cmd.Flags().GetBool("dashboard-only")
-		fileCfg.DashboardOnly = v
+		input.DashboardOnly = &v
 	}
+
+	dc.ApplyInstallerConfig(fileCfg, input)
 
 	// Upsert rather than append: running configure twice with the same URL
 	// should not produce duplicate notification targets.
@@ -358,8 +341,6 @@ func runConfigureFlags(cmd *cobra.Command, fileCfg *dc.Config) error {
 	if ntfyURL != "" {
 		fileCfg.Notifications = upsertNotifyTarget(fileCfg.Notifications, "ntfy", ntfyURL)
 	}
-
-	fileCfg.Validate()
 
 	if err := dc.SaveConfig(fileCfg); err != nil {
 		return fmt.Errorf("save config: %w", err)

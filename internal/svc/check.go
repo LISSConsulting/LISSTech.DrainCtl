@@ -59,6 +59,14 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 		}
 	}
 
+	// On non-transition ticks, inherit the principal from the prior observation
+	// so the dashboard `Changed By` and the CheckResult sent upstream reflect
+	// the actor who set the current state. Without this, every post-transition
+	// tick would clear ChangedBy to "" and the UI would flip to `—` on refresh.
+	if !transition && prev != nil {
+		changedBy = prev.ChangedBy
+	}
+
 	// Determine exit code and status.
 	drainActive := state.Mode != dc.AllowAll
 	tickTime := time.Now()
@@ -127,6 +135,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 		Timestamp:  tickTime,
 		DrainMode:  state.Mode,
 		StateSince: stateBegan,
+		ChangedBy:  changedBy,
 	})
 	slog.Debug("diag: check=observed_updated")
 

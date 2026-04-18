@@ -63,9 +63,9 @@ func TestHandleHistory_AllRecords(t *testing.T) {
 	defer cleanup()
 
 	base := time.Now().UTC().Truncate(time.Millisecond)
-	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.PreventNewLogon)
-	appendTransition(t, audit, base.Add(time.Second), "srv", dc.PreventNewLogon, dc.AllowAll)
-	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.AllowAll, dc.PreventNewLogon)
+	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.DrainPersistent)
+	appendTransition(t, audit, base.Add(time.Second), "srv", dc.DrainPersistent, dc.AllowAll)
+	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.AllowAll, dc.DrainPersistent)
 
 	got := h.HandleHistory(0, false)
 	if len(got) != 3 {
@@ -80,10 +80,10 @@ func TestHandleHistory_ChangesOnly(t *testing.T) {
 	defer cleanup()
 
 	base := time.Now().UTC().Truncate(time.Millisecond)
-	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.PreventNewLogon)
+	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.DrainPersistent)
 	// No-op row (prev==next, e.g. a reconciliation where state didn't change).
-	appendTransition(t, audit, base.Add(time.Second), "srv", dc.PreventNewLogon, dc.PreventNewLogon)
-	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.PreventNewLogon, dc.AllowAll)
+	appendTransition(t, audit, base.Add(time.Second), "srv", dc.DrainPersistent, dc.DrainPersistent)
+	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.DrainPersistent, dc.AllowAll)
 
 	got := h.HandleHistory(0, true)
 	if len(got) != 2 {
@@ -102,6 +102,84 @@ func TestHandleHistory_NilAuditReturnsNil(t *testing.T) {
 	h := &serviceHandler{}
 	if got := h.HandleHistory(10, false); got != nil {
 		t.Errorf("HandleHistory on nil-audit handler returned %v, want nil", got)
+	}
+}
+
+// TestHandleHistory_EnrichesFromMetrics verifies that audit rows returned
+// through the pipe carry CPU / input-delay / session counters joined from
+// metrics_raw. Covers the FR-026 regression where `drainctl history`
+// always rendered `-` in those columns because the audit table schema
+// narrowed to transition metadata only.
+func TestHandleHistory_EnrichesFromMetrics(t *testing.T) {
+	dir := t.TempDir()
+	db, err := telemetry.Open(dir)
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+	audit, err := telemetry.NewAuditStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	defer func() { _ = audit.Close() }()
+	ms := telemetry.NewMetricsStore(db)
+
+	h := &serviceHandler{audit: audit, metrics: ms}
+	cfg := dc.DefaultConfig().ToServiceConfig()
+	h.cfg.Store(&cfg)
+
+	transitionTs := time.Now().UTC().Truncate(time.Millisecond)
+	host := "SRV01"
+	appendTransition(t, audit, transitionTs, host, dc.AllowAll, dc.DrainPersistent)
+
+	// Perf sample 5 s before the transition — inside the 2-minute tolerance.
+	if err := ms.Append(ctx, []telemetry.Sample{
+		{Ts: transitionTs.Add(-5 * time.Second), Host: host, Counter: "cpu_pct", Value: 37},
+		{Ts: transitionTs.Add(-5 * time.Second), Host: host, Counter: "input_delay_max_ms", Value: 210},
+		{Ts: transitionTs.Add(-5 * time.Second), Host: host, Counter: "sessions_total", Value: 8},
+		{Ts: transitionTs.Add(-5 * time.Second), Host: host, Counter: "sessions_active", Value: 6},
+	}); err != nil {
+		t.Fatalf("ms.Append: %v", err)
+	}
+
+	got := h.HandleHistory(10, false)
+	if len(got) != 1 {
+		t.Fatalf("HandleHistory returned %d records, want 1", len(got))
+	}
+	r := got[0]
+	if r.CPUPct != 37 {
+		t.Errorf("CPUPct = %v, want 37 (joined from metrics_raw)", r.CPUPct)
+	}
+	if r.InputDelayMax != 210 {
+		t.Errorf("InputDelayMax = %v, want 210", r.InputDelayMax)
+	}
+	if r.TotalSessions != 8 {
+		t.Errorf("TotalSessions = %d, want 8", r.TotalSessions)
+	}
+	if r.ActiveSessions != 6 {
+		t.Errorf("ActiveSessions = %d, want 6", r.ActiveSessions)
+	}
+}
+
+// TestHandleHistory_NilMetricsStillReturnsAudit verifies that enrichment is
+// best-effort — a handler constructed without a MetricsStore still returns
+// audit rows, just with empty perf fields (zero-valued).
+func TestHandleHistory_NilMetricsStillReturnsAudit(t *testing.T) {
+	h, audit, cleanup := newHandlerStore(t)
+	defer cleanup()
+	// h.metrics is intentionally nil in this helper.
+
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.DrainPersistent)
+
+	got := h.HandleHistory(10, false)
+	if len(got) != 1 {
+		t.Fatalf("HandleHistory returned %d records, want 1", len(got))
+	}
+	if got[0].CPUPct != 0 || got[0].InputDelayMax != 0 {
+		t.Errorf("expected zero-valued perf fields with nil metrics store, got %+v", got[0])
 	}
 }
 
