@@ -29,13 +29,18 @@ const (
 const jsonlMigrationJobName = "jsonl_migration"
 
 // MigrationResult reports the outcome of a single MigrateJSONL invocation.
+//
+// Invariant: Imported + Observations + Skipped ≤ LineCount. The gap (if any)
+// is empty JSONL lines, which are counted toward LineCount but don't exercise
+// any of the three parse-result branches.
 type MigrationResult struct {
-	JSONLFound bool   // audit.jsonl existed at migration time
-	LineCount  int    // total source lines consumed this call (cumulative across resumes not reflected here)
-	Imported   int    // rows submitted via INSERT … ON CONFLICT this call (conflict no-ops still count)
-	Skipped    int    // malformed lines observed cumulatively (loaded from schema_meta + this call)
-	BackupPath string // set when audit.jsonl was renamed to audit.jsonl.bak.<UTC-timestamp> this call
-	Duration   time.Duration
+	JSONLFound   bool   // audit.jsonl existed at migration time
+	LineCount    int    // total source lines consumed this call (cumulative across resumes not reflected here)
+	Imported     int    // transition rows submitted via INSERT … ON CONFLICT this call (conflict no-ops still count)
+	Observations int    // successfully parsed non-transition observations (Changed==false) — these are DROPPED by the new schema since audit is now one row per transition, not per poll tick
+	Skipped      int    // malformed lines observed cumulatively (loaded from schema_meta + this call)
+	BackupPath   string // set when audit.jsonl was renamed to audit.jsonl.bak.<UTC-timestamp> this call
+	Duration     time.Duration
 }
 
 // legacyAuditRecord is the JSONL-on-disk shape produced by pre-007 code
@@ -304,6 +309,14 @@ func MigrateJSONL(ctx context.Context, db *DB, dataDir string) (res MigrationRes
 						rec.KeyModifiedTs = &km
 					}
 					chunk = append(chunk, rec)
+				} else {
+					// Successfully parsed poll observation that is not a
+					// transition. The new schema does not store per-tick
+					// observations (audit is "one row per drain-mode
+					// transition"), so this row is counted and dropped.
+					// Operators grepping the migration log get this field
+					// so imported+observations+skipped add up to lines.
+					res.Observations++
 				}
 			}
 		}
