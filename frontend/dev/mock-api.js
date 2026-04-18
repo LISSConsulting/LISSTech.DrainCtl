@@ -758,6 +758,64 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: result };
   }
 
+  // GET /api/v1/maintenance/status — mirrors contracts/http-maintenance.md
+  if (method === 'GET' && pathname === '/api/v1/maintenance/status') {
+    const now = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    return {
+      status: 200,
+      body: {
+        jobs: [
+          {
+            name: 'aggregator_5min',
+            started: iso(now - 45_000),
+            finished: iso(now - 44_900),
+            duration_ms: 100,
+            outcome: 'success',
+            reason: '',
+            rows_affected: 300,
+            overdue: false,
+            expected_interval_seconds: 60,
+          },
+          {
+            name: 'aggregator_hourly',
+            started: iso(now - 15 * 60_000),
+            finished: iso(now - 15 * 60_000 + 210),
+            duration_ms: 210,
+            outcome: 'success',
+            reason: '',
+            rows_affected: 72,
+            overdue: false,
+            expected_interval_seconds: 3600,
+          },
+          {
+            name: 'retention',
+            started: iso(now - 8 * 60_000),
+            finished: iso(now - 8 * 60_000 + 4115),
+            duration_ms: 4115,
+            outcome: 'success',
+            reason: '',
+            rows_affected: 1287,
+            overdue: false,
+            expected_interval_seconds: 900,
+          },
+          {
+            name: 'jsonl_migration',
+            started: iso(now - 36 * 60 * 60_000),
+            finished: iso(now - 36 * 60 * 60_000 + 812),
+            duration_ms: 812,
+            outcome: 'skipped',
+            reason: 'already migrated',
+            rows_affected: 0,
+            overdue: false,
+            expected_interval_seconds: 0,
+          },
+        ],
+        server_time: iso(now),
+      },
+    };
+  }
+
   // GET /api/v1/settings
   if (method === 'GET' && pathname === '/api/v1/settings') {
     return { status: 200, body: mockSettings };
