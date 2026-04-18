@@ -34,9 +34,7 @@ func ClassifyState(drainActive bool, stateDur, gracePeriod time.Duration) (statu
 
 // CheckOptions configures a drain mode check.
 type CheckOptions struct {
-	DBPath        string        // audit trail path (empty = skip audit)
-	GracePeriod   time.Duration // how long drain mode must persist before alerting
-	RetentionDays int           // days to retain audit records
+	GracePeriod time.Duration
 }
 
 // CheckOutput holds the result of a check plus the recommended exit code.
@@ -45,8 +43,13 @@ type CheckOutput struct {
 	ExitCode int
 }
 
-// Check reads the registry, detects transitions, records audit, and evaluates
-// the drain mode state against the grace period.
+// Check reads the registry and evaluates drain mode against the grace period.
+//
+// This is the CLI-direct fallback path used when the service pipe is
+// unavailable (the primary path returns pipe.CheckViaPipe results that include
+// full audit-backed transition data). The service owns the SQLite telemetry
+// store exclusively, so this fallback derives state duration from the
+// registry key's last-write timestamp rather than from an audit trail.
 func Check(opts CheckOptions) (*CheckOutput, error) {
 	log := slog.Default()
 
@@ -58,7 +61,6 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 
 	log.Info("", "drainctl", Version, "cmd", "check")
 
-	// ── Read registry ──────────────────────────────────────────────────
 	state, err := ReadDrainMode()
 	if err != nil {
 		log.Error("registry read failed", "error", err)
@@ -81,7 +83,6 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 
 	log.Info("", "grace_period", opts.GracePeriod.String())
 
-	// ── Session tracking ───────────────────────────────────────────────
 	if sess := GetSessionSummary(); sess != nil {
 		res.Sessions = sess
 		if sess.MaxSessions > 0 {
@@ -98,130 +99,36 @@ func Check(opts CheckOptions) (*CheckOutput, error) {
 		}
 	}
 
-	// ── Open audit store ───────────────────────────────────────────────
-	var store *AuditStore
-	if opts.DBPath != "" {
-		store, err = OpenAuditStore(opts.DBPath)
-		if err != nil {
-			log.Warn("audit store unavailable", "error", err)
-			store = nil
-		}
-	}
-	if store != nil {
-		defer func() { _ = store.Close() }()
-	}
-
-	// ── Evaluate state ─────────────────────────────────────────────────
 	drainActive := state.Mode != AllowAll
 	connAllowed := !drainActive
 	res.ConnectionsAllowed = &connAllowed
 
-	// Compute state duration from the registry key's last-write timestamp.
-	// If KeyModified is zero (timestamp unavailable), treat stateDur as 0 so
-	// ClassifyState conservatively returns Grace rather than Alert.
 	stateDur := time.Duration(0)
 	if !state.KeyModified.IsZero() {
 		stateDur = time.Since(state.KeyModified)
+		s := state.KeyModified.Local()
+		res.StateSince = &s
+		dur := stateDur.Seconds()
+		res.StateDurationSeconds = &dur
+		log.Info("",
+			"state_since", s.Format(time.RFC3339),
+			"state_duration", stateDur.Truncate(time.Second).String(),
+		)
 	}
 
-	// Detect state transitions
-	if store != nil {
-		last, err := store.LastObservation()
-		if err != nil {
-			log.Warn("could not read last observation", "error", err)
-		} else if last != nil && last.DrainMode != state.Mode {
-			res.Transition = true
-			res.TransitionFrom = last.DrainMode.String()
+	res.Status, res.Message, res.ExitCode = ClassifyState(drainActive, stateDur, opts.GracePeriod)
 
-			log.Warn("",
-				"transition", "true",
-				"from", last.DrainMode.String(),
-				"to", state.Mode.String(),
-			)
-
-			lookback := time.Since(last.Timestamp)
-			if lookback < 24*time.Hour {
-				res.ChangedBy = QueryRegistryChangeUser(last.Timestamp)
-			}
-			if res.ChangedBy != "" {
-				log.Info("", "changed_by", res.ChangedBy)
-			} else {
-				log.Info("changed_by=unknown (run: drainctl audit-setup)")
-			}
-		}
-	}
-
-	// Compute state duration from audit trail
-	if store != nil {
-		if res.Transition {
-			// Just transitioned — state duration is zero (this is the first observation)
-			zero := 0.0
-			now := time.Now()
-			res.StateSince = &now
-			res.StateDurationSeconds = &zero
-			log.Info("", "state_since", "now", "state_duration", "0s")
-		} else if since, err := store.StateSince(state.Mode); err == nil && since != nil {
-			s := since.Local()
-			res.StateSince = &s
-			dur := time.Since(*since).Seconds()
-			res.StateDurationSeconds = &dur
-			log.Info("",
-				"state_since", s.Format(time.RFC3339),
-				"state_duration", (time.Duration(dur) * time.Second).Truncate(time.Second).String(),
-			)
-		}
-	}
-
-	// Determine final status using the audit store's duration when available
-	// (more accurate than the registry timestamp), falling back to stateDur.
-	effectiveDur := stateDur
-	if res.StateDurationSeconds != nil {
-		effectiveDur = time.Duration(*res.StateDurationSeconds) * time.Second
-	}
-	res.Status, res.Message, res.ExitCode = ClassifyState(drainActive, effectiveDur, opts.GracePeriod)
-
-	// Record this observation
-	if store != nil {
-		rec := &AuditRecord{
-			Timestamp:   time.Now(),
-			Host:        state.Host,
-			DrainMode:   state.Mode,
-			DrainLabel:  state.Mode.String(),
-			KeyModified: state.KeyModified,
-			Changed:     res.Transition,
-			ChangedBy:   res.ChangedBy,
-			ExitCode:    res.ExitCode,
-		}
-		if res.Sessions != nil {
-			rec.ActiveSessions = res.Sessions.ActiveSessions
-			rec.DisconnectedSessions = res.Sessions.DisconnectedSessions
-			rec.TotalSessions = res.Sessions.TotalSessions
-			rec.MaxSessions = res.Sessions.MaxSessions
-		}
-		if err := store.Record(rec); err != nil {
-			log.Warn("failed to record observation", "error", err)
-		}
-
-		retention := time.Duration(opts.RetentionDays) * 24 * time.Hour
-		if pruned, err := store.Prune(retention); err != nil {
-			log.Warn("prune failed", "error", err)
-		} else if pruned > 0 {
-			log.Info("", "pruned", pruned, "retention_days", opts.RetentionDays)
-		}
-	}
-
-	// ── Log final status ───────────────────────────────────────────────
 	switch res.Status {
 	case "Alert":
 		log.Error("",
 			"status", "alert",
 			"connections_allowed", false,
-			"drain_age", effectiveDur.Truncate(time.Second).String(),
+			"drain_age", stateDur.Truncate(time.Second).String(),
 			"threshold", opts.GracePeriod.String(),
 			"exit", res.ExitCode,
 		)
 	case "Grace":
-		remaining := opts.GracePeriod - effectiveDur
+		remaining := opts.GracePeriod - stateDur
 		log.Warn("",
 			"status", "grace",
 			"connections_allowed", false,
