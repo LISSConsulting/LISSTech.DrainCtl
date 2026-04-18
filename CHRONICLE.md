@@ -1,5 +1,9 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## 007 SQLite Telemetry Store — shipped (2026-04-18)
+
+Feature 007 replaces the in-memory history ring + JSONL audit fallback with a single durable `drainctl.db` (WAL-mode SQLite via `modernc.org/sqlite`, no cgo). Metrics flow through a three-tier cascade — `metrics_raw` (≤25 h) → `metrics_5min` (≤7 d) → `metrics_hourly` (≤30 d) — driven by a watermarked aggregator that idempotently recomputes every eligible bucket per tick. Audit writes land through a dedicated `*sql.Conn` pinned to `PRAGMA synchronous=FULL` (metrics stay at NORMAL) and a cursor-paginated `QueryRange` over all-DESC ordering. The service boot path is now `Open → MigrateJSONL → drift reconciliation → live ingest`; `LatestByHost` + registry `LastWriteTime` together catch both net-state drift and A→B→A oscillations. Retention runs on its own dedicated connection with `busy_timeout=0`, chunks deletes in 10k-row batches, does WAL checkpoints PASSIVE-then-TRUNCATE, and reports through the new `/api/v1/maintenance/status` endpoint backed by the `maintenance_jobs` table. Dashboard chart zoom now debounces (150 ms) and asks the server for `resolution=auto` — tier-selection truth lives server-side, not in the browser. `MemAuditStore` and the file-only root-package `AuditStore` are deleted; `/api/v1/history/{host}` returns 410 Gone; the CLI reads the same DB with `?mode=ro`. FR coverage and success-criteria instrumentation is in the task list — this paragraph is the map, not the territory.
+
 ## BUILD.md for Ralph loops + per-commit codex review (2026-04-17)
 
 Rewrote `BUILD.md` from a 9-line generic agent prompt into a staged Ralph-loop runbook: Orient → Implement → Verify → Codex review → Commit → Stop. Captures the project rules (Windows build tag, CalVer in 7 places, `just lint` zero-tolerance, named mutex ≠ SQLite WAL locking) so each fresh Opus iteration doesn't have to re-derive them from `CLAUDE.md`.
