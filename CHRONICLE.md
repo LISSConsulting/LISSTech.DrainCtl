@@ -1,5 +1,13 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## 007 — Post-migration downgrade loses new audit events (2026-04-18)
+
+If v26.107+ runs for days/weeks after a successful JSONL→SQLite migration, every audit event recorded into `drainctl.db` during that window is **invisible to any pre-007 binary**. The pre-007 binary reads `audit.jsonl` only; rolling back via MSI downgrade restores `audit.jsonl.bak.<ts>` (the migration's original backup) but no post-migration events were ever written to JSONL — they exist only in SQLite.
+
+The events are not lost — `drainctl.db` remains on disk and can be read by a 007+ build or opened offline by any `sqlite3` tool — but the old binary shows a hole between the `.bak`'s final row and the restart time. Operators who anticipate potentially long-lived downgrades should export audit data to JSONL before downgrading (a dedicated export command is deliberately out of scope for 007; see spec Clarifications Q4 and `research.md §15`).
+
+Flagged here so future loops considering a downgrade path don't rediscover the gap from a cold start. If an export tool becomes a real operational need, it's a small follow-up: `sqlite3 drainctl.db` → `SELECT ... FROM audit` → emit the legacy JSONL shape.
+
 ## 007 SQLite Telemetry Store — shipped (2026-04-18)
 
 Feature 007 replaces the in-memory history ring + JSONL audit fallback with a single durable `drainctl.db` (WAL-mode SQLite via `modernc.org/sqlite`, no cgo). Metrics flow through a three-tier cascade — `metrics_raw` (≤25 h) → `metrics_5min` (≤7 d) → `metrics_hourly` (≤30 d) — driven by a watermarked aggregator that idempotently recomputes every eligible bucket per tick. Audit writes land through a dedicated `*sql.Conn` pinned to `PRAGMA synchronous=FULL` (metrics stay at NORMAL) and a cursor-paginated `QueryRange` over all-DESC ordering. The service boot path is now `Open → MigrateJSONL → drift reconciliation → live ingest`; `LatestByHost` + registry `LastWriteTime` together catch both net-state drift and A→B→A oscillations. Retention runs on its own dedicated connection with `busy_timeout=0`, chunks deletes in 10k-row batches, does WAL checkpoints PASSIVE-then-TRUNCATE, and reports through the new `/api/v1/maintenance/status` endpoint backed by the `maintenance_jobs` table. Dashboard chart zoom now debounces (150 ms) and asks the server for `resolution=auto` — tier-selection truth lives server-side, not in the browser. `MemAuditStore` and the file-only root-package `AuditStore` are deleted; `/api/v1/history/{host}` returns 410 Gone; the CLI reads the same DB with `?mode=ro`. FR coverage and success-criteria instrumentation is in the task list — this paragraph is the map, not the territory.
