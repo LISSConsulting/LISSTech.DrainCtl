@@ -1075,7 +1075,7 @@ func (ds *DashboardServer) handleMaintenance(w http.ResponseWriter, r *http.Requ
 		default:
 			expected = 0
 		}
-		overdue := expected > 0 && serverTime.Sub(j.Finished) > 2*time.Duration(expected)*time.Second
+		overdue := j.IsOverdue(expected, serverTime)
 		out.Jobs = append(out.Jobs, jobJSON{
 			Name:                    j.Name,
 			Started:                 j.Started.Format(time.RFC3339Nano),
