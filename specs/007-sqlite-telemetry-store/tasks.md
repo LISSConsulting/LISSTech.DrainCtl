@@ -176,7 +176,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 
 **Purpose**: Remove superseded code, align docs, close the loop on version hygiene.
 
-- [ ] T059 Delete `internal/store/memstore.go` and its test file (`memstore_test.go`); delete the `internal/store/` package if no other files remain; remove any remaining imports
+- [x] T059 Delete `internal/store/memstore.go` and its test file (`memstore_test.go`); delete the `internal/store/` package if no other files remain; remove any remaining imports
 - [ ] T060 Delete the file-only `AuditStore` struct and methods from root-package `audit.go` (and any helpers in `audit_setup.go` that become unused); keep the public `AuditRecord` type — external DLL/CLI callers still need it
 - [ ] T061 [P] Update `README.md`: retention settings section, storage location, new endpoints, removal of `/api/v1/history/{host}`
 - [ ] T062 [P] Update `docs/index.html` if endpoint list is embedded there

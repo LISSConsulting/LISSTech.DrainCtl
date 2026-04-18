@@ -3,43 +3,69 @@
 package svc
 
 import (
-	"path/filepath"
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/store"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// newHandlerStore opens a MemAuditStore at a temp path and returns a
-// serviceHandler backed by it. The caller must close the store when done.
-func newHandlerStore(t *testing.T) (*serviceHandler, *store.MemAuditStore) {
+// newHandlerStore opens a telemetry.DB backed by a fresh drainctl.db in a
+// temp dir and returns a serviceHandler bound to its AuditStore. Caller
+// must invoke the returned cleanup.
+func newHandlerStore(t *testing.T) (*serviceHandler, *telemetry.AuditStore, func()) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	st, err := store.OpenMemAuditStore(path)
+	dir := t.TempDir()
+	db, err := telemetry.Open(dir)
 	if err != nil {
-		t.Fatalf("OpenMemAuditStore: %v", err)
+		t.Fatalf("telemetry.Open: %v", err)
 	}
-	h := &serviceHandler{store: st}
+	ctx := context.Background()
+	audit, err := telemetry.NewAuditStore(ctx, db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	h := &serviceHandler{audit: audit}
 	cfg := dc.DefaultConfig().ToServiceConfig()
 	h.cfg.Store(&cfg)
-	return h, st
+	cleanup := func() {
+		_ = audit.Close()
+		_ = db.Close()
+	}
+	return h, audit, cleanup
+}
+
+// appendTransition is a test helper that writes a drain-mode transition audit
+// row through the AuditStore, mirroring what svcRunCheck writes in production.
+func appendTransition(t *testing.T, audit *telemetry.AuditStore, ts time.Time, host string, prev, next dc.DrainMode) {
+	t.Helper()
+	rec := telemetry.AuditRecord{
+		Ts:        ts,
+		Host:      host,
+		PrevState: int(prev),
+		NewState:  int(next),
+	}
+	if err := audit.Append(context.Background(), rec); err != nil {
+		t.Fatalf("audit.Append: %v", err)
+	}
 }
 
 // ── HandleHistory ─────────────────────────────────────────────────────────────
 
-// TestHandleHistory_AllRecords verifies that changesOnly=false returns all
-// appended records, not just transition records.
+// TestHandleHistory_AllRecords verifies that changesOnly=false returns every
+// audit row the store holds.
 func TestHandleHistory_AllRecords(t *testing.T) {
-	h, st := newHandlerStore(t)
-	defer func() { _ = st.Close() }()
+	h, audit, cleanup := newHandlerStore(t)
+	defer cleanup()
 
-	base := time.Now()
-	st.Append(&dc.AuditRecord{Timestamp: base, Host: "srv", DrainMode: dc.AllowAll, Changed: false})
-	st.Append(&dc.AuditRecord{Timestamp: base.Add(time.Second), Host: "srv", DrainMode: dc.PreventNewLogon, Changed: true})
-	st.Append(&dc.AuditRecord{Timestamp: base.Add(2 * time.Second), Host: "srv", DrainMode: dc.PreventNewLogon, Changed: false})
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.PreventNewLogon)
+	appendTransition(t, audit, base.Add(time.Second), "srv", dc.PreventNewLogon, dc.AllowAll)
+	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.AllowAll, dc.PreventNewLogon)
 
 	got := h.HandleHistory(0, false)
 	if len(got) != 3 {
@@ -47,17 +73,17 @@ func TestHandleHistory_AllRecords(t *testing.T) {
 	}
 }
 
-// TestHandleHistory_ChangesOnly verifies that changesOnly=true filters to only
-// records where Changed==true (i.e. state transitions).
+// TestHandleHistory_ChangesOnly verifies the filter passes through to the
+// store layer and excludes no-op rows (prev_state == new_state).
 func TestHandleHistory_ChangesOnly(t *testing.T) {
-	h, st := newHandlerStore(t)
-	defer func() { _ = st.Close() }()
+	h, audit, cleanup := newHandlerStore(t)
+	defer cleanup()
 
-	base := time.Now()
-	st.Append(&dc.AuditRecord{Timestamp: base, Host: "srv", DrainMode: dc.AllowAll, Changed: false})
-	st.Append(&dc.AuditRecord{Timestamp: base.Add(time.Second), Host: "srv", DrainMode: dc.PreventNewLogon, Changed: true})
-	st.Append(&dc.AuditRecord{Timestamp: base.Add(2 * time.Second), Host: "srv", DrainMode: dc.PreventNewLogon, Changed: false})
-	st.Append(&dc.AuditRecord{Timestamp: base.Add(3 * time.Second), Host: "srv", DrainMode: dc.AllowAll, Changed: true})
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	appendTransition(t, audit, base, "srv", dc.AllowAll, dc.PreventNewLogon)
+	// No-op row (prev==next, e.g. a reconciliation where state didn't change).
+	appendTransition(t, audit, base.Add(time.Second), "srv", dc.PreventNewLogon, dc.PreventNewLogon)
+	appendTransition(t, audit, base.Add(2*time.Second), "srv", dc.PreventNewLogon, dc.AllowAll)
 
 	got := h.HandleHistory(0, true)
 	if len(got) != 2 {
@@ -67,6 +93,15 @@ func TestHandleHistory_ChangesOnly(t *testing.T) {
 		if !r.Changed {
 			t.Errorf("changesOnly=true returned record with Changed=false: %+v", r)
 		}
+	}
+}
+
+// TestHandleHistory_NilAuditReturnsNil verifies the pipe handler tolerates a
+// construction path where the audit store is not wired (degraded mode).
+func TestHandleHistory_NilAuditReturnsNil(t *testing.T) {
+	h := &serviceHandler{}
+	if got := h.HandleHistory(10, false); got != nil {
+		t.Errorf("HandleHistory on nil-audit handler returned %v, want nil", got)
 	}
 }
 
