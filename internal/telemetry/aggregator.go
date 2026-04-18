@@ -49,11 +49,18 @@ func (a *Aggregator) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			now := time.Now().UTC()
-			a.roll5Min(ctx, now)
-			a.rollHourly(ctx, now)
+			a.RollOnce(ctx, time.Now().UTC())
 		}
 	}
+}
+
+// RollOnce runs a single 5-min-then-hourly aggregation pass at the given
+// wall-clock. Exposed so callers outside this package (notably HTTP handler
+// tests that need to materialise all three tiers deterministically) can drive
+// one tick synchronously instead of racing the Run ticker.
+func (a *Aggregator) RollOnce(ctx context.Context, now time.Time) {
+	a.roll5Min(ctx, now)
+	a.rollHourly(ctx, now)
 }
 
 // roll5Min aggregates all eligible 5-minute buckets from metrics_raw.

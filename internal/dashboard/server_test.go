@@ -2876,6 +2876,190 @@ func TestMetricsHandler_UnknownHostReturns404(t *testing.T) {
 	}
 }
 
+// newTestServerWithAggregator wires a DashboardServer to a real on-disk
+// telemetry store plus an Aggregator so tests can materialise 5-min and
+// hourly tiers deterministically via a single RollOnce call.
+func newTestServerWithAggregator(t *testing.T) (*DashboardServer, *telemetry.MetricsStore, *telemetry.Aggregator, func()) {
+	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	ms := telemetry.NewMetricsStore(db)
+	agg := telemetry.NewAggregator(db, 60)
+	ds := &DashboardServer{
+		state:  NewServerState(t.TempDir()),
+		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
+		broker: NewBroker(),
+		ms:     ms,
+	}
+	return ds, ms, agg, func() { _ = db.Close() }
+}
+
+// decodeMetricsTier reads just the `tier` field from a handler response body.
+func decodeMetricsTier(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var resp struct {
+		Tier string `json:"tier"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, w.Body.String())
+	}
+	return resp.Tier
+}
+
+// TestMetricsHandler_ResolutionAutoMatrix drives every decision boundary in
+// research.md §8's auto-resolution table. Seeds a single raw sample far
+// enough in the past that all three tiers have `oldest <= from` for every
+// window under test, so the table exercises the window → tier mapping
+// without interference from the degradation code path.
+func TestMetricsHandler_ResolutionAutoMatrix(t *testing.T) {
+	ds, ms, agg, closeDB := newTestServerWithAggregator(t)
+	defer closeDB()
+	ds.state.Register("SRV01")
+
+	now := time.Now().UTC().Truncate(time.Second)
+	ctx := context.Background()
+
+	// One sample 50h back lets `roll5Min` materialise a 5-min bucket and
+	// `rollHourly` (reading from metrics_5min) materialise an hourly bucket,
+	// so all three tier pools contain rows older than any tested `from`.
+	if err := ms.Append(ctx, []telemetry.Sample{
+		{Ts: now.Add(-50 * time.Hour), Host: "SRV01", Counter: "cpu_pct", Value: 10},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	agg.RollOnce(ctx, now)
+
+	// Sanity: each tier must hold >= 1 row for this host. If the aggregator
+	// watermark math drifts, the rest of the matrix would silently fall
+	// through to the degradation path and misdiagnose.
+	for _, tier := range []telemetry.Tier{telemetry.TierRaw, telemetry.TierFiveMin, telemetry.TierHourly} {
+		oldest, _, err := ms.BoundsForTier(ctx, "SRV01", tier)
+		if err != nil {
+			t.Fatalf("BoundsForTier %s: %v", tier.TierName(), err)
+		}
+		if oldest == nil {
+			t.Fatalf("tier %s has no rows after aggregation; matrix cannot test auto selection", tier.TierName())
+		}
+	}
+
+	cases := []struct {
+		name   string
+		window time.Duration
+		tier   string
+	}{
+		{"30m → raw", 30 * time.Minute, "raw"},
+		{"1h (inclusive) → raw", time.Hour, "raw"},
+		{"1h+1m → 5min", time.Hour + time.Minute, "5min"},
+		{"12h → 5min", 12 * time.Hour, "5min"},
+		{"24h (inclusive) → 5min", 24 * time.Hour, "5min"},
+		{"24h+1m → hourly", 24*time.Hour + time.Minute, "hourly"},
+		{"48h → hourly", 48 * time.Hour, "hourly"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from := now.Add(-tc.window).Format(time.RFC3339)
+			to := now.Format(time.RFC3339)
+			url := "/api/v1/metrics/SRV01?from=" + from + "&to=" + to + "&resolution=auto"
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, url, nil)
+			r.SetPathValue("host", "SRV01")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+			if got := decodeMetricsTier(t, w); got != tc.tier {
+				t.Errorf("tier = %q, want %q (window=%s)", got, tc.tier, tc.window)
+			}
+		})
+	}
+}
+
+// TestMetricsHandler_ExplicitResolutionOverrides confirms that an explicit
+// `resolution=` value bypasses the auto window→tier selection AND the
+// degradation loop — the response echoes the requested tier even if no data
+// is materialised there. Empty DB is used so there is nothing for auto to
+// fall back to.
+func TestMetricsHandler_ExplicitResolutionOverrides(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	ds.state.Register("SRV01")
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	cases := []struct {
+		name       string
+		resolution string
+		window     time.Duration
+	}{
+		// A 48h window would pick hourly under auto. Explicit raw forces raw.
+		{"resolution=raw overrides a 48h window", "raw", 48 * time.Hour},
+		// A 30m window would pick raw under auto. Explicit 5min forces 5min.
+		{"resolution=5min overrides a 30m window", "5min", 30 * time.Minute},
+		// A 30m window would pick raw under auto. Explicit hourly forces hourly.
+		{"resolution=hourly overrides a 30m window", "hourly", 30 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from := now.Add(-tc.window).Format(time.RFC3339)
+			to := now.Format(time.RFC3339)
+			url := "/api/v1/metrics/SRV01?from=" + from + "&to=" + to + "&resolution=" + tc.resolution
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, url, nil)
+			r.SetPathValue("host", "SRV01")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+			if got := decodeMetricsTier(t, w); got != tc.resolution {
+				t.Errorf("tier = %q, want %q", got, tc.resolution)
+			}
+		})
+	}
+}
+
+// TestMetricsHandler_DegradesWhenRawPurged walks the full degradation chain.
+// Raw holds only very recent samples (oldest > from), 5-min and hourly are
+// empty because the aggregator hasn't run. The handler must degrade
+// raw → 5min → hourly and return hourly since it is the coarsest tier.
+func TestMetricsHandler_DegradesWhenRawPurged(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	ds.state.Register("SRV01")
+
+	now := time.Now().UTC().Truncate(time.Second)
+	ctx := context.Background()
+
+	// Raw oldest = now-20m. Request from = now-3h is strictly older than that,
+	// so raw reports coverage-missing via oldest.After(from) and degrades.
+	if err := ms.Append(ctx, []telemetry.Sample{
+		{Ts: now.Add(-20 * time.Minute), Host: "SRV01", Counter: "cpu_pct", Value: 7},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	// Window = 30m picks raw under auto. With raw missing the older half of
+	// the window, and 5-min + hourly both empty, resolveMetricsTier should
+	// fall all the way through to hourly (it is never degraded off).
+	from := now.Add(-3 * time.Hour).Format(time.RFC3339)
+	to := now.Add(-150 * time.Minute).Format(time.RFC3339)
+	url := "/api/v1/metrics/SRV01?from=" + from + "&to=" + to + "&resolution=auto"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "SRV01")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if got := decodeMetricsTier(t, w); got != "hourly" {
+		t.Errorf("tier = %q, want hourly", got)
+	}
+}
+
 // ── handleAudit ──────────────────────────────────────────────────────────────
 
 // newTestServerWithAudit wires a DashboardServer to a real on-disk telemetry
