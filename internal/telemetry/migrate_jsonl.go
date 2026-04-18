@@ -24,10 +24,11 @@ const (
 
 // MigrationResult reports the outcome of a single MigrateJSONL invocation.
 type MigrationResult struct {
-	JSONLFound bool // audit.jsonl existed at migration time
-	LineCount  int  // total source lines consumed this call (cumulative across resumes not reflected here)
-	Imported   int  // rows submitted via INSERT … ON CONFLICT this call (conflict no-ops still count)
-	Skipped    int  // malformed lines observed cumulatively (loaded from schema_meta + this call)
+	JSONLFound bool   // audit.jsonl existed at migration time
+	LineCount  int    // total source lines consumed this call (cumulative across resumes not reflected here)
+	Imported   int    // rows submitted via INSERT … ON CONFLICT this call (conflict no-ops still count)
+	Skipped    int    // malformed lines observed cumulatively (loaded from schema_meta + this call)
+	BackupPath string // set when audit.jsonl was renamed to audit.jsonl.bak.<UTC-timestamp> this call
 	Duration   time.Duration
 }
 
@@ -73,13 +74,15 @@ type legacyAuditRecord struct {
 // resume the tracker is seeded from the newest audit row per host, so
 // transitions that land after a restart still get an accurate PrevState.
 //
-// In the streaming case, MigrateJSONL does NOT flip schema_meta[jsonl_migrated]
-// to "true" on EOF. That flip is atomic with the audit.jsonl → audit.jsonl.bak
-// rename owned by T043: if the flag were set here and T043 then crashed
-// mid-rename, a second start would see flag=true with audit.jsonl still
-// present, and the legacy CLI path could keep appending records that nothing
-// would ever migrate. Keeping the flag-set co-located with the rename in
-// T043 preserves the invariant "flag=true ⇒ audit.jsonl has been renamed."
+// On EOF with no scanner error, MigrateJSONL finalizes in this order:
+// rename audit.jsonl → audit.jsonl.bak.<UTC-timestamp>, then set
+// schema_meta[jsonl_migrated]="true". Rename-before-flag preserves the
+// invariant "flag=true ⇒ audit.jsonl has been renamed." If the rename
+// succeeds but the flag-set fails, the next service start finds audit.jsonl
+// absent and takes the absent-branch that writes the flag — convergent.
+// If the rename fails, the flag stays false and the next start resumes
+// scanning from schema_meta[jsonl_migrated_line_count]; since every INSERT
+// uses ON CONFLICT DO NOTHING the retry is idempotent (FR-021).
 func MigrateJSONL(ctx context.Context, db *DB, dataDir string) (MigrationResult, error) {
 	started := time.Now()
 	res := MigrationResult{}
@@ -267,6 +270,25 @@ func MigrateJSONL(ctx context.Context, db *DB, dataDir string) (MigrationResult,
 	}
 
 	res.LineCount = lineIndex
+
+	// Explicit close before rename — Windows refuses to rename an open handle.
+	// The deferred Close above becomes a no-op on an already-closed *os.File.
+	if err := f.Close(); err != nil {
+		return res, fmt.Errorf("telemetry: migrate close jsonl: %w", err)
+	}
+
+	backupPath := jsonlPath + ".bak." + time.Now().UTC().Format("20060102T150405Z")
+	if err := os.Rename(jsonlPath, backupPath); err != nil {
+		return res, fmt.Errorf("telemetry: migrate rename to %s: %w", backupPath, err)
+	}
+	res.BackupPath = backupPath
+
+	if _, err := db.writer.ExecContext(ctx,
+		`INSERT INTO schema_meta(key, value) VALUES('jsonl_migrated', 'true')
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`); err != nil {
+		return res, fmt.Errorf("telemetry: migrate mark success: %w", err)
+	}
+
 	res.Duration = time.Since(started)
 	return res, nil
 }
