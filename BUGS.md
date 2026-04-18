@@ -23,15 +23,17 @@ Running list of defects and UX gaps surfaced during validation / manual testing.
 
 ---
 
-### 2. Migration log line is misleading when JSONL has no transitions
+### 2. Migration log line is misleading when JSONL has no transitions — FIXED 2026-04-18
 
-**Surfaced:** 2026-04-18 during T067 validation on CST-ISLAB-PC3.
+**Status:** Fixed.
 
-**Symptom:** `INF audit JSONL migration lines=14761 imported=0 skipped=0` — numbers don't add up; looks like silent data loss.
+**Symptom:** `INF audit JSONL migration lines=14761 imported=0 skipped=0` — numbers don't add up; looked like silent data loss.
 
-**Root cause:** `internal/telemetry/migrate_jsonl.go:274-316` reads every line but only inserts records where `leg.Changed == true` (i.e. real drain-mode transitions). Non-transition observations are *neither* imported *nor* skipped — they're silently filtered. The log line reports all three counters but never accounts for the filtered-out middle bucket.
+**Root cause:** `internal/telemetry/migrate_jsonl.go:274-316` read every line but only inserted records where `leg.Changed == true` (real drain-mode transitions). Successfully parsed non-transition observations were *neither* imported *nor* skipped — they're the "dropped by design" bucket the new schema no longer stores. The log line reported three counters with no home for this middle bucket.
 
-**Fix:** Either add an `observations=N` field to the log, or rename `lines` → `transition_candidates` and make the math explicit. Behaviour is correct; only the log wording is wrong.
+**Fix:** added `Observations int` to `telemetry.MigrationResult`, incremented on every successfully parsed line where `leg.Changed == false`. Service boot log now emits `observations` alongside `imported` and `skipped`. Invariant: `imported + observations + skipped ≤ lines` (equal in the no-empty-lines common case). Unit test `TestMigrate_ValidJSONLAllImported` gained an `Observations` assertion plus an invariant sum-check.
+
+**Verification:** `go test ./internal/telemetry/ -run TestMigrate` all green. The next JSONL migration that runs will emit `lines=N imported=X observations=Y skipped=Z` where `X+Y+Z=N`; the previously-confusing `imported=0 skipped=0` from CST-ISLAB-PC3 would now read `imported=0 observations=14761 skipped=0` — instantly legible.
 
 ---
 
