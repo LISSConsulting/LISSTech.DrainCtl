@@ -174,10 +174,12 @@ frontend-copy: frontend
 cli: frontend-copy
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    & go build -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & go build -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
-    Write-Host "   drainctl.exe ($size)" -ForegroundColor DarkGray
+    Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
 
 # Build the C-shared DLL (requires CGo + MinGW)
 [script('pwsh', '-NoProfile')]
@@ -185,12 +187,14 @@ cli: frontend-copy
 dll:
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building DLL  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $env:CGO_ENABLED = "1"
-    & go build -buildmode=c-shared -ldflags "-s -w" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
+    & go build -buildmode=c-shared -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Remove-Item -ErrorAction SilentlyContinue "{{bin_dir}}/drainctl.h"
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.dll").Length / 1MB)
-    Write-Host "   drainctl.dll ($size)" -ForegroundColor DarkGray
+    Write-Host "   drainctl.dll ($size) — v$ver" -ForegroundColor DarkGray
 
 # Copy PowerShell module files
 [script('pwsh', '-NoProfile')]

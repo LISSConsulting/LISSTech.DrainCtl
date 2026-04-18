@@ -6,8 +6,11 @@ package drainctl
 
 import "os"
 
-// Version is the library version. Overridable via ldflags.
-var Version = "26.107.26"
+// Version is the library version. Injected at build time via ldflags
+// (see scripts/version.ps1 and the `cli` / `dll` recipes in justfile).
+// The default "dev" shows up only for plain `go build` invocations that
+// skip the just recipes.
+var Version = "dev"
 
 // ETW audit event IDs (5xxx) — routed to the Audit channel.
 // Defined here so both internal/svc and internal/dashboard can reference them.
