@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/svc"
 	"github.com/spf13/cobra"
 )
@@ -21,11 +23,15 @@ func serviceCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install DrainCtl as a Windows service (requires admin)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exePath, err := os.Executable()
+			cliPath, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("get executable path: %w", err)
 			}
-			return svc.InstallService(exePath)
+			servicePath := filepath.Join(filepath.Dir(cliPath), dc.ServiceBinaryName)
+			if _, err := os.Stat(servicePath); err != nil {
+				return fmt.Errorf("service binary %q not found: %w", servicePath, err)
+			}
+			return svc.InstallService(servicePath)
 		},
 	})
 
@@ -70,15 +76,6 @@ func serviceCmd() *cobra.Command {
 				slog.Info("service status", "state", state)
 			}
 			return nil
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:    "run",
-		Short:  "Run as a Windows service (invoked by SCM)",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return svc.RunService()
 		},
 	})
 

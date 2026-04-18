@@ -12,6 +12,8 @@ import "os"
 // skip the just recipes.
 var Version = "dev"
 
+const ServiceBinaryName = "drainctld.exe"
+
 // ETW audit event IDs (5xxx) — routed to the Audit channel.
 // Defined here so both internal/svc and internal/dashboard can reference them.
 const (
