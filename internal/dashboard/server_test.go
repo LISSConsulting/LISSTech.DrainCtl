@@ -3545,3 +3545,297 @@ func TestSettingsHandler_ConcurrentRetentionPUTIsSerialized(t *testing.T) {
 			final.GracePeriod, intentA, intentB)
 	}
 }
+
+// ── handleMaintenance ─────────────────────────────────────────────────────────
+
+// newTestServerWithMaintenance returns a DashboardServer wired to a real
+// on-disk telemetry store and MaintenanceStore. testLoadConfigFunc is stubbed
+// so the handler reads deterministic interval defaults instead of hitting
+// config.json on disk.
+func newTestServerWithMaintenance(t *testing.T) (*DashboardServer, *telemetry.MaintenanceStore, func()) {
+	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	mnt := telemetry.NewMaintenanceStore(db)
+	ds := &DashboardServer{
+		state:  NewServerState(t.TempDir()),
+		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
+		broker: NewBroker(),
+		mnt:    mnt,
+	}
+	ds.testLoadConfigFunc = func() (*dc.Config, error) { return dc.DefaultConfig(), nil }
+	return ds, mnt, func() { _ = db.Close() }
+}
+
+type maintenanceJobJSON struct {
+	Name                    string `json:"name"`
+	Started                 string `json:"started"`
+	Finished                string `json:"finished"`
+	DurationMs              int64  `json:"duration_ms"`
+	Outcome                 string `json:"outcome"`
+	Reason                  string `json:"reason"`
+	RowsAffected            int64  `json:"rows_affected"`
+	Overdue                 bool   `json:"overdue"`
+	ExpectedIntervalSeconds int64  `json:"expected_interval_seconds"`
+}
+
+type maintenanceResponseJSON struct {
+	Jobs       []maintenanceJobJSON `json:"jobs"`
+	ServerTime string               `json:"server_time"`
+}
+
+func callMaintenance(t *testing.T, ds *DashboardServer) (*httptest.ResponseRecorder, maintenanceResponseJSON) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/maintenance/status", nil)
+	ds.handleMaintenance(w, r)
+
+	var resp maintenanceResponseJSON
+	if w.Code == http.StatusOK {
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v; body=%s", err, w.Body.String())
+		}
+	}
+	return w, resp
+}
+
+func TestMaintenanceHandler_ContractShape(t *testing.T) {
+	ds, mnt, closeDB := newTestServerWithMaintenance(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	// Recent aggregator run — within 2× its 60s expected interval.
+	aggStart := now.Add(-30 * time.Second)
+	aggFinish := aggStart.Add(83 * time.Millisecond)
+	if err := mnt.UpsertJob(ctx, "aggregator_5min", telemetry.Result{
+		Started:      aggStart,
+		Finished:     aggFinish,
+		Outcome:      "success",
+		RowsAffected: 300,
+	}); err != nil {
+		t.Fatalf("UpsertJob aggregator_5min: %v", err)
+	}
+
+	// Recent retention run with its 900s expected interval.
+	retStart := now.Add(-5 * time.Minute)
+	retFinish := retStart.Add(4115 * time.Millisecond)
+	if err := mnt.UpsertJob(ctx, "retention", telemetry.Result{
+		Started:      retStart,
+		Finished:     retFinish,
+		Outcome:      "success",
+		RowsAffected: 1287,
+	}); err != nil {
+		t.Fatalf("UpsertJob retention: %v", err)
+	}
+
+	// Failure with a reason, rows_affected=0.
+	failStart := now.Add(-10 * time.Second)
+	failFinish := failStart.Add(204 * time.Millisecond)
+	if err := mnt.UpsertJob(ctx, "aggregator_hourly", telemetry.Result{
+		Started:      failStart,
+		Finished:     failFinish,
+		Outcome:      "failure",
+		Reason:       "disk full: insert into metrics_hourly: database or disk is full",
+		RowsAffected: 0,
+	}); err != nil {
+		t.Fatalf("UpsertJob aggregator_hourly: %v", err)
+	}
+
+	w, resp := callMaintenance(t, ds)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	if resp.ServerTime == "" {
+		t.Error("server_time missing")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, resp.ServerTime); err != nil {
+		t.Errorf("server_time parse: %v (got %q)", err, resp.ServerTime)
+	}
+	if len(resp.Jobs) != 3 {
+		t.Fatalf("jobs count = %d, want 3 (got %+v)", len(resp.Jobs), resp.Jobs)
+	}
+
+	// ListJobs returns rows alphabetically by name.
+	byName := make(map[string]maintenanceJobJSON, len(resp.Jobs))
+	for _, j := range resp.Jobs {
+		byName[j.Name] = j
+	}
+
+	agg, ok := byName["aggregator_5min"]
+	if !ok {
+		t.Fatalf("aggregator_5min row missing")
+	}
+	if agg.Outcome != "success" {
+		t.Errorf("aggregator_5min outcome = %q, want success", agg.Outcome)
+	}
+	if agg.Reason != "" {
+		t.Errorf("aggregator_5min reason = %q, want empty", agg.Reason)
+	}
+	if agg.RowsAffected != 300 {
+		t.Errorf("aggregator_5min rows_affected = %d, want 300", agg.RowsAffected)
+	}
+	if agg.DurationMs != 83 {
+		t.Errorf("aggregator_5min duration_ms = %d, want 83", agg.DurationMs)
+	}
+	if agg.ExpectedIntervalSeconds != int64(dc.DefaultAggregatorIntervalSeconds) {
+		t.Errorf("aggregator_5min expected_interval_seconds = %d, want %d",
+			agg.ExpectedIntervalSeconds, dc.DefaultAggregatorIntervalSeconds)
+	}
+	if agg.Overdue {
+		t.Error("aggregator_5min overdue = true, want false (ran 30s ago, interval 60s)")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, agg.Started); err != nil {
+		t.Errorf("aggregator_5min started parse: %v (got %q)", err, agg.Started)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, agg.Finished); err != nil {
+		t.Errorf("aggregator_5min finished parse: %v (got %q)", err, agg.Finished)
+	}
+
+	ret, ok := byName["retention"]
+	if !ok {
+		t.Fatalf("retention row missing")
+	}
+	wantRetention := int64(dc.DefaultRetentionIntervalMinutes) * 60
+	if ret.ExpectedIntervalSeconds != wantRetention {
+		t.Errorf("retention expected_interval_seconds = %d, want %d",
+			ret.ExpectedIntervalSeconds, wantRetention)
+	}
+	if ret.RowsAffected != 1287 {
+		t.Errorf("retention rows_affected = %d, want 1287", ret.RowsAffected)
+	}
+	if ret.Overdue {
+		t.Error("retention overdue = true, want false (ran 5m ago, interval 15m)")
+	}
+
+	fail, ok := byName["aggregator_hourly"]
+	if !ok {
+		t.Fatalf("aggregator_hourly row missing")
+	}
+	if fail.Outcome != "failure" {
+		t.Errorf("aggregator_hourly outcome = %q, want failure", fail.Outcome)
+	}
+	if !strings.Contains(fail.Reason, "disk full") {
+		t.Errorf("aggregator_hourly reason = %q, want substring 'disk full'", fail.Reason)
+	}
+	if fail.ExpectedIntervalSeconds != int64(dc.DefaultAggregatorIntervalSeconds) {
+		t.Errorf("aggregator_hourly expected_interval_seconds = %d, want %d",
+			fail.ExpectedIntervalSeconds, dc.DefaultAggregatorIntervalSeconds)
+	}
+}
+
+func TestMaintenanceHandler_OverdueFlagCorrect(t *testing.T) {
+	ds, mnt, closeDB := newTestServerWithMaintenance(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	aggInterval := time.Duration(dc.DefaultAggregatorIntervalSeconds) * time.Second
+	retInterval := time.Duration(dc.DefaultRetentionIntervalMinutes) * time.Minute
+	now := time.Now().UTC()
+
+	// Fresh aggregator — finished well under 2× interval → NOT overdue.
+	freshStart := now.Add(-aggInterval / 2)
+	if err := mnt.UpsertJob(ctx, "aggregator_5min", telemetry.Result{
+		Started:      freshStart,
+		Finished:     freshStart.Add(10 * time.Millisecond),
+		Outcome:      "success",
+		RowsAffected: 10,
+	}); err != nil {
+		t.Fatalf("UpsertJob fresh aggregator: %v", err)
+	}
+
+	// Stale aggregator — finished > 2× interval ago → OVERDUE.
+	staleFinish := now.Add(-3 * aggInterval)
+	if err := mnt.UpsertJob(ctx, "aggregator_hourly", telemetry.Result{
+		Started:      staleFinish.Add(-time.Second),
+		Finished:     staleFinish,
+		Outcome:      "success",
+		RowsAffected: 1,
+	}); err != nil {
+		t.Fatalf("UpsertJob stale aggregator: %v", err)
+	}
+
+	// Retention > 2× its 15-min interval ago → OVERDUE.
+	retFinish := now.Add(-3 * retInterval)
+	if err := mnt.UpsertJob(ctx, "retention", telemetry.Result{
+		Started:      retFinish.Add(-time.Second),
+		Finished:     retFinish,
+		Outcome:      "success",
+		RowsAffected: 42,
+	}); err != nil {
+		t.Fatalf("UpsertJob stale retention: %v", err)
+	}
+
+	w, resp := callMaintenance(t, ds)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+
+	byName := make(map[string]maintenanceJobJSON, len(resp.Jobs))
+	for _, j := range resp.Jobs {
+		byName[j.Name] = j
+	}
+
+	if byName["aggregator_5min"].Overdue {
+		t.Error("aggregator_5min overdue = true, want false (fresh run within interval)")
+	}
+	if !byName["aggregator_hourly"].Overdue {
+		t.Error("aggregator_hourly overdue = false, want true (3× interval old)")
+	}
+	if !byName["retention"].Overdue {
+		t.Error("retention overdue = false, want true (3× interval old)")
+	}
+}
+
+func TestMaintenanceHandler_OneShotJobNeverOverdue(t *testing.T) {
+	ds, mnt, closeDB := newTestServerWithMaintenance(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	// Pre-dated by ten years — would be overdue by any interval test, yet
+	// one-shot jobs carry expected_interval_seconds == 0 and must never flag.
+	ancient := time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+
+	oneShots := []string{"jsonl_migration", "drift_reconciliation"}
+	for _, name := range oneShots {
+		if err := mnt.UpsertJob(ctx, name, telemetry.Result{
+			Started:      ancient,
+			Finished:     ancient.Add(50 * time.Millisecond),
+			Outcome:      "success",
+			RowsAffected: 1,
+		}); err != nil {
+			t.Fatalf("UpsertJob %s: %v", name, err)
+		}
+	}
+
+	w, resp := callMaintenance(t, ds)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+
+	byName := make(map[string]maintenanceJobJSON, len(resp.Jobs))
+	for _, j := range resp.Jobs {
+		byName[j.Name] = j
+	}
+
+	for _, name := range oneShots {
+		j, ok := byName[name]
+		if !ok {
+			t.Fatalf("%s row missing", name)
+		}
+		if j.ExpectedIntervalSeconds != 0 {
+			t.Errorf("%s expected_interval_seconds = %d, want 0 (one-shot sentinel)",
+				name, j.ExpectedIntervalSeconds)
+		}
+		if j.Overdue {
+			t.Errorf("%s overdue = true, want false (one-shot jobs are never overdue)", name)
+		}
+	}
+}
