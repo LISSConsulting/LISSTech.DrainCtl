@@ -182,7 +182,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 - [x] T062 [P] Update `docs/index.html` if endpoint list is embedded there
 - [x] T063 Update `CHRONICLE.md` with a one-paragraph entry for the telemetry store
 - [x] T064 Run `just lint` (gofmt + go vet + golangci-lint) and fix every warning — project rule is zero warnings
-- [ ] T065 Run `prek run --all-files` and fix any pre-commit failures
+- [x] T065 Run `prek run --all-files` and fix any pre-commit failures
 - [ ] T066 Bump CalVer `YY.DOY.patch` in all 7 canonical locations (drainctl.go, drainctl.rc, .psd1, .wixproj, README.md, CLAUDE.md, docs/index.html) per `CLAUDE.md`; run `just resource` after editing `.rc`
 - [ ] T067 Run the full `quickstart.md` validation end-to-end against an unsigned local build (`just all`); confirm the chart renders, zoom works, maintenance widget is green, audit query returns results, and reconciliation rows appear after a deliberate service-stopped drain toggle. Also walk the Regression Checklist in quickstart.md (CLI `drainctl history` output shape unchanged, dashboard empty-state render unchanged, Kerberos negotiate flow unchanged, host-add flow unchanged, notification triggers unchanged — covers FR-026).
 - [ ] T067a Document WAL-aware backup procedure: `PRAGMA wal_checkpoint(TRUNCATE)` first, then copy `drainctl.db` + `drainctl.db-wal` + `drainctl.db-shm` atomically (as a set); OR use SQLite online backup API. Smoke-test the recipe in `quickstart.md`. Must replace the current quickstart text that simply says "close the sqlite3 session".
