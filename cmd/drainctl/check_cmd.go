@@ -22,7 +22,13 @@ func checkCmd() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&cfg.Grace, "grace", 60, "Minutes drain mode must persist before alerting")
-	cmd.Flags().IntVar(&cfg.RetentionDays, "retention", 90, "Days to retain audit records")
+
+	// --retention survives as a silently-accepted flag so existing N-central
+	// monitoring invocations do not trip Cobra's "unknown flag" error. Audit
+	// retention is now managed by the service's telemetry retention worker.
+	var legacyRetention int
+	cmd.Flags().IntVar(&legacyRetention, "retention", 0, "")
+	_ = cmd.Flags().MarkHidden("retention")
 
 	return cmd
 }
@@ -110,9 +116,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	out, err := dc.Check(dc.CheckOptions{
-		DBPath:        cfg.DB,
-		GracePeriod:   time.Duration(cfg.Grace) * time.Minute,
-		RetentionDays: dc.ClampRetention(cfg.RetentionDays),
+		GracePeriod: time.Duration(cfg.Grace) * time.Minute,
 	})
 	if err != nil {
 		return err
