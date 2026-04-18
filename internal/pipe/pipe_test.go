@@ -4,7 +4,9 @@ package pipe
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"golang.org/x/sys/windows"
 )
 
 // mockHandler implements PipeHandler for tests.
@@ -256,9 +259,54 @@ func TestHandlePipeConn_StatusMarshalError(t *testing.T) {
 	}
 }
 
+func TestReadPipeResponse_ContinuesOnMoreData(t *testing.T) {
+	r := &scriptedReader{steps: []readStep{
+		{data: []byte(`{"ok":true,"data":"`), err: windows.ERROR_MORE_DATA},
+		{data: []byte(`chunked"}`), err: io.EOF},
+	}}
+
+	got, err := readPipeResponse(r)
+	if err != nil {
+		t.Fatalf("readPipeResponse: %v", err)
+	}
+	if string(got) != `{"ok":true,"data":"chunked"}` {
+		t.Fatalf("response = %q", string(got))
+	}
+}
+
+func TestReadPipeResponse_PropagatesUnexpectedError(t *testing.T) {
+	want := errors.New("boom")
+	r := &scriptedReader{steps: []readStep{{data: []byte("oops"), err: want}}}
+
+	_, err := readPipeResponse(r)
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+}
+
 // captureHandler lets tests inject callbacks for HandleHistory.
 type captureHandler struct {
 	onHistory func(limit int, changesOnly bool) []dc.AuditRecord
+}
+
+type readStep struct {
+	data []byte
+	err  error
+}
+
+type scriptedReader struct {
+	steps []readStep
+	idx   int
+}
+
+func (r *scriptedReader) Read(p []byte) (int, error) {
+	if r.idx >= len(r.steps) {
+		return 0, io.EOF
+	}
+	step := r.steps[r.idx]
+	r.idx++
+	n := copy(p, step.data)
+	return n, step.err
 }
 
 func (c *captureHandler) HandleStatus() *dc.CheckResult {
