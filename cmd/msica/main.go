@@ -206,7 +206,7 @@ func msiMessage(handle uintptr, kind uintptr, text string) {
 	if rec == 0 {
 		return
 	}
-	defer procMsiCloseHandle.Call(rec)
+	defer func() { _, _, _ = procMsiCloseHandle.Call(rec) }()
 	msg, err := windows.UTF16PtrFromString(text)
 	if err != nil {
 		return
