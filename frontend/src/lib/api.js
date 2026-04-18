@@ -387,6 +387,40 @@ export async function saveSettings(config) {
 }
 
 // ---------------------------------------------------------------------------
+// Maintenance status
+// ---------------------------------------------------------------------------
+
+/**
+ * MaintenanceJob mirrors one entry in the GET /api/v1/maintenance/status payload.
+ *
+ * @typedef {Object} MaintenanceJob
+ * @property {string} name                       - aggregator_5min | aggregator_hourly | retention | jsonl_migration | drift_reconciliation (new names may appear)
+ * @property {string} started                    - ISO-8601 UTC
+ * @property {string} finished                   - ISO-8601 UTC
+ * @property {number} duration_ms
+ * @property {'success'|'failure'|'skipped'} outcome
+ * @property {string} reason                     - populated on failure
+ * @property {number} rows_affected
+ * @property {boolean} overdue
+ * @property {number} expected_interval_seconds  - 0 sentinel for one-shot startup jobs (never overdue)
+ */
+
+/**
+ * @typedef {Object} MaintenanceResponse
+ * @property {MaintenanceJob[]} jobs
+ * @property {string} server_time                - server's own clock; clients should use this instead of Date.now() to avoid skew
+ */
+
+/**
+ * GET /api/v1/maintenance/status
+ * @returns {Promise<MaintenanceResponse>}
+ */
+export async function fetchMaintenance() {
+    const res = await apiFetch('/maintenance/status');
+    return /** @type {MaintenanceResponse} */ (await res.json());
+}
+
+// ---------------------------------------------------------------------------
 // Notify test
 // ---------------------------------------------------------------------------
 

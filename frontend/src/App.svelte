@@ -14,7 +14,7 @@
         deriveP95,
         deriveP50,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics } from './lib/api.js';
+    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, fetchMaintenance } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
 
@@ -29,6 +29,7 @@
     import ConfigModal from './components/ConfigModal.svelte';
     import HistoryModal from './components/HistoryModal.svelte';
     import Toast from './components/Toast.svelte';
+    import MaintenanceStatus from './lib/maintenance-status.svelte';
 
     // ---------------------------------------------------------------------------
     // Initialise theme once on load
@@ -41,6 +42,36 @@
     let configOpen = $state(false);
     /** @type {string|null} */
     let historyHost = $state(null);
+
+    // ---------------------------------------------------------------------------
+    // Maintenance status widget state (FR-030)
+    // The widget itself is pure presentation; this component owns the fetch
+    // and the 15-second refresh cadence matching contracts/http-maintenance.md.
+    // ---------------------------------------------------------------------------
+    /** @type {import('./lib/api.js').MaintenanceJob[]} */
+    let maintenanceJobs = $state([]);
+    /** @type {string|null} */
+    let maintenanceServerTime = $state(null);
+    let maintenanceLoading = $state(false);
+    let maintenanceError = $state('');
+
+    let maintenanceFetching = false;
+    async function refreshMaintenance() {
+        if (maintenanceFetching) return;
+        maintenanceFetching = true;
+        if (maintenanceJobs.length === 0) maintenanceLoading = true;
+        try {
+            const data = await fetchMaintenance();
+            maintenanceJobs = Array.isArray(data?.jobs) ? data.jobs : [];
+            maintenanceServerTime = data?.server_time ?? null;
+            maintenanceError = '';
+        } catch (e) {
+            maintenanceError = `Maintenance fetch failed: ${e?.message ?? e}`;
+        } finally {
+            maintenanceLoading = false;
+            maintenanceFetching = false;
+        }
+    }
 
     // ---------------------------------------------------------------------------
     // State transition tracking — detect status changes between refresh cycles
@@ -526,6 +557,22 @@
         };
     });
 
+    // Maintenance status poll — 15-second cadence per contracts/http-maintenance.md.
+    // Kept separate from the 30-second dashboard refresh so the widget reflects
+    // aggregator/retention progress at the tighter cadence operators expect.
+    $effect(() => {
+        if (!authState.username) return;
+        untrack(() => refreshMaintenance());
+        const interval = setInterval(() => untrack(() => refreshMaintenance()), 15_000);
+        return () => {
+            clearInterval(interval);
+            maintenanceJobs = [];
+            maintenanceServerTime = null;
+            maintenanceError = '';
+            maintenanceLoading = false;
+        };
+    });
+
     // SSE: real-time event stream — supplements polling with instant updates.
     // EventSource auto-reconnects on network errors (~3s default retry).
     $effect(() => {
@@ -671,6 +718,14 @@
                     <CounterGrid />
                     <StateBar />
                     <MetricsChart />
+                    <div class="maint-slot">
+                        <MaintenanceStatus
+                            jobs={maintenanceJobs}
+                            serverTime={maintenanceServerTime}
+                            loading={maintenanceLoading}
+                            error={maintenanceError}
+                        />
+                    </div>
                 {:else if appState.currentView === 'servers'}
                     <ServerTable onhistoryclick={(host) => (historyHost = host)} />
                 {:else if appState.currentView === 'events'}
@@ -722,5 +777,9 @@
 
     @keyframes spin {
         to { transform: rotate(360deg); }
+    }
+
+    .maint-slot {
+        margin-top: 20px;
     }
 </style>
