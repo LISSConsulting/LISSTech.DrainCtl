@@ -204,15 +204,20 @@ dll:
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.dll").Length / 1MB)
     Write-Host "   drainctl.dll ($size) — v$ver" -ForegroundColor DarkGray
 
-# Copy PowerShell module files
+# Render the PS module manifest from its template and copy the .psm1.
+# ModuleVersion is injected from scripts/version.ps1.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 psmodule: cli dll
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n📦 Copying PowerShell module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    Copy-Item "powershell/LISSTech.DrainCtl.psd1" "{{module_dir}}/"
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $tmpl = Get-Content "powershell/LISSTech.DrainCtl.psd1.tmpl" -Raw
+    $psd1 = $tmpl -replace '\{\{VERSION\}\}', $ver
+    Set-Content "{{module_dir}}/LISSTech.DrainCtl.psd1" -Value $psd1 -NoNewline
     Copy-Item "powershell/LISSTech.DrainCtl.psm1" "{{module_dir}}/"
-    Write-Host "   LISSTech.DrainCtl.psd1" -ForegroundColor DarkGray
+    Write-Host "   LISSTech.DrainCtl.psd1 — v$ver" -ForegroundColor DarkGray
     Write-Host "   LISSTech.DrainCtl.psm1" -ForegroundColor DarkGray
 
 # Build the WiX MSI installer
@@ -221,10 +226,12 @@ psmodule: cli dll
 msi: psmodule
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n📦 Building MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 -nologo -v:q
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 "-p:ProductVersion=$ver" -nologo -v:q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi").Length / 1MB)
-    Write-Host "   LISSTech.DrainCtl.msi ($size)" -ForegroundColor DarkGray
+    Write-Host "   LISSTech.DrainCtl.msi ($size) — v$ver" -ForegroundColor DarkGray
 
 # ── Sign ─────────────────────────────────────────────────────────────────────
 
