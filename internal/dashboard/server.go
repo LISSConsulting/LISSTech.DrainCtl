@@ -1012,8 +1012,56 @@ func writeJSONError(w http.ResponseWriter, code string, status int) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
+// resolveMetricsTier maps a request's resolution parameter to a concrete tier.
+// Explicit "raw"/"5min"/"hourly" pass through. "auto" picks by window size
+// (≤1h → raw, 1h–24h → 5min, >24h → hourly, per research.md §8) then
+// degrades to the next coarser tier if the chosen tier's oldest row does
+// not cover `from`. Hourly is never degraded (it is the coarsest tier).
+func (ds *DashboardServer) resolveMetricsTier(
+	ctx context.Context,
+	host string,
+	from, to time.Time,
+	resolution string,
+) (telemetry.Tier, error) {
+	switch resolution {
+	case "raw":
+		return telemetry.TierRaw, nil
+	case "5min":
+		return telemetry.TierFiveMin, nil
+	case "hourly":
+		return telemetry.TierHourly, nil
+	}
+
+	window := to.Sub(from)
+	var tier telemetry.Tier
+	switch {
+	case window <= time.Hour:
+		tier = telemetry.TierRaw
+	case window <= 24*time.Hour:
+		tier = telemetry.TierFiveMin
+	default:
+		tier = telemetry.TierHourly
+	}
+
+	for tier != telemetry.TierHourly {
+		oldest, _, err := ds.ms.BoundsForTier(ctx, host, tier)
+		if err != nil {
+			return 0, err
+		}
+		if oldest != nil && !oldest.After(from) {
+			return tier, nil
+		}
+		switch tier {
+		case telemetry.TierRaw:
+			tier = telemetry.TierFiveMin
+		case telemetry.TierFiveMin:
+			tier = telemetry.TierHourly
+		}
+	}
+	return tier, nil
+}
+
 // handleMetrics serves GET /api/v1/metrics/{host} per contracts/http-metrics.md.
-// tier=auto falls back to hourly in this phase; real auto selection is added in T037 (US3).
 func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
 	if host == "" || !ds.state.IsRegistered(host) {
@@ -1047,17 +1095,7 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 	if resStr == "" {
 		resStr = "auto"
 	}
-	var tier telemetry.Tier
-	switch resStr {
-	case "auto", "5min":
-		// 5-min tier is implemented in T036 (US3); degrade to hourly until then.
-		// Response tier field reflects what was actually served (FR-019).
-		tier = telemetry.TierHourly
-	case "raw":
-		tier = telemetry.TierRaw
-	case "hourly":
-		tier = telemetry.TierHourly
-	default:
+	if resStr != "auto" && resStr != "raw" && resStr != "5min" && resStr != "hourly" {
 		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
 		return
 	}
@@ -1079,6 +1117,13 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+
+	tier, err := ds.resolveMetricsTier(ctx, host, from, to, resStr)
+	if err != nil {
+		slog.Error("metrics: tier resolution failed", "host", host, "error", err) //nolint:gosec // host is validated against registered server list
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
 
 	sr, err := ds.ms.QueryRange(ctx, host, from, to, tier, counters)
 	if err != nil {

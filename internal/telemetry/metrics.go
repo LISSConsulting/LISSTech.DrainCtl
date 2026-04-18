@@ -141,7 +141,7 @@ func (s *MetricsStore) QueryRange(
 	tier Tier,
 	counters []string,
 ) (*Series, error) {
-	oldest, newest, err := s.boundsForTier(ctx, host, tier)
+	oldest, newest, err := s.BoundsForTier(ctx, host, tier)
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +247,9 @@ var tierBoundsSQL = map[Tier]string{
 	TierHourly:  `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_hourly WHERE host = ?`,
 }
 
-// boundsForTier returns the oldest and newest timestamp the tier holds for the given host.
-func (s *MetricsStore) boundsForTier(ctx context.Context, host string, tier Tier) (*time.Time, *time.Time, error) {
+// BoundsForTier returns the oldest and newest timestamp the tier holds for the given host.
+// Returned values are nil when the tier has no rows for the host.
+func (s *MetricsStore) BoundsForTier(ctx context.Context, host string, tier Tier) (*time.Time, *time.Time, error) {
 	q, ok := tierBoundsSQL[tier]
 	if !ok {
 		return nil, nil, fmt.Errorf("telemetry: unknown tier %d", int(tier))
