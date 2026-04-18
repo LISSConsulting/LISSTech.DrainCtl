@@ -86,29 +86,35 @@ Original report below for historical context.
 
 ---
 
-### 6. `change logon /disable` produces no drainctl history entry — FIXED 2026-04-18
+### 6. `fDenyTSConnections` transitions not tracked — FIXED 2026-04-18
 
-**Status:** Fixed. Chose option (A) — extend tracking to include `fDenyTSConnections`.
+**Status:** Fixed for registry-side deny via `fDenyTSConnections`.
+
+The `fDenyTSConnections` registry value is now tracked. Operators can still flip drain state via GPO, "Allow users to connect remotely" in System Properties, or direct regedit — all of which write `fDenyTSConnections` — and DrainCtl now emits a `DENY_ALL_CONNECTIONS` transition for each.
 
 **Change:**
 - `registry.go`: added `DenyValueName = "fDenyTSConnections"` + synthetic `DenyAll DrainMode = 3` + `"DENY_ALL_CONNECTIONS"` label. `ReadDrainMode` now reads `fDenyTSConnections` and returns `DenyAll` when it is 1, regardless of the underlying `TSServerDrainMode` value. The drain enum still takes values 0/1/2 when fDeny is 0 or absent; the synthetic 3 does not collide.
 - `frontend/src/lib/utils.js`: new `modeLabel` mapping `DENY_ALL_CONNECTIONS → "Denied"`.
 - `audit_setup.go`: success log updated to mention both values (the existing SACL already covers any value-write under the Terminal Server key, so Event 4657 attribution works for fDenyTSConnections with no SACL change).
-- Transition detection, `ClassifyState` (drain-active check), the registry key watcher, and notification triggers needed no code changes — they all compose on `DrainMode` equality or `!= AllowAll`, and the synthetic value participates naturally.
+- Transition detection, `ClassifyState`, the registry key watcher, and notification triggers compose on `DrainMode` equality or `!= AllowAll` — no code changes needed for those paths.
 
 Tests: `TestDrainMode_String` in `registry_test.go`. `go test ./...` green, `just lint` clean.
 
-**Note:** the dashboard API / SSE payload now carries `drain_mode_value = 3` for DenyAll. Older frontends decode this as the raw string; the server-side `DrainMode.String()` in the report path produces the new label, so clients that map by label continue to work. Two `//nolint:gosec` comments in `internal/dashboard/server.go` already said "PrevState is 0..3" — someone anticipated this.
+---
 
-Original report below for historical context.
+### 6a. `change logon /disable` explicitly out of scope
 
-**Symptom:** Running `change logon /disable` reports `Session logins are currently DISABLED` but no corresponding entry appears in `drainctl history` or the audit table.
+**Status:** Won't fix — scoped out 2026-04-18 after a design review (scrapped).
 
-**Root cause:** `change logon /disable` modifies `HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\fDenyTSConnections`. DrainCtl only watches `TSServerDrainMode` (`registry.go:15-25`) — value 0 (AllowAll) / 1 (PreventNewLogon) / 2 (PreventUntilRST). The `fDenyTSConnections` value is outside the tracked set, so neither the registry watcher nor the audit store sees it change.
+**Why it's not covered by #6's fix:** empirical testing on Windows Server 2022 showed that `change logon /disable` does NOT modify `fDenyTSConnections` or any other registry value we could watch. It flips an in-memory flag in the Terminal Services LSM (lsm.exe), readable only via:
+- The undocumented `winsta.dll!WinStationQueryInformationW` API, or
+- `Win32_TerminalServiceSetting.Logons` via WMI (`root\cimv2\TerminalServices`).
 
-**Product decision needed:** is "all logons denied" (fDenyTSConnections=1) a state DrainCtl should track? Operationally it's an operator-relevant gate — arguably *more* severe than drain. Options:
-- **(A) Extend tracking** to include `fDenyTSConnections`. Introduce a new mode label (e.g. `DENY_ALL_CONNECTIONS`) and have the watcher + audit store emit transitions for it. Broadest fix; touches registry reader, enum, history formatter, dashboard, notifications.
-- **(B) Document as out-of-scope** in README and keep ignoring. Minimum work, but operators using `/disable` will keep getting surprised.
+**Why we're not tracking it:** the implementation path was costed via a three-round adversarial design review. The WMI subscription approach requires raw COM in-process (DrainCtl has no COM today), per-thread `CoInitializeEx` lifecycle, `CoInitializeSecurity` + `CoSetProxyBlanket` for the `root\cimv2\terminalservices` namespace, a custom `IWbemObjectSink` implementation, graceful degradation when `winmgmt` is unreachable, and a 4688-process-creation heuristic for attribution (with spoofability concerns). The cost-benefit ratio wasn't justified for what is a transient, in-memory, non-persistent toggle.
+
+**What operators should do instead:** use `Set-RDSessionHost -NewConnectionAllowed {Yes|No|NotUntilReboot}` (verified 2026-04-18 to write `TSServerDrainMode` and thus to be captured by DrainCtl). Or flip `fDenyTSConnections` via GPO / System Properties for a persistent deny. Both produce audit rows with attribution via Event 4657.
+
+**Revisit if:** `change logon /disable` usage shows up as an operational gap in production (e.g. security audit asks "why isn't this tracked?"). At that point the path is a well-scoped follow-up: direct `WinStationQueryInformationW` syscall (matches the existing perfmon/watcher pattern; no COM; undocumented but stable enough for `change.exe` itself to use).
 
 ---
 
