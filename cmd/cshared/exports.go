@@ -45,21 +45,19 @@ func DrainCtl_ReadDrainMode() *C.char {
 
 //export DrainCtl_Check
 func DrainCtl_Check(dbPath *C.char, graceMinutes C.int, retentionDays C.int) *C.char {
-	// Try service pipe first.
+	// dbPath and retentionDays are accepted for C-ABI compatibility with the
+	// PowerShell module and other external DLL consumers; the audit store now
+	// lives in the SQLite telemetry DB owned exclusively by the service, so
+	// the CLI-direct fallback no longer persists observations.
+	_ = dbPath
+	_ = retentionDays
+
 	if result, err := pipe.CheckViaPipe(); err == nil {
 		return marshalJSON(result)
 	}
 
-	// Fallback: direct check.
-	db := C.GoString(dbPath)
-	if db == "" {
-		db = dc.DefaultAuditPath()
-	}
-
 	out, err := dc.Check(dc.CheckOptions{
-		DBPath:        db,
-		GracePeriod:   time.Duration(graceMinutes) * time.Minute,
-		RetentionDays: dc.ClampRetention(int(retentionDays)),
+		GracePeriod: time.Duration(graceMinutes) * time.Minute,
 	})
 	if err != nil {
 		return marshalError(err)
