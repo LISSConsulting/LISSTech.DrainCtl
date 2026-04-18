@@ -26,11 +26,16 @@ const hourlyWatermark = time.Hour + 5*time.Minute
 type Aggregator struct {
 	db              *DB
 	intervalSeconds int
+	maintenance     *MaintenanceStore
 }
 
 // NewAggregator returns an Aggregator backed by the given open DB.
 func NewAggregator(db *DB, intervalSeconds int) *Aggregator {
-	return &Aggregator{db: db, intervalSeconds: intervalSeconds}
+	return &Aggregator{
+		db:              db,
+		intervalSeconds: intervalSeconds,
+		maintenance:     NewMaintenanceStore(db),
+	}
 }
 
 // Run starts the aggregation loop, blocking until ctx is cancelled.
@@ -113,7 +118,15 @@ func (a *Aggregator) roll5Min(ctx context.Context, now time.Time) {
 			"rows_affected", rowsAffected, "max_bucket_ms", maxBucketMs)
 	}
 
-	a.recordMaintenance(ctx, "aggregator_5min", started, time.Now().UTC(), outcome, reason, rowsAffected)
+	if err := a.maintenance.UpsertJob(ctx, "aggregator_5min", Result{
+		Started:      started,
+		Finished:     time.Now().UTC(),
+		Outcome:      outcome,
+		Reason:       reason,
+		RowsAffected: rowsAffected,
+	}); err != nil {
+		slog.Warn("telemetry: record maintenance_jobs failed", "name", "aggregator_5min", "error", err)
+	}
 }
 
 // rollHourly aggregates all eligible hourly buckets from metrics_5min using
@@ -169,35 +182,13 @@ func (a *Aggregator) rollHourly(ctx context.Context, now time.Time) {
 			"rows_affected", rowsAffected, "max_bucket_ms", maxBucketMs)
 	}
 
-	a.recordMaintenance(ctx, "aggregator_hourly", started, time.Now().UTC(), outcome, reason, rowsAffected)
-}
-
-// recordMaintenance upserts a maintenance_jobs row covering one aggregator run.
-// Full instrumentation (via MaintenanceStore) lands in T048; per FR-032 the
-// ETW + file log record emitted above must be paired with the row written here
-// so the dashboard widget and the logs stay in sync.
-func (a *Aggregator) recordMaintenance(
-	ctx context.Context,
-	name string,
-	started, finished time.Time,
-	outcome, reason string,
-	rowsAffected int64,
-) {
-	_, err := a.db.writer.ExecContext(ctx, `
-		INSERT INTO maintenance_jobs
-			(name, started_ts, finished_ts, duration_ms, outcome, reason, rows_affected)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET
-			started_ts    = excluded.started_ts,
-			finished_ts   = excluded.finished_ts,
-			duration_ms   = excluded.duration_ms,
-			outcome       = excluded.outcome,
-			reason        = excluded.reason,
-			rows_affected = excluded.rows_affected`,
-		name, started.UnixMilli(), finished.UnixMilli(),
-		finished.Sub(started).Milliseconds(), outcome, reason, rowsAffected,
-	)
-	if err != nil {
-		slog.Warn("telemetry: record maintenance_jobs failed", "name", name, "error", err)
+	if err := a.maintenance.UpsertJob(ctx, "aggregator_hourly", Result{
+		Started:      started,
+		Finished:     time.Now().UTC(),
+		Outcome:      outcome,
+		Reason:       reason,
+		RowsAffected: rowsAffected,
+	}); err != nil {
+		slog.Warn("telemetry: record maintenance_jobs failed", "name", "aggregator_hourly", "error", err)
 	}
 }
