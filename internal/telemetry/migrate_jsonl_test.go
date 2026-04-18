@@ -147,8 +147,18 @@ func TestMigrate_ValidJSONLAllImported(t *testing.T) {
 	if res.Imported != 3 {
 		t.Errorf("Imported = %d, want 3 (only Changed records)", res.Imported)
 	}
+	if res.Observations != 1 {
+		t.Errorf("Observations = %d, want 1 (the SRV-A baseline with Changed=false)", res.Observations)
+	}
 	if res.Skipped != 0 {
 		t.Errorf("Skipped = %d, want 0", res.Skipped)
+	}
+	// Invariant: Imported + Observations + Skipped ≤ LineCount (equal here
+	// because there are no empty lines in this fixture).
+	if res.Imported+res.Observations+res.Skipped != res.LineCount {
+		t.Errorf("Imported(%d) + Observations(%d) + Skipped(%d) = %d, want LineCount=%d",
+			res.Imported, res.Observations, res.Skipped,
+			res.Imported+res.Observations+res.Skipped, res.LineCount)
 	}
 	if res.BackupPath == "" {
 		t.Error("BackupPath empty, want <path>.bak.<ts>")
