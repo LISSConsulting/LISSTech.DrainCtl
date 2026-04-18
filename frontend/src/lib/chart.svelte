@@ -25,7 +25,7 @@
      * "Collecting data…" status per FR-019a.
      */
     import { LayerCake, Svg } from 'layercake';
-    import LinePath from '../components/chart/LinePath.svelte';
+    import InteractiveTimeChart from '../components/chart/InteractiveTimeChart.svelte';
     import { fetchMetrics } from './api.js';
 
     /** @type {{
@@ -312,17 +312,19 @@
             data={points}
             x="t"
             y="v"
+            xDomain={[viewFrom.getTime(), viewTo.getTime()]}
             yDomain={[0, null]}
-            padding={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            padding={{ top: 12, right: 16, bottom: 28, left: 52 }}
         >
             <Svg>
-                <LinePath {color} filled={true} />
+                <InteractiveTimeChart {points} {counter} {color} hideHover={isDragging} />
             </Svg>
         </LayerCake>
         <div class="chart-meta">
             <span class="meta-counter">{counter}</span>
             <span class="meta-tier">tier={tier}</span>
         </div>
+        <div class="chart-hint" aria-hidden="true">scroll · drag · dbl-click</div>
         {#if retentionTruncated}
             <div class="retention-badge" title="oldest_available={response?.oldest_available}">
                 Data beyond this range is not retained
@@ -398,6 +400,21 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--color-amber);
+        pointer-events: none;
+    }
+
+    /* Subtle hint so operators discover the wheel/drag/dblclk interactions
+       without needing to stumble into them by accident. */
+    .chart-hint {
+        position: absolute;
+        bottom: 4px;
+        right: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-subtle);
+        opacity: 0.55;
         pointer-events: none;
     }
 </style>
