@@ -144,15 +144,20 @@ const FETCH_TIMEOUT_MS = 20_000;
  * @returns {Promise<Response>}
  */
 async function apiFetch(path, options = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeoutController = new AbortController();
+    const timer = setTimeout(() => timeoutController.abort(), FETCH_TIMEOUT_MS);
+
+    const { signal: callerSignal, ...rest } = options;
+    const signal = callerSignal
+        ? AbortSignal.any([timeoutController.signal, callerSignal])
+        : timeoutController.signal;
 
     let response;
     try {
         response = await fetch(`${BASE}${path}`, {
             credentials: 'include',
-            signal: controller.signal,
-            ...options,
+            ...rest,
+            signal,
             headers: {
                 Accept: 'application/json',
                 ...options.headers,
@@ -160,6 +165,10 @@ async function apiFetch(path, options = {}) {
         });
     } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
+            // Distinguish caller-initiated abort from our own timeout abort
+            // so callers can ignore their own cancellations without seeing them
+            // reported as timeouts.
+            if (callerSignal?.aborted) throw err;
             throw new ApiError(0, 'Timeout', `Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`, path);
         }
         throw err;
@@ -299,9 +308,10 @@ export async function fetchAllServerMetrics() {
  * @param {Date|string} to                           - exclusive upper bound (must be > from)
  * @param {'raw'|'5min'|'hourly'|'auto'} [resolution='auto']
  * @param {string[]} [counters]                      - omitted → all known counters
+ * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer zoom/pan supersedes it
  * @returns {Promise<MetricsResponse>}
  */
-export async function fetchMetrics(host, from, to, resolution = 'auto', counters) {
+export async function fetchMetrics(host, from, to, resolution = 'auto', counters, signal) {
     const params = new URLSearchParams({
         from: from instanceof Date ? from.toISOString() : from,
         to: to instanceof Date ? to.toISOString() : to,
@@ -310,7 +320,7 @@ export async function fetchMetrics(host, from, to, resolution = 'auto', counters
     if (counters && counters.length > 0) {
         params.set('counters', counters.join(','));
     }
-    const res = await apiFetch(`/metrics/${encodeURIComponent(host)}?${params}`);
+    const res = await apiFetch(`/metrics/${encodeURIComponent(host)}?${params}`, { signal });
     return /** @type {MetricsResponse} */ (await res.json());
 }
 
