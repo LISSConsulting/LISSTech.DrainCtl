@@ -21,7 +21,7 @@ type Tier int
 
 const (
 	TierRaw     Tier = iota // metrics_raw: full-resolution, ~25 h retention
-	TierFiveMin             // metrics_5min: 5-minute buckets, ~6 d retention (implemented in US3)
+	TierFiveMin             // metrics_5min: 5-minute buckets, ~6 d retention
 	TierHourly              // metrics_hourly: hourly buckets, configured retention
 )
 
@@ -133,7 +133,6 @@ func (s *MetricsStore) Append(ctx context.Context, samples []Sample) error {
 }
 
 // QueryRange reads the chosen tier for one host and time window.
-// TierFiveMin is not supported until US3 (task T036); callers should use TierHourly as the coarser fallback.
 // counters filters by counter name; nil or empty means "all known counters".
 func (s *MetricsStore) QueryRange(
 	ctx context.Context,
@@ -163,6 +162,10 @@ func (s *MetricsStore) QueryRange(
 	switch tier {
 	case TierRaw:
 		if err := s.queryRaw(ctx, sr, host, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
+	case TierFiveMin:
+		if err := s.queryAggregated(ctx, sr, "metrics_5min", host, fromMs, toMs, counters); err != nil {
 			return nil, err
 		}
 	case TierHourly:
