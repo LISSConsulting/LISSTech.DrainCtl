@@ -15,7 +15,14 @@
     {@const fillPath = `${lineParts} L${last.x.toFixed(2)},${$height.toFixed(2)} L${first.x.toFixed(2)},${$height.toFixed(2)} Z`}
 
     {#if filled}
-        <path d={fillPath} fill="{color}33" stroke="none" />
+        <!-- fill-opacity keeps alpha orthogonal to color so CSS variables
+             (`var(--color-accent)`) work alongside hex literals. The previous
+             `fill="{color}33"` idiom concatenated the "33" alpha directly onto
+             the color string, which produced a valid 8-digit hex for literals
+             but an invalid `var(--color-accent)33` for CSS-var colors —
+             browsers fell back to black and the filled area below the line
+             rendered as a solid black rectangle. -->
+        <path d={fillPath} fill={color} fill-opacity="0.2" stroke="none" />
     {/if}
     <path
         d={lineParts}
