@@ -577,7 +577,14 @@ func saveConfigToFile(cfg *Config) error {
 	}
 	defer func() { _ = windows.CloseHandle(mutex) }()
 
-	event, _ := windows.WaitForSingleObject(mutex, 5000) // 5s timeout
+	// 30s timeout. Real saves complete in milliseconds; this budget only matters
+	// under contention (concurrent PUTs from the settings handler, or a rare
+	// config-reload vs save race). Was 5s, which was too tight for GitHub
+	// Actions Windows runners under load — the concurrent-PUT regression test
+	// intermittently timed out there. 30s is still much shorter than any
+	// user-visible request deadline, and a real 30s hold indicates a bug worth
+	// failing loudly on.
+	event, _ := windows.WaitForSingleObject(mutex, 30_000)
 	if event == uint32(windows.WAIT_TIMEOUT) {
 		return fmt.Errorf("config mutex timeout")
 	}
