@@ -5,14 +5,15 @@
 just all        # unsigned: CLI + DLL + PS module + MSI
 just release    # signed (needs CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env)
 just lint       # go vet + gofmt + golangci-lint
-just resource   # recompile .syso after icon/version changes
+just resource   # re-render drainctl.rc from tmpl + recompile .syso
+just version    # print the version the next build will embed
 ```
 Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 
 ## Key Rules
 - Every `.go` file needs `//go:build windows`
-- Version is CalVer `YY.DOY.patch` — bump with **`just bump`** (handles all 8 files + recompiles `.syso`). Never edit version strings by hand.
-- After changing `.rc` directly (not via `just bump`): run `just resource` to recompile `.syso`
+- Version is git-derived CalVer `YY.DOY.N` via `scripts/version.ps1` — injected into Go at build time (ldflags), into `drainctl.rc`/`drainctl.syso` via `just resource`, into `.wixproj` via `-p:ProductVersion=`, into the PS module via `.psd1.tmpl` rendering. Nothing to bump by hand.
+- The only version strings still stored in git are `docs/index.html` release-notes content, which updates manually on release refreshes (not per commit).
 - Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
 - No viper — config lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` (encoding/json)
 - Retention capped 1–365 days via `ClampRetention()`
