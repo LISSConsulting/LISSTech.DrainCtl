@@ -383,6 +383,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		slog.Info("audit JSONL migration",
 			"lines", migRes.LineCount,
 			"imported", migRes.Imported,
+			"observations", migRes.Observations,
 			"skipped", migRes.Skipped,
 			"backup", migRes.BackupPath,
 			"duration", migRes.Duration)
