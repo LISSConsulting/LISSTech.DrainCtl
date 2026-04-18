@@ -140,7 +140,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 - [x] T043 [US4] On success, rename `audit.jsonl` → `audit.jsonl.bak.<UTC-timestamp>` and set `schema_meta[jsonl_migrated]=true`; on any error, leave the JSONL in place and return the error (retry on next start is by construction idempotent — FR-021)
 - [x] T044 [US4] Invoke `MigrateJSONL` from service boot in `internal/svc/` (after `telemetry.Open()`, BEFORE drift reconciliation, before the audit writer goes live — so reconciliation's `LatestByHost` baseline sees imported rows per FR-020); log progress (records processed, skipped, duration) at INFO
 - [x] T045 [US4] Write a `maintenance_jobs` row (`name="jsonl_migration"`) capturing the run (success/skipped/failure)
-- [ ] T046 [P] [US4] Unit tests in `internal/telemetry/migrate_jsonl_test.go`: `TestMigrate_NoJSONLWritesMarker`, `TestMigrate_ValidJSONLAllImported`, `TestMigrate_MalformedLineSkipped`, `TestMigrate_DuplicateRecordsIgnored`, `TestMigrate_RerunIsNoop`, `TestMigrate_PartialFailureLeavesJSONL`, `TestMigrate_RenameIncludesTimestamp`
+- [x] T046 [P] [US4] Unit tests in `internal/telemetry/migrate_jsonl_test.go`: `TestMigrate_NoJSONLWritesMarker`, `TestMigrate_ValidJSONLAllImported`, `TestMigrate_MalformedLineSkipped`, `TestMigrate_DuplicateRecordsIgnored`, `TestMigrate_RerunIsNoop`, `TestMigrate_PartialFailureLeavesJSONL`, `TestMigrate_RenameIncludesTimestamp`
 
 **Checkpoint**: A staged upgrade preserves history end-to-end. Migration is safe to re-run.
 
