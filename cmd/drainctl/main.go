@@ -13,11 +13,10 @@ import (
 )
 
 var cfg struct {
-	DB            string
-	Format        string
-	LogLevel      string
-	Grace         int
-	RetentionDays int
+	DB       string
+	Format   string
+	LogLevel string
+	Grace    int
 }
 
 func main() {
