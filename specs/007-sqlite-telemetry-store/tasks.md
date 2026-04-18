@@ -179,7 +179,7 @@ description: "Task list for feature 007-sqlite-telemetry-store"
 - [x] T059 Delete `internal/store/memstore.go` and its test file (`memstore_test.go`); delete the `internal/store/` package if no other files remain; remove any remaining imports
 - [x] T060 Delete the file-only `AuditStore` struct and methods from root-package `audit.go` (and any helpers in `audit_setup.go` that become unused); keep the public `AuditRecord` type — external DLL/CLI callers still need it
 - [x] T061 [P] Update `README.md`: retention settings section, storage location, new endpoints, removal of `/api/v1/history/{host}`
-- [ ] T062 [P] Update `docs/index.html` if endpoint list is embedded there
+- [x] T062 [P] Update `docs/index.html` if endpoint list is embedded there
 - [ ] T063 Update `CHRONICLE.md` with a one-paragraph entry for the telemetry store
 - [ ] T064 Run `just lint` (gofmt + go vet + golangci-lint) and fix every warning — project rule is zero warnings
 - [ ] T065 Run `prek run --all-files` and fix any pre-commit failures
