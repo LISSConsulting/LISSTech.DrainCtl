@@ -524,6 +524,14 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 | `triggers` | string[] | no | Event types to notify on (omit for all) |
 | `repeat_minutes` | int | no | Re-alert interval while condition persists (0 = notify once) |
 
+### Retention & Storage
+
+Telemetry lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.db` (SQLite, WAL mode). A background retention worker deletes rows older than each tier's configured window and then issues `PRAGMA incremental_vacuum` to reclaim freed pages.
+
+**The database file does NOT shrink on disk after a retention purge.** `incremental_vacuum` returns freed pages to SQLite's internal free-list; subsequent inserts reuse those pages, so the file stays at its high-water mark. A stable `drainctl.db` size after a large purge is expected — not a sign that retention is broken. To verify retention is actually running, check the `maintenance_jobs` table or the dashboard maintenance widget.
+
+Full compaction (shrinking the file back to its minimal size) requires a `VACUUM INTO` sweep and is a planned follow-up. Until then, plan capacity against the high-water mark a long retention window can reach, not against steady-state row count.
+
 ---
 
 ## 🔒 Audit Setup
