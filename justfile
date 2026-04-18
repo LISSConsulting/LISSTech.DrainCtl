@@ -133,15 +133,23 @@ man:
     Pop-Location
     Write-Host "   drainctl-msg.dll" -ForegroundColor DarkGray
 
-# Compile Windows resource file (icon + version info)
+# Render drainctl.rc from its template with the git-derived version,
+# then compile to drainctl.syso. Both .rc and .syso are build artifacts.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 resource:
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Compiling Windows resource file  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $csv = & "{{justfile_directory()}}/scripts/version.ps1" -Csv
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $tmpl = Get-Content "cmd/drainctl/drainctl.rc.tmpl" -Raw
+    $rc = $tmpl -replace '\{\{VERSION_CSV\}\}', $csv -replace '\{\{VERSION\}\}', $ver
+    Set-Content "cmd/drainctl/drainctl.rc" -Value $rc -NoNewline
     & windres cmd/drainctl/drainctl.rc -o cmd/drainctl/drainctl.syso
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "   drainctl.syso" -ForegroundColor DarkGray
+    Write-Host "   drainctl.syso — v$ver" -ForegroundColor DarkGray
 
 # Build the Svelte dashboard (runs pnpm build in frontend/)
 [script('pwsh', '-NoProfile')]
@@ -171,7 +179,7 @@ frontend-copy: frontend
 # Build the CLI binary
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-cli: frontend-copy
+cli: frontend-copy resource
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full

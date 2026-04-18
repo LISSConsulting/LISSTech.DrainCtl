@@ -12,7 +12,10 @@ frontend/node_modules/
 # Go
 *.exe
 *.dll
-!cmd/drainctl/drainctl.syso
+
+# Generated from cmd/drainctl/drainctl.rc.tmpl + scripts/version.ps1 by `just resource`
+cmd/drainctl/drainctl.rc
+cmd/drainctl/drainctl.syso
 
 # WiX
 installer/obj/
