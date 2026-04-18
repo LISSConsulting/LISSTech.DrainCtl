@@ -6,11 +6,16 @@
      * authoritative series in SQLite so the chart survives a service restart
      * without losing pre-restart samples.
      *
+     * Zoom/pan: wheel zooms around the cursor, drag pans horizontally,
+     * double-click resets to the default window. Handlers are debounced to
+     * 150 ms (research.md §9) and cancel in-flight fetches via AbortController
+     * so a rapid drag doesn't pile up stale responses on the wire.
+     *
      * Props:
      *   host        — required hostname (must be registered)
      *   counter     — counter name from the PerfSnapshot/SessionSummary set;
      *                 defaults to 'cpu_pct'
-     *   windowMs    — lookback window in milliseconds (default 5 days)
+     *   windowMs    — default lookback window in ms (also the reset target)
      *   resolution  — 'auto' | 'raw' | '5min' | 'hourly' (default 'auto')
      *   color       — line/fill color (CSS var or hex)
      *   height      — chart height in pixels
@@ -47,21 +52,44 @@
     let loading = $state(false);
     let error = $state('');
 
-    // Monotonic sequence so a slow-returning request can't overwrite a newer one.
-    let fetchSeq = 0;
+    // Authoritative visible window. Seeded by the prop-change $effect below
+    // (which runs synchronously on mount); mutated by zoom/pan; reset by
+    // double-click. Seed values here are never rendered.
+    let viewFrom = $state(new Date(0));
+    let viewTo = $state(new Date(0));
 
-    async function load() {
+    const MIN_SPAN_MS = 60_000; // 1 minute
+    const MAX_SPAN_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+    const DEBOUNCE_MS = 150;
+
+    // Monotonic sequence so a slow-returning request can't overwrite a newer
+    // one even if the abort signal hasn't propagated to fetch's reject yet.
+    let fetchSeq = 0;
+    /** @type {AbortController | null} */
+    let inflight = null;
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let debounceTimer = null;
+
+    /**
+     * @param {Date} from
+     * @param {Date} to
+     */
+    async function load(from, to) {
         if (!host) return;
         const mySeq = ++fetchSeq;
+
+        if (inflight) inflight.abort();
+        inflight = new AbortController();
+        const signal = inflight.signal;
+
         loading = true;
         error = '';
         try {
-            const to = new Date();
-            const from = new Date(to.getTime() - windowMs);
-            const r = await fetchMetrics(host, from, to, resolution, [counter]);
+            const r = await fetchMetrics(host, from, to, resolution, [counter], signal);
             if (mySeq !== fetchSeq) return;
             response = r;
         } catch (e) {
+            if (signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
             if (mySeq !== fetchSeq) return;
             response = null;
             error = /** @type {Error} */ (e)?.message ?? String(e);
@@ -70,21 +98,147 @@
         }
     }
 
-    // Refetch whenever host / counter / window / resolution changes.
+    function scheduleLoad() {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+            load(viewFrom, viewTo);
+        }, DEBOUNCE_MS);
+    }
+
+    // Prop-driven reload: reset the window and fetch immediately when the
+    // identifying props actually change. Svelte can re-run an $effect on any
+    // parent re-render even when prop values are unchanged — without this
+    // guard, the parent's 10 s clock tick would silently wipe the user's
+    // zoom/pan back to the default window.
+    let lastPropKey = '';
     $effect(() => {
-        host;
-        counter;
-        windowMs;
-        resolution;
-        load();
+        const key = `${host}|${counter}|${windowMs}|${resolution}`;
+        if (key === lastPropKey) return;
+        lastPropKey = key;
+        const to = new Date();
+        const from = new Date(to.getTime() - windowMs);
+        viewFrom = from;
+        viewTo = to;
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        load(from, to);
     });
 
     // Optional polling so the chart keeps pace while the user stays on the page.
+    // The setInterval callback reads viewFrom/viewTo outside a reactive context,
+    // so zoom/pan does not reset the interval. If the visible window's right
+    // edge is still near real-time we slide the window forward by the elapsed
+    // time so newly collected samples come into view; once the user pans well
+    // into the past we leave the fixed window alone.
     $effect(() => {
         if (!refreshMs || refreshMs <= 0) return;
-        const id = setInterval(load, refreshMs);
+        const id = setInterval(() => {
+            const nowMs = Date.now();
+            const fromMs = viewFrom.getTime();
+            const toMs = viewTo.getTime();
+            const span = toMs - fromMs;
+            if (span > 0 && toMs >= nowMs - 2 * refreshMs) {
+                const newTo = new Date(nowMs);
+                const newFrom = new Date(nowMs - span);
+                viewFrom = newFrom;
+                viewTo = newTo;
+                load(newFrom, newTo);
+            } else {
+                load(viewFrom, viewTo);
+            }
+        }, refreshMs);
         return () => clearInterval(id);
     });
+
+    $effect(() => {
+        return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            if (inflight) inflight.abort();
+        };
+    });
+
+    /** @param {WheelEvent} e */
+    function onWheel(e) {
+        e.preventDefault();
+        const el = /** @type {HTMLElement} */ (e.currentTarget);
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const relX = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+
+        const fromT = viewFrom.getTime();
+        const toT = viewTo.getTime();
+        const span = toT - fromT;
+        if (span <= 0) return;
+
+        // deltaY > 0 (scroll down) → zoom out. 1.25 / 0.8 are reciprocals so
+        // a scroll-up-then-down returns to the original span.
+        const factor = e.deltaY > 0 ? 1.25 : 0.8;
+        const newSpan = Math.max(MIN_SPAN_MS, Math.min(MAX_SPAN_MS, span * factor));
+        if (newSpan === span) return;
+
+        const cursorT = fromT + span * relX;
+        viewFrom = new Date(cursorT - newSpan * relX);
+        viewTo = new Date(cursorT + newSpan * (1 - relX));
+        scheduleLoad();
+    }
+
+    let isDragging = $state(false);
+    let dragPointerId = -1;
+    let dragStartX = 0;
+    let dragStartFromMs = 0;
+    let dragStartToMs = 0;
+    let dragWidth = 0;
+
+    /** @param {PointerEvent} e */
+    function onPointerDown(e) {
+        if (e.button !== 0) return;
+        const el = /** @type {HTMLElement} */ (e.currentTarget);
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        isDragging = true;
+        dragPointerId = e.pointerId;
+        dragStartX = e.clientX;
+        dragStartFromMs = viewFrom.getTime();
+        dragStartToMs = viewTo.getTime();
+        dragWidth = rect.width;
+        el.setPointerCapture?.(e.pointerId);
+    }
+
+    /** @param {PointerEvent} e */
+    function onPointerMove(e) {
+        if (!isDragging || e.pointerId !== dragPointerId) return;
+        const dx = e.clientX - dragStartX;
+        const span = dragStartToMs - dragStartFromMs;
+        // Drag right → pan backwards in time (content follows the pointer).
+        const deltaT = -(dx / dragWidth) * span;
+        viewFrom = new Date(dragStartFromMs + deltaT);
+        viewTo = new Date(dragStartToMs + deltaT);
+        scheduleLoad();
+    }
+
+    /** @param {PointerEvent} e */
+    function onPointerUp(e) {
+        if (!isDragging || e.pointerId !== dragPointerId) return;
+        const el = /** @type {HTMLElement} */ (e.currentTarget);
+        el.releasePointerCapture?.(e.pointerId);
+        isDragging = false;
+        dragPointerId = -1;
+    }
+
+    function onDoubleClick() {
+        const to = new Date();
+        const from = new Date(to.getTime() - windowMs);
+        viewFrom = from;
+        viewTo = to;
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        load(from, to);
+    }
 
     let series = $derived(response?.series?.[counter] ?? null);
     let isEmpty = $derived.by(() => {
@@ -111,7 +265,20 @@
     let tier = $derived(response?.tier ?? resolution);
 </script>
 
-<div class="chart-wrap" style="height:{height}px">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+    class="chart-wrap"
+    class:dragging={isDragging}
+    style="height:{height}px"
+    onwheel={onWheel}
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={onPointerUp}
+    onpointercancel={onPointerUp}
+    ondblclick={onDoubleClick}
+    role="img"
+    aria-label="{counter} history for {host}"
+>
     {#if error}
         <div class="chart-status err">Error: {error}</div>
     {:else if loading && !response}
@@ -143,6 +310,13 @@
         width: 100%;
         background: var(--color-surface);
         border-radius: var(--radius-default);
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+    }
+
+    .chart-wrap.dragging {
+        cursor: grabbing;
     }
 
     .chart-status {
