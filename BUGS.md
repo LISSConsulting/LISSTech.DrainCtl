@@ -175,4 +175,23 @@ Tests: `TestDrainMode_String` (including deprecated-alias compat cases), `go tes
 
 **Change:** decouple alpha from color using the SVG `fill-opacity` attribute. `fill={color} fill-opacity="0.2"` is equivalent visually to the old `#NNN33` (≈0.2 alpha) and works for both hex literals AND `var()` references. One-line fix in `LinePath.svelte`.
 
-**Verification:** `npm run build` in `frontend/` succeeds clean. Visual verification pending operator restart of dashboard with rebuilt bundle.
+**Verification:** `pnpm run build` in `frontend/` succeeds clean. Visual verification pending operator restart of dashboard with rebuilt bundle.
+
+---
+
+### 11. 5-day per-host chart had no axes, tooltips, or visible zoom affordance — FIXED 2026-04-18
+
+**Status:** Fixed.
+
+**Symptom:** after the black-rectangle bug (item 10) was cleared, the chart correctly rendered the CPU time-series in the accent color but offered no other affordances — no Y-axis labels, no X-axis dates, no hover tooltip, no visible indication that scroll/drag/dbl-click worked. Operators couldn't read exact values at a point or learn how to zoom.
+
+**Root cause:** `frontend/src/lib/chart.svelte` wrapped `<LayerCake>` with only a `<LinePath>` — no `AxisX` / `AxisY` components, no hover layer, no affordance text. The Overview page's LOAD and Health Indicators charts (`DualAxisChart.svelte`) already had the full pattern (Y grid labels, X time labels, crosshair, data dot, tooltip card with shadow) but it had never been ported to the per-host chart.
+
+**Change:**
+- New component `frontend/src/components/chart/InteractiveTimeChart.svelte` — single-series analogue of `DualAxisChart`. Renders Y-axis ticks (pinned to 0/25/50/75/100 for percent counters, auto-scaled for the rest), X-axis time ticks (format adapts to window span: H:M:S for <2 h, H:M for <48 h, month+day for longer), faint horizontal gridlines, left+bottom axis borders, hover crosshair + data dot + tooltip card with neobrutalist shadow.
+- `frontend/src/lib/chart.svelte` — swapped `<LinePath>` for `<InteractiveTimeChart>`. Passes explicit `xDomain={[viewFrom, viewTo]}` so the chart still shows the visible window even when data is sparse. Increased LayerCake padding to make room for axis labels. Added a small `.chart-hint` at bottom-right: `SCROLL · DRAG · DBL-CLICK`. The subscriber's existing wheel/drag/dblclick handlers on the outer div remain — unchanged. New `hideHover={isDragging}` prop so the tooltip doesn't fight the drag-pan.
+- Counter-aware Y-axis formatting: `_pct` → `N%`, `_ms` → `Nms`, `_mb` → `N MB`, `_bytes` → `N MB` (auto-converted), `_sec` → `N/s`, else numeric.
+
+**Verification:** `pnpm run build` clean. Playwright visual check: Y-axis ticks 0-100% rendered, X-axis date ticks APR 13 → APR 18 rendered, hover at 70% of chart width produced a crosshair + dot + tooltip with `"Apr 18, 15:27:51 / cpu_pct: 87%"`, hint text visible.
+
+**Not done (follow-up):** visible +/- zoom buttons. The text hint is sufficient for now; buttons can come when operators ask for them.
