@@ -6,8 +6,7 @@ First-time install dialog sequence:
  - InstallModeDlg          (choose standalone / dashboard / registration)
  - ModeConfigDlg            (mode-specific fields; skipped for standalone)
  - MonitoringDlg            (grace period, poll interval, threshold, perf)
- - NotificationsDlg         (webhook URL, ntfy URL)
- - WixUI_VerifyReadyDlg
+  - WixUI_VerifyReadyDlg
  - WixUI_DiskCostDlg
 
 Upgrade dialog sequence (WIX_UPGRADE_DETECTED):
@@ -50,7 +49,6 @@ Maintenance dialog sequence:
       <DialogRef Id="ResumeDlg" />
       <DialogRef Id="UserExit" />
       <DialogRef Id="MonitoringDlg" />
-      <DialogRef Id="NotificationsDlg" />
 
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return"
         Order="999" />
@@ -94,7 +92,7 @@ Maintenance dialog sequence:
       <Publish Dialog="RegistrationConfigDlg" Control="Next" Event="NewDialog"
         Value="MonitoringDlg" />
 
-      <!-- MonitoringDlg: Back depends on mode, Next → NotificationsDlg -->
+      <!-- MonitoringDlg: Back depends on mode, Next → VerifyReady -->
       <Publish Dialog="MonitoringDlg" Control="Back" Event="NewDialog"
         Value="DashboardConfigDlg" Order="1"
         Condition="INSTALL_MODE = &quot;dashboard&quot;" />
@@ -105,17 +103,11 @@ Maintenance dialog sequence:
         Value="InstallModeDlg" Order="3"
         Condition="INSTALL_MODE = &quot;standalone&quot;" />
       <Publish Dialog="MonitoringDlg" Control="Next" Event="NewDialog"
-        Value="NotificationsDlg" />
-
-      <!-- NotificationsDlg: Back → MonitoringDlg, Next → VerifyReady -->
-      <Publish Dialog="NotificationsDlg" Control="Back" Event="NewDialog"
-        Value="MonitoringDlg" />
-      <Publish Dialog="NotificationsDlg" Control="Next" Event="NewDialog"
         Value="VerifyReadyDlg" />
 
-      <!-- VerifyReady Back: first-install → NotificationsDlg, upgrade → Welcome -->
+      <!-- VerifyReady Back: first-install → MonitoringDlg, upgrade → Welcome -->
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-        Value="NotificationsDlg" Order="1"
+        Value="MonitoringDlg" Order="1"
         Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
         Value="WelcomeDlg" Order="2"

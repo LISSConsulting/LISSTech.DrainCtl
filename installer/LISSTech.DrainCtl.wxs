@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
   xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
   xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
-    <Package Name="LISSTech DrainCtl v$(var.ProductVersion)"
+    <Package Name="LISSTech DrainCtl v$(var.AppVersion)"
         Manufacturer="LISS Consulting, Corp."
         Version="$(var.ProductVersion)"
         UpgradeCode="c7a1e3f0-5d28-4b91-a6e4-9f2c8d1b7a3e"
@@ -26,8 +26,6 @@
 
         <!-- MSI properties for unattended install -->
         <Property Id="INSTALL_MODE" Value="standalone" Secure="yes" />
-        <Property Id="WEBHOOK_URL" Secure="yes" />
-        <Property Id="NTFY_URL" Secure="yes" />
         <Property Id="DASHBOARD_URL" Secure="yes" />
         <Property Id="DASHBOARD_PORT" Value="49470" Secure="yes" />
         <Property Id="DASHBOARD_GROUP" Value="Domain Admins" Secure="yes" />
@@ -40,6 +38,9 @@
         <Property Id="LOG_EVENT_LEVEL" Value="info" Secure="yes" />
         <Property Id="DASHBOARD_ONLY" Value="0" Secure="yes" />
         <Property Id="AUTODISCOVER" Value="1" Secure="yes" />
+
+        <Binary Id="DrainCtlMsiCA"
+            SourceFile="..\dist\customactions\drainctl-msica.dll" />
 
         <!-- UI: custom wizard with install mode selection -->
         <ui:WixUI Id="DrainCtlUI" />
@@ -55,39 +56,17 @@
             </ComboBox>
         </UI>
 
-        <!--
-            Custom actions via WixQuietExec — no console window.
-            Split into two calls to stay under the 255-char CustomAction.Target limit (ICE03).
-            ConfigureAction: core settings (mode, grace, perf, dashboard server).
-            ConfigureNotifyAction: notification URLs (webhook, ntfy, dashboard-url).
-            The second call loads the config saved by the first and layers on URL flags.
-        -->
-        <SetProperty Id="ConfigureAction" Before="ConfigureAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --grace-period=[GRACE_PERIOD] --dashboard-port=[DASHBOARD_PORT] --dashboard-group=&quot;[DASHBOARD_GROUP]&quot; --perf-enabled=[ENABLE_PERF] --perf-rfx=[ENABLE_RFX]" />
-        <CustomAction Id="ConfigureAction"
-            DllEntry="WixQuietExec"
-            Execute="commit"
+        <!-- Installer-owned machine settings are applied by a dedicated Go DLL
+             custom action before the service starts. Notification targets are
+             configured post-install through the dashboard or CLI. -->
+        <SetProperty Id="ApplyInstallerConfig" Before="ApplyInstallerConfig" Sequence="execute"
+            Value="m=[INSTALL_MODE]&#10;u=[DASHBOARD_URL]&#10;g=[GRACE_PERIOD]&#10;p=[POLL_INTERVAL]&#10;s=[SESSION_THRESHOLD]&#10;P=[DASHBOARD_PORT]&#10;G=[DASHBOARD_GROUP]&#10;e=[ENABLE_PERF]&#10;r=[ENABLE_RFX]&#10;f=[LOG_FILE_LEVEL]&#10;v=[LOG_EVENT_LEVEL]&#10;d=[DASHBOARD_ONLY]" />
+        <CustomAction Id="ApplyInstallerConfig"
+            BinaryRef="DrainCtlMsiCA"
+            DllEntry="ApplyInstallerConfig"
+            Execute="deferred"
             Impersonate="no"
-            Return="check"
-            BinaryRef="Wix4UtilCA_X64" />
-
-        <SetProperty Id="ConfigureNotifyAction" Before="ConfigureNotifyAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --dashboard-url=[DASHBOARD_URL] --webhook-url=[WEBHOOK_URL] --ntfy-url=[NTFY_URL] --poll-interval=[POLL_INTERVAL] --session-warning-threshold=[SESSION_THRESHOLD]" />
-        <CustomAction Id="ConfigureNotifyAction"
-            DllEntry="WixQuietExec"
-            Execute="commit"
-            Impersonate="no"
-            Return="check"
-            BinaryRef="Wix4UtilCA_X64" />
-
-        <SetProperty Id="ConfigureExtrasAction" Before="ConfigureExtrasAction" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; configure --mode=[INSTALL_MODE] --log-file-level=[LOG_FILE_LEVEL] --log-event-level=[LOG_EVENT_LEVEL] --dashboard-only=[DASHBOARD_ONLY]" />
-        <CustomAction Id="ConfigureExtrasAction"
-            DllEntry="WixQuietExec"
-            Execute="commit"
-            Impersonate="no"
-            Return="check"
-            BinaryRef="Wix4UtilCA_X64" />
+            Return="check" />
 
         <!-- ETW provider: um before im on install (clears stale registration from
              previous installs or major upgrades), um on uninstall. -->
@@ -95,7 +74,7 @@
             Value="&quot;[SystemFolder]wevtutil.exe&quot; um &quot;[BinFolder]drainctl.man&quot;" />
         <CustomAction Id="CleanETWProvider"
             DllEntry="WixQuietExec"
-            Execute="commit"
+            Execute="deferred"
             Impersonate="no"
             Return="ignore"
             BinaryRef="Wix4UtilCA_X64" />
@@ -104,7 +83,7 @@
             Value="&quot;[SystemFolder]wevtutil.exe&quot; im &quot;[BinFolder]drainctl.man&quot;" />
         <CustomAction Id="RegisterETWProvider"
             DllEntry="WixQuietExec"
-            Execute="commit"
+            Execute="deferred"
             Impersonate="no"
             Return="ignore"
             BinaryRef="Wix4UtilCA_X64" />
@@ -122,32 +101,26 @@
             Value="&quot;[BinFolder]drainctl.exe&quot; service grant-eventlog" />
         <CustomAction Id="AddEventLogReaders"
             DllEntry="WixQuietExec"
-            Execute="commit"
+            Execute="deferred"
             Impersonate="no"
             Return="ignore"
             BinaryRef="Wix4UtilCA_X64" />
 
-        <SetProperty Id="RestartService" Before="RestartService" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; service restart" />
-        <CustomAction Id="RestartService"
+        <SetProperty Id="StartDrainCtlService" Before="StartDrainCtlService" Sequence="execute"
+            Value="&quot;[BinFolder]drainctl.exe&quot; service start" />
+        <CustomAction Id="StartDrainCtlService"
             DllEntry="WixQuietExec"
-            Execute="commit"
+            Execute="deferred"
             Impersonate="no"
             Return="ignore"
             BinaryRef="Wix4UtilCA_X64" />
 
         <InstallExecuteSequence>
-            <Custom Action="ConfigureAction"
+            <Custom Action="ApplyInstallerConfig"
                 After="InstallFiles"
                 Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
-            <Custom Action="ConfigureNotifyAction"
-                After="ConfigureAction"
-                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
-            <Custom Action="ConfigureExtrasAction"
-                After="ConfigureNotifyAction"
-                Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
             <Custom Action="CleanETWProvider"
-                After="ConfigureExtrasAction"
+                After="ApplyInstallerConfig"
                 Condition="NOT REMOVE" />
             <Custom Action="RegisterETWProvider"
                 After="CleanETWProvider"
@@ -156,9 +129,9 @@
                 After="InstallInitialize"
                 Condition="REMOVE" />
             <Custom Action="AddEventLogReaders"
-                After="RegisterETWProvider"
+                After="InstallServices"
                 Condition="NOT REMOVE" />
-            <Custom Action="RestartService"
+            <Custom Action="StartDrainCtlService"
                 After="AddEventLogReaders"
                 Condition="NOT REMOVE" />
         </InstallExecuteSequence>
@@ -202,7 +175,6 @@
                 Account="LocalSystem" />
             <ServiceControl Id="DrainCtlServiceControl"
                 Name="DrainCtl"
-                Start="install"
                 Stop="both"
                 Remove="uninstall"
                 Wait="yes" />

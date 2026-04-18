@@ -351,3 +351,87 @@ func TestNewCounterRoundTripsThroughAllTiersAndHTTP(t *testing.T) {
 		t.Errorf("hourly min/max = %v/%v, want 10/40", cs.Min[0], cs.Max[0])
 	}
 }
+
+func TestNearestCounters_PicksClosestWithinTolerance(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Second)
+
+	// Three cpu_pct samples around the target at t=base:
+	//   -60s → 10, -10s → 42 (closest), +90s → 77
+	// Only one input_delay_max_ms sample, within tolerance.
+	samples := []Sample{
+		{Ts: base.Add(-60 * time.Second), Host: "SRV01", Counter: "cpu_pct", Value: 10},
+		{Ts: base.Add(-10 * time.Second), Host: "SRV01", Counter: "cpu_pct", Value: 42},
+		{Ts: base.Add(90 * time.Second), Host: "SRV01", Counter: "cpu_pct", Value: 77},
+		{Ts: base.Add(5 * time.Second), Host: "SRV01", Counter: "input_delay_max_ms", Value: 125},
+	}
+	if err := ms.Append(ctx, samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := ms.NearestCounters(ctx, "SRV01", base, 120*1000,
+		[]string{"cpu_pct", "input_delay_max_ms"})
+	if err != nil {
+		t.Fatalf("NearestCounters: %v", err)
+	}
+	if v := got["cpu_pct"]; v != 42 {
+		t.Errorf("cpu_pct = %v, want 42 (closest sample)", v)
+	}
+	if v := got["input_delay_max_ms"]; v != 125 {
+		t.Errorf("input_delay_max_ms = %v, want 125", v)
+	}
+}
+
+func TestNearestCounters_OutsideToleranceOmitted(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Second)
+
+	// Sample lives 10 minutes away from the target; a 60 s tolerance must omit it.
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base.Add(-10 * time.Minute), Host: "SRV01", Counter: "cpu_pct", Value: 99},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := ms.NearestCounters(ctx, "SRV01", base, 60*1000, []string{"cpu_pct"})
+	if err != nil {
+		t.Fatalf("NearestCounters: %v", err)
+	}
+	if _, ok := got["cpu_pct"]; ok {
+		t.Errorf("expected cpu_pct omitted (outside tolerance), got %v", got)
+	}
+}
+
+func TestNearestCounters_CrossHostIsolation(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Second)
+
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base, Host: "SRV01", Counter: "cpu_pct", Value: 10},
+		{Ts: base, Host: "SRV02", Counter: "cpu_pct", Value: 90},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := ms.NearestCounters(ctx, "SRV01", base, 60*1000, []string{"cpu_pct"})
+	if err != nil {
+		t.Fatalf("NearestCounters: %v", err)
+	}
+	if v := got["cpu_pct"]; v != 10 {
+		t.Errorf("cpu_pct = %v, want 10 (SRV01 only; SRV02 sample must not leak)", v)
+	}
+}
+
+func TestNearestCounters_EmptyCounterList(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	got, err := ms.NearestCounters(context.Background(), "SRV01", time.Now(), 60*1000, nil)
+	if err != nil {
+		t.Fatalf("NearestCounters(nil): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty map, got %v", got)
+	}
+}

@@ -86,10 +86,16 @@ type drainService struct {
 // The persistent record of transitions lives in the SQLite audit table; this
 // struct is an in-memory cache used by the pipe handler to answer live status
 // queries and by svcRunCheck to detect transitions between ticks.
+//
+// ChangedBy is carried across non-transition ticks so the dashboard's
+// `Changed By` column reflects "who set the current state", not "who did
+// anything on this tick" (which is only populated when a transition is
+// detected; every subsequent tick would otherwise clear the display).
 type observation struct {
 	Timestamp  time.Time
 	DrainMode  dc.DrainMode
 	StateSince time.Time
+	ChangedBy  string
 }
 
 // serviceHandler is the pipe handler bridge between the service state
@@ -98,6 +104,7 @@ type observation struct {
 // must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
 	audit        *telemetry.AuditStore
+	metrics      *telemetry.MetricsStore // nil is tolerated in tests; HandleHistory skips perf enrichment
 	observed     atomic.Pointer[observation]
 	cfg          atomic.Pointer[dc.ServiceConfig]
 	dashState    *dashboard.ServerState // nil if dashboard not enabled
@@ -169,10 +176,37 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 	return res
 }
 
+// historyPerfCounters names the metrics_raw counters that populate the perf
+// and session fields on a `drainctl history` audit row. Kept in sync with
+// the writer side in internal/dashboard/server.go `checkResultSamples`.
+var historyPerfCounters = []string{
+	"cpu_pct",
+	"input_delay_max_ms",
+	"mem_avail_mb",
+	"mem_total_mb",
+	"disk_queue",
+	"tcp_retrans_sec",
+	"sessions_active",
+	"sessions_disconnected",
+	"sessions_total",
+	"sessions_max",
+}
+
+// historyPerfToleranceMs is the ±window used when joining a history row
+// against metrics_raw. Two minutes covers a sampler interval up to ~60 s
+// with one missed tick; counters outside this window render as `-`.
+const historyPerfToleranceMs int64 = 2 * 60 * 1000
+
 // HandleHistory returns the most recent audit rows from the SQLite audit
 // table. Only drain-mode transitions (and startup reconciliation rows) are
 // stored — per-tick observations are no longer persisted (T059). The
 // changesOnly filter drops reconciliation-style no-op rows.
+//
+// Perf and session counters are NOT stored on audit rows; they are joined
+// from metrics_raw at read time, picking the closest sample to each
+// transition's timestamp. This preserves the pre-007 `drainctl history`
+// column shape (CPU%, INPUT DLY, SESSIONS) while keeping the audit schema
+// narrow and append-only.
 func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRecord {
 	if h.audit == nil {
 		return nil
@@ -190,8 +224,52 @@ func (h *serviceHandler) HandleHistory(limit int, changesOnly bool) []dc.AuditRe
 	out := make([]dc.AuditRecord, len(recs))
 	for i, r := range recs {
 		out[i] = auditFromTelemetry(r)
+		if h.metrics != nil {
+			if values, mErr := h.metrics.NearestCounters(ctx, r.Host, r.Ts, historyPerfToleranceMs, historyPerfCounters); mErr == nil {
+				applyPerfCounters(&out[i], values)
+			} else {
+				slog.Debug("pipe history perf enrich failed",
+					"host", r.Host, "ts", r.Ts, "error", mErr)
+			}
+		}
 	}
 	return out
+}
+
+// applyPerfCounters copies values from a metrics_raw lookup into the
+// per-row perf/session fields on an AuditRecord. Missing counters are
+// left at the zero value so the CLI formatter renders them as `-`.
+func applyPerfCounters(rec *dc.AuditRecord, values map[string]float64) {
+	if v, ok := values["cpu_pct"]; ok {
+		rec.CPUPct = v
+	}
+	if v, ok := values["input_delay_max_ms"]; ok {
+		rec.InputDelayMax = v
+	}
+	if v, ok := values["mem_avail_mb"]; ok {
+		rec.MemAvailMB = v
+	}
+	if v, ok := values["mem_total_mb"]; ok {
+		rec.MemTotalMB = v
+	}
+	if v, ok := values["disk_queue"]; ok {
+		rec.DiskQueue = v
+	}
+	if v, ok := values["tcp_retrans_sec"]; ok {
+		rec.TCPRetransSec = v
+	}
+	if v, ok := values["sessions_active"]; ok {
+		rec.ActiveSessions = int(v)
+	}
+	if v, ok := values["sessions_disconnected"]; ok {
+		rec.DisconnectedSessions = int(v)
+	}
+	if v, ok := values["sessions_total"]; ok {
+		rec.TotalSessions = int(v)
+	}
+	if v, ok := values["sessions_max"]; ok {
+		rec.MaxSessions = int(v)
+	}
 }
 
 // auditFromTelemetry maps a telemetry audit row to the public dc.AuditRecord
@@ -386,7 +464,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}()
 
 	// Start pipe server.
-	handler := &serviceHandler{audit: auditStore}
+	handler := &serviceHandler{audit: auditStore, metrics: metricsStore}
 	handler.cfg.Store(&cfg)
 
 	// Seed the in-memory observation from the latest audit row for this host
@@ -401,6 +479,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				Timestamp:  row.Ts,
 				DrainMode:  dc.DrainMode(row.NewState),
 				StateSince: row.Ts,
+				ChangedBy:  row.ChangedBy,
 			})
 		}
 	}

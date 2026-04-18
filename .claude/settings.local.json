@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Skill(commit-commands:commit)"
+      "Skill(commit-commands:commit)",
+      "Skill(codex-review)"
     ]
   }
 }

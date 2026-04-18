@@ -301,6 +301,62 @@ func buildAggQuery(table, host string, fromMs, toMs int64, counters []string) (s
 	return q, args
 }
 
+// NearestCounters returns, for each named counter, the value of the
+// metrics_raw sample whose ts is closest to target within ±toleranceMs.
+// Counters with no sample inside the window are absent from the result.
+//
+// Used by the pipe handler to enrich drainctl history audit rows with the
+// perf snapshot that was active at each transition — the audit table stores
+// only transition metadata, so CPU/input-delay/session counters have to be
+// joined from metrics_raw at read time.
+func (s *MetricsStore) NearestCounters(
+	ctx context.Context,
+	host string,
+	target time.Time,
+	toleranceMs int64,
+	counters []string,
+) (map[string]float64, error) {
+	if len(counters) == 0 {
+		return map[string]float64{}, nil
+	}
+	q, args := buildNearestCountersQuery(host, target.UTC().UnixMilli(), toleranceMs, counters)
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: nearest counters query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]float64, len(counters))
+	for rows.Next() {
+		var counter string
+		var value float64
+		if err := rows.Scan(&counter, &value); err != nil {
+			return nil, fmt.Errorf("telemetry: nearest counters scan: %w", err)
+		}
+		out[counter] = value
+	}
+	return out, rows.Err()
+}
+
+// buildNearestCountersQuery mirrors buildRawQuery / buildAggQuery in this
+// file: it returns a ready-to-exec SQL string plus the positional arg slice.
+// Only "?" placeholders are embedded — no user data is concatenated — so the
+// result is safe to pass directly to QueryContext.
+func buildNearestCountersQuery(host string, targetMs, toleranceMs int64, counters []string) (string, []any) {
+	args := []any{targetMs, host, targetMs - toleranceMs, targetMs + toleranceMs}
+	q := `SELECT counter, value FROM (
+	    SELECT counter, value,
+	           ROW_NUMBER() OVER (PARTITION BY counter ORDER BY ABS(ts - ?)) AS rn
+	    FROM metrics_raw
+	    WHERE host = ? AND ts >= ? AND ts <= ?`
+	q += " AND counter IN (" + placeholders(len(counters)) + ")"
+	for _, c := range counters {
+		args = append(args, c)
+	}
+	q += ") WHERE rn = 1"
+	return q, args
+}
+
 func placeholders(n int) string {
 	return strings.Repeat("?,", n-1) + "?"
 }
