@@ -175,6 +175,7 @@ type DashboardServer struct {
 	broker       *Broker       // SSE event broker for real-time updates
 	ms           *telemetry.MetricsStore
 	as           *telemetry.AuditStore
+	mnt          *telemetry.MaintenanceStore
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -197,7 +198,8 @@ type DashboardServer struct {
 // gracefully when ctx is cancelled.
 // ms may be nil; when nil, metrics ingest is skipped (degraded mode).
 // as may be nil; when nil, /api/v1/audit returns storage_error.
-func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms *telemetry.MetricsStore, as *telemetry.AuditStore) (*ServerState, error) {
+// mnt may be nil; when nil, /api/v1/maintenance/status returns storage_error.
+func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms *telemetry.MetricsStore, as *telemetry.AuditStore, mnt *telemetry.MaintenanceStore) (*ServerState, error) {
 	state := NewServerState(dataDir)
 
 	ds := &DashboardServer{
@@ -207,6 +209,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		broker:       NewBroker(),
 		ms:           ms,
 		as:           as,
+		mnt:          mnt,
 	}
 
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
@@ -312,6 +315,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("GET /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handleGetSettings))))
 	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
+	mux.Handle("GET /api/v1/maintenance/status", rlw(rs(http.HandlerFunc(ds.handleMaintenance))))
 
 	// SSE event stream — session auth, no rate limit (long-lived connection).
 	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
@@ -1003,6 +1007,90 @@ func (ds *DashboardServer) handleHistory(w http.ResponseWriter, _ *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": "use /api/v1/metrics/{host} or /api/v1/audit",
 	})
+}
+
+// handleMaintenance serves GET /api/v1/maintenance/status per
+// contracts/http-maintenance.md. One row per background job, with
+// expected_interval_seconds echoed from the current telemetry config and
+// overdue computed server-side per FR-031.
+func (ds *DashboardServer) handleMaintenance(w http.ResponseWriter, r *http.Request) {
+	if ds.mnt == nil {
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	jobs, err := ds.mnt.ListJobs(ctx)
+	if err != nil {
+		slog.Error("maintenance: list jobs failed", "error", err)
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	var cfg *dc.Config
+	if ds.testLoadConfigFunc != nil {
+		cfg, err = ds.testLoadConfigFunc()
+	} else {
+		cfg, err = dc.LoadConfig()
+	}
+	if err != nil {
+		slog.Error("maintenance: load config failed", "error", err)
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	aggregatorInterval := int64(cfg.Telemetry.AggregatorIntervalSeconds)
+	retentionInterval := int64(cfg.Telemetry.RetentionIntervalMinutes) * 60
+	serverTime := time.Now().UTC()
+
+	type jobJSON struct {
+		Name                    string `json:"name"`
+		Started                 string `json:"started"`
+		Finished                string `json:"finished"`
+		DurationMs              int64  `json:"duration_ms"`
+		Outcome                 string `json:"outcome"`
+		Reason                  string `json:"reason"`
+		RowsAffected            int64  `json:"rows_affected"`
+		Overdue                 bool   `json:"overdue"`
+		ExpectedIntervalSeconds int64  `json:"expected_interval_seconds"`
+	}
+
+	out := struct {
+		Jobs       []jobJSON `json:"jobs"`
+		ServerTime string    `json:"server_time"`
+	}{
+		Jobs:       make([]jobJSON, 0, len(jobs)),
+		ServerTime: serverTime.Format(time.RFC3339Nano),
+	}
+
+	for _, j := range jobs {
+		var expected int64
+		switch j.Name {
+		case "aggregator_5min", "aggregator_hourly":
+			expected = aggregatorInterval
+		case "retention":
+			expected = retentionInterval
+		default:
+			expected = 0
+		}
+		overdue := expected > 0 && serverTime.Sub(j.Finished) > 2*time.Duration(expected)*time.Second
+		out.Jobs = append(out.Jobs, jobJSON{
+			Name:                    j.Name,
+			Started:                 j.Started.Format(time.RFC3339Nano),
+			Finished:                j.Finished.Format(time.RFC3339Nano),
+			DurationMs:              j.DurationMs,
+			Outcome:                 j.Outcome,
+			Reason:                  j.Reason,
+			RowsAffected:            j.RowsAffected,
+			Overdue:                 overdue,
+			ExpectedIntervalSeconds: expected,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // writeJSONError writes a JSON body {"error":"<code>"} with the given HTTP status.
