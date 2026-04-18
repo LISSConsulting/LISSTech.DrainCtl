@@ -29,6 +29,18 @@ type Job struct {
 	RowsAffected int64
 }
 
+// IsOverdue reports whether the job has not run within 2× its expected
+// interval (FR-031). expectedIntervalSeconds == 0 designates a one-shot
+// startup job (jsonl_migration, drift_reconciliation) which is never
+// overdue. The threshold is strict (`>`); a run exactly at 2× is not
+// flagged.
+func (j Job) IsOverdue(expectedIntervalSeconds int64, now time.Time) bool {
+	if expectedIntervalSeconds <= 0 {
+		return false
+	}
+	return now.Sub(j.Finished) > 2*time.Duration(expectedIntervalSeconds)*time.Second
+}
+
 // MaintenanceStore reads and writes the maintenance_jobs table. Writes go
 // through the writer pool; reads use the reader pool.
 type MaintenanceStore struct {
