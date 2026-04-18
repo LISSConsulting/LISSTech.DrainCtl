@@ -291,9 +291,7 @@ func TestAppend_FutureTimestampStoresAndLogs(t *testing.T) {
 
 // TestNewCounterRoundTripsThroughAllTiersAndHTTP ingests a counter name that
 // the schema has never seen before, then confirms it materialises through
-// raw, 5-min, and hourly tables with no DDL change (FR-012). The 5-min
-// aggregator ships in US3/T035; until then this test writes directly to
-// metrics_5min to prove the table is counter-agnostic. The dashboard
+// raw, 5-min, and hourly tables with no DDL change (FR-012). The dashboard
 // handler (T015) re-encodes whatever MetricsStore returns, so verifying
 // QueryRange across tiers is equivalent to verifying the HTTP response.
 func TestNewCounterRoundTripsThroughAllTiersAndHTTP(t *testing.T) {
@@ -322,7 +320,21 @@ func TestNewCounterRoundTripsThroughAllTiersAndHTTP(t *testing.T) {
 		t.Errorf("raw tier missing new counter or wrong len: %+v", cs)
 	}
 
-	agg.rollHourly(ctx)
+	now := time.Now().UTC()
+	agg.roll5Min(ctx, now)
+
+	var fiveMinCount int
+	if err := db.reader.QueryRow(
+		`SELECT COUNT(*) FROM metrics_5min WHERE host=? AND counter=?`,
+		"SRV01", newCounter,
+	).Scan(&fiveMinCount); err != nil {
+		t.Fatalf("count 5min: %v", err)
+	}
+	if fiveMinCount != 4 {
+		t.Errorf("5min bucket count = %d, want 4 (one per sample, distinct 5-min boundaries)", fiveMinCount)
+	}
+
+	agg.rollHourly(ctx, now)
 	sr, err = ms.QueryRange(ctx, "SRV01",
 		base.Add(-time.Hour), base.Add(2*time.Hour), TierHourly, nil)
 	if err != nil {
@@ -337,23 +349,5 @@ func TestNewCounterRoundTripsThroughAllTiersAndHTTP(t *testing.T) {
 	}
 	if cs.Min[0] != 10 || cs.Max[0] != 40 {
 		t.Errorf("hourly min/max = %v/%v, want 10/40", cs.Min[0], cs.Max[0])
-	}
-
-	if _, err := db.writer.Exec(
-		`INSERT INTO metrics_5min(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		base.UnixMilli(), "SRV01", newCounter, 25.0, 10.0, 40.0, 4,
-	); err != nil {
-		t.Fatalf("insert 5min: %v", err)
-	}
-	var count int
-	if err := db.reader.QueryRow(
-		`SELECT COUNT(*) FROM metrics_5min WHERE host=? AND counter=?`,
-		"SRV01", newCounter,
-	).Scan(&count); err != nil {
-		t.Fatalf("count 5min: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("5min count = %d, want 1", count)
 	}
 }
