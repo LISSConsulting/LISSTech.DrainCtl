@@ -118,11 +118,22 @@ const BASE = '/api/v1';
  */
 
 /**
+ * EvtSpikeSettings is the narrow dashboard view of the evtspike config block.
+ * Only the `enabled` toggle is surfaced per FR-028 — admin-only fields
+ * (thresholds, channel lists, baseline_path, security-channel gate) live in
+ * config.json and are not exposed via /api/v1/settings.
+ *
+ * @typedef {Object} EvtSpikeSettings
+ * @property {boolean} enabled
+ */
+
+/**
  * @typedef {Object} Settings
  * @property {number} grace_period              - grace period in minutes
  * @property {number} session_warning_threshold
  * @property {PerfMonitoringConfig} performance
  * @property {NotifyTarget[]} notifications
+ * @property {EvtSpikeSettings} [evtspike]
  */
 
 /**
