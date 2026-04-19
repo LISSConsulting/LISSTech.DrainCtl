@@ -527,6 +527,111 @@ func TestSubsystem_MaturedSlot_WarmRestart_HydratesBitForBit_US4(t *testing.T) {
 	}
 }
 
+// TestSubsystem_WarmRestart_NormalNoSpike_AnomalyFires_US4 covers T060: after a
+// warm restart (baseline written by s1, loaded into s2), the detector must not
+// fire on a normal-rate bucket and must fire on the first eligible
+// confirmation window of an anomalous pattern. "First eligible confirmation
+// window" = the earliest 3-bucket window in which 2 anomalous bits can
+// co-exist, which is bucket index 2 of a fresh RecentFlags=0 — RecentFlags is
+// intentionally not persisted (baseline.go §ChannelState), so the rolling
+// window always restarts empty.
+func TestSubsystem_WarmRestart_NormalNoSpike_AnomalyFires_US4(t *testing.T) {
+	baselinePath := filepath.Join(t.TempDir(), "baseline.json")
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          10,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             baselinePath,
+	}
+
+	s1 := New(cfg, "TEST-HOST")
+	s1.Subscribe = noopSubscribe
+	s1.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s1.initChannels(ctx, nil)
+
+	channel := "Application"
+	d1 := s1.detectors[channel]
+	if d1 == nil {
+		t.Fatal("s1 Application detector not initialised")
+	}
+
+	base := time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC)
+	trainOneChannel(d1, base, 200, 1)
+
+	s1.writeBaseline()
+
+	bf, err := LoadBaseline(baselinePath)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+
+	s2 := New(cfg, "TEST-HOST")
+	s2.Subscribe = noopSubscribe
+
+	var mu sync.Mutex
+	var got []SpikePayload
+	s2.OnSpike = func(p SpikePayload) {
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+	}
+
+	s2.initChannels(ctx, bf)
+
+	counter := s2.counters[channel]
+	d2 := s2.detectors[channel]
+	if counter == nil || d2 == nil {
+		t.Fatal("post-restart subsystem missing Application counter/detector")
+	}
+	if !detectorMature(d2, cfg.SlotMaturityObservations) {
+		t.Fatalf("post-restart detector has no mature slot; test premise broken")
+	}
+
+	postStart := base.Add(2000 * time.Second)
+	counter.Store(1)
+	s2.scoreOnce(postStart)
+
+	mu.Lock()
+	if n := len(got); n != 0 {
+		mu.Unlock()
+		t.Fatalf("normal-rate bucket post-restart fired OnSpike %d times; warm-up re-entered", n)
+	}
+	mu.Unlock()
+
+	anomStart := postStart.Add(10 * time.Second)
+	steps := []int{50, 1, 50}
+	spikesPerBucket := make([]int, len(steps))
+	for i, c := range steps {
+		counter.Store(int64(c))
+		mu.Lock()
+		before := len(got)
+		mu.Unlock()
+		s2.scoreOnce(anomStart.Add(time.Duration(i) * 10 * time.Second))
+		mu.Lock()
+		spikesPerBucket[i] = len(got) - before
+		mu.Unlock()
+	}
+
+	if spikesPerBucket[0] != 0 {
+		t.Errorf("bucket 0 fired prematurely (RecentFlags=0b001 cannot confirm)")
+	}
+	if spikesPerBucket[1] != 0 {
+		t.Errorf("bucket 1 (normal) fired OnSpike unexpectedly")
+	}
+	if spikesPerBucket[2] != 1 {
+		t.Errorf("first eligible confirmation window did not fire OnSpike exactly once (got %d)", spikesPerBucket[2])
+	}
+}
+
 // TestSubsystem_SingleWindowTransient_NoSpike covers T022: a single anomalous
 // bucket flanked by normal buckets does not confirm, so OnSpike must not fire.
 func TestSubsystem_SingleWindowTransient_NoSpike(t *testing.T) {
