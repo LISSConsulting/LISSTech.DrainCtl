@@ -1,0 +1,7 @@
+{
+  "workload": "normal-day-false-positive-workload",
+  "placeholder": true,
+  "description": "Deterministic 7-day event trace for SC-001 and SC-003 validation. Averages 100-500 events/hour aggregate across the 54-channel default list, with one morning logon storm (sustained 60s elevated rate on logon-related channels), a steady-state work-hours period, an evening logoff burst, and an overnight idle period. Filled during Phase 9 SC-validation tasks (T094b, T094c).",
+  "validates": ["SC-001", "SC-003"],
+  "events": []
+}
