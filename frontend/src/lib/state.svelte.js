@@ -151,8 +151,8 @@ const persistRfxAvailable = debounce((v) => {
  * @typedef {import('./api.js').Server} Server
  * @typedef {import('./api.js').HealthResponse} HealthResponse
  * @typedef {import('./api.js').Settings} Settings
- * @typedef {import('./api.js').DetectorStatus} DetectorStatus
- * @typedef {import('./api.js').RecentSpike} RecentSpike
+ * @typedef {import('./types.js').DetectorStatus} DetectorStatus
+ * @typedef {import('./types.js').RecentSpike} RecentSpike
  */
 
 /**
