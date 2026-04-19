@@ -141,6 +141,126 @@ func TestSubsystem_SustainedBurst_FiresOnSpikeOncePerCooldown(t *testing.T) {
 	mu.Unlock()
 }
 
+// TestSubsystem_FloodThenSecondAnomaly_BothFire_US2 covers T044: a 30-minute
+// sustained flood on one channel must not poison the posterior badly enough to
+// mask a subsequent smaller anomaly. We flood Application at y=100 for 180
+// consecutive 10-second buckets, pause beyond the cooldown, then inject a
+// second 2-of-3 anomaly at y=30. OnSpike must fire for BOTH phases (at least
+// once during the flood, at least once for the second anomaly) — proving the
+// robust cap in Detector.ObserveBucket kept the baseline near its pre-flood
+// mean (see TestRobustUpdate_SlotNotPoisoned_30Consecutive for the detector-
+// level assertion).
+func TestSubsystem_FloodThenSecondAnomaly_BothFire_US2(t *testing.T) {
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          1,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             filepath.Join(t.TempDir(), "baseline.json"),
+	}
+	s := New(cfg, "TEST-HOST")
+	s.Subscribe = noopSubscribe
+
+	var mu sync.Mutex
+	var got []SpikePayload
+	s.OnSpike = func(p SpikePayload) {
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.initChannels(ctx, nil)
+
+	channel := "Application"
+	counter := s.counters[channel]
+	d := s.detectors[channel]
+	if counter == nil || d == nil {
+		t.Fatal("Application counter/detector not initialised")
+	}
+
+	// Train the slots the test will exercise (40, 41, 42) by replaying 10 days
+	// of 1-hour morning windows with y=1. Training bypasses scoreOnce so only
+	// Application's detector is primed; other channels stay at prior mean with
+	// counter=0 and produce no noise.
+	base := time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)
+	const trainingDays = 10
+	const bucketsPerDay = 360
+	for day := 0; day < trainingDays; day++ {
+		dayStart := base.Add(time.Duration(day) * 24 * time.Hour)
+		for i := 0; i < bucketsPerDay; i++ {
+			d.ObserveBucket(dayStart.Add(time.Duration(i)*10*time.Second), 1)
+		}
+	}
+
+	// Phase 1 — flood: 180 consecutive buckets of y=100 driven through
+	// scoreOnce. The first confirmation fires OnSpike; robust cap clamps
+	// each update so the posterior can only creep up.
+	floodStart := base.Add(time.Duration(trainingDays) * 24 * time.Hour)
+	const floodBuckets = 180
+	for i := 0; i < floodBuckets; i++ {
+		counter.Store(100)
+		s.scoreOnce(floodStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+
+	mu.Lock()
+	floodSpikes := len(got)
+	mu.Unlock()
+	if floodSpikes < 1 {
+		t.Fatalf("flood fired no OnSpike; expected ≥1 (first confirmation)")
+	}
+
+	// Phase 2 — pause: 12 quiet buckets (120 s) clears the 3-bucket
+	// confirmation window and exceeds the 60 s cooldown, arming the detector
+	// for a fresh alert.
+	pauseStart := floodStart.Add(floodBuckets * 10 * time.Second)
+	const pauseBuckets = 12
+	for i := 0; i < pauseBuckets; i++ {
+		counter.Store(1)
+		s.scoreOnce(pauseStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+
+	mu.Lock()
+	afterPause := len(got)
+	mu.Unlock()
+
+	// Phase 3 — second smaller anomaly: 2-of-3 pattern at y=30. If the robust
+	// cap poisoned the baseline toward the flood regime, y=30 would no longer
+	// cross the tail threshold and OnSpike would stay silent here.
+	secondStart := pauseStart.Add(pauseBuckets * 10 * time.Second)
+	steps := []int{30, 1, 30}
+	for i, c := range steps {
+		counter.Store(int64(c))
+		s.scoreOnce(secondStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+
+	mu.Lock()
+	total := len(got)
+	mu.Unlock()
+
+	if total <= afterPause {
+		t.Fatalf("robust cap poisoned baseline: second y=30 anomaly did not "+
+			"fire OnSpike (floodSpikes=%d afterPause=%d total=%d)",
+			floodSpikes, afterPause, total)
+	}
+
+	mu.Lock()
+	last := got[total-1]
+	mu.Unlock()
+	if last.Channel != channel {
+		t.Errorf("second spike Channel: got %q want %q", last.Channel, channel)
+	}
+	if last.Observed != 30 {
+		t.Errorf("second spike Observed: got %d want 30", last.Observed)
+	}
+}
+
 // TestSubsystem_SingleWindowTransient_NoSpike covers T022: a single anomalous
 // bucket flanked by normal buckets does not confirm, so OnSpike must not fire.
 func TestSubsystem_SingleWindowTransient_NoSpike(t *testing.T) {
