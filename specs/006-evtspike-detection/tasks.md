@@ -194,7 +194,7 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 
 ### Implementation for User Story 5
 
-- [ ] T069 [US5] In `internal/evtspike/subsystem.go`, implement `Reload(newCfg EvtSpikeConfig) error`: hot-apply the scalar fields from the live-reload matrix in `contracts/evtspike-config.md` (min_count, threshold, cooldown_minutes, slot_maturity_observations, persist_interval_seconds, half_life_buckets, prior_strength, mean_per_bucket_prior); detect channel-list or baseline-path changes and perform Stop+Start while holding an internal mutex
+- [x] T069 [US5] In `internal/evtspike/subsystem.go`, implement `Reload(newCfg EvtSpikeConfig) error`: hot-apply the scalar fields from the live-reload matrix in `contracts/evtspike-config.md` (min_count, threshold, cooldown_minutes, slot_maturity_observations, persist_interval_seconds, half_life_buckets, prior_strength, mean_per_bucket_prior); detect channel-list or baseline-path changes and perform Stop+Start while holding an internal mutex
 - [x] T070 [US5] In `internal/svc/svc.go` config reload path (existing file watcher), add a branch that calls `evtspike.Reload(cfg.EvtSpike)` when that block's fields change; log the event at INF level
 - [ ] T071 [US5] Update the dashboard's existing settings UI (not a new page, per FR-028) to surface `evtspike.enabled` as a simple toggle in the existing Settings modal — reuse existing API endpoints; NO per-channel or sensitivity editing controls (explicitly out of scope)
 
