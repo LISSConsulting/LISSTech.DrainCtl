@@ -4,6 +4,7 @@ package evtspike
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,6 +27,11 @@ const (
 // be driven by direct counter manipulation.
 type SubscribeFunc func(ctx context.Context, channel, query string, counter *atomic.Int64) error
 
+// PrivilegeFunc enables SeSecurityPrivilege on the current process token.
+// Production wires this to EnableSecurityPrivilege; tests swap in a fake to
+// simulate dedicated-account scenarios without touching the real token.
+type PrivilegeFunc func() error
+
 // Subsystem owns per-channel subscriptions, detectors, and the scoring and
 // baseline-persistence loops inside the DrainCtl service. One instance per
 // host. Create with New, set OnSpike, then Start(ctx). Stop flushes state and
@@ -39,6 +45,10 @@ type Subsystem struct {
 
 	// Subscribe lets tests inject a fake; nil means production Subscribe.
 	Subscribe SubscribeFunc
+
+	// EnablePrivilege lets tests inject a fake SeSecurityPrivilege enabler.
+	// Defaulted to EnableSecurityPrivilege by New.
+	EnablePrivilege PrivilegeFunc
 
 	// Now lets tests inject a deterministic clock for the persistence write
 	// timestamp. The scoring path always takes time from the caller.
@@ -63,12 +73,13 @@ type Subsystem struct {
 // ClampEvtSpike on the caller.
 func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
 	s := &Subsystem{
-		cfg:       cfg,
-		host:      host,
-		Subscribe: Subscribe,
-		Now:       time.Now,
-		detectors: make(map[string]*Detector),
-		counters:  make(map[string]*atomic.Int64),
+		cfg:             cfg,
+		host:            host,
+		Subscribe:       Subscribe,
+		EnablePrivilege: EnableSecurityPrivilege,
+		Now:             time.Now,
+		detectors:       make(map[string]*Detector),
+		counters:        make(map[string]*atomic.Int64),
 	}
 	s.baselinePath = s.resolveBaselinePath()
 	return s
@@ -120,7 +131,19 @@ func (s *Subsystem) Stop() {
 // in the current config. Split out from Start so tests can run it without
 // firing scoring/persistence goroutines.
 func (s *Subsystem) initChannels(ctx context.Context, bf *BaselineFile) {
-	wanted := ResolveChannels(s.cfg)
+	effective := s.cfg
+	if effective.SecurityChannelEnabled {
+		if err := s.EnablePrivilege(); err != nil {
+			reason := err.Error()
+			if errors.Is(err, ErrPrivilegeNotAssigned) {
+				reason = "SeSecurityPrivilege not assigned to process token"
+			}
+			slog.Warn("", "evtspike", "skipped", "channel", SecurityChannel, "reason", reason)
+			effective.SecurityChannelEnabled = false
+		}
+	}
+
+	wanted := ResolveChannels(effective)
 	subscribed := make([]string, 0, len(wanted))
 
 	for _, ch := range wanted {
