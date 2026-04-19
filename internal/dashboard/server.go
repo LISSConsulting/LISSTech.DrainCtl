@@ -25,6 +25,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -226,6 +227,24 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
 	// triggers a server_update event to all connected browsers.
 	state.OnUpdate = ds.broadcastServerUpdate
+
+	// Wire evtspike ingestion: the service's Subsystem.OnSpike callback calls
+	// OnEvtSpikeIngest to append the spike to the per-host ring and emit a
+	// recent_spike SSE event. OnEvtSpikeStatus emits detector_status on
+	// transitions; the broker dedups so callers can emit liberally.
+	// RegisterEvtSpikeStatusFunc installs the pull-based status lookup that
+	// backs GET /api/evtspike/status.
+	state.OnEvtSpikeIngest = func(spike evtspike.SpikePayload) evtspike.RecentSpikeEntry {
+		entry := ds.spikestore.Append(spike.Host, spike)
+		ds.broker.PublishRecentSpike(entry)
+		return entry
+	}
+	state.OnEvtSpikeStatus = func(status evtspike.DetectorStatus) {
+		ds.broker.PublishDetectorStatus(status)
+	}
+	state.RegisterEvtSpikeStatusFunc = func(f EvtSpikeStatusFunc) {
+		ds.evtspikeStatus = f
+	}
 
 	// Wire metrics ingest for both HTTP and local-report paths.
 	if ms != nil {
