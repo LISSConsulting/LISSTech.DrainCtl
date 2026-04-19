@@ -834,18 +834,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 }
 
 // applyEvtSpikeConfigReload calls sub.Reload when the EvtSpike block has
-// changed between loads. sub is always non-nil now that Execute constructs
-// and Start()s the subsystem unconditionally — an Enabled toggle is handled
-// by Reload's Enabled-diff branch, not by skipping the call. Equality is
-// reflect.DeepEqual so the helper accepts two whole EvtSpikeConfig snapshots
-// — both scalar and channel-list mutations are detected by one compare.
+// changed between loads. Execute constructs and Start()s the subsystem
+// unconditionally, so an Enabled toggle rides through Reload's Enabled-diff
+// branch rather than a nil-sub shortcut. Equality is reflect.DeepEqual so the
+// helper accepts two whole EvtSpikeConfig snapshots — both scalar and
+// channel-list mutations are detected by one compare.
 //
 // Split out from Execute's configCh branch so the T068 integration test can
 // drive the exact code path Execute wires in, without a runnable SCM.
 func applyEvtSpikeConfigReload(sub *evtspike.Subsystem, oldCfg, newCfg dc.EvtSpikeConfig) error {
-	if sub == nil {
-		return nil
-	}
 	if reflect.DeepEqual(oldCfg, newCfg) {
 		return nil
 	}

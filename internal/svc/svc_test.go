@@ -142,15 +142,6 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 	}
 }
 
-// TestApplyEvtSpikeConfigReload_NilSubNoOp covers the degenerate case where
-// evtspike is disabled at service start (sub == nil): applyEvtSpikeConfigReload
-// must return nil without panicking so the configCh branch in Execute is safe.
-func TestApplyEvtSpikeConfigReload_NilSubNoOp(t *testing.T) {
-	if err := applyEvtSpikeConfigReload(nil, dc.EvtSpikeConfig{}, dc.EvtSpikeConfig{Enabled: true}); err != nil {
-		t.Errorf("nil subsystem: got %v, want nil", err)
-	}
-}
-
 // TestApplyEvtSpikeConfigReload_EnabledToggle — T101. Reload via the svc
 // wiring path (applyEvtSpikeConfigReload) must handle the Enabled=true→false
 // and false→true transitions end-to-end. Regression test for the plan's
