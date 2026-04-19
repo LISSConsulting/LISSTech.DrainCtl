@@ -25,3 +25,17 @@ type SpikePayload struct {
 	ConfirmationCount int       `json:"confirmation_count"`
 	FirstSeenAt       time.Time `json:"first_seen_at"`
 }
+
+// DetectorStatus is the per-host evtspike detector snapshot that travels in
+// CheckResult.EvtSpikeStatus so remote agents can propagate their subsystem
+// state to the central dashboard. Defined in root so format.go can embed it
+// without cycling with internal/evtspike (which imports this package).
+// internal/evtspike exposes a type alias for in-package readability.
+type DetectorStatus struct {
+	Host            string     `json:"host"`
+	State           string     `json:"state"`
+	EnabledChannels int        `json:"enabled_channels"`
+	MatureChannels  int        `json:"mature_channels"`
+	ErrorReason     string     `json:"error_reason,omitempty"`
+	LastSpikeAt     *time.Time `json:"last_spike_at,omitempty"`
+}

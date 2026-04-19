@@ -604,8 +604,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 	if dashState != nil && dashState.RegisterEvtSpikeStatusFunc != nil {
 		localHost := host
+		remoteLookup := dashState.GetRemoteEvtSpikeStatus
 		dashState.RegisterEvtSpikeStatusFunc(func(h string) evtspike.DetectorStatus {
 			if h != localHost {
+				if remoteLookup != nil {
+					return remoteLookup(h)
+				}
 				return evtspike.DetectorStatus{}
 			}
 			return evtSpikeSub.Status()
@@ -631,7 +635,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Run initial check (skip in dashboard-only mode).
 	if !cfg.DashboardOnly {
-		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
+		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
 	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
@@ -668,7 +672,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		case <-regCh:
 			if !cfg.DashboardOnly {
 				slog.Info("trigger=registry_change")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
 			}
 
 		case spike := <-spikeCh:
@@ -735,7 +739,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
 			}
 
 		case <-configCh:
@@ -822,7 +826,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
 			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 		}
