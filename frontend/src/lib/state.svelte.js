@@ -12,6 +12,8 @@
 
 const MAX_EVENTS = 200;
 const MAX_METRICS = 60;
+// Matches the server-side per-host ring buffer in internal/dashboard/spikestore.go.
+const MAX_RECENT_SPIKES = 20;
 
 /**
  * Must match MOCK_VERSION in frontend/dev/mock-api.js.
@@ -149,6 +151,8 @@ const persistRfxAvailable = debounce((v) => {
  * @typedef {import('./api.js').Server} Server
  * @typedef {import('./api.js').HealthResponse} HealthResponse
  * @typedef {import('./api.js').Settings} Settings
+ * @typedef {import('./api.js').DetectorStatus} DetectorStatus
+ * @typedef {import('./api.js').RecentSpike} RecentSpike
  */
 
 /**
@@ -243,6 +247,22 @@ let metricsHistory = $state(/** @type {MetricsSample[]} */ (lsGet(LS_METRICS, []
  * @type {Map<string, MetricsSample[]>}
  */
 let serverMetrics = $state(lsGetServerMetrics());
+
+/**
+ * Per-host evtspike detector status. Populated by `fetchEvtSpikeStatus` and
+ * kept live by `detector_status` SSE events. Transient — not persisted to
+ * localStorage; the backend is authoritative on reconnect.
+ * @type {Map<string, DetectorStatus>}
+ */
+let detectorStatuses = $state(new Map());
+
+/**
+ * Per-host recent-spike ring buffer. Seeded by `fetchRecentSpikes` and
+ * prepended by `recent_spike` SSE events. Capped at MAX_RECENT_SPIKES per
+ * host to mirror the server-side ring buffer. Newest first.
+ * @type {Map<string, RecentSpike[]>}
+ */
+let recentSpikes = $state(new Map());
 
 // UI state
 let connected = $state(false);
@@ -449,6 +469,14 @@ export const appState = {
         return serverMetrics;
     },
 
+    // Evtspike per-host state — read-only; mutate via the helpers below
+    get detectorStatuses() {
+        return detectorStatuses;
+    },
+    get recentSpikes() {
+        return recentSpikes;
+    },
+
     // UI state
     get connected() {
         return connected;
@@ -638,6 +666,64 @@ export function appendSessionSample(sample) {
  */
 export function appendRfxSample(sample) {
     remoteFxHistory = [...remoteFxHistory, sample].slice(-MAX_METRICS);
+}
+
+/**
+ * Set the evtspike detector status for a host. Creates a new Map to preserve
+ * Svelte 5 deep reactivity. Called by SSE `detector_status` events and by the
+ * REST fallback via `fetchEvtSpikeStatus`.
+ * @param {string} host
+ * @param {DetectorStatus} status
+ */
+export function setDetectorStatus(host, status) {
+    const next = new Map(detectorStatuses);
+    next.set(host, status);
+    detectorStatuses = next;
+}
+
+/**
+ * Replace the recent-spikes ring for a host with a seeded list (newest first).
+ * Called after an explicit `fetchRecentSpikes` refresh. Trims to MAX_RECENT_SPIKES.
+ * @param {string} host
+ * @param {RecentSpike[]} entries
+ */
+export function setRecentSpikes(host, entries) {
+    const next = new Map(recentSpikes);
+    next.set(host, entries.slice(0, MAX_RECENT_SPIKES));
+    recentSpikes = next;
+}
+
+/**
+ * Prepend a single spike to a host's ring buffer, capped at MAX_RECENT_SPIKES.
+ * De-dupes on `id` so a REST refresh immediately followed by an SSE arrival
+ * of the same spike (common on reconnect) does not double-list.
+ * @param {string} host
+ * @param {RecentSpike} spike
+ */
+export function appendRecentSpike(host, spike) {
+    const next = new Map(recentSpikes);
+    const prev = next.get(host) ?? [];
+    const deduped = prev.filter((s) => s.id !== spike.id);
+    next.set(host, [spike, ...deduped].slice(0, MAX_RECENT_SPIKES));
+    recentSpikes = next;
+}
+
+/**
+ * Drop per-host evtspike state when a server is removed from the dashboard.
+ * Mirrors `removeServerMetrics` so ghost entries don't leak indefinitely.
+ * @param {string} host
+ */
+export function removeEvtSpikeState(host) {
+    if (detectorStatuses.has(host)) {
+        const nextStatuses = new Map(detectorStatuses);
+        nextStatuses.delete(host);
+        detectorStatuses = nextStatuses;
+    }
+    if (recentSpikes.has(host)) {
+        const nextSpikes = new Map(recentSpikes);
+        nextSpikes.delete(host);
+        recentSpikes = nextSpikes;
+    }
 }
 
 /**

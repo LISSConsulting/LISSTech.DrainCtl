@@ -13,6 +13,9 @@
         appendRfxSample,
         deriveP95,
         deriveP50,
+        setDetectorStatus,
+        appendRecentSpike,
+        removeEvtSpikeState,
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, fetchMaintenance } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
@@ -639,6 +642,7 @@
                     // operators see it disappear without waiting for the next poll cycle.
                     appState.handleSSEServerDeleted(event.host);
                     removeServerMetrics(event.host);
+                    removeEvtSpikeState(event.host);
                     prevStates.delete(event.host);
                     addEvent(
                         serverEvent(
@@ -653,6 +657,12 @@
                             'alert',
                         ),
                     );
+                } else if (event.type === 'detector_status' && event.host && event.data) {
+                    // Broker fires detector_status only on state transitions (see
+                    // dashboard-sse-events.md), so no client-side dedup is needed.
+                    setDetectorStatus(event.host, event.data);
+                } else if (event.type === 'recent_spike' && event.host && event.data) {
+                    appendRecentSpike(event.host, event.data);
                 } else if (event.type === 'settings_update' && event.data) {
                     // Go stores memory thresholds as % free; UI works in % used —
                     // apply the same inversion that fetchSettings() does on REST load.
