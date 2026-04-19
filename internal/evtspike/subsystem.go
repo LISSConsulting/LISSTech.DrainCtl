@@ -60,6 +60,11 @@ type Subsystem struct {
 	// timestamp. The scoring path always takes time from the caller.
 	Now func() time.Time
 
+	// PersistTickSource returns the channel that drives persistenceLoop and a
+	// stop closure invoked on loop exit. Production uses time.NewTicker; tests
+	// supply a channel they send on to trigger WriteBaseline deterministically.
+	PersistTickSource func(time.Duration) (<-chan time.Time, func())
+
 	baselinePath string
 
 	mu          sync.Mutex
@@ -79,13 +84,14 @@ type Subsystem struct {
 // ClampEvtSpike on the caller.
 func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
 	s := &Subsystem{
-		cfg:             cfg,
-		host:            host,
-		Subscribe:       Subscribe,
-		EnablePrivilege: EnableSecurityPrivilege,
-		Now:             time.Now,
-		detectors:       make(map[string]*Detector),
-		counters:        make(map[string]*atomic.Int64),
+		cfg:               cfg,
+		host:              host,
+		Subscribe:         Subscribe,
+		EnablePrivilege:   EnableSecurityPrivilege,
+		Now:               time.Now,
+		PersistTickSource: defaultPersistTickSource,
+		detectors:         make(map[string]*Detector),
+		counters:          make(map[string]*atomic.Int64),
 	}
 	s.baselinePath = s.resolveBaselinePath()
 	return s
@@ -225,16 +231,25 @@ func (s *Subsystem) persistenceLoop(ctx context.Context) {
 	if interval <= 0 {
 		interval = time.Duration(dc.DefaultEvtSpikePersistIntervalSeconds) * time.Second
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	src := s.PersistTickSource
+	if src == nil {
+		src = defaultPersistTickSource
+	}
+	ch, stop := src(interval)
+	defer stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ch:
 			s.writeBaseline()
 		}
 	}
+}
+
+func defaultPersistTickSource(d time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(d)
+	return t.C, t.Stop
 }
 
 // scoreOnce drains every subscribed channel's counter, feeds the count

@@ -668,3 +668,103 @@ func TestSubsystem_SingleWindowTransient_NoSpike(t *testing.T) {
 		t.Fatalf("single-window transient fired OnSpike %d times; 2-of-3 suppression failed", got)
 	}
 }
+
+// TestSubsystem_PersistenceTicker_WritesOnAdvance covers T065: the periodic
+// persistence ticker must call WriteBaseline every PersistIntervalSeconds. We
+// inject a controllable tick channel via PersistTickSource and advance the
+// mock clock by sending on it; each tick must produce a fresh baseline file
+// on disk whose WrittenAt reflects the advance.
+func TestSubsystem_PersistenceTicker_WritesOnAdvance(t *testing.T) {
+	baselinePath := filepath.Join(t.TempDir(), "baseline.json")
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          10,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             baselinePath,
+	}
+
+	s := New(cfg, "TEST-HOST")
+	s.Subscribe = noopSubscribe
+	s.OnSpike = func(SpikePayload) {}
+
+	tickCh := make(chan time.Time)
+	s.PersistTickSource = func(time.Duration) (<-chan time.Time, func()) {
+		return tickCh, func() {}
+	}
+
+	var nowMu sync.Mutex
+	clock := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	s.Now = func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return clock
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// First tick: advance the mock clock 15 minutes and signal persistenceLoop.
+	// Use a synchronous send to ensure the loop has consumed the tick before we
+	// inspect the file. The writeBaseline call completes before the next tick
+	// can be sent.
+	nowMu.Lock()
+	clock = clock.Add(15 * time.Minute)
+	firstExpected := clock
+	nowMu.Unlock()
+	tickCh <- time.Time{}
+
+	first := waitForBaselineWrittenAt(t, baselinePath, firstExpected)
+
+	nowMu.Lock()
+	clock = clock.Add(15 * time.Minute)
+	secondExpected := clock
+	nowMu.Unlock()
+	tickCh <- time.Time{}
+
+	second := waitForBaselineWrittenAt(t, baselinePath, secondExpected)
+
+	if !second.WrittenAt.After(first.WrittenAt) {
+		t.Fatalf("second baseline WrittenAt %v should be after first %v — ticker did not drive a second write",
+			second.WrittenAt, first.WrittenAt)
+	}
+	if second.Host != "TEST-HOST" {
+		t.Errorf("second baseline Host: got %q want TEST-HOST", second.Host)
+	}
+}
+
+// waitForBaselineWrittenAt polls the baseline file until LoadBaseline returns a
+// BaselineFile whose WrittenAt equals the expected timestamp. The synchronous
+// tick send guarantees persistenceLoop has entered the case branch, but
+// writeBaseline runs under s.mu and the atomic rename may lag by a few
+// microseconds — hence the short deadline.
+func waitForBaselineWrittenAt(t *testing.T, path string, want time.Time) *BaselineFile {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		bf, err := LoadBaseline(path)
+		if err == nil && bf != nil && bf.WrittenAt.Equal(want) {
+			return bf
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("waiting for WrittenAt=%v: LoadBaseline error: %v", want, err)
+			}
+			var got time.Time
+			if bf != nil {
+				got = bf.WrittenAt
+			}
+			t.Fatalf("waiting for WrittenAt=%v: last observed %v", want, got)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
