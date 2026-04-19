@@ -5,6 +5,7 @@ package drainctl
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,169 @@ func TestClampRetention_LogsWarning_AboveMax(t *testing.T) {
 	// ClampRetention now logs via slog internally; verify the return value only.
 	if got := ClampRetention(MaxRetentionDays + 1); got != MaxRetentionDays {
 		t.Errorf("ClampRetention(%d) = %d, want %d", MaxRetentionDays+1, got, MaxRetentionDays)
+	}
+}
+
+// ── ClampEvtSpike ─────────────────────────────────────────────────────────────
+
+func TestClampEvtSpike_NilSafe(t *testing.T) {
+	ClampEvtSpike(nil)
+}
+
+func TestClampEvtSpike_ZeroValuePromotesDefaults(t *testing.T) {
+	cfg := EvtSpikeConfig{}
+	ClampEvtSpike(&cfg)
+
+	if cfg.MinCount != DefaultEvtSpikeMinCount {
+		t.Errorf("MinCount = %d, want %d", cfg.MinCount, DefaultEvtSpikeMinCount)
+	}
+	if cfg.Threshold != DefaultEvtSpikeThreshold {
+		t.Errorf("Threshold = %g, want %g", cfg.Threshold, DefaultEvtSpikeThreshold)
+	}
+	if cfg.CooldownMinutes != DefaultEvtSpikeCooldownMinutes {
+		t.Errorf("CooldownMinutes = %d, want %d", cfg.CooldownMinutes, DefaultEvtSpikeCooldownMinutes)
+	}
+	if cfg.SlotMaturityObservations != DefaultEvtSpikeSlotMaturityObservations {
+		t.Errorf("SlotMaturityObservations = %d, want %d", cfg.SlotMaturityObservations, DefaultEvtSpikeSlotMaturityObservations)
+	}
+	if cfg.PersistIntervalSeconds != DefaultEvtSpikePersistIntervalSeconds {
+		t.Errorf("PersistIntervalSeconds = %d, want %d", cfg.PersistIntervalSeconds, DefaultEvtSpikePersistIntervalSeconds)
+	}
+	if cfg.HalfLifeBuckets != DefaultEvtSpikeHalfLifeBuckets {
+		t.Errorf("HalfLifeBuckets = %d, want %d", cfg.HalfLifeBuckets, DefaultEvtSpikeHalfLifeBuckets)
+	}
+	if cfg.PriorStrength != DefaultEvtSpikePriorStrength {
+		t.Errorf("PriorStrength = %g, want %g", cfg.PriorStrength, DefaultEvtSpikePriorStrength)
+	}
+	if cfg.MeanPerBucketPrior != DefaultEvtSpikeMeanPerBucketPrior {
+		t.Errorf("MeanPerBucketPrior = %g, want %g", cfg.MeanPerBucketPrior, DefaultEvtSpikeMeanPerBucketPrior)
+	}
+	if cfg.DisabledChannels == nil {
+		t.Error("DisabledChannels = nil, want non-nil empty slice")
+	}
+	if cfg.AddedChannels == nil {
+		t.Error("AddedChannels = nil, want non-nil empty slice")
+	}
+	if cfg.Enabled {
+		t.Error("Enabled = true, want false (zero value)")
+	}
+}
+
+func TestClampEvtSpike_BelowMinClampsToMin(t *testing.T) {
+	cfg := EvtSpikeConfig{
+		MinCount:                 -5,
+		Threshold:                1e-12,
+		CooldownMinutes:          -1,
+		SlotMaturityObservations: -1,
+		PersistIntervalSeconds:   30,
+		HalfLifeBuckets:          10,
+		PriorStrength:            0.1,
+		MeanPerBucketPrior:       -1.0,
+	}
+	ClampEvtSpike(&cfg)
+
+	if cfg.MinCount != MinEvtSpikeMinCount {
+		t.Errorf("MinCount = %d, want %d", cfg.MinCount, MinEvtSpikeMinCount)
+	}
+	if cfg.Threshold != MinEvtSpikeThreshold {
+		t.Errorf("Threshold = %g, want %g", cfg.Threshold, MinEvtSpikeThreshold)
+	}
+	if cfg.CooldownMinutes != MinEvtSpikeCooldownMinutes {
+		t.Errorf("CooldownMinutes = %d, want %d", cfg.CooldownMinutes, MinEvtSpikeCooldownMinutes)
+	}
+	if cfg.SlotMaturityObservations != MinEvtSpikeSlotMaturityObservations {
+		t.Errorf("SlotMaturityObservations = %d, want %d", cfg.SlotMaturityObservations, MinEvtSpikeSlotMaturityObservations)
+	}
+	if cfg.PersistIntervalSeconds != MinEvtSpikePersistIntervalSeconds {
+		t.Errorf("PersistIntervalSeconds = %d, want %d", cfg.PersistIntervalSeconds, MinEvtSpikePersistIntervalSeconds)
+	}
+	if cfg.HalfLifeBuckets != MinEvtSpikeHalfLifeBuckets {
+		t.Errorf("HalfLifeBuckets = %d, want %d", cfg.HalfLifeBuckets, MinEvtSpikeHalfLifeBuckets)
+	}
+	if cfg.PriorStrength != MinEvtSpikePriorStrength {
+		t.Errorf("PriorStrength = %g, want %g", cfg.PriorStrength, MinEvtSpikePriorStrength)
+	}
+	if cfg.MeanPerBucketPrior != MinEvtSpikeMeanPerBucketPrior {
+		t.Errorf("MeanPerBucketPrior = %g, want %g", cfg.MeanPerBucketPrior, MinEvtSpikeMeanPerBucketPrior)
+	}
+}
+
+func TestClampEvtSpike_AboveMaxClampsToMax(t *testing.T) {
+	cfg := EvtSpikeConfig{
+		MinCount:                 99999,
+		Threshold:                0.5,
+		CooldownMinutes:          99999,
+		SlotMaturityObservations: 9999,
+		PersistIntervalSeconds:   1_000_000,
+		HalfLifeBuckets:          99999,
+		PriorStrength:            1e9,
+		MeanPerBucketPrior:       1e9,
+	}
+	ClampEvtSpike(&cfg)
+
+	if cfg.MinCount != MaxEvtSpikeMinCount {
+		t.Errorf("MinCount = %d, want %d", cfg.MinCount, MaxEvtSpikeMinCount)
+	}
+	if cfg.Threshold != MaxEvtSpikeThreshold {
+		t.Errorf("Threshold = %g, want %g", cfg.Threshold, MaxEvtSpikeThreshold)
+	}
+	if cfg.CooldownMinutes != MaxEvtSpikeCooldownMinutes {
+		t.Errorf("CooldownMinutes = %d, want %d", cfg.CooldownMinutes, MaxEvtSpikeCooldownMinutes)
+	}
+	if cfg.SlotMaturityObservations != MaxEvtSpikeSlotMaturityObservations {
+		t.Errorf("SlotMaturityObservations = %d, want %d", cfg.SlotMaturityObservations, MaxEvtSpikeSlotMaturityObservations)
+	}
+	if cfg.PersistIntervalSeconds != MaxEvtSpikePersistIntervalSeconds {
+		t.Errorf("PersistIntervalSeconds = %d, want %d", cfg.PersistIntervalSeconds, MaxEvtSpikePersistIntervalSeconds)
+	}
+	if cfg.HalfLifeBuckets != MaxEvtSpikeHalfLifeBuckets {
+		t.Errorf("HalfLifeBuckets = %d, want %d", cfg.HalfLifeBuckets, MaxEvtSpikeHalfLifeBuckets)
+	}
+	if cfg.PriorStrength != MaxEvtSpikePriorStrength {
+		t.Errorf("PriorStrength = %g, want %g", cfg.PriorStrength, MaxEvtSpikePriorStrength)
+	}
+	if cfg.MeanPerBucketPrior != MaxEvtSpikeMeanPerBucketPrior {
+		t.Errorf("MeanPerBucketPrior = %g, want %g", cfg.MeanPerBucketPrior, MaxEvtSpikeMeanPerBucketPrior)
+	}
+}
+
+func TestClampEvtSpike_WithinRangeIsUnchanged(t *testing.T) {
+	cfg := EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 25,
+		Threshold:                5e-3,
+		CooldownMinutes:          30,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   1800, // multiple of 900
+		HalfLifeBuckets:          720,
+		PriorStrength:            120,
+		MeanPerBucketPrior:       0.5,
+		DisabledChannels:         []string{"X"},
+		AddedChannels:            []string{"Y"},
+		SecurityChannelEnabled:   true,
+	}
+	want := cfg
+	ClampEvtSpike(&cfg)
+
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("ClampEvtSpike mutated in-range values:\n got=%+v\nwant=%+v", cfg, want)
+	}
+}
+
+func TestClampEvtSpike_PersistIntervalNonMultipleOf900Warns(t *testing.T) {
+	// We can't trivially intercept slog without rewiring; assert the value
+	// stays put (it's in [60, 86400] and should not be re-clamped) so the
+	// only behavioral effect is the warning, which the contract documents.
+	cfg := EvtSpikeConfig{PersistIntervalSeconds: 450} // divisor of 900, in range
+	ClampEvtSpike(&cfg)
+	if cfg.PersistIntervalSeconds != 450 {
+		t.Errorf("PersistIntervalSeconds = %d, want 450 (in range, only warned)", cfg.PersistIntervalSeconds)
+	}
+
+	cfg = EvtSpikeConfig{PersistIntervalSeconds: 1234} // arbitrary, in range
+	ClampEvtSpike(&cfg)
+	if cfg.PersistIntervalSeconds != 1234 {
+		t.Errorf("PersistIntervalSeconds = %d, want 1234 (in range, only warned)", cfg.PersistIntervalSeconds)
 	}
 }
 
