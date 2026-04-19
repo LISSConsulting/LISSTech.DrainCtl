@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -206,6 +207,14 @@ type DashboardServer struct {
 	// subsystem at Start via dashboard.OnSpike wiring; nil until that wires up
 	// or when the feature is off (handler then returns 200 []).
 	spikestore *SpikeStore
+
+	// remoteEvtSpikeStatus caches the DetectorStatus most recently reported by
+	// each registered agent via /api/v1/report. Remote hosts don't run a local
+	// broker, so the central dashboard relies on the heartbeat payload to know
+	// their detector state; the pull function for non-local hosts consults
+	// this map so GET /api/evtspike/status?host=<remote> reflects reality.
+	remoteEvtSpikeStatusMu sync.RWMutex
+	remoteEvtSpikeStatus   map[string]evtspike.DetectorStatus
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -219,14 +228,15 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	state := NewServerState(dataDir)
 
 	ds := &DashboardServer{
-		state:        state,
-		cfg:          cfg,
-		sessionStore: NewSessionStore(ctx),
-		broker:       NewBroker(),
-		ms:           ms,
-		as:           as,
-		mnt:          mnt,
-		spikestore:   NewSpikeStore(),
+		state:                state,
+		cfg:                  cfg,
+		sessionStore:         NewSessionStore(ctx),
+		broker:               NewBroker(),
+		ms:                   ms,
+		as:                   as,
+		mnt:                  mnt,
+		spikestore:           NewSpikeStore(),
+		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
 	}
 
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
@@ -250,6 +260,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	state.RegisterEvtSpikeStatusFunc = func(f EvtSpikeStatusFunc) {
 		ds.evtspikeStatus = f
 	}
+	state.GetRemoteEvtSpikeStatus = ds.RemoteEvtSpikeStatus
 
 	// Wire metrics ingest for both HTTP and local-report paths.
 	if ms != nil {
@@ -559,9 +570,31 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 
 	ds.state.Update(result.Host, &result)
 
+	// Propagate the remote agent's evtspike detector status. The broker dedups
+	// by (host, state) so calling unconditionally every heartbeat is safe and
+	// keeps the wire quiet on steady state. The cache backs the pull function
+	// registered for non-local hosts in internal/svc/handler.go.
+	if result.EvtSpikeStatus != nil {
+		status := *result.EvtSpikeStatus
+		status.Host = result.Host
+		ds.remoteEvtSpikeStatusMu.Lock()
+		ds.remoteEvtSpikeStatus[result.Host] = status
+		ds.remoteEvtSpikeStatusMu.Unlock()
+		ds.broker.PublishDetectorStatus(status)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// RemoteEvtSpikeStatus returns the DetectorStatus most recently reported for
+// the given host via /api/v1/report. Zero value (State="") for unknown hosts;
+// callers translate that into the disabled state. Safe for concurrent use.
+func (ds *DashboardServer) RemoteEvtSpikeStatus(host string) evtspike.DetectorStatus {
+	ds.remoteEvtSpikeStatusMu.RLock()
+	defer ds.remoteEvtSpikeStatusMu.RUnlock()
+	return ds.remoteEvtSpikeStatus[host]
 }
 
 // handleServers returns GET /api/v1/servers as a JSON array of ServerView.

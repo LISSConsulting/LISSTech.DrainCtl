@@ -59,6 +59,7 @@ type CheckResult struct {
 	Sessions             *SessionSummary `json:"sessions,omitempty"`
 	Performance          *PerfSnapshot   `json:"performance,omitempty"`
 	Spike                *SpikePayload   `json:"spike,omitempty"`
+	EvtSpikeStatus       *DetectorStatus `json:"evtspike_status,omitempty"`
 	Message              string          `json:"message"`
 	ExitCode             int             `json:"exit_code"`
 }

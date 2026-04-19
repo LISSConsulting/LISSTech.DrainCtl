@@ -10,6 +10,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -20,7 +21,7 @@ import (
 // The handler owns the in-memory observation cache (transition detection,
 // live state duration) and the persistent SQLite audit writer (T026/T059);
 // drain-mode transitions are appended there, never to JSONL.
-func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState) {
+func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, evtSpikeSub *evtspike.Subsystem) {
 	checkStart := time.Now()
 	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
@@ -219,6 +220,15 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 		Performance:          perfSnap,
 		Message:              message,
 		ExitCode:             exitCode,
+	}
+
+	// Attach the evtspike detector status so the central dashboard renders the
+	// pill for remote hosts. Subsystem.Status() returns State=disabled when
+	// off, so forwarding unconditionally is safe and keeps the central
+	// dashboard's pill accurate when an operator flips enabled off.
+	if evtSpikeSub != nil {
+		status := evtSpikeSub.Status()
+		result.EvtSpikeStatus = &status
 	}
 
 	// Determine triggers and send notifications.
