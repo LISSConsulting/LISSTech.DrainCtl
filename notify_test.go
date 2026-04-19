@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1399,5 +1400,96 @@ func TestEventSpikePayload_NtfyPriority(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEventSpikePayload_PerTargetSeverity proves FR-011a: severity for an
+// event_spike notification is wired on the target, not derived from the
+// detector. Two webhook targets on the same host/channel receive the same
+// spike payload but each with its own configured severity.
+func TestEventSpikePayload_PerTargetSeverity(t *testing.T) {
+	type capture struct {
+		mu     sync.Mutex
+		bodies [][]byte
+	}
+	newCapturer := func() (*httptest.Server, *capture) {
+		cap := &capture{}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			cap.mu.Lock()
+			cap.bodies = append(cap.bodies, body)
+			cap.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		}))
+		return srv, cap
+	}
+
+	warnSrv, warnCap := newCapturer()
+	defer warnSrv.Close()
+	alertSrv, alertCap := newCapturer()
+	defer alertSrv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: warnSrv.URL, Severity: "warning", Triggers: []Trigger{TriggerEventSpike}},
+		{Type: "webhook", URL: alertSrv.URL, Severity: "alert", Triggers: []Trigger{TriggerEventSpike}},
+	}
+	result, _ := newSpikeResult()
+	result.Status = "" // detector does not assign severity — comes from target wiring
+
+	SendNotification(targets, &NotifyState{}, result, TriggerEventSpike, "")
+
+	check := func(label string, cap *capture, want string) {
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		if len(cap.bodies) != 1 {
+			t.Fatalf("%s target: got %d bodies, want 1", label, len(cap.bodies))
+		}
+		var p map[string]any
+		if err := json.Unmarshal(cap.bodies[0], &p); err != nil {
+			t.Fatalf("%s target: unmarshal: %v", label, err)
+		}
+		if got := p["status"]; got != want {
+			t.Errorf("%s target: payload.status = %v, want %q", label, got, want)
+		}
+		subj, _ := p["subject"].(string)
+		if want == "alert" && !strings.Contains(subj, "\U0001F6A8") {
+			t.Errorf("%s target: subject %q missing alert emoji", label, subj)
+		}
+		if want == "warning" && !strings.Contains(subj, "\u26A0") {
+			t.Errorf("%s target: subject %q missing warning emoji", label, subj)
+		}
+	}
+	check("warning", warnCap, "warning")
+	check("alert", alertCap, "alert")
+}
+
+// TestEventSpikePayload_DefaultSeverity proves that when neither the target
+// nor the result carries a severity, the payload defaults to "warning" — no
+// auto-escalation from intensity (FR-011b).
+func TestEventSpikePayload_DefaultSeverity(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerEventSpike}},
+	}
+	result, _ := newSpikeResult()
+	result.Status = ""
+
+	SendNotification(targets, &NotifyState{}, result, TriggerEventSpike, "")
+
+	if len(body) == 0 {
+		t.Fatal("webhook captured no body")
+	}
+	var p map[string]any
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := p["status"]; got != "warning" {
+		t.Errorf("payload.status = %v, want %q", got, "warning")
 	}
 }

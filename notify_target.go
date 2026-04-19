@@ -25,6 +25,7 @@ type NotifyTargetUpdate struct {
 	To            *[]string  `json:"to,omitempty"`
 	Triggers      *[]Trigger `json:"triggers,omitempty"`
 	RepeatMinutes *int       `json:"repeat_minutes,omitempty"`
+	Severity      *string    `json:"severity,omitempty"`
 }
 
 // validNotifyTypes lists the accepted values for NotifyTargetUpdate.Type and
@@ -65,6 +66,9 @@ func AppendNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
 		if err := validateEmailTarget(&t); err != nil {
 			return err
 		}
+	}
+	if err := validateSeverity(t.Severity); err != nil {
+		return err
 	}
 
 	cfg.Notifications = append(cfg.Notifications, t)
@@ -112,9 +116,24 @@ func SetNotifyTarget(cfg *Config, u NotifyTargetUpdate) error {
 			return err
 		}
 	}
+	if err := validateSeverity(proposed.Severity); err != nil {
+		return err
+	}
 
 	cfg.Notifications[matchingPositions[u.TargetIndex]] = proposed
 	return nil
+}
+
+// validateSeverity enforces that a target's Severity is empty, "warning", or
+// "alert". Severity drives event_spike status-per-target (FR-011a); an unknown
+// value would silently fall back to the warning default and confuse operators.
+func validateSeverity(s string) error {
+	switch s {
+	case "", "warning", "alert":
+		return nil
+	default:
+		return fmt.Errorf("severity must be 'warning' or 'alert', got %q", s)
+	}
 }
 
 // validateEmailTarget enforces email-target invariants that SaveConfig would
@@ -184,5 +203,8 @@ func applyUpdate(t *NotificationTarget, u NotifyTargetUpdate) {
 	}
 	if u.RepeatMinutes != nil {
 		t.RepeatMinutes = *u.RepeatMinutes
+	}
+	if u.Severity != nil {
+		t.Severity = strings.ToLower(*u.Severity)
 	}
 }
