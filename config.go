@@ -107,6 +107,7 @@ const (
 	TriggerInputDelayCritical Trigger = "input_delay_critical"
 	TriggerMemoryWarning      Trigger = "memory_warning"
 	TriggerMemoryCritical     Trigger = "memory_critical"
+	TriggerEventSpike         Trigger = "event_spike"
 )
 
 // DefaultTriggers is used when a target specifies no triggers.
@@ -120,6 +121,7 @@ var ValidTriggers = map[Trigger]bool{
 	TriggerCPUWarning: true, TriggerCPUCritical: true,
 	TriggerInputDelayWarning: true, TriggerInputDelayCritical: true,
 	TriggerMemoryWarning: true, TriggerMemoryCritical: true,
+	TriggerEventSpike: true,
 }
 
 // ── NotificationTarget ───────────────────────────────────────────────────
