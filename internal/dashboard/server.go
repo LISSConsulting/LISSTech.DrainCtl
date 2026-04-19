@@ -195,6 +195,11 @@ type DashboardServer struct {
 	// the evtspike subsystem at Start; nil when the feature is off or not yet
 	// wired. See evtspike.go handleEvtSpikeStatus for nil semantics.
 	evtspikeStatus EvtSpikeStatusFunc
+
+	// spikestore backs GET /api/evtspike/spikes. Populated by the evtspike
+	// subsystem at Start via dashboard.OnSpike wiring; nil until that wires up
+	// or when the feature is off (handler then returns 200 []).
+	spikestore *SpikeStore
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -215,6 +220,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		ms:           ms,
 		as:           as,
 		mnt:          mnt,
+		spikestore:   NewSpikeStore(),
 	}
 
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
@@ -322,6 +328,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
 	mux.Handle("GET /api/v1/maintenance/status", rlw(rs(http.HandlerFunc(ds.handleMaintenance))))
 	mux.Handle("GET /api/evtspike/status", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeStatus))))
+	mux.Handle("GET /api/evtspike/spikes", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeSpikes))))
 
 	// SSE event stream — session auth, no rate limit (long-lived connection).
 	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
