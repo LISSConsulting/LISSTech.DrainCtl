@@ -410,6 +410,123 @@ func TestSubsystem_FloodThenRestart_SecondAnomalyStillFires_US2(t *testing.T) {
 	}
 }
 
+// TestSubsystem_MaturedSlot_WarmRestart_HydratesBitForBit_US4 covers T059: after
+// maturing a slot and stopping the subsystem, a freshly started subsystem
+// pointed at the same baseline file must hydrate detector GammaState bit-for-
+// bit. We exercise the real Start/Stop lifecycle (not initChannels/writeBaseline
+// shortcuts) so the ticker-driven scoring and persistence loops, final-flush
+// path, and LoadBaseline-on-Start are all on the covered path.
+//
+// Race note: the scoring loop's first tick is 10 s after Start; maturing a slot
+// and calling Stop completes in microseconds, so no scoringLoop tick can
+// interleave. The extra on-disk comparison below guards against a future
+// regression that would change that timing.
+func TestSubsystem_MaturedSlot_WarmRestart_HydratesBitForBit_US4(t *testing.T) {
+	baselinePath := filepath.Join(t.TempDir(), "baseline.json")
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          10,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             baselinePath,
+	}
+
+	s1 := New(cfg, "TEST-HOST")
+	s1.Subscribe = noopSubscribe
+	s1.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s1.Start(ctx); err != nil {
+		t.Fatalf("s1.Start: %v", err)
+	}
+
+	channel := "Application"
+	base := time.Date(2026, 4, 18, 10, 7, 0, 0, time.UTC)
+
+	s1.mu.Lock()
+	d1 := s1.detectors[channel]
+	if d1 == nil {
+		s1.mu.Unlock()
+		s1.Stop()
+		t.Fatal("s1 Application detector not initialised")
+	}
+	for i := 0; i < 10; i++ {
+		d1.ObserveBucket(base.Add(time.Duration(i)*time.Second), 1)
+	}
+	d1.ObserveBucket(base.Add(45*time.Minute), 2)
+	slotsBefore := d1.Slots
+	globalBefore := d1.Global
+	s1.mu.Unlock()
+
+	matureSlots := 0
+	for _, sl := range slotsBefore {
+		if sl.N >= cfg.SlotMaturityObservations {
+			matureSlots++
+		}
+	}
+	if matureSlots == 0 {
+		s1.Stop()
+		t.Fatalf("no slot matured pre-Stop (SlotMaturityObservations=%d); "+
+			"test would not exercise warm restart", cfg.SlotMaturityObservations)
+	}
+
+	s1.Stop()
+
+	bf, err := LoadBaseline(baselinePath)
+	if err != nil {
+		t.Fatalf("LoadBaseline after Stop: %v", err)
+	}
+	persisted, ok := bf.Channels[channel]
+	if !ok {
+		t.Fatalf("baseline missing channel %q; got %d channels", channel, len(bf.Channels))
+	}
+	if !reflect.DeepEqual(slotsBefore, persisted.Slots) {
+		t.Fatalf("baseline Slots drifted from pre-Stop snapshot "+
+			"(scoringLoop tick may have raced the test)\n before: %+v\n disk:   %+v",
+			slotsBefore, persisted.Slots)
+	}
+	if !reflect.DeepEqual(globalBefore, persisted.Global) {
+		t.Fatalf("baseline Global drifted from pre-Stop snapshot\n before: %+v\n disk:   %+v",
+			globalBefore, persisted.Global)
+	}
+
+	s2 := New(cfg, "TEST-HOST")
+	s2.Subscribe = noopSubscribe
+	s2.OnSpike = func(SpikePayload) {}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	if err := s2.Start(ctx2); err != nil {
+		t.Fatalf("s2.Start: %v", err)
+	}
+	defer s2.Stop()
+
+	s2.mu.Lock()
+	d2 := s2.detectors[channel]
+	if d2 == nil {
+		s2.mu.Unlock()
+		t.Fatal("s2 Application detector not initialised after warm restart")
+	}
+	slotsAfter := d2.Slots
+	globalAfter := d2.Global
+	s2.mu.Unlock()
+
+	if !reflect.DeepEqual(slotsBefore, slotsAfter) {
+		t.Fatalf("Slots not bit-for-bit after warm restart\n before: %+v\n after:  %+v",
+			slotsBefore, slotsAfter)
+	}
+	if !reflect.DeepEqual(globalBefore, globalAfter) {
+		t.Fatalf("Global not bit-for-bit after warm restart\n before: %+v\n after:  %+v",
+			globalBefore, globalAfter)
+	}
+}
+
 // TestSubsystem_SingleWindowTransient_NoSpike covers T022: a single anomalous
 // bucket flanked by normal buckets does not confirm, so OnSpike must not fire.
 func TestSubsystem_SingleWindowTransient_NoSpike(t *testing.T) {
