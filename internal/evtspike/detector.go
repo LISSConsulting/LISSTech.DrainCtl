@@ -104,6 +104,7 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 		d.LastAlert = now
 	}
 
+	// Robust cap: during a confirmed anomaly, clamp the update to the 99th percentile of the current posterior so a sustained flood cannot poison the baseline and mask a follow-up anomaly (SC-004 / US2 Independent Test).
 	updateY := float64(count)
 	if anomalous {
 		cap := float64(negBinQuantile(robustCapProb, scoring.Alpha, scoring.Beta))
