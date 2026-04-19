@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,7 +78,9 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 	}
 
 	sub := evtspike.New(initial.EvtSpike, "TEST-HOST")
-	sub.Subscribe = func(_ context.Context, _, _ string, _ *atomic.Int64) error { return nil }
+	sub.Subscribe = func(_ context.Context, _ *sync.WaitGroup, _, _ string, _ *atomic.Int64, _ func(error)) error {
+		return nil
+	}
 	sub.OnSpike = func(_ evtspike.SpikePayload) {}
 	if err := sub.Start(ctx); err != nil {
 		t.Fatalf("sub.Start: %v", err)
@@ -145,6 +148,62 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 func TestApplyEvtSpikeConfigReload_NilSubNoOp(t *testing.T) {
 	if err := applyEvtSpikeConfigReload(nil, dc.EvtSpikeConfig{}, dc.EvtSpikeConfig{Enabled: true}); err != nil {
 		t.Errorf("nil subsystem: got %v, want nil", err)
+	}
+}
+
+// TestApplyEvtSpikeConfigReload_EnabledToggle — T101. Reload via the svc
+// wiring path (applyEvtSpikeConfigReload) must handle the Enabled=true→false
+// and false→true transitions end-to-end. Regression test for the plan's
+// Phase A2 fix: previously a disabled-at-start subsystem could never be
+// enabled without a service restart, and an enabled subsystem kept running
+// after Reload(Enabled=false).
+func TestApplyEvtSpikeConfigReload_EnabledToggle(t *testing.T) {
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          10,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             filepath.Join(t.TempDir(), "baseline.json"),
+	}
+	sub := evtspike.New(cfg, "TEST-HOST")
+	sub.Subscribe = func(_ context.Context, _ *sync.WaitGroup, _, _ string, _ *atomic.Int64, _ func(error)) error {
+		return nil
+	}
+	sub.OnSpike = func(_ evtspike.SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := sub.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sub.Stop()
+
+	preChannels := sub.Status().EnabledChannels
+	if preChannels == 0 {
+		t.Fatal("premise: Start subscribed zero channels")
+	}
+
+	// Enabled=true → false via the svc wiring helper.
+	disabled := cfg
+	disabled.Enabled = false
+	if err := applyEvtSpikeConfigReload(sub, cfg, disabled); err != nil {
+		t.Fatalf("applyEvtSpikeConfigReload(disable): %v", err)
+	}
+	if st := sub.Status(); st.State != "disabled" {
+		t.Errorf("after disable: Status.State = %q, want \"disabled\"", st.State)
+	}
+
+	// false → true via the same path.
+	if err := applyEvtSpikeConfigReload(sub, disabled, cfg); err != nil {
+		t.Fatalf("applyEvtSpikeConfigReload(enable): %v", err)
+	}
+	if got := sub.Status().EnabledChannels; got != preChannels {
+		t.Errorf("after re-enable: EnabledChannels = %d, want %d", got, preChannels)
 	}
 }
 
