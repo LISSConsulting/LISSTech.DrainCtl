@@ -57,6 +57,32 @@ const (
 	// would overflow time.Duration when multiplied by time.Minute.
 	MaxRepeatMinutes = 10080 // 1 week
 
+	// EvtSpike defaults and clamp boundaries (data-model.md §1).
+	DefaultEvtSpikeMinCount                 = 10
+	MinEvtSpikeMinCount                     = 1
+	MaxEvtSpikeMinCount                     = 10000
+	DefaultEvtSpikeThreshold                = 1e-4
+	MinEvtSpikeThreshold                    = 1e-9
+	MaxEvtSpikeThreshold                    = 0.1
+	DefaultEvtSpikeCooldownMinutes          = 10
+	MinEvtSpikeCooldownMinutes              = 1
+	MaxEvtSpikeCooldownMinutes              = 1440
+	DefaultEvtSpikeSlotMaturityObservations = 7
+	MinEvtSpikeSlotMaturityObservations     = 1
+	MaxEvtSpikeSlotMaturityObservations     = 100
+	DefaultEvtSpikePersistIntervalSeconds   = 900
+	MinEvtSpikePersistIntervalSeconds       = 60
+	MaxEvtSpikePersistIntervalSeconds       = 86400
+	DefaultEvtSpikeHalfLifeBuckets          = 360
+	MinEvtSpikeHalfLifeBuckets              = 60
+	MaxEvtSpikeHalfLifeBuckets              = 10000
+	DefaultEvtSpikePriorStrength            = 60.0
+	MinEvtSpikePriorStrength                = 1.0
+	MaxEvtSpikePriorStrength                = 10000.0
+	DefaultEvtSpikeMeanPerBucketPrior       = 0.1
+	MinEvtSpikeMeanPerBucketPrior           = 0.0
+	MaxEvtSpikeMeanPerBucketPrior           = 1000.0
+
 	configMutexName = `Global\DrainCtlConfig`
 
 	// dpapiPrefix marks a secret as DPAPI-encrypted in config.json.
@@ -331,6 +357,7 @@ func validateLogLevel(val, fieldName, fallback string) string {
 func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
 	c.Retention.MetricsDays = ClampRetention(c.Retention.MetricsDays)
+	ClampEvtSpike(&c.EvtSpike)
 	if c.Retention.AuditDays < MinRetentionDays {
 		slog.Default().Warn("audit retention below minimum, clamping", "requested", c.Retention.AuditDays, "min", MinRetentionDays)
 		c.Retention.AuditDays = MinRetentionDays
@@ -532,6 +559,78 @@ func ClampRetention(days int) int {
 		return MaxRetentionDays
 	}
 	return days
+}
+
+// ClampEvtSpike normalises EvtSpikeConfig per data-model.md §1: zero-value
+// numeric fields are promoted to defaults silently (treated as "not set"),
+// non-zero out-of-range values are clamped to the nearest endpoint with a
+// warning, and PersistIntervalSeconds emits a coherence warning when it is
+// not a multiple of 900 (slot rollover boundary).
+func ClampEvtSpike(cfg *EvtSpikeConfig) {
+	if cfg == nil {
+		return
+	}
+
+	cfg.MinCount = clampIntField("min_count", cfg.MinCount,
+		DefaultEvtSpikeMinCount, MinEvtSpikeMinCount, MaxEvtSpikeMinCount)
+	cfg.Threshold = clampFloatField("threshold", cfg.Threshold,
+		DefaultEvtSpikeThreshold, MinEvtSpikeThreshold, MaxEvtSpikeThreshold)
+	cfg.CooldownMinutes = clampIntField("cooldown_minutes", cfg.CooldownMinutes,
+		DefaultEvtSpikeCooldownMinutes, MinEvtSpikeCooldownMinutes, MaxEvtSpikeCooldownMinutes)
+	cfg.SlotMaturityObservations = clampIntField("slot_maturity_observations", cfg.SlotMaturityObservations,
+		DefaultEvtSpikeSlotMaturityObservations, MinEvtSpikeSlotMaturityObservations, MaxEvtSpikeSlotMaturityObservations)
+	cfg.PersistIntervalSeconds = clampIntField("persist_interval_seconds", cfg.PersistIntervalSeconds,
+		DefaultEvtSpikePersistIntervalSeconds, MinEvtSpikePersistIntervalSeconds, MaxEvtSpikePersistIntervalSeconds)
+	cfg.HalfLifeBuckets = clampIntField("half_life_buckets", cfg.HalfLifeBuckets,
+		DefaultEvtSpikeHalfLifeBuckets, MinEvtSpikeHalfLifeBuckets, MaxEvtSpikeHalfLifeBuckets)
+	cfg.PriorStrength = clampFloatField("prior_strength", cfg.PriorStrength,
+		DefaultEvtSpikePriorStrength, MinEvtSpikePriorStrength, MaxEvtSpikePriorStrength)
+	cfg.MeanPerBucketPrior = clampFloatField("mean_per_bucket_prior", cfg.MeanPerBucketPrior,
+		DefaultEvtSpikeMeanPerBucketPrior, MinEvtSpikeMeanPerBucketPrior, MaxEvtSpikeMeanPerBucketPrior)
+
+	// PersistIntervalSeconds is at this point in [60, 86400]. Slot rollover
+	// (R1) is preserved only when the cadence is a multiple of 900 s.
+	if cfg.PersistIntervalSeconds%DefaultEvtSpikePersistIntervalSeconds != 0 {
+		slog.Default().Warn("evtspike: persist_interval_seconds not aligned to slot rollover (multiple of 900); R1 coherence not guaranteed",
+			"value", cfg.PersistIntervalSeconds)
+	}
+
+	if cfg.DisabledChannels == nil {
+		cfg.DisabledChannels = []string{}
+	}
+	if cfg.AddedChannels == nil {
+		cfg.AddedChannels = []string{}
+	}
+}
+
+func clampIntField(name string, v, def, min, max int) int {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		slog.Default().Warn("evtspike: field clamped to minimum", "field", name, "requested", v, "min", min)
+		return min
+	}
+	if v > max {
+		slog.Default().Warn("evtspike: field clamped to maximum", "field", name, "requested", v, "max", max)
+		return max
+	}
+	return v
+}
+
+func clampFloatField(name string, v, def, min, max float64) float64 {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		slog.Default().Warn("evtspike: field clamped to minimum", "field", name, "requested", v, "min", min)
+		return min
+	}
+	if v > max {
+		slog.Default().Warn("evtspike: field clamped to maximum", "field", name, "requested", v, "max", max)
+		return max
+	}
+	return v
 }
 
 // ── Load / Save ─────────────────────────────────────────────────────────
