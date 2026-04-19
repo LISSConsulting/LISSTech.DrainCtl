@@ -255,6 +255,90 @@ func TestRobustUpdate_SlotNotPoisoned_30Consecutive(t *testing.T) {
 	}
 }
 
+// TestNegBinTail_ExtremeCountDoesNotUnderflow — T110. A y far larger than the
+// trained distribution's practical support must return a finite, non-negative
+// tail. Without the pmf-underflow short-circuit the loop would spin to
+// maxNBinIter while pmf decayed below float range; the guard keeps the
+// result well-defined.
+func TestNegBinTail_ExtremeCountDoesNotUnderflow(t *testing.T) {
+	p := negBinUpperTail(1_000_000_000, 6.0, 60.0)
+	if math.IsNaN(p) || math.IsInf(p, 0) {
+		t.Fatalf("extreme count produced non-finite tail: %v", p)
+	}
+	if p < 0 {
+		t.Errorf("extreme count produced negative tail: %v", p)
+	}
+	if p > 1e-10 {
+		t.Errorf("P(Y >= 1e9) against alpha=6 beta=60 should be ~0, got %e", p)
+	}
+}
+
+// TestDetector_FloodingAboveSoftCapStillFlags — T110. A count well beyond the
+// robust-cap quantile must still mark the bucket anomalous. The cap clamps the
+// baseline update, not the anomaly decision.
+func TestDetector_FloodingAboveSoftCapStillFlags(t *testing.T) {
+	d := NewDetector(0.1, 60, 360, testCfg())
+	now := time.Date(2026, 4, 15, 10, 0, 0, 0, time.Local)
+
+	for i := 0; i < 200; i++ {
+		d.ObserveBucket(now.Add(time.Duration(i)*10*time.Second), 1)
+	}
+
+	cap99, ok := negBinQuantile(0.99, d.Global.Alpha, d.Global.Beta)
+	if !ok {
+		t.Fatalf("negBinQuantile overflowed on trained parameters alpha=%.3f beta=%.3f", d.Global.Alpha, d.Global.Beta)
+	}
+
+	floodCount := (cap99 + 1) * 100
+	r := d.ObserveBucket(now.Add(2000*time.Second), floodCount)
+	if !r.Anomalous {
+		t.Errorf("flood count %d (cap99=%d) should be anomalous: tail=%e mean=%.4f", floodCount, cap99, r.TailProb, r.Mean)
+	}
+	if r.CapOverflow {
+		t.Errorf("flood against trained state should not trigger cap overflow: CapOverflow=true")
+	}
+}
+
+// TestDetector_FloodDoesNotPoisonBaseline — T110. When the robust-cap
+// quantile iteration overflows (pathological heavy-tailed scoring state), the
+// detector refuses the baseline update for that bucket and surfaces
+// CapOverflow. A malicious or sensor-broken flood cannot poison the baseline
+// into disabling future detections (FR-009 regression guard).
+func TestDetector_FloodDoesNotPoisonBaseline(t *testing.T) {
+	cfg := testCfg()
+	cfg.Threshold = 10.0
+	cfg.MinCount = 0
+	d := NewDetector(0.1, 60, 360, cfg)
+	now := time.Date(2026, 4, 15, 10, 0, 0, 0, time.Local)
+
+	slot := timeSlot(now)
+	d.Slots[slot] = GammaState{Alpha: 1.0, Beta: 1e-9, N: 100}
+	d.Global = GammaState{Alpha: 1.0, Beta: 1e-9, N: 100}
+
+	alphaBefore := d.Slots[slot].Alpha
+	betaBefore := d.Slots[slot].Beta
+	nBefore := d.Slots[slot].N
+	globalAlphaBefore := d.Global.Alpha
+	globalBetaBefore := d.Global.Beta
+
+	r := d.ObserveBucket(now, 1)
+
+	if !r.Anomalous {
+		t.Fatalf("expected anomalous under relaxed threshold: tail=%e", r.TailProb)
+	}
+	if !r.CapOverflow {
+		t.Fatalf("expected CapOverflow=true for alpha=1 beta=1e-9: quantile should saturate")
+	}
+	if d.Slots[slot].Alpha != alphaBefore || d.Slots[slot].Beta != betaBefore || d.Slots[slot].N != nBefore {
+		t.Errorf("slot updated despite overflow: alpha %.6g→%.6g, beta %.6g→%.6g, N %d→%d",
+			alphaBefore, d.Slots[slot].Alpha, betaBefore, d.Slots[slot].Beta, nBefore, d.Slots[slot].N)
+	}
+	if d.Global.Alpha != globalAlphaBefore || d.Global.Beta != globalBetaBefore {
+		t.Errorf("global updated despite overflow: alpha %.6g→%.6g, beta %.6g→%.6g",
+			globalAlphaBefore, d.Global.Alpha, globalBetaBefore, d.Global.Beta)
+	}
+}
+
 func TestSlotMaturityObservations_ZeroPromotedToDefault(t *testing.T) {
 	cfg := DetectorConfig{
 		MinCount:  10,
