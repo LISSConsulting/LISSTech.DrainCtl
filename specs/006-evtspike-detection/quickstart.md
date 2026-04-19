@@ -62,29 +62,31 @@ Add a webhook (or other target) subscribed to the `event_spike` trigger:
 
 ### 4. Inject a spike
 
-Pick a channel from the default list that's normally quiet — `Microsoft-Windows-Winlogon/Operational` is a good choice because the channel exists on every RDSH and typically sits near zero outside logon storms.
+Pick a channel from the default list that's normally quiet — `Application` is a good choice because `eventcreate` can write there directly with no provider registration.
 
-Write 50 events in a burst, then another 50 one minute later:
+**Important:** confirmed spikes require 2-of-3 anomalous 10-second scoring windows. A single burst that all fires inside one 10-second bucket will be correctly *suppressed* as a transient — by design (SC-003). To trip confirmation, the anomaly must span at least 2 of 3 consecutive windows. The recipe below writes ~20 events every ~8 seconds for 4 rounds, sustaining the anomaly across ~4 buckets.
 
 ```powershell
-for ($i = 1; $i -le 50; $i++) {
-  eventcreate /T ERROR /ID 999 /L Application /SO 'evtspike-smoke' /D "burst 1 iteration $i" | Out-Null
-}
-Start-Sleep -Seconds 60
-for ($i = 1; $i -le 50; $i++) {
-  eventcreate /T ERROR /ID 999 /L Application /SO 'evtspike-smoke' /D "burst 2 iteration $i" | Out-Null
+for ($round = 1; $round -le 4; $round++) {
+  for ($i = 1; $i -le 20; $i++) {
+    eventcreate /T ERROR /ID 999 /L Application /SO 'evtspike-smoke' /D "round $round iter $i" | Out-Null
+  }
+  Write-Host "Round $round done at $(Get-Date -Format HH:mm:ss)"
+  Start-Sleep -Seconds 8
 }
 ```
 
-*(`eventcreate` targets the Application channel, not Winlogon. For a Winlogon test, `New-WinEvent -ProviderName 'Microsoft-Windows-Winlogon' ...` requires the provider to be registered — you'd need to register a test provider. For smoke-test purposes, use Application; it's in the default watched list.)*
+*(`eventcreate` targets the Application channel. For a Winlogon or other provider-scoped test, `New-WinEvent -ProviderName 'Microsoft-Windows-Winlogon' ...` requires the provider to be registered — you'd need to register a test provider. For smoke-test purposes, Application is in the default watched list.)*
 
 ### 5. Verify
 
-Check three places:
+Check three places — all should fire within ~30 s of round 2 completing:
 
-- **Webhook**: the target receives one POST with `"event": "event_spike"` and a `spike` sub-object whose `channel` is `"Application"` and `observed` is ~50.
+- **Webhook**: the target receives one POST with `"event": "event_spike"` and a `spike` sub-object whose `channel` is `"Application"` and `observed` is ~20.
 - **Dashboard**: the server card shows `Training` or `Healthy` status pill. Open the server detail — the recent-spikes list shows the Application spike.
-- **Log**: `drainctl.log` has an entry like `evtspike: confirmed spike channel=Application observed=50 expected=~0.3 tail=1.2e-23`.
+- **Log**: `drainctl.log` has an entry like `evtspike=confirmed_spike host=<hostname> channel=Application observed=20 expected=~0.1 tail=0`.
+
+If you see no `confirmed_spike` line and no webhook POST, the most likely cause is that the events landed in a single 10-second bucket — re-run the loop with a longer `Start-Sleep` (e.g., 10 s) between rounds to guarantee bucket spread.
 
 ### 6. Verify non-spikes are quiet
 
