@@ -14,6 +14,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 )
 
 // ServerInfo describes a registered server and its last known state.
@@ -35,6 +36,20 @@ type ServerState struct {
 	// OnMetrics, if non-nil, is called after every state update with the full
 	// CheckResult so that both the HTTP and local-report paths write metrics.
 	OnMetrics func(result dc.CheckResult)
+	// OnEvtSpikeIngest, if non-nil, pushes a confirmed spike into the
+	// dashboard's per-host ring buffer and emits a recent_spike SSE event.
+	// Wired by StartDashboard; the evtspike subsystem calls it from its
+	// OnSpike callback.
+	OnEvtSpikeIngest func(spike evtspike.SpikePayload) evtspike.RecentSpikeEntry
+	// OnEvtSpikeStatus, if non-nil, emits a detector_status SSE event. The
+	// dashboard's broker dedups same-state emissions, so callers may invoke
+	// this on every observation without flooding subscribers. Wired by
+	// StartDashboard.
+	OnEvtSpikeStatus func(status evtspike.DetectorStatus)
+	// RegisterEvtSpikeStatusFunc, if non-nil, installs the pull-based status
+	// lookup that backs GET /api/evtspike/status. Wired by StartDashboard; the
+	// evtspike subsystem calls it once at Start with its Status method.
+	RegisterEvtSpikeStatusFunc func(f EvtSpikeStatusFunc)
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.

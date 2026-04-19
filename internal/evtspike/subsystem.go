@@ -43,6 +43,12 @@ type Subsystem struct {
 	// OnSpike is invoked on each confirmed spike. Must be non-nil before Start.
 	OnSpike func(SpikePayload)
 
+	// OnStatusChange is invoked with the derived DetectorStatus whenever it
+	// could have transitioned (post-initChannels at Start, post-bucket in the
+	// scoring loop). Dedup of same-state emissions is the subscriber's
+	// responsibility — the broker does this for SSE fan-out.
+	OnStatusChange func(DetectorStatus)
+
 	// Subscribe lets tests inject a fake; nil means production Subscribe.
 	Subscribe SubscribeFunc
 
@@ -103,6 +109,10 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	s.runMu.Unlock()
 
 	s.initChannels(runCtx, bf)
+
+	if s.OnStatusChange != nil {
+		s.OnStatusChange(s.Status())
+	}
 
 	s.wg.Add(2)
 	go s.scoringLoop(runCtx)
