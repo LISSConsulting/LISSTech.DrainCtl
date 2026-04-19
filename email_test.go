@@ -5,8 +5,15 @@ package drainctl
 import (
 	"bufio"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"strings"
@@ -396,6 +403,90 @@ func TestSMTPStartTLS_SilentGreetingHitsOverallDeadline(t *testing.T) {
 	// must not have hung significantly longer.
 	if elapsed > 3*time.Second {
 		t.Errorf("sendSMTPStartTLS took %v — did not respect overall deadline", elapsed)
+	}
+	<-acceptDone
+}
+
+// testSelfSignedTLS builds an in-memory self-signed certificate suitable for a
+// tls.Server in deadline tests. Separate from internal/dashboard's equivalent
+// so this package stays self-contained.
+func testSelfSignedTLS(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "drainctl-smtps-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     []string{"localhost"},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// TestSMTPS_SilentGreetingHitsOverallDeadline — T108. Mirror of the STARTTLS
+// variant for the implicit-TLS code path. The server completes the TLS
+// handshake but never emits the SMTP greeting, so NewClient's greeting read
+// must be bounded by the conn.SetDeadline that sendSMTPS arms BEFORE calling
+// smtp.NewClient. Without that ordering the call would hang indefinitely.
+func TestSMTPS_SilentGreetingHitsOverallDeadline(t *testing.T) {
+	withShortSMTPTimeouts(t, 2*time.Second, 250*time.Millisecond)
+
+	origCfg := smtpsTLSConfig
+	smtpsTLSConfig = func(host string) *tls.Config {
+		return &tls.Config{ServerName: host, InsecureSkipVerify: true} //nolint:gosec // deadline test against in-process self-signed server
+	}
+	t.Cleanup(func() { smtpsTLSConfig = origCfg })
+
+	cert := testSelfSignedTLS(t)
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatalf("tls.Listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		// Force the TLS handshake so the client reaches its greeting read,
+		// then stay silent until the client's deadline fires.
+		if tc, ok := conn.(*tls.Conn); ok {
+			_ = tc.Handshake()
+		}
+		buf := make([]byte, 256)
+		_, _ = conn.Read(buf)
+	}()
+
+	target := NotificationTarget{
+		URL:  "smtps://" + ln.Addr().String(),
+		From: "drainctl@example.test",
+		To:   []string{"rcpt@example.test"},
+	}
+
+	start := time.Now()
+	err = sendSMTPS(ln.Addr().String(), "localhost", target, []byte("Subject: x\r\n\r\nbody"))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("sendSMTPS returned nil on silent-greeting server; expected deadline error")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Errorf("expected net.Error.Timeout()==true, got %T: %v", err, err)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("sendSMTPS took %v — did not respect overall deadline", elapsed)
 	}
 	<-acceptDone
 }

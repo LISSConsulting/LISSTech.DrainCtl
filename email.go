@@ -29,6 +29,13 @@ var (
 	smtpOverallDeadline = 30 * time.Second
 )
 
+// smtpsTLSConfig returns the tls.Config used by sendSMTPS. Indirected so tests
+// can substitute an InsecureSkipVerify config when exercising deadline paths
+// against an in-process listener with a self-signed cert.
+var smtpsTLSConfig = func(host string) *tls.Config {
+	return &tls.Config{ServerName: host}
+}
+
 type emailData struct {
 	Subject           string
 	Preview           string // hidden preview text shown by email clients
@@ -334,7 +341,7 @@ func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) 
 
 func sendSMTPS(addr, host string, target NotificationTarget, msg []byte) error {
 	d := &net.Dialer{Timeout: smtpDialTimeout}
-	conn, err := tls.DialWithDialer(d, "tcp", addr, &tls.Config{ServerName: host})
+	conn, err := tls.DialWithDialer(d, "tcp", addr, smtpsTLSConfig(host))
 	if err != nil {
 		return fmt.Errorf("smtps dial: %w", err)
 	}
