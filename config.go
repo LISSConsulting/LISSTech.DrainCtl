@@ -136,6 +136,7 @@ type NotificationTarget struct {
 	To            []string  `json:"to,omitempty"`             // email recipients
 	From          string    `json:"from,omitempty"`           // email sender
 	Enabled       *bool     `json:"enabled,omitempty"`        // nil or true = enabled (default); false = disabled
+	Severity      string    `json:"severity,omitempty"`       // "warning" or "alert" — event_spike target wiring (FR-011a); empty defaults to "warning"
 }
 
 // HasTrigger returns true if the target subscribes to the given trigger.
@@ -483,6 +484,14 @@ func (c *Config) Validate() {
 		}
 		if c.Notifications[i].RepeatMinutes > MaxRepeatMinutes {
 			c.Notifications[i].RepeatMinutes = MaxRepeatMinutes
+		}
+		switch strings.ToLower(c.Notifications[i].Severity) {
+		case "", "warning", "alert":
+			c.Notifications[i].Severity = strings.ToLower(c.Notifications[i].Severity)
+		default:
+			slog.Default().Warn("notification target severity must be 'warning' or 'alert', reset to default",
+				"severity", c.Notifications[i].Severity, "url", c.Notifications[i].URL)
+			c.Notifications[i].Severity = ""
 		}
 	}
 
