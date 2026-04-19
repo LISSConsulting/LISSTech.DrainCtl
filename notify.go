@@ -178,15 +178,20 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			title := NotificationSubject(result, trigger, changedBy)
 			priority := ntfyStyle(trigger)
 			ntfyMsg := result.Message
+			var tags string
 			if trigger == TriggerSessionWarning && result.Sessions != nil {
 				sess := result.Sessions
 				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
 					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
 			}
+			if trigger == TriggerEventSpike && result.Spike != nil {
+				priority = spikeNtfyPriority(result.Status)
+				tags = spikeNtfyTags(result.Spike.Host, result.Spike.Channel)
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := sendNtfy(t.URL, title, ntfyMsg, priority); err != nil {
+				if err := sendNtfy(t.URL, title, ntfyMsg, priority, tags); err != nil {
 					slog.Warn("ntfy notification failed", "error", err, "url", t.URL)
 				} else {
 					slog.Info("", "notify", "ntfy", "event", string(trigger), "url", t.URL)
@@ -280,7 +285,7 @@ func SendTestNotification(targets []NotificationTarget) ([]TestNotificationResul
 		case "ntfy":
 			title := fmt.Sprintf("DrainCtl Test: %s", host)
 			msg := "This is a test notification from DrainCtl."
-			sendErr = sendNtfy(target.URL, title, msg, "default")
+			sendErr = sendNtfy(target.URL, title, msg, "default", "")
 		case "email":
 			testResult := &CheckResult{
 				Host:           host,
@@ -474,8 +479,9 @@ func formatDuration(d time.Duration) string {
 	return "0m"
 }
 
-// sendNtfy posts a message to an ntfy.sh-compatible endpoint.
-func sendNtfy(url string, title string, message string, priority string) error {
+// sendNtfy posts a message to an ntfy.sh-compatible endpoint. A non-empty tags
+// value is set as the ntfy "Tags" header (comma-separated list per ntfy.sh).
+func sendNtfy(url string, title string, message string, priority string, tags string) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBufferString(message))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -483,6 +489,9 @@ func sendNtfy(url string, title string, message string, priority string) error {
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("User-Agent", "DrainCtl/"+Version)
+	if tags != "" {
+		req.Header.Set("Tags", tags)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -505,6 +514,28 @@ func ntfyStyle(trigger Trigger) (priority string) {
 	default:
 		return "default"
 	}
+}
+
+// spikeNtfyPriority maps an event_spike severity to an ntfy priority. Matching
+// is case-insensitive so capitalized callers don't silently demote.
+func spikeNtfyPriority(severity string) string {
+	switch strings.ToLower(severity) {
+	case "alert":
+		return "high"
+	default:
+		return "default"
+	}
+}
+
+// spikeNtfyTags returns the comma-separated ntfy Tags value for an event_spike
+// notification: ["evtspike", host, channel-basename] where channel-basename is
+// the portion of the channel name after the final "/".
+func spikeNtfyTags(host string, channel string) string {
+	base := channel
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	return "evtspike," + host + "," + base
 }
 
 // perfTriggers is the set of performance-related triggers that use repeat intervals.
