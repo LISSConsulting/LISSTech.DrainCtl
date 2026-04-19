@@ -143,7 +143,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 No new production code — the POC's `Detector.ObserveBucket` already caps update `y` at `negBinQuantile(0.99, alpha, beta)` before `ewmaUpdate`. These tests verify and lock in that behavior.
 
-- [ ] T046 [US2] Audit `internal/evtspike/detector.go` for the robust-cap path (lines 105-111 in the POC); add a single-line comment tying it to SC-004 and US2's Independent Test, so future refactors don't inadvertently remove it
+- [x] T046 [US2] Audit `internal/evtspike/detector.go` for the robust-cap path (lines 105-111 in the POC); add a single-line comment tying it to SC-004 and US2's Independent Test, so future refactors don't inadvertently remove it
 
 **Checkpoint**: US1 + US2 are both fully functional and regression-guarded. MVP is hardened.
 
