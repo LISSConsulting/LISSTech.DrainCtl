@@ -438,6 +438,53 @@ func TestHandleRegister_AuthenticatedUser_Returns200(t *testing.T) {
 	}
 }
 
+// TestRequireMachineAccount_HumanPrincipalReturnsJSONError verifies BUGS.md#4:
+// an authenticated human principal hitting a machine-account-gated route gets
+// 403 with a JSON error body naming the account, not a bare plain-text response.
+func TestRequireMachineAccount_HumanPrincipalReturnsJSONError(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+	h := requireMachineAccount(inner)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", nil)
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: `DOMAIN\alice`}))
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"error"`) {
+		t.Errorf("body missing \"error\" key: %s", body)
+	}
+	// json.Marshal escapes backslashes: DOMAIN\alice becomes DOMAIN\\alice in JSON text.
+	if !strings.Contains(body, `DOMAIN\\alice`) {
+		t.Errorf("body should name the rejected principal, got: %s", body)
+	}
+	if called {
+		t.Error("inner handler must not be called for non-machine accounts")
+	}
+}
+
+// TestRequireMachineAccount_UnauthenticatedReturns401 verifies that
+// unauthenticated requests still get a plain 401 (no info leak).
+func TestRequireMachineAccount_UnauthenticatedReturns401(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	h := requireMachineAccount(inner)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/register", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
 // ── handleReport ──────────────────────────────────────────────────────────────
 
 func TestHandleReport_UnregisteredHostRejected(t *testing.T) {

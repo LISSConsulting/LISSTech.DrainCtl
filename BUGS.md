@@ -74,7 +74,18 @@ Original report below for historical context.
 
 ---
 
-### 4. `/api/v1/register` 401 gives no hint about machine-account requirement
+### 4. `/api/v1/register` 401 gives no hint about machine-account requirement — FIXED 2026-04-19
+
+**Status:** Fixed.
+
+**Change:**
+- `internal/dashboard/auth_prod.go`: `requireMachineAccount` now returns 403 with `Content-Type: application/json` and a body of `{"error":"machine account required: this endpoint accepts only COMPUTERNAME$ principals; <username> is a human user account"}` when an authenticated human principal hits the route. The unauthenticated path (auth == nil → 401) is unchanged, preserving the no-info-leak contract. Username is serialised via `json.Marshal` so domain backslashes (e.g. `DOMAIN\alice`) are correctly escaped.
+- Note: the original report cited a bare 401; by the time this was fixed the code already returned 403 (correct HTTP semantics for authenticated-but-unauthorised). The body was still plain text.
+- Tests: `TestRequireMachineAccount_HumanPrincipalReturnsJSONError` (status 403, Content-Type application/json, body names the principal), `TestRequireMachineAccount_UnauthenticatedReturns401` (unauthenticated path still returns 401 with no JSON body).
+
+**Verification:** `go test ./internal/dashboard/ -run TestRequireMachineAccount` green; `go test ./...` all green; `just lint` 0 issues. Codex caught unescaped backslash in username interpolation (confirmed high-confidence); fixed by switching to `json.Marshal`.
+
+Original report below for historical context.
 
 **Surfaced:** 2026-04-18 during T067 validation on MDS-LDC1-RDS12.
 
