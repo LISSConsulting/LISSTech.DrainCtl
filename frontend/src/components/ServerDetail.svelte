@@ -3,7 +3,8 @@
     import Sparkline from './Sparkline.svelte';
     import Chart from '../lib/chart.svelte';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
-    import { appState } from '../lib/state.svelte.js';
+    import { appState, setRecentSpikes } from '../lib/state.svelte.js';
+    import { fetchRecentSpikes } from '../lib/api.js';
     import { rel, dur, modeLabel, formatTs } from '../lib/utils.js';
 
     let { server, now = Date.now(), onhistoryclick = undefined, onremove = undefined } = $props();
@@ -82,6 +83,41 @@
     let stateSinceStr = $derived(server.state_changed_at ? formatTs(server.state_changed_at) : '—');
 
     let isOff = $derived(server.status === 'off');
+
+    // Recent evtspike spikes for this host. SSE `recent_spike` events prepend
+    // entries to appState.recentSpikes automatically; this effect seeds the
+    // ring on first expand so the user sees historic spikes without waiting
+    // for a new one to arrive over SSE.
+    let detectorState = $derived(appState.detectorStatuses.get(server.host)?.state);
+    let showSpikeTile = $derived(detectorState != null && detectorState !== 'disabled');
+    let recentSpikes = $derived(appState.recentSpikes.get(server.host) ?? []);
+
+    $effect(() => {
+        if (!showSpikeTile) return;
+        if (appState.recentSpikes.has(server.host)) return;
+        let cancelled = false;
+        fetchRecentSpikes(server.host)
+            .then((list) => {
+                if (!cancelled) setRecentSpikes(server.host, list);
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    // Drop the Windows channel-path prefix so "Microsoft-Windows-Winlogon/Operational"
+    // collapses to "Winlogon/Operational" — the table is cramped and the provider
+    // prefix is redundant noise when the operator already knows the host.
+    function channelShort(full) {
+        if (!full) return '';
+        return full.replace(/^Microsoft-Windows-/, '');
+    }
+
+    function fmtExpected(n) {
+        if (n == null || !isFinite(n)) return '—';
+        return n < 10 ? n.toFixed(1) : n.toFixed(0);
+    }
 </script>
 
 <div class="d-inner">
@@ -414,7 +450,38 @@
         </div>
     </div>
 
-    <!-- Tile 4: Durable CPU history (5-day chart from /api/v1/metrics/{host}) -->
+    {#if showSpikeTile}
+        <!-- Tile 4: Recent evtspike confirmations -->
+        <div class="d-tile d-tile-spikes">
+            <div class="d-tile-label">Recent Spikes</div>
+            {#if recentSpikes.length === 0}
+                <div class="d-spikes-empty">No recent spikes.</div>
+            {:else}
+                <div class="d-spikes-list" role="list">
+                    <div class="d-spikes-head">
+                        <span class="d-sp-chan">Channel</span>
+                        <span class="d-sp-time">Time</span>
+                        <span class="d-sp-obs">Observed vs Expected</span>
+                    </div>
+                    {#each recentSpikes as spike (spike.id)}
+                        <div class="d-spikes-row" role="listitem">
+                            <span class="d-sp-chan mono" title={spike.channel}>{channelShort(spike.channel)}</span>
+                            <span class="d-sp-time mono" title={formatTs(spike.window_end)}
+                                >{rel(spike.window_end, now)}</span
+                            >
+                            <span class="d-sp-obs mono">
+                                <span class="d-sp-observed">{spike.observed}</span>
+                                <span class="d-sp-vs">vs</span>
+                                <span class="d-sp-expected">{fmtExpected(spike.expected)}</span>
+                            </span>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/if}
+
+    <!-- Tile 5: Durable CPU history (5-day chart from /api/v1/metrics/{host}) -->
     <div class="d-tile d-tile-chart">
         <div class="d-tile-label">5-Day CPU History</div>
         <Chart host={server.host} counter="cpu_pct" height={140} refreshMs={30_000} />
@@ -468,6 +535,65 @@
     .d-tile-chart {
         flex: 1 0 100%;
         min-width: 0;
+    }
+    .d-tile-spikes {
+        flex: 1 0 100%;
+        min-width: 0;
+    }
+
+    /* Recent spikes list */
+    .d-spikes-empty {
+        color: var(--color-subtle);
+        font-style: italic;
+        font-size: 11px;
+        padding: 8px 4px;
+    }
+    .d-spikes-head,
+    .d-spikes-row {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr);
+        gap: 8px;
+        padding: 3px 4px;
+        align-items: baseline;
+    }
+    .d-spikes-head {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--color-accent);
+        border-bottom: 1px solid var(--color-surface);
+        margin-bottom: 2px;
+    }
+    .d-spikes-row {
+        font-size: 12px;
+    }
+    .d-spikes-row:nth-child(even) {
+        background: var(--color-surface);
+    }
+    .d-sp-chan {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .d-sp-time {
+        white-space: nowrap;
+        color: var(--color-muted);
+    }
+    .d-sp-obs {
+        text-align: right;
+        white-space: nowrap;
+    }
+    .d-sp-observed {
+        font-weight: 700;
+        color: var(--color-red);
+    }
+    .d-sp-vs {
+        color: var(--color-muted);
+        margin: 0 4px;
+    }
+    .d-sp-expected {
+        font-weight: 600;
     }
 
     /* Ring row */
