@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,10 +76,11 @@ type Subsystem struct {
 	startupErr  error
 	lastSpikeAt time.Time
 
-	runMu  sync.Mutex
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	ctx    context.Context
+	runMu    sync.Mutex
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	ctx      context.Context
+	startCtx context.Context
 }
 
 // New returns an unstarted Subsystem. cfg is assumed already clamped by
@@ -113,6 +115,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.ctx = runCtx
 	s.cancel = cancel
+	s.startCtx = ctx
 	s.runMu.Unlock()
 
 	s.initChannels(runCtx, bf)
@@ -144,17 +147,30 @@ func (s *Subsystem) Stop() {
 	slog.Info("", "evtspike", "stop", "host", s.host)
 }
 
-// Reload hot-applies scalar detector tunables to a running subsystem so the
-// next scoring tick uses the new values. MinCount, Threshold, CooldownMinutes,
-// SlotMaturityObservations, and HalfLifeBuckets rewrite every live detector's
-// Cfg. PriorStrength and MeanPerBucketPrior are stored on s.cfg so channels
-// added later take the new prior, but existing channels' GammaState is not
-// rewritten — per data-model.md §1 their Alpha/Beta have already been shaped
-// by observations. PersistIntervalSeconds updates s.cfg; the running
-// persistenceLoop ticker is not re-armed here. Channel-list, baseline-path,
-// and SecurityChannelEnabled changes are handled by Stop+Start in T067/T069,
-// not this path. newCfg is assumed clamped by ClampEvtSpike.
+// Reload applies newCfg to a running subsystem per the live-reload matrix in
+// contracts/evtspike-config.md. Scalar detector tunables (MinCount, Threshold,
+// CooldownMinutes, SlotMaturityObservations, HalfLifeBuckets) rewrite every
+// live detector's Cfg so the next scoring tick uses them. PriorStrength and
+// MeanPerBucketPrior are stored on s.cfg so channels added later take the new
+// prior; existing channels' GammaState is not rewritten — per data-model.md §1
+// their Alpha/Beta have already been shaped by observations.
+// PersistIntervalSeconds updates s.cfg but the running persistenceLoop ticker
+// is not re-armed. Changes that alter the resolved channel set
+// (DisabledChannels, AddedChannels, SecurityChannelEnabled) or the baseline
+// file location trigger an internal Stop+Start so detectors, subscriptions,
+// and the on-disk baseline stay aligned. newCfg is assumed clamped by
+// ClampEvtSpike. The internal restart is ≤1 s and emits the
+// "channel_list_changed" slog line per the contract.
 func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
+	s.mu.Lock()
+	oldCfg := s.cfg
+	s.mu.Unlock()
+
+	if channelSetChanged(oldCfg, newCfg) {
+		slog.Info("", "evtspike", "channel_list_changed", "host", s.host)
+		return s.restartWithConfig(newCfg)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -182,6 +198,48 @@ func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
 	s.cfg.MeanPerBucketPrior = newCfg.MeanPerBucketPrior
 
 	return nil
+}
+
+// channelSetChanged reports whether newCfg would resolve to a different
+// subscription set or baseline-file path than oldCfg. Uses ResolveChannels so
+// the three channel-affecting fields (DisabledChannels, AddedChannels,
+// SecurityChannelEnabled) are all covered by one equality check that matches
+// the production merge semantics (case-insensitive dedup, disabled-then-added
+// ordering).
+func channelSetChanged(oldCfg, newCfg dc.EvtSpikeConfig) bool {
+	if oldCfg.BaselinePath != newCfg.BaselinePath {
+		return true
+	}
+	return !reflect.DeepEqual(ResolveChannels(oldCfg), ResolveChannels(newCfg))
+}
+
+// restartWithConfig performs the Stop+Start cycle required when the channel
+// set or baseline-file path changes. Stop flushes in-memory state to disk;
+// Start then hydrates detectors from that same baseline, so mature channels
+// retain their learned state across the restart and no alert storm follows.
+// The parent context stored by Start is reused so the caller (the file-watch
+// path in svc.go) need not pass a context through Reload.
+func (s *Subsystem) restartWithConfig(newCfg dc.EvtSpikeConfig) error {
+	s.runMu.Lock()
+	parent := s.startCtx
+	s.runMu.Unlock()
+	if parent == nil {
+		return fmt.Errorf("evtspike: Reload called before Start — no stored parent context")
+	}
+
+	s.Stop()
+
+	s.mu.Lock()
+	s.cfg = newCfg
+	s.detectors = make(map[string]*Detector)
+	s.counters = make(map[string]*atomic.Int64)
+	s.channels = nil
+	s.startupErr = nil
+	s.lastSpikeAt = time.Time{}
+	s.baselinePath = s.resolveBaselinePath()
+	s.mu.Unlock()
+
+	return s.Start(parent)
 }
 
 // initChannels resolves, subscribes, and primes detectors for every channel
