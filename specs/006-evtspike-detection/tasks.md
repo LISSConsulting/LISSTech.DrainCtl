@@ -136,7 +136,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 ### Tests for User Story 2
 
 - [x] T043 [P] [US2] Unit test in `internal/evtspike/detector_test.go`: feed 30 consecutive anomalous observations (y=100 with expected=1); assert `Slots[slot].Alpha/Beta` grows by ≤2× over the pre-flood value (robust cap effectiveness)
-- [ ] T044 [P] [US2] Integration test in `internal/evtspike/subsystem_test.go`: simulate flood → pause → second smaller anomaly; assert `OnSpike` called for BOTH the flood (first confirmation) and the second anomaly (robust cap did not poison)
+- [x] T044 [P] [US2] Integration test in `internal/evtspike/subsystem_test.go`: simulate flood → pause → second smaller anomaly; assert `OnSpike` called for BOTH the flood (first confirmation) and the second anomaly (robust cap did not poison)
 - [ ] T045 [P] [US2] Integration test in `internal/evtspike/subsystem_test.go`: flood-then-restart scenario — persist baseline mid-flood, reload, verify post-reload scoring of the second anomaly still flags (robust cap survives warm restart)
 
 ### Implementation for User Story 2
