@@ -19,9 +19,9 @@ const (
 
 // GammaState holds the sufficient statistics of a Gamma(alpha, beta) posterior.
 type GammaState struct {
-	Alpha float64
-	Beta  float64
-	N     int
+	Alpha float64 `json:"a"`
+	Beta  float64 `json:"b"`
+	N     int     `json:"n"`
 }
 
 // DetectorConfig holds tuning parameters.
