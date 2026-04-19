@@ -399,7 +399,7 @@ func TestSendNtfy_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := sendNtfy(srv.URL, "DrainCtl: Alert on SRV01", "Drain active.", "high"); err != nil {
+	if err := sendNtfy(srv.URL, "DrainCtl: Alert on SRV01", "Drain active.", "high", ""); err != nil {
 		t.Fatalf("sendNtfy error: %v", err)
 	}
 }
@@ -410,7 +410,7 @@ func TestSendNtfy_NonSuccessStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := sendNtfy(srv.URL, "title", "msg", "default")
+	err := sendNtfy(srv.URL, "title", "msg", "default", "")
 	if err == nil {
 		t.Error("expected error for 500 response, got nil")
 	}
@@ -424,7 +424,7 @@ func TestSendNtfy_SetsHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := sendNtfy(srv.URL, "My Title", "My Message", "high"); err != nil {
+	if err := sendNtfy(srv.URL, "My Title", "My Message", "high", ""); err != nil {
 		t.Fatalf("sendNtfy error: %v", err)
 	}
 
@@ -1037,7 +1037,7 @@ func TestSendWebhook_InvalidURL_ReturnsError(t *testing.T) {
 // TestSendNtfy_InvalidURL_ReturnsError verifies that sendNtfy returns an error
 // when the target URL is not valid.
 func TestSendNtfy_InvalidURL_ReturnsError(t *testing.T) {
-	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default")
+	err := sendNtfy("\x00invalid-url", "DrainCtl Test", "msg", "default", "")
 	if err == nil {
 		t.Error("expected error for invalid URL, got nil")
 	}
@@ -1167,7 +1167,7 @@ func TestSendNtfy_DoFails_ReturnsError(t *testing.T) {
 	url := srv.URL
 	srv.Close() // close before use — Do will get connection refused
 
-	err := sendNtfy(url, "Test", "msg", "default")
+	err := sendNtfy(url, "Test", "msg", "default", "")
 	if err == nil {
 		t.Fatal("expected error when connection refused, got nil")
 	}
@@ -1334,5 +1334,70 @@ func TestEventSpikePayload_HMAC(t *testing.T) {
 	wantSig := webhookSignature(secret, capturedBody)
 	if capturedSig != wantSig {
 		t.Errorf("X-DrainCtl-Signature = %q, want %q", capturedSig, wantSig)
+	}
+}
+
+// TestEventSpikePayload_NtfyPriority verifies the contract from
+// contracts/event_spike-payload.md: ntfy Priority is derived from the spike
+// severity (3/default for warning, 4/high for alert — ntfy accepts either the
+// numeric or named form) and the Tags header carries ["evtspike", host,
+// channel-basename] so operators can filter their ntfy feeds by host and
+// channel without parsing the message body.
+func TestEventSpikePayload_NtfyPriority(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   string
+		priority []string // ntfy accepts either the numeric or named encoding
+	}{
+		{"warning maps to priority 3/default", "warning", []string{"3", "default"}},
+		{"alert maps to priority 4/high", "alert", []string{"4", "high"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured http.Header
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				captured = r.Header.Clone()
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			result, spike := newSpikeResult()
+			result.Status = tc.status
+
+			targets := []NotificationTarget{
+				{Type: "ntfy", URL: srv.URL, Triggers: []Trigger{TriggerEventSpike}},
+			}
+			SendNotification(targets, &NotifyState{}, result, TriggerEventSpike, "")
+
+			if captured == nil {
+				t.Fatal("ntfy server received no request — SendNotification did not dispatch event_spike")
+			}
+
+			gotPriority := captured.Get("Priority")
+			matched := false
+			for _, p := range tc.priority {
+				if gotPriority == p {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				t.Errorf("Priority = %q, want one of %v for status %q", gotPriority, tc.priority, tc.status)
+			}
+
+			gotTags := captured.Get("Tags")
+			// ntfy's Tags header is a comma-separated list; basename of a
+			// "Provider/Channel" path is the portion after the final slash.
+			channelBase := spike.Channel
+			if idx := strings.LastIndex(channelBase, "/"); idx >= 0 {
+				channelBase = channelBase[idx+1:]
+			}
+			wantTagParts := []string{"evtspike", spike.Host, channelBase}
+			for _, tag := range wantTagParts {
+				if !strings.Contains(gotTags, tag) {
+					t.Errorf("Tags header %q missing %q", gotTags, tag)
+				}
+			}
+		})
 	}
 }

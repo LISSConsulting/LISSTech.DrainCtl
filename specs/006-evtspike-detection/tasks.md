@@ -83,7 +83,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 - [x] T018 [P] [US1] Contract test in `notify_test.go`: marshal a `SpikePayload` via `SendNotification(..., TriggerEventSpike, "")`; assert the body matches `contracts/event_spike-payload.md` (top-level fields present, `spike` sub-object shape, HMAC header correct when `secret` configured)
 - [x] T018a [P] [US1] Email template render test in `notify_test.go` (or `email_test.go`): render the MJML template for an `event_spike` payload to HTML; assert the subject emoji matches severity (⚠️ warning, 🚨 alert), preview text contains the channel name and observed/expected values, and the card body lists Observed-vs-Expected and Confirmation-Window rows. Corresponds to `TestEventSpikePayload_EmailTemplate` in `contracts/event_spike-payload.md`.
-- [ ] T018b [P] [US1] Ntfy priority mapping test in `notify_test.go`: assert `status: "warning"` → priority 3, `status: "alert"` → priority 4, tags include `["evtspike", host, channel-basename]`. Corresponds to `TestEventSpikePayload_NtfyPriority` in `contracts/event_spike-payload.md`.
+- [x] T018b [P] [US1] Ntfy priority mapping test in `notify_test.go`: assert `status: "warning"` → priority 3, `status: "alert"` → priority 4, tags include `["evtspike", host, channel-basename]`. Corresponds to `TestEventSpikePayload_NtfyPriority` in `contracts/event_spike-payload.md`.
 - [ ] T019 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/status?host=X` returns shape from `contracts/dashboard-sse-events.md`; 404 for unknown host; 401 without session
 - [ ] T020 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/spikes?host=X&limit=20` returns newest-first ring-buffer content; `limit=500` clamped to 50
 - [ ] T021 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: fake `Subscriber` feeds 50-event bursts in 2-of-3 windows; assert `OnSpike` invoked exactly once per cooldown with a `SpikePayload` matching invariants from `data-model.md` §5
@@ -106,7 +106,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 - [x] T030 [US1] In `notify.go`, add an `event_spike` branch to `SendNotification`: reuse the existing envelope, populate the `spike` sub-object from a new `*SpikePayload` parameter (thread through the existing signature via a typed context struct or a new `SendSpikeNotification` helper — pick whichever keeps call sites clean); enforce per-target repeat interval using `LastSpikeNotify`
 - [ ] T031 [US1] In `notify.go`, ensure severity comes from the target wiring (per-target `severity` field or existing severity-tag mechanism); no auto-escalation (FR-011a, FR-011b)
 - [x] T032 [US1] Update `email.go` (and/or its MJML template) to render `event_spike` using the card layout from commits `bdf197e`/`38d6dae`: subject emoji (⚠️ warning / 🚨 alert), preview text `"<channel>: <observed> events, expected ~<expected>. Tail probability <p>."`, card body with Observed-vs-Expected and Confirmation-Window rows
-- [ ] T033 [US1] Add `ntfy` rendering branch for `event_spike` in `notify.go`: Title=subject, Message=message, Priority (3 for warning / 4 for alert), Tags=["evtspike", host, channel-basename]
+- [x] T033 [US1] Add `ntfy` rendering branch for `event_spike` in `notify.go`: Title=subject, Message=message, Priority (3 for warning / 4 for alert), Tags=["evtspike", host, channel-basename]
 
 #### Dashboard surface
 
