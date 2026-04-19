@@ -1450,6 +1450,15 @@
                             cmdlets + CLI.
                         </div>
                     </div>
+                    <div class="compact-card">
+                        <div class="compact-card-icon">&#127919;</div>
+                        <div class="compact-card-title">Event Log Anomaly Detection</div>
+                        <div class="compact-card-desc">
+                            Opt-in subsystem learns a per-channel baseline across 54 Windows event logs and fires
+                            <code>event_spike</code> alerts on confirmed deviations &mdash; catches what fixed thresholds
+                            miss without drowning operators in false positives.
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -1579,16 +1588,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.108.29</h2>
+                <h2 class="section-title">v26.109.24</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Durable metrics history</strong> &mdash; CPU, memory, and session samples survive service restarts</li>
-                            <li><strong>Audit log moved to SQLite</strong> &mdash; fast queries over months of drain history, no more JSONL scans</li>
-                            <li><strong>Chart zoom across tiers</strong> &mdash; raw samples, 5-minute, and hourly aggregates in one seamless view</li>
-                            <li><strong>JSONL auto-migration</strong> &mdash; existing audit files imported on first start, original kept as <code>.bak</code></li>
-                            <li><strong>Retention worker</strong> &mdash; bounded chunked purge keeps the database inside per-tier windows</li>
-                            <li><strong>Maintenance widget</strong> &mdash; dashboard surfaces aggregator and retention job health at a glance</li>
+                            <li><strong>Event log anomaly detection</strong> &mdash; opt-in <code>evtspike</code> subsystem watches 54 curated Windows event log channels, learns a per-slot Bayesian baseline, and fires <code>event_spike</code> notifications on confirmed deviations</li>
+                            <li><strong>False-positive resistance by construction</strong> &mdash; 2-of-3 confirmation suppresses single-bucket transients; a robust update cap prevents a single flood from poisoning the baseline, so subsequent anomalies still flag</li>
+                            <li><strong>Warm restart, no alert storms</strong> &mdash; baselines persist to <code>evtspike-baseline.json</code> every 15 minutes; service restarts resume scoring without re-entering warm-up on mature channels</li>
+                            <li><strong>Security channel opt-in</strong> &mdash; single config flag enables <code>SeSecurityPrivilege</code> on the LocalSystem service token at Start via <code>AdjustTokenPrivileges</code>; no installer-time LSA operation, no MSI feature gate</li>
+                            <li><strong>Live config reload</strong> &mdash; thresholds, cooldowns, and slot maturity hot-apply on the next scoring window; channel-list changes trigger a clean subsystem restart with no service bounce</li>
+                            <li><strong>Dashboard surface</strong> &mdash; detector status pill on every server card, recent-spikes list in the server detail view with live updates</li>
                         </ul>
                     </div>
                 </div>
