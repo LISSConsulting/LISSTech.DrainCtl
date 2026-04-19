@@ -888,6 +888,27 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 	return saveConfigToFile(cfg)
 }
 
+// UpdateEvtSpikeEnabled flips only the evtspike.enabled flag, leaving all
+// other evtspike fields (thresholds, channel lists, baseline_path, security
+// channel gate) untouched. Per FR-028 the dashboard Settings modal surfaces
+// ONLY the enabled toggle — sensitivity, per-channel, and security-channel
+// controls are out of scope. Passing nil is a no-op. The live-reload path in
+// internal/svc picks up the change via the config-file watcher and calls
+// evtspike.Subsystem.Reload per the matrix in contracts/evtspike-config.md.
+func UpdateEvtSpikeEnabled(enabled *bool) error {
+	if enabled == nil {
+		return nil
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg.EvtSpike.Enabled = *enabled
+	ClampEvtSpike(&cfg.EvtSpike)
+	cfg.Validate()
+	return saveConfigToFile(cfg)
+}
+
 // InstallCertificate copies a PEM cert and key into the data directory and
 // updates config.json so the dashboard uses them. The key file is written
 // with restrictive permissions (0600).
