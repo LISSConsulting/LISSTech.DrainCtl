@@ -17,6 +17,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/filelog"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
@@ -357,6 +358,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		LastSessionWarnNotify: make(map[string]time.Time),
 	}
 
+	// evtspike spike dispatch is funnelled through spikeCh so notifyState stays
+	// single-threaded (only the Execute goroutine calls SendNotification). A
+	// nil channel never selects, so the branch is inert when the subsystem is
+	// disabled.
+	var spikeCh chan dc.SpikePayload
+
 	slog.Info("service=starting", "version", dc.Version, "grace", cfg.GracePeriod, "poll", cfg.PollInterval, "retention_days", cfg.RetentionDays, "fetch_interval", dashCfg.FetchInterval, "memory_limit_mb", memLimitMB)
 
 	// Open SQLite telemetry store before the named pipe and HTTP servers.
@@ -562,6 +569,29 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		// (lastConfigFetch is zero, dashRegistered is false).
 	}
 
+	// Start evtspike subsystem if enabled. OnSpike forwards to spikeCh which
+	// the Execute loop drains; this keeps notifyState access single-threaded
+	// (only the Execute goroutine calls SendNotification).
+	if fullCfg.EvtSpike.Enabled {
+		host, _ := os.Hostname()
+		spikeCh = make(chan dc.SpikePayload, 16)
+		sub := evtspike.New(fullCfg.EvtSpike, host)
+		sub.OnSpike = func(p dc.SpikePayload) {
+			select {
+			case spikeCh <- p:
+			default:
+				slog.Warn("evtspike=spike_dropped reason=channel_full",
+					"host", p.Host, "channel", p.Channel)
+			}
+		}
+		if err := sub.Start(ctx); err != nil {
+			slog.Warn("evtspike=start_failed", "error", err)
+			spikeCh = nil
+		} else {
+			slog.Info("evtspike=enabled", "host", host)
+		}
+	}
+
 	// Timers.
 	pollTicker := time.NewTicker(cfg.PollInterval)
 	defer pollTicker.Stop()
@@ -612,6 +642,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("trigger=registry_change")
 				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState)
 			}
+
+		case spike := <-spikeCh:
+			spikeResult := &dc.CheckResult{
+				Version:   dc.Version,
+				Timestamp: time.Now(),
+				Host:      spike.Host,
+				Spike:     &spike,
+			}
+			dc.SendNotification(notifyTargets, notifyState, spikeResult, dc.TriggerEventSpike, "")
 
 		case <-dashBootstrap:
 			// First async dashboard registration attempt after startup.
