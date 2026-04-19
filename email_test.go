@@ -5,6 +5,7 @@ package drainctl
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -328,4 +329,73 @@ func TestNotificationSubject(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withShortSMTPTimeouts shrinks the package-level SMTP timeouts for the
+// duration of a test so deadline assertions fire in milliseconds rather than
+// tens of seconds. T108.
+func withShortSMTPTimeouts(t *testing.T, dial, overall time.Duration) {
+	t.Helper()
+	origDial := smtpDialTimeout
+	origOverall := smtpOverallDeadline
+	smtpDialTimeout = dial
+	smtpOverallDeadline = overall
+	t.Cleanup(func() {
+		smtpDialTimeout = origDial
+		smtpOverallDeadline = origOverall
+	})
+}
+
+// TestSMTPStartTLS_SilentGreetingHitsOverallDeadline — T108. A server that
+// accepts the TCP connection but never sends a greeting must not hang
+// sendSMTPStartTLS indefinitely. The conn.SetDeadline call that comes BEFORE
+// smtp.NewClient is what makes this deterministic; without it, NewClient's
+// ReadResponse on the greeting would block forever.
+func TestSMTPStartTLS_SilentGreetingHitsOverallDeadline(t *testing.T) {
+	withShortSMTPTimeouts(t, 2*time.Second, 250*time.Millisecond)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	// Accept but never speak. Goroutine exits when the client hangs up
+	// after its deadline fires.
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		// Drain any bytes the client might write; never respond.
+		buf := make([]byte, 256)
+		_, _ = conn.Read(buf)
+	}()
+
+	target := NotificationTarget{
+		URL:  "smtp://" + ln.Addr().String(),
+		From: "drainctl@example.test",
+		To:   []string{"rcpt@example.test"},
+	}
+
+	start := time.Now()
+	err = sendSMTPStartTLS(ln.Addr().String(), "localhost", target, []byte("Subject: x\r\n\r\nbody"))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("sendSMTPStartTLS returned nil on silent-greeting server; expected deadline error")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Errorf("expected net.Error.Timeout()==true, got %T: %v", err, err)
+	}
+	// Must respect the overall deadline within a generous slop window; also
+	// must not have hung significantly longer.
+	if elapsed > 3*time.Second {
+		t.Errorf("sendSMTPStartTLS took %v — did not respect overall deadline", elapsed)
+	}
+	<-acceptDone
 }
