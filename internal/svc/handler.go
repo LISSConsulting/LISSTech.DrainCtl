@@ -314,6 +314,24 @@ func (h *serviceHandler) HandleRemoveServer(hostname string) error {
 	return nil
 }
 
+// HandleRegister runs dashboard.Register under the service's machine-account
+// identity so the CLI can route around the dashboard's requireMachineAccount
+// gate. See BUGS.md #1.
+func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, error) {
+	if dashboardURL == "" {
+		return nil, fmt.Errorf("dashboard url required")
+	}
+	result, err := dashboard.Register(dashboardURL)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshal register result: %w", err)
+	}
+	return raw, nil
+}
+
 // Execute is the Windows service main loop.
 func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, statusCh chan<- svc.Status) (bool, uint32) {
 	statusCh <- svc.Status{State: svc.StartPending, WaitHint: 10000}

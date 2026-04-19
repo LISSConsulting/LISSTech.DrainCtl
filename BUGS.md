@@ -6,7 +6,20 @@ Running list of defects and UX gaps surfaced during validation / manual testing.
 
 ## Feature 007 — SQLite telemetry store
 
-### 1. `drainctl register [--auto]` should proxy through the service pipe
+### 1. `drainctl register [--auto]` should proxy through the service pipe — FIXED 2026-04-19
+
+**Status:** Fixed.
+
+**Change:**
+- `internal/pipe/pipe.go`: added `register` command to the pipe protocol (extends `PipeRequest.URL`, `PipeHandler.HandleRegister`), a 30 s per-connection deadline so the outbound SSPI+HTTPS round-trip has room to complete, and `RegisterViaPipe()` for CLI callers. Introduced a new `ErrPipeUnavailable` sentinel so dial failures (bootstrap case) are distinguishable from errors returned by a working service.
+- `internal/svc/handler.go`: `serviceHandler.HandleRegister()` invokes existing `dashboard.Register()` under the service's machine-account identity and marshals `RegisterResult` back over the pipe.
+- `cmd/drainctl/register_cmd.go`: `drainctl register` now calls `pipe.RegisterViaPipe()` first and falls back to `dashboard.Register()` **only** when the error is `ErrPipeUnavailable` (service not installed/started). Service-side failures surface as-is so a 401 / TLS mismatch / timeout isn't silently retried under the operator's user token.
+- Tests: `TestHandlePipeConn_Register{OK,MissingURL,HandlerError}`, `TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable`, `TestHandleRegister_EmptyURLReturnsError`; compile-time `var _ pipe.PipeHandler = (*serviceHandler)(nil)` guards interface drift.
+- `DashboardURL` persistence and auto-pin both stay in the CLI — only the network call moved.
+
+**Verification:** `go test ./...` green; `just lint` 0 issues. Codex review caught the over-broad fallback (falling back on *any* pipe error would double-call under the human token) — narrowed before commit.
+
+Original report below for historical context.
 
 **Surfaced:** 2026-04-18 during T067 validation on MDS-LDC1-RDS12.
 
