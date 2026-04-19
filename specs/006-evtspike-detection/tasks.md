@@ -86,16 +86,16 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 - [x] T018b [P] [US1] Ntfy priority mapping test in `notify_test.go`: assert `status: "warning"` → priority 3, `status: "alert"` → priority 4, tags include `["evtspike", host, channel-basename]`. Corresponds to `TestEventSpikePayload_NtfyPriority` in `contracts/event_spike-payload.md`.
 - [x] T019 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/status?host=X` returns shape from `contracts/dashboard-sse-events.md`; 404 for unknown host; 401 without session
 - [x] T020 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/spikes?host=X&limit=20` returns newest-first ring-buffer content; `limit=500` clamped to 50
-- [ ] T021 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: fake `Subscriber` feeds 50-event bursts in 2-of-3 windows; assert `OnSpike` invoked exactly once per cooldown with a `SpikePayload` matching invariants from `data-model.md` §5
-- [ ] T022 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: single-window transient burst (one window over threshold, next two clean) does NOT call `OnSpike` (confirms 2-of-3 suppression)
+- [x] T021 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: fake `Subscriber` feeds 50-event bursts in 2-of-3 windows; assert `OnSpike` invoked exactly once per cooldown with a `SpikePayload` matching invariants from `data-model.md` §5
+- [x] T022 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: single-window transient burst (one window over threshold, next two clean) does NOT call `OnSpike` (confirms 2-of-3 suppression)
 - [ ] T023 [P] [US1] Integration test in `internal/dashboard/broker_test.go`: state transition `disabled → training → healthy` emits exactly one `detector_status` SSE event per transition; same-state no-op emits zero
 
 ### Implementation for User Story 1
 
 #### Service-side subsystem
 
-- [ ] T024 [US1] Create `internal/evtspike/subsystem.go` with `Subsystem` struct owning channel subscriptions, detectors, baseline ticker, and an `OnSpike func(SpikePayload)` callback; implement `Start(ctx) error` (load baseline via `LoadBaseline`, subscribe per `ResolveChannels`, start scoring goroutine, start persistence ticker per R1) and `Stop()` (cancel context, flush baseline via `WriteBaseline`, wait for goroutines)
-- [ ] T025 [US1] In `internal/evtspike/subsystem.go`, implement the scoring goroutine: 10-second ticker reading per-channel counters (already atomic.Int64), feeding `Detector.ObserveBucket`, and on confirmed spike building a `SpikePayload` and invoking `OnSpike`
+- [x] T024 [US1] Create `internal/evtspike/subsystem.go` with `Subsystem` struct owning channel subscriptions, detectors, baseline ticker, and an `OnSpike func(SpikePayload)` callback; implement `Start(ctx) error` (load baseline via `LoadBaseline`, subscribe per `ResolveChannels`, start scoring goroutine, start persistence ticker per R1) and `Stop()` (cancel context, flush baseline via `WriteBaseline`, wait for goroutines)
+- [x] T025 [US1] In `internal/evtspike/subsystem.go`, implement the scoring goroutine: 10-second ticker reading per-channel counters (already atomic.Int64), feeding `Detector.ObserveBucket`, and on confirmed spike building a `SpikePayload` and invoking `OnSpike`
 - [ ] T026 [US1] Integrate subsystem into `internal/svc/svc.go`: construct when `cfg.EvtSpike.Enabled == true`; pass an `OnSpike` callback that invokes `drainctl.SendNotification(cfg.Notifications, notifyState, spikeCheckResult, TriggerEventSpike, "")` on the service's existing goroutine pool
 - [ ] T027 [US1] In `internal/svc/svc.go`, add the subsystem to the graceful-shutdown sequence (call `Subsystem.Stop()` before returning from `Run`)
 - [ ] T028 [US1] At subsystem Start, if `cfg.SecurityChannelEnabled == true`: call `EnableSecurityPrivilege()` (from T012a) on the service's own process token; if it returns `nil`, proceed to subscribe to Security (resolved by `ResolveChannels` when the flag is set); if it returns `ErrPrivilegeNotAssigned` (admin runs DrainCtl under a dedicated account without the right), log a warning and skip Security subscription — other channels continue. Log at INF level which channels were subscribed vs skipped (FR-024).
@@ -121,7 +121,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 #### Logging + ops
 
-- [ ] T042 [US1] Add slog structured log lines at key lifecycle points in `internal/evtspike/subsystem.go`: `evtspike=start`, `evtspike=subscribed channel=X`, `evtspike=skipped channel=X reason=…`, `evtspike=confirmed_spike host=X channel=X observed=X expected=X tail=X`, `evtspike=baseline_written bytes=X`, `evtspike=stop`
+- [x] T042 [US1] Add slog structured log lines at key lifecycle points in `internal/evtspike/subsystem.go`: `evtspike=start`, `evtspike=subscribed channel=X`, `evtspike=skipped channel=X reason=…`, `evtspike=confirmed_spike host=X channel=X observed=X expected=X tail=X`, `evtspike=baseline_written bytes=X`, `evtspike=stop`
 
 **Checkpoint**: User Story 1 + 2 (via shared detector) fully functional end-to-end. An admin can enable the feature, inject a spike, see notification fire, see dashboard update. MVP is deployable at this point.
 
