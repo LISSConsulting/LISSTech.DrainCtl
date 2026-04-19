@@ -1,0 +1,7 @@
+{
+  "workload": "stress-performance-workload",
+  "placeholder": true,
+  "description": "Deterministic 1-hour event trace for SC-007 validation. Sustained 200 events/sec aggregate across the 54-channel default list for 1 hour after baseline maturity on a 4-core Windows Server 2019+ VM. Filled during Phase 9 SC-validation task T094.",
+  "validates": ["SC-007"],
+  "events": []
+}
