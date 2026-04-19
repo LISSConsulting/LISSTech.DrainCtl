@@ -44,7 +44,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 ### Config + Trigger
 
-- [ ] T004 Add `EvtSpikeConfig` struct to `config.go` (zero-value defaults, JSON tags per `contracts/evtspike-config.md`) and embed in `Config` as `EvtSpike EvtSpikeConfig \`json:"evtspike"\``
+- [x] T004 Add `EvtSpikeConfig` struct to `config.go` (zero-value defaults, JSON tags per `contracts/evtspike-config.md`) and embed in `Config` as `EvtSpike EvtSpikeConfig \`json:"evtspike"\``
 - [ ] T005 Add `ClampEvtSpike(cfg *EvtSpikeConfig)` helper to `config.go` (clamps per `data-model.md` §1 tables); call it from `LoadConfig` next to the existing `ClampRetention` call
 - [ ] T006 Add `TriggerEventSpike Trigger = "event_spike"` constant to `config.go`; add to `ValidTriggers` map; DO NOT add to `DefaultTriggers` (explicit opt-in required by design)
 
