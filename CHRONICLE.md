@@ -94,8 +94,8 @@ Commits `4c13128` / `e25482e` / `c021f4e` / (this commit) resolve 32 deduplicate
 
 ## Build & Versioning
 
-- **CalVer `YY.DOY.patch` must update in 7 places.** `drainctl.go`, `drainctl.rc`, `.psd1`, `.wixproj`, `README.md`, `CLAUDE.md`, `docs/index.html`. `just bump` handles this.
-- **After `.rc` changes, run `just resource`** to recompile `.syso`. Forgetting this ships stale version info in the binary.
+- **CalVer `YY.DOY.N` is git-derived, nothing to bump by hand.** `scripts/version.ps1` computes it from the current date + commit count; `just all`/`just release` inject it into Go (ldflags), the Windows resource (`just resource` renders `assets/drainctl.rc` from its template and recompiles `drainctl.syso`), the MSI (`-p:ProductVersion=`), and the PowerShell module (`.psd1.tmpl` rendering). The only version string still hand-maintained is `docs/index.html` release-notes content, updated per release refresh — not per commit.
+- **`just resource` is wired into the build.** `just all`/`just release` call it automatically; re-run it manually only if you are poking at `drainctl.rc.tmpl` or `assets/drainctl.man` directly.
 - **WiX custom actions must match CLI flags.** Broke v26.100.0 when MSI install action used old flag names.
 - **Signing order: binaries → MSI → sign MSI.** Can't sign the MSI before the binaries inside it are signed.
 
