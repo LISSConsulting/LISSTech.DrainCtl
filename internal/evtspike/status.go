@@ -2,7 +2,9 @@
 
 package evtspike
 
-import "time"
+import (
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+)
 
 const (
 	StateHealthy  = "healthy"
@@ -11,14 +13,11 @@ const (
 	StateError    = "error"
 )
 
-type DetectorStatus struct {
-	Host            string     `json:"host"`
-	State           string     `json:"state"`
-	EnabledChannels int        `json:"enabled_channels"`
-	MatureChannels  int        `json:"mature_channels"`
-	ErrorReason     string     `json:"error_reason,omitempty"`
-	LastSpikeAt     *time.Time `json:"last_spike_at,omitempty"`
-}
+// DetectorStatus aliases the canonical drainctl.DetectorStatus so detector code
+// can use a local name. The canonical definition lives in drainctl root so
+// CheckResult can embed it (via EvtSpikeStatus) without creating a cycle with
+// this package.
+type DetectorStatus = dc.DetectorStatus
 
 type RecentSpikeEntry struct {
 	ID int64 `json:"id"`

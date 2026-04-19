@@ -50,6 +50,11 @@ type ServerState struct {
 	// lookup that backs GET /api/evtspike/status. Wired by StartDashboard; the
 	// evtspike subsystem calls it once at Start with its Status method.
 	RegisterEvtSpikeStatusFunc func(f EvtSpikeStatusFunc)
+	// GetRemoteEvtSpikeStatus, if non-nil, returns the most recently reported
+	// DetectorStatus for a remote agent. Wired by StartDashboard to the
+	// DashboardServer's remote-status cache so the pull function can answer
+	// for non-local hosts. Zero value when the host has never reported.
+	GetRemoteEvtSpikeStatus func(host string) evtspike.DetectorStatus
 }
 
 // NewServerState creates a ServerState backed by servers.json in dataDir.
