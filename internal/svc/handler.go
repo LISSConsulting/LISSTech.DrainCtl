@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -346,6 +347,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	cfg := fullCfg.ToServiceConfig()
 	dashCfg := fullCfg.ToDashboardConfig()
+	prevEvtSpikeCfg := fullCfg.EvtSpike
 
 	// Apply Go runtime soft memory limit. Makes the GC more aggressive about
 	// returning pages to the OS, which matters on memory-constrained RDS hosts.
@@ -806,6 +808,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			dashCfg = newDashCfg
 			slog.Info("config=reloaded")
 
+			// Hot-apply evtspike config changes to the running subsystem.
+			// Reload itself diffs old vs. new internally, but the helper skips
+			// the call entirely on a no-op so log noise stays bounded.
+			if err := applyEvtSpikeConfigReload(evtSpikeSub, prevEvtSpikeCfg, newFullCfg.EvtSpike); err != nil {
+				slog.Warn("evtspike reload failed", "error", err)
+			}
+			prevEvtSpikeCfg = newFullCfg.EvtSpike
+
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
 			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
@@ -814,6 +824,25 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 		}
 	}
+}
+
+// applyEvtSpikeConfigReload calls sub.Reload when the EvtSpike block has
+// changed between loads. sub may be nil (feature disabled at startup); that
+// case is a no-op. Equality is reflect.DeepEqual so the helper can accept
+// two whole EvtSpikeConfig snapshots — both scalar and channel-list mutations
+// are detected by one compare.
+//
+// Split out from Execute's configCh branch so the T068 integration test can
+// drive the exact code path Execute wires in, without a runnable SCM.
+func applyEvtSpikeConfigReload(sub *evtspike.Subsystem, oldCfg, newCfg dc.EvtSpikeConfig) error {
+	if sub == nil {
+		return nil
+	}
+	if reflect.DeepEqual(oldCfg, newCfg) {
+		return nil
+	}
+	slog.Info("config=reloaded-evtspike")
+	return sub.Reload(newCfg)
 }
 
 // syncPerfCollector reconciles the running performance collector with a config
