@@ -190,6 +190,11 @@ type DashboardServer struct {
 	// nil notifications means the field was absent from the request body
 	// (no-op for that field). nil threshold/gracePeriod/pollInterval mean the fields were absent.
 	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *dc.PerformanceConfig) error
+
+	// evtspikeStatus returns the current detector status for a host. Set by
+	// the evtspike subsystem at Start; nil when the feature is off or not yet
+	// wired. See evtspike.go handleEvtSpikeStatus for nil semantics.
+	evtspikeStatus EvtSpikeStatusFunc
 }
 
 // StartDashboard creates the server state, sets up routes, and starts the
@@ -316,6 +321,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
 	mux.Handle("GET /api/v1/maintenance/status", rlw(rs(http.HandlerFunc(ds.handleMaintenance))))
+	mux.Handle("GET /api/evtspike/status", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeStatus))))
 
 	// SSE event stream — session auth, no rate limit (long-lived connection).
 	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
