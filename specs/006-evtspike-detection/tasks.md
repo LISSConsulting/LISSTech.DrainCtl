@@ -67,7 +67,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 ### Dashboard status types (shared)
 
-- [ ] T017 [P] Create `internal/evtspike/status.go` defining `DetectorStatus` and `RecentSpikeEntry` structs per `data-model.md` §6 and §7, with a `DeriveState(enabled bool, startupErr error, matureChannels int) string` helper implementing the state table
+- [x] T017 [P] Create `internal/evtspike/status.go` defining `DetectorStatus` and `RecentSpikeEntry` structs per `data-model.md` §6 and §7, with a `DeriveState(enabled bool, startupErr error, matureChannels int) string` helper implementing the state table
 
 **Checkpoint**: Foundation ready — detector library is package-internal and importable by both the in-service subsystem and the standalone CLI. User story implementation can now begin in parallel.
 
