@@ -220,15 +220,15 @@ The single Security-opt-in test now lives in Phase 3 as part of the subsystem te
 
 - [x] T083 (DROPPED — versioning is now git-derived CalVer via `scripts/version.ps1`, injected at build time via ldflags / `just resource` / `-p:ProductVersion=` / `.psd1.tmpl` rendering. Nothing to bump by hand. See CLAUDE.md "Key Rules". Tasks.md predated the migration.)
 - [x] T084 (DROPPED — `just resource` still exists and is run automatically by `just all`/`just release`; no standalone bump step is required. Superseded alongside T083.)
-- [ ] T085 Run `just lint` and fix every warning — zero-tolerance noise policy per `feedback_clean_output.md`
-- [ ] T086 Run `just all` (unsigned) — verify full build produces CLI + DLL + PS module + MSI (no new binaries — the POC `cmd/evtspike` is a dev tool only)
+- [x] T085 Run `just lint` and fix every warning — zero-tolerance noise policy per `feedback_clean_output.md`
+- [x] T086 Run `just all` (unsigned) — verify full build produces CLI + DLL + PS module + MSI (no new binaries — the POC `cmd/evtspike` is a dev tool only)
 - [ ] T087 Run `just release` (signed) — requires `CODE_SIGNING_CERTIFICATE_THUMBPRINT` in `.env`; verify signing order binaries → MSI → sign MSI
 
 ### Documentation
 
-- [ ] T088 [P] Add an `## Event Log Anomaly Detection (evtspike)` section to `README.md` covering: what it is, how to enable (link to `quickstart.md`), the Security opt-in note including the canonical capability sentence (link to `quickstart.md` Path C). The canonical capability sentence MUST appear byte-identical to FR-031's canonical sentence across `spec.md`, `README.md`, and `quickstart.md` Path C: **"This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host."**
-- [ ] T089 [P] Add a short feature callout to `docs/index.html` in the same style as existing feature callouts
-- [ ] T090 [P] Write release notes for this bump in the style of `96e28a4` — substance, not just a changelog
+- [x] T088 [P] Add an `## Event Log Anomaly Detection (evtspike)` section to `README.md` covering: what it is, how to enable (link to `quickstart.md`), the Security opt-in note including the canonical capability sentence (link to `quickstart.md` Path C). The canonical capability sentence MUST appear byte-identical to FR-031's canonical sentence across `spec.md`, `README.md`, and `quickstart.md` Path C: **"This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host."**
+- [x] T089 [P] Add a short feature callout to `docs/index.html` in the same style as existing feature callouts
+- [x] T090 [P] Write release notes for this bump in the style of `96e28a4` — substance, not just a changelog
 
 ### SC validation on real hardware
 
