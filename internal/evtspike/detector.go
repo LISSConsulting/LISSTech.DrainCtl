@@ -61,6 +61,12 @@ type Result struct {
 	TailProb  float64
 	Anomalous bool
 	Alert     bool
+	// CapOverflow is true when the robust-cap quantile iteration hit the
+	// ceiling without converging — i.e., the scoring distribution's tail is
+	// heavier than float precision can resolve. The baseline update for this
+	// bucket was skipped to preserve flood-poisoning protection (FR-009).
+	// Callers use this to emit a rate-limited operator WARN.
+	CapOverflow bool
 }
 
 // NewDetector creates a detector with a weakly informative prior.
@@ -124,10 +130,12 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 	// exists to prevent (plan C3).
 	updateY := float64(count)
 	skipBaseline := false
+	capOverflow := false
 	if anomalous {
 		capY, ok := negBinQuantile(robustCapProb, scoring.Alpha, scoring.Beta)
 		if !ok {
 			skipBaseline = true
+			capOverflow = true
 		} else if updateY > float64(capY) {
 			updateY = float64(capY)
 		}
@@ -139,11 +147,12 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 	}
 
 	return Result{
-		Count:     count,
-		Mean:      mean,
-		TailProb:  tail,
-		Anomalous: anomalous,
-		Alert:     alert,
+		Count:       count,
+		Mean:        mean,
+		TailProb:    tail,
+		Anomalous:   anomalous,
+		Alert:       alert,
+		CapOverflow: capOverflow,
 	}
 }
 
@@ -239,10 +248,12 @@ func negBinQuantile(prob float64, alpha, beta float64) (int, bool) {
 		if cdf >= prob {
 			return k + 1, true
 		}
-		if pmf == 0 {
-			// PMF underflowed to zero before reaching prob — the true
-			// quantile is beyond our floating-point precision; signal
-			// overflow so the caller refuses to update the baseline.
+		if pmf < negBinUnderflow {
+			// PMF shrank below the underflow threshold before reaching
+			// prob — the true quantile is beyond our floating-point
+			// precision. Signal overflow so the caller refuses to update
+			// the baseline. Match the upper-tail threshold so both
+			// functions give up at the same point under identical inputs.
 			return maxNBinIter, false
 		}
 	}

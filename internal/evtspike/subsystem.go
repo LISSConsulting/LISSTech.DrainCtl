@@ -131,8 +131,12 @@ type Subsystem struct {
 	counters      map[string]*atomic.Int64
 	channels      []string
 	subscriptions map[string]*channelSubscription // per-channel state machine
-	startupErr    error
-	lastSpikeAt   time.Time
+	// capOverflowWarn throttles the cap-overflow WARN log to one emission
+	// per hour per channel. An extreme sustained flood would otherwise
+	// spam the log at the scoring cadence (every 10 s).
+	capOverflowWarn map[string]time.Time
+	startupErr      error
+	lastSpikeAt     time.Time
 
 	runMu    sync.Mutex
 	cancel   context.CancelFunc
@@ -156,6 +160,7 @@ func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
 		detectors:         make(map[string]*Detector),
 		counters:          make(map[string]*atomic.Int64),
 		subscriptions:     make(map[string]*channelSubscription),
+		capOverflowWarn:   make(map[string]time.Time),
 	}
 	s.baselinePath = s.resolveBaselinePath()
 	return s
@@ -322,6 +327,7 @@ func (s *Subsystem) quiesce() {
 	s.counters = make(map[string]*atomic.Int64)
 	s.channels = nil
 	s.subscriptions = make(map[string]*channelSubscription)
+	s.capOverflowWarn = make(map[string]time.Time)
 	s.startupErr = nil
 	s.lastSpikeAt = time.Time{}
 	s.mu.Unlock()
@@ -663,7 +669,24 @@ func (s *Subsystem) scoreOnce(now time.Time) {
 			}
 			s.lastSpikeAt = now
 		}
+
+		warnOverflow := false
+		if r.CapOverflow {
+			if now.Sub(s.capOverflowWarn[ch]) >= time.Hour {
+				s.capOverflowWarn[ch] = now
+				warnOverflow = true
+			}
+		}
 		s.mu.Unlock()
+
+		if warnOverflow {
+			slog.Warn("", "evtspike", "cap_overflow",
+				"host", s.host,
+				"channel", ch,
+				"observed", r.Count,
+				"expected", r.Mean,
+			)
+		}
 
 		if payload == nil {
 			continue
