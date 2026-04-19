@@ -17,6 +17,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -25,9 +26,10 @@ import (
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
 	return &DashboardServer{
-		state:  NewServerState(t.TempDir()),
-		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
-		broker: NewBroker(),
+		state:                NewServerState(t.TempDir()),
+		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
+		broker:               NewBroker(),
+		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
 	}
 }
 
@@ -3837,5 +3839,182 @@ func TestMaintenanceHandler_OneShotJobNeverOverdue(t *testing.T) {
 		if j.Overdue {
 			t.Errorf("%s overdue = true, want false (one-shot jobs are never overdue)", name)
 		}
+	}
+}
+
+// ── Bug B: remote-host evtspike DetectorStatus propagation ───────────────────
+
+// TestHandleReport_CachesRemoteEvtSpikeStatus verifies that the /api/v1/report
+// handler stores the EvtSpikeStatus payload sent by a remote agent so the
+// pull-based GET /api/evtspike/status?host=<remote> handler can return it.
+// Before this wiring, the central dashboard had no visibility into remote
+// detector state and the pill rendered DISABLED for every registered agent.
+func TestHandleReport_CachesRemoteEvtSpikeStatus(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("GW01")
+	ds.state.GetRemoteEvtSpikeStatus = ds.RemoteEvtSpikeStatus
+	ds.evtspikeStatus = func(host string) evtspike.DetectorStatus {
+		// Simulate the handler.go registration: remote hosts fall through
+		// to the cache; local host returns a different value.
+		if host != "RDS12" {
+			return ds.state.GetRemoteEvtSpikeStatus(host)
+		}
+		return evtspike.DetectorStatus{}
+	}
+
+	status := evtspike.DetectorStatus{
+		Host:            "GW01",
+		State:           evtspike.StateHealthy,
+		EnabledChannels: 54,
+		MatureChannels:  27,
+	}
+	body, _ := json.Marshal(dc.CheckResult{Host: "GW01", Status: "Healthy", EvtSpikeStatus: &status})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+	ds.handleReport(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("report status = %d, want 200", w.Code)
+	}
+
+	// Now query the status endpoint for the remote host.
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/api/evtspike/status?host=GW01", nil)
+	ds.handleEvtSpikeStatus(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status endpoint = %d, want 200", w.Code)
+	}
+	var got evtspike.DetectorStatus
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.State != evtspike.StateHealthy {
+		t.Errorf("state = %q, want healthy", got.State)
+	}
+	if got.EnabledChannels != 54 {
+		t.Errorf("enabled_channels = %d, want 54", got.EnabledChannels)
+	}
+	if got.MatureChannels != 27 {
+		t.Errorf("mature_channels = %d, want 27", got.MatureChannels)
+	}
+}
+
+// TestHandleReport_EmitsSSEOnRemoteStatusChange verifies that when a remote
+// agent's DetectorStatus transitions between reports (training → healthy),
+// the central dashboard emits exactly one detector_status SSE event so
+// connected browsers see the pill flip with no poll lag.
+func TestHandleReport_EmitsSSEOnRemoteStatusChange(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("GW01")
+	_, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	post := func(state string, mature int) {
+		t.Helper()
+		status := evtspike.DetectorStatus{Host: "GW01", State: state, EnabledChannels: 54, MatureChannels: mature}
+		body, _ := json.Marshal(dc.CheckResult{Host: "GW01", Status: "Healthy", EvtSpikeStatus: &status})
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+		ds.handleReport(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("report status = %d, want 200", w.Code)
+		}
+	}
+
+	post(evtspike.StateTraining, 0)
+	post(evtspike.StateHealthy, 40)
+
+	events := drainBroker(t, ch)
+	detectorEvents := 0
+	for _, ev := range events {
+		if ev.Type == "detector_status" {
+			detectorEvents++
+		}
+	}
+	if detectorEvents != 2 {
+		t.Fatalf("got %d detector_status events, want 2 (one per transition)", detectorEvents)
+	}
+}
+
+// TestHandleReport_NoSSEOnRemoteStatusNoChange verifies broker dedup: two
+// reports carrying the same DetectorStatus emit only one detector_status SSE
+// event. Without this, every heartbeat on steady state would spam connected
+// browsers.
+func TestHandleReport_NoSSEOnRemoteStatusNoChange(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("GW01")
+	_, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status := evtspike.DetectorStatus{Host: "GW01", State: evtspike.StateHealthy, EnabledChannels: 54, MatureChannels: 40}
+	body, _ := json.Marshal(dc.CheckResult{Host: "GW01", Status: "Healthy", EvtSpikeStatus: &status})
+
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+		ds.handleReport(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("report %d status = %d, want 200", i, w.Code)
+		}
+	}
+
+	events := drainBroker(t, ch)
+	detectorEvents := 0
+	for _, ev := range events {
+		if ev.Type == "detector_status" {
+			detectorEvents++
+		}
+	}
+	if detectorEvents != 1 {
+		t.Fatalf("got %d detector_status events, want 1 (three same-state reports dedup to one emission)", detectorEvents)
+	}
+}
+
+// TestCheckResult_EvtSpikeStatusRoundTrip verifies that CheckResult round-trips
+// the EvtSpikeStatus field through JSON without data loss — the wire contract
+// that remote agents and the central dashboard share via /api/v1/report.
+func TestCheckResult_EvtSpikeStatusRoundTrip(t *testing.T) {
+	original := dc.CheckResult{
+		Host:   "GW01",
+		Status: "Healthy",
+		EvtSpikeStatus: &dc.DetectorStatus{
+			Host:            "GW01",
+			State:           evtspike.StateTraining,
+			EnabledChannels: 54,
+			MatureChannels:  5,
+		},
+	}
+	body, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"evtspike_status"`)) {
+		t.Fatalf("marshaled body missing evtspike_status field: %s", body)
+	}
+
+	var got dc.CheckResult
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.EvtSpikeStatus == nil {
+		t.Fatal("unmarshaled EvtSpikeStatus is nil")
+	}
+	if got.EvtSpikeStatus.State != evtspike.StateTraining {
+		t.Errorf("state = %q, want training", got.EvtSpikeStatus.State)
+	}
+	if got.EvtSpikeStatus.EnabledChannels != 54 {
+		t.Errorf("enabled_channels = %d, want 54", got.EvtSpikeStatus.EnabledChannels)
+	}
+	if got.EvtSpikeStatus.MatureChannels != 5 {
+		t.Errorf("mature_channels = %d, want 5", got.EvtSpikeStatus.MatureChannels)
+	}
+
+	// Absent field must be omitted on the wire (omitempty).
+	absent, _ := json.Marshal(dc.CheckResult{Host: "GW01", Status: "Healthy"})
+	if bytes.Contains(absent, []byte(`"evtspike_status"`)) {
+		t.Errorf("CheckResult without EvtSpikeStatus should not emit the field: %s", absent)
 	}
 }
