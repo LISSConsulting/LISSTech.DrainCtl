@@ -758,6 +758,39 @@ function handleRequest(method, pathname, body, query = {}) {
     return { status: 200, body: result };
   }
 
+  // GET /api/evtspike/status?host=<host> — evtspike detector status (feature 006).
+  // Dev-mock rotates across the four states so the UI pill renders in all its
+  // color variants without requiring a real backend.
+  if (method === 'GET' && pathname === '/api/evtspike/status') {
+    const host = query.host;
+    if (!host || !state.has(host)) {
+      return { status: 404, body: { error: 'unknown_host' } };
+    }
+    const evtStates = ['healthy', 'training', 'disabled', 'error'];
+    let h = 0;
+    for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
+    const evtState = evtStates[Math.abs(h) % evtStates.length];
+    return {
+      status: 200,
+      body: {
+        host,
+        state: evtState,
+        enabled_channels: evtState === 'disabled' ? 0 : 54,
+        mature_channels: evtState === 'healthy' ? 54 : evtState === 'training' ? 31 : 0,
+        ...(evtState === 'error' ? { error_reason: 'EvtSubscribe failed: provider unavailable' } : {}),
+      },
+    };
+  }
+
+  // GET /api/evtspike/spikes?host=<host>&limit=<n> — recent confirmed spikes.
+  if (method === 'GET' && pathname === '/api/evtspike/spikes') {
+    const host = query.host;
+    if (!host || !state.has(host)) {
+      return { status: 404, body: { error: 'unknown_host' } };
+    }
+    return { status: 200, body: [] };
+  }
+
   // GET /api/v1/maintenance/status — mirrors contracts/http-maintenance.md
   if (method === 'GET' && pathname === '/api/v1/maintenance/status') {
     const now = Date.now();

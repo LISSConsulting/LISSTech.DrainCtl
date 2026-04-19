@@ -1,7 +1,7 @@
 <script>
     import { untrack } from 'svelte';
-    import { appState, removeServerMetrics } from '../lib/state.svelte.js';
-    import { deleteServer } from '../lib/api.js';
+    import { appState, removeServerMetrics, setDetectorStatus } from '../lib/state.svelte.js';
+    import { deleteServer, fetchEvtSpikeStatus } from '../lib/api.js';
     import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
     import { rel, modeLabel } from '../lib/utils.js';
     import ServerDetail from './ServerDetail.svelte';
@@ -47,6 +47,40 @@
             expandedHosts = next;
         }
     });
+
+    // The SSE broker publishes detector_status only on transitions, so a cold
+    // page load has no entry in appState.detectorStatuses until the next
+    // transition. Seed via REST for any server that the map doesn't yet cover.
+    /** @type {Set<string>} */
+    const seedingEvtSpike = new Set();
+    $effect(() => {
+        for (const srv of appState.servers) {
+            if (appState.detectorStatuses.has(srv.host) || seedingEvtSpike.has(srv.host)) continue;
+            seedingEvtSpike.add(srv.host);
+            fetchEvtSpikeStatus(srv.host)
+                .then((status) => { if (status) setDetectorStatus(srv.host, status); })
+                .catch(() => {})
+                .finally(() => { seedingEvtSpike.delete(srv.host); });
+        }
+    });
+
+    const EVT_LABEL = { healthy: 'Healthy', training: 'Training', disabled: 'Disabled', error: 'Error' };
+
+    /**
+     * Build a tooltip describing detector status, channel coverage, and the
+     * last spike if any. Used as the `title` attribute for the pill so an
+     * operator hovering it gets the concrete numbers without a detail view.
+     * @param {import('../lib/types.js').DetectorStatus} ds
+     */
+    function evtTitle(ds) {
+        const lines = [`Evtspike: ${EVT_LABEL[ds.state] ?? ds.state}`];
+        if (ds.state === 'error' && ds.error_reason) lines.push(ds.error_reason);
+        if (ds.enabled_channels > 0) {
+            lines.push(`${ds.mature_channels}/${ds.enabled_channels} channels mature`);
+        }
+        if (ds.last_spike_at) lines.push(`Last spike: ${new Date(ds.last_spike_at).toLocaleString()}`);
+        return lines.join('\n');
+    }
 
     // Reactive clock — ticks every 10 s so that relative timestamps and the
     // grace-period countdown badge stay fresh between 30-second server refreshes.
@@ -381,6 +415,14 @@
                                     {#if cd}
                                         <span class="grace-cd {cd === 'expired' ? 'grace-cd--expired' : ''}">{cd}</span>
                                     {/if}
+                                {/if}
+                                {#if appState.detectorStatuses.has(srv.host)}
+                                    {@const ds = appState.detectorStatuses.get(srv.host)}
+                                    <span
+                                        class="pill evt-pill evt-{ds.state}"
+                                        title={evtTitle(ds)}
+                                        aria-label="Event-log detector: {EVT_LABEL[ds.state] ?? ds.state}"
+                                    >EVT {EVT_LABEL[ds.state] ?? ds.state}</span>
                                 {/if}
                             </td>
                             <td class="mono">{modeLabel(srv.drain_mode)}</td>
@@ -781,6 +823,27 @@
     }
     .pill.off {
         background: var(--color-subtle);
+    }
+    .evt-pill {
+        margin-left: 6px;
+        background: transparent;
+        border: 1.5px solid currentColor;
+        padding: 1px 6px;
+        font-size: 0.55rem;
+        letter-spacing: 0.08em;
+        vertical-align: middle;
+    }
+    .evt-pill.evt-healthy {
+        color: var(--color-green);
+    }
+    .evt-pill.evt-training {
+        color: var(--color-amber);
+    }
+    .evt-pill.evt-disabled {
+        color: var(--color-subtle);
+    }
+    .evt-pill.evt-error {
+        color: var(--color-red);
     }
     .section-label {
         font-family: 'JetBrains Mono', monospace;
