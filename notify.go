@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -422,8 +423,37 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 			return fmt.Sprintf("\U0001F525 %s \u2014 Input delay P95 %.0fms", host, result.Performance.InputDelayP95)
 		}
 		return fmt.Sprintf("\U0001F525 %s \u2014 %s", host, trigger)
+	case TriggerEventSpike:
+		emoji := spikeSubjectEmoji(result.Status)
+		channel := ""
+		observed := 0
+		expected := 0.0
+		if result.Spike != nil {
+			channel = result.Spike.Channel
+			observed = result.Spike.Observed
+			expected = result.Spike.Expected
+		}
+		if channel == "" {
+			return fmt.Sprintf("%s %s \u2014 Event spike", emoji, host)
+		}
+		return fmt.Sprintf("%s %s \u2014 Event spike on %s (%d vs ~%.1f)", emoji, host, channel, observed, expected)
 	default:
 		return fmt.Sprintf("%s \u2014 %s", host, trigger)
+	}
+}
+
+// spikeSubjectEmoji maps the event_spike severity (carried on result.Status
+// until per-target severity wiring lands in T031) to a leading subject emoji.
+// Matching is case-insensitive so capitalized callers don't silently demote to
+// the info glyph. Unknown severities fall back to info.
+func spikeSubjectEmoji(severity string) string {
+	switch strings.ToLower(severity) {
+	case "alert":
+		return "\U0001F6A8"
+	case "warning":
+		return "\u26A0\uFE0F"
+	default:
+		return "\u2139\uFE0F"
 	}
 }
 
