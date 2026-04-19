@@ -388,6 +388,39 @@ func TestLoadBaseline_ZeroSchemaVersionIsRenamed(t *testing.T) {
 	}
 }
 
+// TestLoadBaseline_NegativeSchemaVersionIsRenamed — T111. Strict equality
+// also rejects negative schema values. A crafted -1 must land in
+// .incompat-*.bak just like zero or a future version.
+func TestLoadBaseline_NegativeSchemaVersionIsRenamed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "negative.json")
+	bf := &BaselineFile{SchemaVersion: -1, Channels: map[string]ChannelState{}}
+	data, _ := json.Marshal(bf)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h := &capturingHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	got, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if got.SchemaVersion != SchemaVersion {
+		t.Errorf("negative schema was accepted: got schema=%d", got.SchemaVersion)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.incompat-*.bak"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one .incompat-*.bak, got %v", matches)
+	}
+	if !hasWarnWithEvtspike(h, "baseline_incompat") {
+		t.Errorf("expected slog warning evtspike=baseline_incompat")
+	}
+}
+
 // TestLoadBaseline_ClampsOutOfBandFloats — T111. Negative Alpha/Beta and
 // oversize N values must be clamped on load with a single WARN.
 func TestLoadBaseline_ClampsOutOfBandFloats(t *testing.T) {
