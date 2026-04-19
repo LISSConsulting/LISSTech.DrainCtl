@@ -26,8 +26,53 @@ const (
 
 // SubscribeFunc is the signature the Subsystem uses to subscribe a channel.
 // Production wires this to Subscribe; tests swap in a no-op so scoreOnce can
-// be driven by direct counter manipulation.
-type SubscribeFunc func(ctx context.Context, channel, query string, counter *atomic.Int64) error
+// be driven by direct counter manipulation. The wg parameter owns the drain
+// goroutine's lifetime: the caller (Subscribe itself) runs wg.Add(1) before
+// launching the goroutine so Stop's wg.Wait cannot race Add.
+//
+// The loss callback is invoked asynchronously from the drain goroutine when
+// the subscription is lost mid-run (handle invalidated, provider unloaded).
+// nil is valid — tests that do not exercise the retry state machine pass
+// nil. The callback MUST NOT block; the supervisor takes over from there.
+type SubscribeFunc func(ctx context.Context, wg *sync.WaitGroup, channel, query string, counter *atomic.Int64, loss func(error)) error
+
+// SubState is the per-channel subscription state for the state machine
+// introduced in plan Phase B1. Status counts only channels in
+// StateSubscribed toward EnabledChannels / MatureChannels.
+type SubState int
+
+const (
+	StateSubscribed SubState = iota
+	StateRetrying
+	StateFailed
+)
+
+// String returns a stable lowercase name for logs + SSE payloads.
+func (s SubState) String() string {
+	switch s {
+	case StateSubscribed:
+		return "subscribed"
+	case StateRetrying:
+		return "retrying"
+	case StateFailed:
+		return "failed"
+	}
+	return "unknown"
+}
+
+// channelSubscription tracks per-channel retry state. All fields are
+// guarded by Subsystem.mu.
+type channelSubscription struct {
+	name     string
+	state    SubState
+	attempts int   // consecutive retry attempts (reset on subscribed)
+	lastErr  error // last error surfaced to retrying/failed states
+}
+
+const (
+	subRetryInterval = 5 * time.Minute
+	subRetryMaxTries = 12 // 12 × 5 min = 1 h
+)
 
 // PrivilegeFunc enables SeSecurityPrivilege on the current process token.
 // Production wires this to EnableSecurityPrivilege; tests swap in a fake to
@@ -58,6 +103,13 @@ type Subsystem struct {
 	// Defaulted to EnableSecurityPrivilege by New.
 	EnablePrivilege PrivilegeFunc
 
+	// DisablePrivilege symmetrically lets tests inject a fake disabler.
+	// Defaulted to DisableSecurityPrivilege by New. Called by Reload when the
+	// Security-channel opt-in flips on→off so a later AddedChannels=Security
+	// attempt cannot silently succeed against a token that still has the
+	// privilege enabled from the prior opt-in window (plan Phase A3).
+	DisablePrivilege PrivilegeFunc
+
 	// Now lets tests inject a deterministic clock for the persistence write
 	// timestamp. The scoring path always takes time from the caller.
 	Now func() time.Time
@@ -69,12 +121,18 @@ type Subsystem struct {
 
 	baselinePath string
 
-	mu          sync.Mutex
-	detectors   map[string]*Detector
-	counters    map[string]*atomic.Int64
-	channels    []string
-	startupErr  error
-	lastSpikeAt time.Time
+	// RetryTickSource feeds the supervisor goroutine. Defaults to a 5-min
+	// ticker via defaultPersistTickSource style; tests inject a channel
+	// they can send on for deterministic retry-cadence assertions.
+	RetryTickSource func(time.Duration) (<-chan time.Time, func())
+
+	mu            sync.Mutex
+	detectors     map[string]*Detector
+	counters      map[string]*atomic.Int64
+	channels      []string
+	subscriptions map[string]*channelSubscription // per-channel state machine
+	startupErr    error
+	lastSpikeAt   time.Time
 
 	runMu    sync.Mutex
 	cancel   context.CancelFunc
@@ -91,10 +149,13 @@ func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
 		host:              host,
 		Subscribe:         Subscribe,
 		EnablePrivilege:   EnableSecurityPrivilege,
+		DisablePrivilege:  DisableSecurityPrivilege,
 		Now:               time.Now,
 		PersistTickSource: defaultPersistTickSource,
+		RetryTickSource:   defaultPersistTickSource,
 		detectors:         make(map[string]*Detector),
 		counters:          make(map[string]*atomic.Int64),
+		subscriptions:     make(map[string]*channelSubscription),
 	}
 	s.baselinePath = s.resolveBaselinePath()
 	return s
@@ -104,18 +165,41 @@ func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
 // launches the scoring and persistence goroutines. Per-channel subscribe
 // errors are logged and the channel is skipped (FR-009); other channels
 // continue. Returns an error only if OnSpike was not set.
+//
+// Start is idempotent w.r.t. cfg.Enabled: when Enabled=false it captures
+// ctx as s.startCtx and returns without subscribing or launching loops, so
+// a later Reload(Enabled=true) has a parent context to reuse.
 func (s *Subsystem) Start(ctx context.Context) error {
 	if s.OnSpike == nil {
 		return fmt.Errorf("evtspike: Subsystem.OnSpike must be set before Start")
 	}
 
+	s.runMu.Lock()
+	s.startCtx = ctx
+	s.runMu.Unlock()
+
+	if !s.cfg.Enabled {
+		if s.OnStatusChange != nil {
+			s.OnStatusChange(s.Status())
+		}
+		return nil
+	}
+
+	return s.startEnabled()
+}
+
+// startEnabled holds the live-run body of Start: baseline load, channel
+// subscription, scoring+persistence goroutines. Factored so Start can skip
+// it when Enabled=false and Reload can call it when flipping false→true
+// without re-entering Start (which would double-capture startCtx).
+func (s *Subsystem) startEnabled() error {
 	bf, _ := LoadBaseline(s.baselinePath)
 
 	s.runMu.Lock()
-	runCtx, cancel := context.WithCancel(ctx)
+	parent := s.startCtx
+	runCtx, cancel := context.WithCancel(parent)
 	s.ctx = runCtx
 	s.cancel = cancel
-	s.startCtx = ctx
 	s.runMu.Unlock()
 
 	s.initChannels(runCtx, bf)
@@ -124,17 +208,105 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		s.OnStatusChange(s.Status())
 	}
 
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.scoringLoop(runCtx)
 	go s.persistenceLoop(runCtx)
+	go s.supervisorLoop(runCtx)
 
 	return nil
+}
+
+// supervisorLoop drives retries for channels in StateRetrying. On each
+// RetryTickSource tick, iterates over retrying channels and re-invokes
+// Subscribe; success transitions back to StateSubscribed, failure
+// increments attempts until subRetryMaxTries → StateFailed.
+func (s *Subsystem) supervisorLoop(ctx context.Context) {
+	defer s.wg.Done()
+	src := s.RetryTickSource
+	if src == nil {
+		src = defaultPersistTickSource
+	}
+	ch, stop := src(subRetryInterval)
+	defer stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+			s.retryOnce(ctx)
+		}
+	}
+}
+
+// retryOnce attempts one re-Subscribe for each channel currently in
+// StateRetrying. Exposed at package scope so tests can drive the retry
+// cadence deterministically without waiting 5 min.
+func (s *Subsystem) retryOnce(ctx context.Context) {
+	s.mu.Lock()
+	type pending struct {
+		name string
+		c    *atomic.Int64
+	}
+	var targets []pending
+	for name, sub := range s.subscriptions {
+		if sub.state != StateRetrying {
+			continue
+		}
+		targets = append(targets, pending{name: name, c: s.counters[name]})
+	}
+	s.mu.Unlock()
+
+	var statusDirty bool
+	for _, p := range targets {
+		chName := p.name
+		lossCb := func(err error) { s.onSubscriptionLoss(chName, err) }
+		err := s.Subscribe(ctx, &s.wg, p.name, defaultChannelQuery, p.c, lossCb)
+
+		s.mu.Lock()
+		sub := s.subscriptions[p.name]
+		if sub == nil {
+			s.mu.Unlock()
+			continue
+		}
+		if err == nil {
+			sub.state = StateSubscribed
+			sub.attempts = 0
+			sub.lastErr = nil
+			s.mu.Unlock()
+			slog.Info("", "evtspike", "retry_success", "channel", p.name)
+			statusDirty = true
+			continue
+		}
+		sub.attempts++
+		sub.lastErr = err
+		if sub.attempts >= subRetryMaxTries {
+			sub.state = StateFailed
+			s.mu.Unlock()
+			slog.Warn("", "evtspike", "subscription_failed", "channel", p.name, "attempts", sub.attempts, "error", err.Error())
+			statusDirty = true
+			continue
+		}
+		s.mu.Unlock()
+	}
+	if statusDirty && s.OnStatusChange != nil {
+		s.OnStatusChange(s.Status())
+	}
 }
 
 // Stop cancels subscriptions, waits for goroutines to exit, and writes the
 // in-memory baseline to disk one final time. Safe to call after a failed
 // Start.
 func (s *Subsystem) Stop() {
+	s.quiesce()
+	slog.Info("", "evtspike", "stop", "host", s.host)
+}
+
+// quiesce cancels the run context, waits for scoring + persistence +
+// subscription goroutines (all joined to s.wg via A1), and writes the final
+// baseline. Factored out so Reload's Enabled=true→false branch can tear the
+// running subsystem down without logging a misleading "stop" line or losing
+// the startCtx (which Stop's caller does not own).
+func (s *Subsystem) quiesce() {
 	s.runMu.Lock()
 	cancel := s.cancel
 	s.cancel = nil
@@ -144,27 +316,69 @@ func (s *Subsystem) Stop() {
 	}
 	s.wg.Wait()
 	s.writeBaseline()
-	slog.Info("", "evtspike", "stop", "host", s.host)
+
+	s.mu.Lock()
+	s.detectors = make(map[string]*Detector)
+	s.counters = make(map[string]*atomic.Int64)
+	s.channels = nil
+	s.subscriptions = make(map[string]*channelSubscription)
+	s.startupErr = nil
+	s.lastSpikeAt = time.Time{}
+	s.mu.Unlock()
 }
 
-// Reload applies newCfg to a running subsystem per the live-reload matrix in
-// contracts/evtspike-config.md. Scalar detector tunables (MinCount, Threshold,
-// CooldownMinutes, SlotMaturityObservations, HalfLifeBuckets) rewrite every
-// live detector's Cfg so the next scoring tick uses them. PriorStrength and
-// MeanPerBucketPrior are stored on s.cfg so channels added later take the new
-// prior; existing channels' GammaState is not rewritten — per data-model.md §1
-// their Alpha/Beta have already been shaped by observations.
-// PersistIntervalSeconds updates s.cfg but the running persistenceLoop ticker
-// is not re-armed. Changes that alter the resolved channel set
-// (DisabledChannels, AddedChannels, SecurityChannelEnabled) or the baseline
-// file location trigger an internal Stop+Start so detectors, subscriptions,
-// and the on-disk baseline stay aligned. newCfg is assumed clamped by
-// ClampEvtSpike. The internal restart is ≤1 s and emits the
-// "channel_list_changed" slog line per the contract.
+// Reload applies newCfg to a running subsystem per the live-reload matrix
+// in contracts/evtspike-config.md. newCfg is assumed clamped by ClampEvtSpike.
+// Existing channels' GammaState is never rewritten by scalar-prior changes —
+// their Alpha/Beta have already been shaped by observations (data-model.md §1).
 func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
 	s.mu.Lock()
 	oldCfg := s.cfg
 	s.mu.Unlock()
+
+	// Enabled diff takes precedence: it dictates whether we are running at
+	// all, which gates every other field. true→false tears down subscriptions
+	// and loops but keeps the subsystem object (and its startCtx) alive for a
+	// later re-enable. false→true hydrates a fresh run from the stored
+	// startCtx without re-entering Start (which would double-capture).
+	if oldCfg.Enabled != newCfg.Enabled {
+		s.mu.Lock()
+		s.cfg = newCfg
+		s.mu.Unlock()
+
+		if !newCfg.Enabled {
+			s.quiesce()
+			// A full disable also drops the Security privilege if it was ever
+			// enabled — otherwise the token keeps it across the off-window.
+			if oldCfg.SecurityChannelEnabled {
+				s.tryDisablePrivilege("full_disable")
+			}
+			slog.Info("", "evtspike", "reload_disabled", "host", s.host)
+			if s.OnStatusChange != nil {
+				s.OnStatusChange(s.Status())
+			}
+			return nil
+		}
+
+		s.runMu.Lock()
+		hasParent := s.startCtx != nil
+		s.runMu.Unlock()
+		if !hasParent {
+			return fmt.Errorf("evtspike: Reload(Enabled=true) before Start — no stored parent context")
+		}
+		s.baselinePath = s.resolveBaselinePath()
+		slog.Info("", "evtspike", "reload_enabled", "host", s.host)
+		return s.startEnabled()
+	}
+
+	// If both sides are disabled there's nothing to reload; just persist the
+	// new config so the next enable sees the latest scalar tunables.
+	if !newCfg.Enabled {
+		s.mu.Lock()
+		s.cfg = newCfg
+		s.mu.Unlock()
+		return nil
+	}
 
 	if channelSetChanged(oldCfg, newCfg) {
 		slog.Info("", "evtspike", "channel_list_changed", "host", s.host)
@@ -227,19 +441,38 @@ func (s *Subsystem) restartWithConfig(newCfg dc.EvtSpikeConfig) error {
 		return fmt.Errorf("evtspike: Reload called before Start — no stored parent context")
 	}
 
+	s.mu.Lock()
+	oldSecurity := s.cfg.SecurityChannelEnabled
+	s.mu.Unlock()
+
 	s.Stop()
+
+	// If the Security opt-in is being turned off, disable the privilege the
+	// prior Start enabled so the token no longer holds it across the new run.
+	// startEnabled re-enables it when the new cfg still wants Security.
+	if oldSecurity && !newCfg.SecurityChannelEnabled {
+		s.tryDisablePrivilege("security_optout")
+	}
 
 	s.mu.Lock()
 	s.cfg = newCfg
-	s.detectors = make(map[string]*Detector)
-	s.counters = make(map[string]*atomic.Int64)
-	s.channels = nil
-	s.startupErr = nil
-	s.lastSpikeAt = time.Time{}
 	s.baselinePath = s.resolveBaselinePath()
 	s.mu.Unlock()
 
-	return s.Start(parent)
+	return s.startEnabled()
+}
+
+// tryDisablePrivilege calls DisablePrivilege if set and logs outcome at WARN
+// on failure. Never fails Reload — privilege restoration is best-effort.
+func (s *Subsystem) tryDisablePrivilege(reason string) {
+	if s.DisablePrivilege == nil {
+		return
+	}
+	if err := s.DisablePrivilege(); err != nil {
+		slog.Warn("", "evtspike", "privilege_disable_failed", "reason", reason, "error", err.Error())
+		return
+	}
+	slog.Info("", "evtspike", "privilege_disabled", "reason", reason)
 }
 
 // initChannels resolves, subscribes, and primes detectors for every channel
@@ -264,26 +497,61 @@ func (s *Subsystem) initChannels(ctx context.Context, bf *BaselineFile) {
 	for _, ch := range wanted {
 		d := s.buildDetector(bf, ch)
 		c := new(atomic.Int64)
-		if err := s.Subscribe(ctx, ch, defaultChannelQuery, c); err != nil {
-			slog.Warn("", "evtspike", "skipped", "channel", ch, "reason", err.Error())
-			continue
-		}
+		chName := ch
+		lossCb := func(err error) { s.onSubscriptionLoss(chName, err) }
+		err := s.Subscribe(ctx, &s.wg, ch, defaultChannelQuery, c, lossCb)
 		s.mu.Lock()
 		s.detectors[ch] = d
 		s.counters[ch] = c
+		if err != nil {
+			// Detector stays live so baseline state survives; subscription
+			// enters retrying. supervisor will retry every subRetryInterval.
+			s.subscriptions[ch] = &channelSubscription{name: ch, state: StateRetrying, attempts: 1, lastErr: err}
+			s.mu.Unlock()
+			slog.Warn("", "evtspike", "subscribe_failed", "channel", ch, "state", "retrying", "reason", err.Error())
+			continue
+		}
+		s.subscriptions[ch] = &channelSubscription{name: ch, state: StateSubscribed}
 		s.mu.Unlock()
 		subscribed = append(subscribed, ch)
 		slog.Info("", "evtspike", "subscribed", "channel", ch)
 	}
 
 	s.mu.Lock()
-	s.channels = subscribed
+	s.channels = wanted // track all requested channels; Status filters by state
 	if len(subscribed) == 0 && len(wanted) > 0 {
 		s.startupErr = fmt.Errorf("no channels subscribed of %d requested", len(wanted))
 	}
 	s.mu.Unlock()
 
-	slog.Info("", "evtspike", "start", "channels", len(subscribed), "host", s.host)
+	slog.Info("", "evtspike", "start", "channels", len(subscribed), "requested", len(wanted), "host", s.host)
+}
+
+// onSubscriptionLoss is the callback handed to Subscribe's loss-signal param.
+// Invoked asynchronously when the drain goroutine detects its subscription
+// has gone bad mid-run. Moves the channel to StateRetrying, leaving the
+// detector + baseline state untouched so a later successful retry hydrates
+// the same learned distribution.
+func (s *Subsystem) onSubscriptionLoss(channel string, err error) {
+	s.mu.Lock()
+	sub, ok := s.subscriptions[channel]
+	if !ok {
+		// Channel already removed by Stop/Reload; nothing to transition.
+		s.mu.Unlock()
+		return
+	}
+	if sub.state == StateFailed {
+		s.mu.Unlock()
+		return
+	}
+	sub.state = StateRetrying
+	sub.attempts = 0
+	sub.lastErr = err
+	s.mu.Unlock()
+	slog.Warn("", "evtspike", "subscription_lost", "channel", channel, "state", "retrying", "error", err.Error())
+	if s.OnStatusChange != nil {
+		s.OnStatusChange(s.Status())
+	}
 }
 
 func (s *Subsystem) buildDetector(bf *BaselineFile, channel string) *Detector {
@@ -326,7 +594,9 @@ func (s *Subsystem) scoringLoop(ctx context.Context) {
 // until ctx is cancelled. Stop performs the final crash-less write.
 func (s *Subsystem) persistenceLoop(ctx context.Context) {
 	defer s.wg.Done()
+	s.mu.Lock()
 	interval := time.Duration(s.cfg.PersistIntervalSeconds) * time.Second
+	s.mu.Unlock()
 	if interval <= 0 {
 		interval = time.Duration(dc.DefaultEvtSpikePersistIntervalSeconds) * time.Second
 	}
@@ -454,13 +724,21 @@ func (s *Subsystem) resolveBaselinePath() string {
 }
 
 // Status returns a snapshot of the subsystem's state for the dashboard.
+// EnabledChannels and MatureChannels count only channels currently in
+// StateSubscribed — channels in retrying or failed are excluded so the
+// dashboard pill reflects true operational capacity (plan Phase B1).
 func (s *Subsystem) Status() DetectorStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	enabled := 0
 	mature := 0
-	for _, d := range s.detectors {
-		if detectorMature(d, s.cfg.SlotMaturityObservations) {
+	for name, sub := range s.subscriptions {
+		if sub.state != StateSubscribed {
+			continue
+		}
+		enabled++
+		if d, ok := s.detectors[name]; ok && detectorMature(d, s.cfg.SlotMaturityObservations) {
 			mature++
 		}
 	}
@@ -473,8 +751,8 @@ func (s *Subsystem) Status() DetectorStatus {
 
 	status := DetectorStatus{
 		Host:            s.host,
-		State:           DeriveState(s.cfg.Enabled, len(s.channels), mature, s.startupErr),
-		EnabledChannels: len(s.channels),
+		State:           DeriveState(s.cfg.Enabled, enabled, mature, s.startupErr),
+		EnabledChannels: enabled,
 		MatureChannels:  mature,
 		LastSpikeAt:     lastSpike,
 	}
