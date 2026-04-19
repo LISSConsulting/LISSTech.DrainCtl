@@ -572,11 +572,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// Start evtspike subsystem if enabled. OnSpike forwards to spikeCh which
 	// the Execute loop drains; this keeps notifyState access single-threaded
 	// (only the Execute goroutine calls SendNotification).
+	var evtSpikeSub *evtspike.Subsystem
 	if fullCfg.EvtSpike.Enabled {
 		host, _ := os.Hostname()
 		spikeCh = make(chan dc.SpikePayload, 16)
-		sub := evtspike.New(fullCfg.EvtSpike, host)
-		sub.OnSpike = func(p dc.SpikePayload) {
+		evtSpikeSub = evtspike.New(fullCfg.EvtSpike, host)
+		evtSpikeSub.OnSpike = func(p dc.SpikePayload) {
 			select {
 			case spikeCh <- p:
 			default:
@@ -584,7 +585,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					"host", p.Host, "channel", p.Channel)
 			}
 		}
-		if err := sub.Start(ctx); err != nil {
+		if err := evtSpikeSub.Start(ctx); err != nil {
 			slog.Warn("evtspike=start_failed", "error", err)
 			spikeCh = nil
 		} else {
@@ -630,6 +631,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("service=stopping")
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
+				if evtSpikeSub != nil {
+					evtSpikeSub.Stop()
+				}
 				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
