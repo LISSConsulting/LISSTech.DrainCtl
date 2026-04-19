@@ -742,6 +742,57 @@ func TestSubsystem_PersistenceTicker_WritesOnAdvance(t *testing.T) {
 	}
 }
 
+// TestSubsystem_Reload_ThresholdHotApplied_US5 covers T066: calling Reload on a
+// running subsystem with a changed Threshold must propagate the new value to
+// s.cfg and every live detector's Cfg so the next ObserveBucket scores against
+// it. The assertion path is Detector.Cfg inspection, per the task's
+// "inspect internal config" criterion — driving a second observation through
+// a trained detector would require the test to guess the exact y-range
+// between old and new threshold, which is not load-bearing for this contract.
+func TestSubsystem_Reload_ThresholdHotApplied_US5(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.initChannels(ctx, nil)
+
+	oldThreshold := s.cfg.Threshold
+	if oldThreshold == 0 {
+		t.Fatal("test premise broken: baseline cfg.Threshold is zero")
+	}
+
+	s.mu.Lock()
+	if len(s.detectors) == 0 {
+		s.mu.Unlock()
+		t.Fatal("test premise broken: no detectors initialised")
+	}
+	for ch, d := range s.detectors {
+		if d.Cfg.Threshold != oldThreshold {
+			s.mu.Unlock()
+			t.Fatalf("pre-reload %s: d.Cfg.Threshold=%g want %g", ch, d.Cfg.Threshold, oldThreshold)
+		}
+	}
+	s.mu.Unlock()
+
+	newCfg := s.cfg
+	newCfg.Threshold = 1e-3
+	if err := s.Reload(newCfg); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.Threshold != 1e-3 {
+		t.Errorf("s.cfg.Threshold: got %g want 1e-3", s.cfg.Threshold)
+	}
+	for ch, d := range s.detectors {
+		if d.Cfg.Threshold != 1e-3 {
+			t.Errorf("post-reload %s: d.Cfg.Threshold=%g want 1e-3", ch, d.Cfg.Threshold)
+		}
+	}
+}
+
 // waitForBaselineWrittenAt polls the baseline file until LoadBaseline returns a
 // BaselineFile whose WrittenAt equals the expected timestamp. The synchronous
 // tick send guarantees persistenceLoop has entered the case branch, but

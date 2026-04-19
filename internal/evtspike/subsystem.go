@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -141,6 +142,46 @@ func (s *Subsystem) Stop() {
 	s.wg.Wait()
 	s.writeBaseline()
 	slog.Info("", "evtspike", "stop", "host", s.host)
+}
+
+// Reload hot-applies scalar detector tunables to a running subsystem so the
+// next scoring tick uses the new values. MinCount, Threshold, CooldownMinutes,
+// SlotMaturityObservations, and HalfLifeBuckets rewrite every live detector's
+// Cfg. PriorStrength and MeanPerBucketPrior are stored on s.cfg so channels
+// added later take the new prior, but existing channels' GammaState is not
+// rewritten — per data-model.md §1 their Alpha/Beta have already been shaped
+// by observations. PersistIntervalSeconds updates s.cfg; the running
+// persistenceLoop ticker is not re-armed here. Channel-list, baseline-path,
+// and SecurityChannelEnabled changes are handled by Stop+Start in T067/T069,
+// not this path. newCfg is assumed clamped by ClampEvtSpike.
+func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	newRho := 1.0
+	if newCfg.HalfLifeBuckets > 0 {
+		newRho = math.Exp(-math.Ln2 / float64(newCfg.HalfLifeBuckets))
+	}
+	newCooldown := time.Duration(newCfg.CooldownMinutes) * time.Minute
+
+	for _, d := range s.detectors {
+		d.Cfg.MinCount = newCfg.MinCount
+		d.Cfg.Threshold = newCfg.Threshold
+		d.Cfg.Cooldown = newCooldown
+		d.Cfg.SlotMaturityObservations = newCfg.SlotMaturityObservations
+		d.Cfg.Rho = newRho
+	}
+
+	s.cfg.MinCount = newCfg.MinCount
+	s.cfg.Threshold = newCfg.Threshold
+	s.cfg.CooldownMinutes = newCfg.CooldownMinutes
+	s.cfg.SlotMaturityObservations = newCfg.SlotMaturityObservations
+	s.cfg.PersistIntervalSeconds = newCfg.PersistIntervalSeconds
+	s.cfg.HalfLifeBuckets = newCfg.HalfLifeBuckets
+	s.cfg.PriorStrength = newCfg.PriorStrength
+	s.cfg.MeanPerBucketPrior = newCfg.MeanPerBucketPrior
+
+	return nil
 }
 
 // initChannels resolves, subscribes, and primes detectors for every channel
