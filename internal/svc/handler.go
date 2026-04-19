@@ -824,6 +824,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 						}
 					}
 				}
+			} else if dashState != nil && !dashRegistered && !cfg.DashboardOnly &&
+				isLocalDashboard(newDashCfg.URL) && !isLocalDashboard(dashCfg.URL) {
+				// URL just changed to point at this machine — self-register in
+				// memory immediately rather than waiting for the next poll tick.
+				if h, _ := os.Hostname(); h != "" {
+					dashState.Register(h)
+					dashRegistered = true
+					slog.Info("dashboard=self-registered", "host", h)
+				}
 			}
 
 			// Preserve SRV-discovered URL if the config file doesn't set one.

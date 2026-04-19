@@ -4,6 +4,7 @@ package svc
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -245,6 +246,59 @@ func TestHandleRegister_EmptyURLReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "url required") {
 		t.Errorf("err = %q, want substring 'url required'", err.Error())
+	}
+}
+
+// ── isLocalDashboard ──────────────────────────────────────────────────────────
+
+// TestIsLocalDashboard_MatchesHostname verifies that isLocalDashboard returns
+// true only when the URL hostname equals os.Hostname() (case-insensitive).
+// "localhost" is intentionally NOT treated as local — the self-register path
+// is only relevant when the URL names this machine by its NetBIOS/DNS name.
+func TestIsLocalDashboard_MatchesHostname(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skip("os.Hostname unavailable")
+	}
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"http://" + host + ":8080", true},
+		{"http://" + strings.ToUpper(host) + ":8080", true}, // case-insensitive
+		{"http://other-server:8080", false},
+		{"http://localhost:8080", false}, // "localhost" != actual hostname
+		{"", false},
+		{"not-a-url", false},
+	}
+	for _, c := range cases {
+		if got := isLocalDashboard(c.url); got != c.want {
+			t.Errorf("isLocalDashboard(%q) = %v, want %v", c.url, got, c.want)
+		}
+	}
+}
+
+// TestIsLocalDashboard_URLBecameLocal verifies the transition condition used
+// by the config-reload self-register branch: old URL is non-local, new URL
+// is local.
+func TestIsLocalDashboard_URLBecameLocal(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skip("os.Hostname unavailable")
+	}
+	staleURL := "http://stale-server:8080"
+	localURL := "http://" + host + ":8080"
+
+	if isLocalDashboard(staleURL) {
+		t.Fatalf("pre-condition: stale URL should not be local: %q", staleURL)
+	}
+	if !isLocalDashboard(localURL) {
+		t.Fatalf("pre-condition: local URL must be local: %q", localURL)
+	}
+	// The reload branch fires when both conditions hold simultaneously.
+	becameLocal := isLocalDashboard(localURL) && !isLocalDashboard(staleURL)
+	if !becameLocal {
+		t.Error("expected URL-became-local transition to be detected")
 	}
 }
 
