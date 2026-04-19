@@ -26,6 +26,7 @@ Know the instant someone blocks new connections on your RDSH servers. DrainCtl r
 - [🐚 PowerShell Module](#-powershell-module)
 - [⚙️ Service](#️-service)
 - [🔔 Notifications](#-notifications)
+- [📈 Event Log Anomaly Detection](#-event-log-anomaly-detection-evtspike)
 - [🔧 Configuration](#-configuration)
 - [🔒 Audit Setup](#-audit-setup)
 - [🛠️ Building from Source](#️-building-from-source)
@@ -54,6 +55,7 @@ DrainCtl monitors the `TSServerDrainMode` registry value on RDSH servers and ans
 | 📈 **Live session tracking** | `WTSEnumerateSessionsW` counts active, disconnected, and total sessions with utilization % |
 | 🚨 **Utilization alerts** | Configurable threshold fires `session_warning` before your RDSH boxes hit capacity |
 | 📊 **Performance monitoring** | PDH counters track CPU, memory, disk queue, input delay, and RemoteFX metrics per poll cycle — with configurable thresholds that fire `cpu_warning`, `memory_critical`, `input_delay_warning`, and more |
+| 📈 **Event log anomaly detection** | Opt-in subsystem watches 54 Windows event log channels, learns a per-slot Bayesian baseline, and fires `event_spike` notifications on confirmed deviations — without drowning operators in false positives |
 
 ---
 
@@ -363,6 +365,7 @@ Each notification target can subscribe to specific event types:
 | `memory_critical` | Available memory below critical threshold (2 consecutive polls) |
 | `input_delay_warning` | User input delay P95 exceeds warning threshold |
 | `input_delay_critical` | User input delay P95 exceeds critical threshold |
+| `event_spike` | Confirmed anomalous activity on a watched event log channel (requires `evtspike.enabled: true`; not in default triggers) |
 
 If no triggers are specified, the target receives all events.
 
@@ -428,7 +431,119 @@ Notification targets are defined in `config.json`:
 }
 ```
 
-The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered`, `alert`, `healthy`, `session_warning`, `cpu_warning`, `cpu_critical`, `memory_warning`, `memory_critical`, `input_delay_warning`, `input_delay_critical`). ntfy messages use priority `high` for alerts, `default` for other events.
+The `event` field uses the trigger name (`drain_on`, `drain_off`, `grace_entered`, `alert`, `healthy`, `session_warning`, `cpu_warning`, `cpu_critical`, `memory_warning`, `memory_critical`, `input_delay_warning`, `input_delay_critical`, `event_spike`). ntfy messages use priority `high` for alerts, `default` for other events.
+
+---
+
+## 📈 Event Log Anomaly Detection (evtspike)
+
+The `evtspike` subsystem watches a curated set of 54 Windows event log channels and fires an `event_spike` notification when it detects anomalous activity that the existing fixed-threshold alerts cannot catch — authentication bursts, SMB storms, print-service floods, FSLogix container errors, TCP/IP stack failures, and similar early-warning signals.
+
+### What it does
+
+- Subscribes to 54 curated channels by default (RDSH/Citrix-relevant: Winlogon, Kerberos, NTLM, LSA, SMB, FSLogix, TerminalServices, PrintService, User Profile Service, DNS, TCP/IP, Windows Defender, and more).
+- Maintains a per-channel Bayesian baseline sliced into 96 time-of-day slots (15 min each). A robust update cap prevents a single flood from poisoning the baseline; a subsequent smaller anomaly still flags.
+- Requires 2 of 3 consecutive 10-second scoring windows to confirm, so single-bucket transients (log rotations, one-shot admin actions) do not page operators.
+- Persists baseline state to `evtspike-baseline.json` every 15 minutes and on shutdown — service restarts do not re-enter warm-up on channels already mature.
+- Delivers through the existing multi-target notification pipeline (webhook, ntfy, email). Spike severity is assigned by notification-target wiring, not the detector.
+- Surfaces a status pill and a recent-spikes list in the dashboard server detail view.
+
+### Enable
+
+The subsystem ships **disabled by default**. Add to `config.json`:
+
+```json
+{
+  "evtspike": {
+    "enabled": true
+  },
+  "notifications": [
+    {
+      "type": "webhook",
+      "url": "https://hooks.example.com/drainctl-spikes",
+      "triggers": ["event_spike"],
+      "repeat_minutes": 30
+    }
+  ]
+}
+```
+
+`event_spike` is **not** in the default trigger set — existing notification targets that upgrade to a version with this feature do not silently start receiving spike notifications. Explicit opt-in is required.
+
+Config is hot-reloaded; scalar tunables (threshold, cooldown, slot maturity) apply on the next scoring window. Channel-list changes trigger a clean subsystem restart.
+
+### Channel list
+
+The 54-channel default is defined in `internal/evtspike/channels.go`. Operators tailor it by naming specific channels to **disable** or **add** — there is no need to restate the full default list:
+
+```json
+{
+  "evtspike": {
+    "enabled": true,
+    "disabled_channels": ["Microsoft-Windows-Crashdump/Operational"],
+    "added_channels": ["Microsoft-Windows-PowerShell/Operational"]
+  }
+}
+```
+
+### Security channel opt-in
+
+The `Security` channel is **not** in the default list because subscribing to it requires `SeSecurityPrivilege` on the service account and carries expanded capability. To enable:
+
+```json
+{
+  "evtspike": {
+    "enabled": true,
+    "security_channel_enabled": true
+  }
+}
+```
+
+> **Read before enabling.** This enables the DrainCtl service to read the Security log, clear the Security log, manage audit policy, and set SACLs on this host.
+
+The default `LocalSystem` service account already has `SeSecurityPrivilege` present in its token — the subsystem enables it at Start via `AdjustTokenPrivileges`. No `LsaAddAccountRights` operation is performed. Installations running under a dedicated service account must grant the privilege manually (User Rights Assignment → "Manage auditing and security log") before the subscription will succeed.
+
+### Webhook payload
+
+```json
+{
+  "event": "event_spike",
+  "host": "RDSH01",
+  "status": "warning",
+  "message": "Event spike on Application (20 vs ~0.1)",
+  "timestamp": "2026-04-19T11:48:17-04:00",
+  "spike": {
+    "channel": "Application",
+    "observed": 20,
+    "expected": 0.1,
+    "tail_probability": 0,
+    "window_start": "2026-04-19T11:48:07-04:00",
+    "window_end": "2026-04-19T11:48:17-04:00",
+    "confirmation_count": 2
+  }
+}
+```
+
+ntfy messages use priority 3 for `status: "warning"` and priority 4 for `status: "alert"`, with tags `["evtspike", <host>, <channel-basename>]`. Email renders through the same card template as other triggers — subject emoji (⚠️ / 🚨) reflects severity.
+
+### Config reference
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `evtspike.enabled` | bool | `false` | Master opt-in. When `false` the subsystem is never constructed and has zero runtime cost |
+| `evtspike.security_channel_enabled` | bool | `false` | Adds `Security` to the watched list; enables `SeSecurityPrivilege` on the service token at Start |
+| `evtspike.disabled_channels` | string[] | `[]` | Channel names to remove from the default list (case-insensitive match) |
+| `evtspike.added_channels` | string[] | `[]` | Extra channels to subscribe to beyond the default list |
+| `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability below which a bucket counts as anomalous |
+| `evtspike.min_count` | int | `10` | Lower observed-event floor; buckets below this never flag regardless of tail probability |
+| `evtspike.cooldown_minutes` | int | `15` | Minimum time between `event_spike` notifications for the same (host, channel) |
+| `evtspike.slot_maturity_observations` | int | `7` | Observations before a per-slot baseline is considered mature (~1 week at 1 visit/day/slot) |
+| `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence |
+| `evtspike.half_life_buckets` | int | `8640` | EWMA half-life in 10 s buckets (~1 day) for baseline adaptation |
+| `evtspike.prior_strength` | float | `1.0` | Gamma prior α/β strength; higher = more resistant to early outliers |
+| `evtspike.mean_per_bucket_prior` | float | `0.5` | Gamma prior mean; initial "expected events per bucket" before learning |
+
+All scalar fields except the channel lists and `baseline_path` hot-reload without a subsystem restart. See `specs/006-evtspike-detection/quickstart.md` for end-to-end setup, injection recipes, and troubleshooting.
 
 ---
 
