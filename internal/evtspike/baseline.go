@@ -4,7 +4,10 @@ package evtspike
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,4 +94,70 @@ func WriteBaseline(path string, bf *BaselineFile) error {
 	}
 
 	return nil
+}
+
+// LoadBaseline reads and deserializes a baseline from path, handling the four
+// startup cases in data-model.md §3 load protocol:
+//
+//  1. File missing — warn, return fresh BaselineFile, NO rename (FR-019).
+//  2. File unreadable (AV lock / transient EACCES) — warn, return fresh, NO
+//     rename so the next load can retry once the lock clears.
+//  3. JSON unmarshal error — warn, rename to .corrupt-YYYYMMDD-HHMMSS.bak,
+//     return fresh.
+//  4. SchemaVersion > 1 — warn, rename to .incompat-YYYYMMDD-HHMMSS.bak,
+//     return fresh.
+//
+// LoadBaseline never returns a non-nil error in current code paths; the
+// signature reserves room for future fatal conditions (e.g., empty path) that
+// should block subsystem start rather than silently rebuild state.
+func LoadBaseline(path string) (*BaselineFile, error) {
+	if path == "" {
+		return nil, fmt.Errorf("load baseline: empty path")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("", "evtspike", "baseline_missing", "path", path)
+			return freshBaseline(), nil
+		}
+		slog.Warn("", "evtspike", "baseline_unreadable", "path", path, "error", err.Error())
+		return freshBaseline(), nil
+	}
+
+	var bf BaselineFile
+	if err := json.Unmarshal(data, &bf); err != nil {
+		renamed := renameWithSuffix(path, "corrupt")
+		slog.Warn("", "evtspike", "baseline_corrupt", "path", path, "renamed", renamed, "error", err.Error())
+		return freshBaseline(), nil
+	}
+
+	if bf.SchemaVersion > SchemaVersion {
+		renamed := renameWithSuffix(path, "incompat")
+		slog.Warn("", "evtspike", "baseline_incompat", "path", path, "renamed", renamed, "schema_version", bf.SchemaVersion)
+		return freshBaseline(), nil
+	}
+
+	return &bf, nil
+}
+
+func freshBaseline() *BaselineFile {
+	return &BaselineFile{
+		SchemaVersion: SchemaVersion,
+		Channels:      make(map[string]ChannelState),
+	}
+}
+
+// renameWithSuffix moves path aside to path.<kind>-YYYYMMDD-HHMMSS.bak. Best
+// effort: if the rename fails (antivirus still holds the handle, permissions
+// changed out from under us), we log and keep going — the caller's goal is to
+// rebuild fresh state, not to guarantee the bad file is archived.
+func renameWithSuffix(path, kind string) string {
+	ts := time.Now().UTC().Format("20060102-150405")
+	renamed := fmt.Sprintf("%s.%s-%s.bak", path, kind, ts)
+	if err := os.Rename(path, renamed); err != nil {
+		slog.Warn("", "evtspike", "baseline_rename_failed", "path", path, "target", renamed, "error", err.Error())
+		return ""
+	}
+	return renamed
 }
