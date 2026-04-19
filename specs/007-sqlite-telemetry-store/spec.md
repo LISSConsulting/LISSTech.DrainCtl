@@ -115,7 +115,8 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 ### Edge Cases
 
 - **Database file missing or corrupted on startup**: the service must either recover (accepting loss of historical data) or refuse to start with a clear error pointing at the file path — never silently drop into an unwritable state.
-- **Disk full during write**: new samples and audit events should be dropped with a logged warning; the service must continue running and recover automatically when space returns.
+- **Disk full during write**: new samples, audit events, and spike events should be dropped with a logged warning; the service must continue running and recover automatically when space returns. For spike events, the in-process notification delivery still fires — only the durable record and the FR-027 recent-spikes list reflect the drop.
+- **Database temporarily unavailable during spike-event write** (AV lock, `SQLITE_BUSY`, transient `EACCES`, or writer conflict that persists beyond the normal `busy_timeout`): the spike-event write MUST be retried with a bounded exponential backoff (at most 3 attempts over no more than 2 seconds total). If all attempts fail, the event is dropped with a logged warning and the FR-027 recent-spikes list reflects the gap. Detection, scoring, confirmation, cooldown, and in-process notification delivery MUST NOT block on spike-event persistence — the detector returns to its scoring loop regardless of persistence outcome.
 - **Service restart during a retention or aggregation job**: partial work must not corrupt the store; the job must be safe to re-run on next start.
 - **Drain mode changed while the service is stopped**: because the CLI writes the registry directly, a change made during service downtime leaves no live witness. On next start the service MUST detect the divergence (registry drain state differs from the last committed audit state for that host) and write a single reconciliation audit record marking the uncertainty window, so the audit trail shows a change happened even if the exact moment and principal are unrecoverable.
 - **Host clock skew**: future-dated samples must still be stored and queryable, flagged in logs but not rejected, because clock skew is the operator's problem to diagnose.
@@ -137,6 +138,8 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 - **FR-001a**: On service start, the system MUST compare the current drain state of each monitored host against the most recent committed audit record for that host. When they differ, the system MUST emit a single reconciliation audit record per affected host marking the change as observed after a service-downtime gap (principal unknown — stored as empty string to match the partial index in data-model.md, timestamp window = last-known-good through first-post-start observation). The system MUST also emit a reconciliation record when the registry `LastWriteTime` for a host has advanced past the last audit record's timestamp even if the drain state matches (detects A→B→A oscillations during downtime).
 - **FR-001b**: Audit records MUST be immutable after insertion. The system MUST NOT expose any interface (API, CLI, or dashboard) that updates or deletes an individual audit record. The only permitted deletion path is the bulk retention job defined in FR-012, acting uniformly on records older than the configured retention window.
 - **FR-002**: The system MUST persist per-host performance-counter samples at the service's configured sampling interval, retaining each sample's host, timestamp, and counter values.
+- **FR-002a**: The system MUST persist every confirmed spike event produced by the evtspike subsystem (spec 006) as a discrete Spike Event Record containing at minimum: timestamp, host, channel, observed count, expected count, confirmation window start, and confirmation window end. Each spike event MUST be committed durably (fsync-equivalent, respecting WAL semantics) before the persistence sink acknowledges the handoff from the detector. Batching is permitted only within a single transaction; async fire-and-forget that could lose confirmed events on crash is NOT permitted on the success path. Transient write failures follow the bounded-retry-then-drop semantics defined in the "Database temporarily unavailable during spike-event write" edge case below — in-process notification delivery MUST NOT block on spike-event persistence.
+- **FR-002b**: Spike Event Records MUST be immutable after insertion. The system MUST NOT expose any interface (API, CLI, or dashboard) that updates or deletes an individual Spike Event Record. The only permitted deletion path is the bulk retention job defined in FR-012, acting uniformly on records older than the configured spike-event retention window (see FR-011a).
 - **FR-003**: Committed records MUST survive service restart, host reboot, and ungraceful termination; the only tolerated loss is data that had not yet been committed at the moment of failure.
 - **FR-004**: The storage file MUST live in the existing DrainCtl data directory (`%ProgramData%\LISS Technologies\LISSTech DrainCtl\`) and MUST have the same access control as `config.json` (SYSTEM, local Administrators, and the DrainCtl service account; no broader access).
 
@@ -153,9 +156,10 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 
 #### Retention
 
-- **FR-010**: Retention windows MUST be configurable in whole days.
+- **FR-010**: Retention windows MUST be configurable in whole days, independently per record class (metrics, audit, spike events).
 - **FR-011**: Metrics retention MUST support at least the range 1–365 days. Audit retention MUST support a longer range (at least 1–3650 days) to cover compliance needs.
-- **FR-012**: A periodic retention job MUST delete records older than the configured retention and reclaim disk space.
+- **FR-011a**: Spike-event retention MUST be configurable independently of metrics and audit retention, supporting at least the range 1–365 days, with a default of 90 days. Spike events are retained only for incident-history and dashboard-surface purposes (see 006 FR-027); they are not compliance-relevant like audit and do not need the multi-year range, but they should outlive metrics so operators can correlate a spike with historical counters.
+- **FR-012**: A periodic retention job MUST delete records older than the configured retention and reclaim disk space, applying the per-class retention windows (metrics, audit, spike events) uniformly.
 - **FR-013**: Retention job failures MUST be logged and MUST NOT crash the service; the next scheduled run MUST retry.
 
 #### Query API
@@ -163,6 +167,7 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 - **FR-014**: The dashboard MUST be able to request metrics for a given host and time range, specifying the desired resolution tier (raw / 5-minute / hourly).
 - **FR-015**: When a caller omits the resolution, the system MUST select an appropriate tier automatically based on the requested time span.
 - **FR-016**: The audit API MUST support querying by time range, by host, and by actor, with results ordered newest-first (reverse chronological).
+- **FR-016a**: The spike-event API MUST support querying by time range, by host, and by channel, with results ordered newest-first (reverse chronological). This is the query surface consumed by 006 FR-027's dashboard recent-spikes list.
 
 #### Chart Behaviour
 
@@ -204,6 +209,7 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 - **Retention Policy** — the operator's configuration for how long each class of record (metrics vs. audit) is kept. Expressed in days.
 - **Migration Marker** — a persistent flag indicating that the legacy JSONL has already been imported. Prevents re-migration on subsequent starts.
 - **Maintenance Job Run** — the recorded last execution of a named background job (aggregation, retention). Attributes: job name, started-at timestamp, duration, outcome, optional error reason. One row per job; overwritten on each new run.
+- **Spike Event Record** — a single confirmed event-log anomaly produced by the evtspike detector (see spec 006). Attributes: timestamp, host, channel, observed count, expected count, confirmation window start, confirmation window end. Immutable after insertion; only the bulk retention job may remove records. Note: this entity carries its own immutability commitment — the FR-001b immutability clause is scoped to Audit Records and does not transitively apply here; Spike Event Records are immutable by the separate commitment in their corresponding Durable Storage FR.
 
 ## Success Criteria *(mandatory)*
 
@@ -231,5 +237,5 @@ A farm with 50 hosts runs DrainCtl unattended for a year. The database file does
 - The dashboard's existing authentication and authorization posture applies unchanged to the new query endpoints; no new auth mechanism is introduced by this feature.
 - The service, not the CLI, owns write access to the store. CLI continues to read directly from the store file when the service is unreachable, but does not write.
 - The three resolution tiers (raw / ≈ 5-minute / hourly) are sufficient for the UX; further tiers can be added later without changing the query contract.
-- Schema migrations beyond the initial import are out of scope for this feature; adding new counters or columns later will be handled by a follow-up.
+- The initial schema delivered by this feature explicitly includes, at minimum: audit records, metric samples, hourly aggregates, the migration marker, maintenance job runs, and **confirmed spike event records** (a first-class record class consumed by spec 006's evtspike detector). Schema migrations *beyond* this initial set — adding new counters, new columns on existing tables, or entirely new record classes post-release — are out of scope for this feature and will be handled by follow-ups.
 - Portable export of audit or metrics data to CSV / JSON is out of scope. Operators needing an archive copy can query the store file directly or copy the file itself. A dedicated export UX is deferred to a follow-up feature if operator feedback calls for it.
