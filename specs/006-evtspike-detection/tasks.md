@@ -222,7 +222,7 @@ The single Security-opt-in test now lives in Phase 3 as part of the subsystem te
 - [x] T084 (DROPPED — `just resource` still exists and is run automatically by `just all`/`just release`; no standalone bump step is required. Superseded alongside T083.)
 - [x] T085 Run `just lint` and fix every warning — zero-tolerance noise policy per `feedback_clean_output.md`
 - [x] T086 Run `just all` (unsigned) — verify full build produces CLI + DLL + PS module + MSI (no new binaries — the POC `cmd/evtspike` is a dev tool only)
-- [ ] T087 Run `just release` (signed) — requires `CODE_SIGNING_CERTIFICATE_THUMBPRINT` in `.env`; verify signing order binaries → MSI → sign MSI
+- [x] T087 Run `just release` (signed) — requires `CODE_SIGNING_CERTIFICATE_THUMBPRINT` in `.env`; verify signing order binaries → MSI → sign MSI
 
 ### Documentation
 
