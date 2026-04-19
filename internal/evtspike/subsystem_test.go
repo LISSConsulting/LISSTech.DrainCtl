@@ -5,6 +5,7 @@ package evtspike
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -258,6 +259,154 @@ func TestSubsystem_FloodThenSecondAnomaly_BothFire_US2(t *testing.T) {
 	}
 	if last.Observed != 30 {
 		t.Errorf("second spike Observed: got %d want 30", last.Observed)
+	}
+}
+
+// TestSubsystem_FloodThenRestart_SecondAnomalyStillFires_US2 covers T045: the
+// robust-cap protection from US2 must survive a service restart. We flood the
+// Application channel mid-day, persist the baseline through the production
+// WriteBaseline path, then start a fresh Subsystem pointed at the same
+// baseline file. After cooldown, a smaller second anomaly (y=30 in a 2-of-3
+// pattern) must still fire OnSpike on the restarted subsystem — proving the
+// capped posterior round-tripped through JSON without losing the
+// poisoning-resistance property tested in TestSubsystem_FloodThenSecondAnomaly_BothFire_US2.
+func TestSubsystem_FloodThenRestart_SecondAnomalyStillFires_US2(t *testing.T) {
+	baselinePath := filepath.Join(t.TempDir(), "baseline.json")
+	cfg := dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          1,
+		SlotMaturityObservations: 5,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             baselinePath,
+	}
+
+	s1 := New(cfg, "TEST-HOST")
+	s1.Subscribe = noopSubscribe
+
+	var mu1 sync.Mutex
+	var got1 []SpikePayload
+	s1.OnSpike = func(p SpikePayload) {
+		mu1.Lock()
+		got1 = append(got1, p)
+		mu1.Unlock()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s1.initChannels(ctx, nil)
+
+	channel := "Application"
+	counter1 := s1.counters[channel]
+	d1 := s1.detectors[channel]
+	if counter1 == nil || d1 == nil {
+		t.Fatal("Application counter/detector not initialised on s1")
+	}
+
+	base := time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)
+	const trainingDays = 10
+	const bucketsPerDay = 360
+	for day := 0; day < trainingDays; day++ {
+		dayStart := base.Add(time.Duration(day) * 24 * time.Hour)
+		for i := 0; i < bucketsPerDay; i++ {
+			d1.ObserveBucket(dayStart.Add(time.Duration(i)*10*time.Second), 1)
+		}
+	}
+
+	floodStart := base.Add(time.Duration(trainingDays) * 24 * time.Hour)
+	const floodBuckets = 180
+	for i := 0; i < floodBuckets; i++ {
+		counter1.Store(100)
+		s1.scoreOnce(floodStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+
+	mu1.Lock()
+	floodSpikes := len(got1)
+	mu1.Unlock()
+	if floodSpikes < 1 {
+		t.Fatalf("flood fired no OnSpike on s1; expected ≥1")
+	}
+
+	s1.writeBaseline()
+
+	bf, err := LoadBaseline(baselinePath)
+	if err != nil {
+		t.Fatalf("LoadBaseline after restart: %v", err)
+	}
+	if bf == nil || bf.Channels == nil {
+		t.Fatal("LoadBaseline returned nil baseline or nil channels map")
+	}
+	persisted, ok := bf.Channels[channel]
+	if !ok {
+		t.Fatalf("baseline missing channel %q after restart; got %d channels", channel, len(bf.Channels))
+	}
+
+	s2 := New(cfg, "TEST-HOST")
+	s2.Subscribe = noopSubscribe
+
+	var mu2 sync.Mutex
+	var got2 []SpikePayload
+	s2.OnSpike = func(p SpikePayload) {
+		mu2.Lock()
+		got2 = append(got2, p)
+		mu2.Unlock()
+	}
+
+	s2.initChannels(ctx, bf)
+
+	counter2 := s2.counters[channel]
+	d2 := s2.detectors[channel]
+	if counter2 == nil || d2 == nil {
+		t.Fatal("post-restart subsystem missing Application counter/detector")
+	}
+
+	if !reflect.DeepEqual(d2.Slots, persisted.Slots) {
+		t.Fatalf("hydrated slots differ from persisted state — warm restart broken")
+	}
+	if !d2.LastAlert.Equal(persisted.LastAlert) {
+		t.Fatalf("hydrated LastAlert %v differs from persisted %v", d2.LastAlert, persisted.LastAlert)
+	}
+
+	pauseStart := floodStart.Add(floodBuckets * 10 * time.Second)
+	const pauseBuckets = 12
+	for i := 0; i < pauseBuckets; i++ {
+		counter2.Store(1)
+		s2.scoreOnce(pauseStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+	mu2.Lock()
+	afterPause := len(got2)
+	mu2.Unlock()
+
+	secondStart := pauseStart.Add(pauseBuckets * 10 * time.Second)
+	steps := []int{30, 1, 30}
+	for i, c := range steps {
+		counter2.Store(int64(c))
+		s2.scoreOnce(secondStart.Add(time.Duration(i) * 10 * time.Second))
+	}
+
+	mu2.Lock()
+	total := len(got2)
+	mu2.Unlock()
+
+	if total <= afterPause {
+		t.Fatalf("post-restart y=30 anomaly did not fire OnSpike; "+
+			"baseline poisoned across warm restart "+
+			"(floodSpikes=%d afterPause=%d total=%d)",
+			floodSpikes, afterPause, total)
+	}
+
+	mu2.Lock()
+	last := got2[total-1]
+	mu2.Unlock()
+	if last.Channel != channel {
+		t.Errorf("post-restart spike Channel: got %q want %q", last.Channel, channel)
+	}
+	if last.Observed != 30 {
+		t.Errorf("post-restart spike Observed: got %d want 30", last.Observed)
 	}
 }
 
