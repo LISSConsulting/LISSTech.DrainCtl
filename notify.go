@@ -159,15 +159,33 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			}
 		}
 
+		// For event_spike, the severity ("warning"/"alert") comes from the
+		// target wiring (FR-011a). Clone the result + payload per target so
+		// each dispatch carries its configured severity without mutating
+		// shared state.
+		dispatchResult := result
+		dispatchPayload := payload
+		if trigger == TriggerEventSpike {
+			sev := spikeSeverity(target, result.Status)
+			cloned := *result
+			cloned.Status = sev
+			dispatchResult = &cloned
+			dispatchPayload = clonePayload(payload)
+			dispatchPayload["status"] = sev
+			dispatchPayload["subject"] = NotificationSubject(dispatchResult, trigger, changedBy)
+		}
+
 		// Dispatch to backend in a goroutine so the poll loop is not
 		// blocked by slow HTTP/SMTP calls.
 		t := target // capture for goroutine
+		r := dispatchResult
+		pl := dispatchPayload
 		switch t.Type {
 		case "webhook":
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := sendWebhook(t.URL, t.Secret, payload); err != nil {
+				if err := sendWebhook(t.URL, t.Secret, pl); err != nil {
 					slog.Warn("webhook notification failed", "error", err, "url", t.URL)
 				} else {
 					slog.Info("", "notify", "webhook", "event", string(trigger), "url", t.URL)
@@ -175,18 +193,18 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			}()
 
 		case "ntfy":
-			title := NotificationSubject(result, trigger, changedBy)
+			title := NotificationSubject(r, trigger, changedBy)
 			priority := ntfyStyle(trigger)
-			ntfyMsg := result.Message
+			ntfyMsg := r.Message
 			var tags string
-			if trigger == TriggerSessionWarning && result.Sessions != nil {
-				sess := result.Sessions
+			if trigger == TriggerSessionWarning && r.Sessions != nil {
+				sess := r.Sessions
 				ntfyMsg = fmt.Sprintf("Session utilization at %d%% (%d/%d sessions).",
 					sess.UtilizationPct, sess.TotalSessions, sess.MaxSessions)
 			}
-			if trigger == TriggerEventSpike && result.Spike != nil {
-				priority = spikeNtfyPriority(result.Status)
-				tags = spikeNtfyTags(result.Spike.Host, result.Spike.Channel)
+			if trigger == TriggerEventSpike && r.Spike != nil {
+				priority = spikeNtfyPriority(r.Status)
+				tags = spikeNtfyTags(r.Spike.Host, r.Spike.Channel)
 			}
 			wg.Add(1)
 			go func() {
@@ -202,7 +220,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := sendEmail(t, result, trigger, changedBy); err != nil {
+				if err := sendEmail(t, r, trigger, changedBy); err != nil {
 					slog.Warn("email notification failed", "error", err, "url", t.URL)
 				} else {
 					slog.Info("", "notify", "email", "event", string(trigger), "to", t.To)
@@ -447,8 +465,32 @@ func NotificationSubject(result *CheckResult, trigger Trigger, changedBy string)
 	}
 }
 
-// spikeSubjectEmoji maps the event_spike severity (carried on result.Status
-// until per-target severity wiring lands in T031) to a leading subject emoji.
+// spikeSeverity resolves the effective event_spike severity for a target
+// (FR-011a): target.Severity wins when set; otherwise fall back to a status
+// the caller may have pre-populated on the result; otherwise default to
+// "warning". No auto-escalation on persistence or intensity (FR-011b).
+func spikeSeverity(target NotificationTarget, fallback string) string {
+	if s := strings.ToLower(target.Severity); s == "warning" || s == "alert" {
+		return s
+	}
+	if s := strings.ToLower(fallback); s == "warning" || s == "alert" {
+		return s
+	}
+	return "warning"
+}
+
+// clonePayload returns a shallow copy of the shared SendNotification payload
+// so a per-target override of the "status" or "subject" field does not leak
+// into sibling targets.
+func clonePayload(src map[string]any) map[string]any {
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// spikeSubjectEmoji maps the event_spike severity to a leading subject emoji.
 // Matching is case-insensitive so capitalized callers don't silently demote to
 // the info glyph. Unknown severities fall back to info.
 func spikeSubjectEmoji(severity string) string {

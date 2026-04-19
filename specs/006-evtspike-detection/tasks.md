@@ -104,7 +104,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 - [x] T029 [US1] In `notify.go`, add `LastSpikeNotify map[string]map[string]time.Time` to `NotifyState` per `data-model.md` §9 (keyed by target URL → "host|channel" → last sent)
 - [x] T030 [US1] In `notify.go`, add an `event_spike` branch to `SendNotification`: reuse the existing envelope, populate the `spike` sub-object from a new `*SpikePayload` parameter (thread through the existing signature via a typed context struct or a new `SendSpikeNotification` helper — pick whichever keeps call sites clean); enforce per-target repeat interval using `LastSpikeNotify`
-- [ ] T031 [US1] In `notify.go`, ensure severity comes from the target wiring (per-target `severity` field or existing severity-tag mechanism); no auto-escalation (FR-011a, FR-011b)
+- [x] T031 [US1] In `notify.go`, ensure severity comes from the target wiring (per-target `severity` field or existing severity-tag mechanism); no auto-escalation (FR-011a, FR-011b)
 - [x] T032 [US1] Update `email.go` (and/or its MJML template) to render `event_spike` using the card layout from commits `bdf197e`/`38d6dae`: subject emoji (⚠️ warning / 🚨 alert), preview text `"<channel>: <observed> events, expected ~<expected>. Tail probability <p>."`, card body with Observed-vs-Expected and Confirmation-Window rows
 - [x] T033 [US1] Add `ntfy` rendering branch for `event_spike` in `notify.go`: Title=subject, Message=message, Priority (3 for warning / 4 for alert), Tags=["evtspike", host, channel-basename]
 
