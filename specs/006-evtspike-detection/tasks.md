@@ -116,7 +116,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 - [x] T037 [US1] In the subsystem's `OnSpike` call path (service-side), additionally push the spike to the dashboard's ring buffer and emit a `recent_spike` broker event; fire a `detector_status` broker event on state transitions in `Subsystem.Start` (state derivation per `DeriveState`)
 - [x] T038 [US1] In `ui/src/lib/api.js`, add `fetchEvtSpikeStatus(host)` and `fetchRecentSpikes(host)`; extend the existing SSE client to handle `detector_status` and `recent_spike` event types and update in-memory state
 - [x] T039 [US1] In `ui/src/lib/types.ts` (or `.d.ts`), add `DetectorStatus` and `RecentSpike` TypeScript types mirroring `data-model.md` §6 and §7
-- [ ] T040 [US1] In `ui/src/components/ServerCard.svelte`, render a detector status pill next to the existing server pills using the four-state color map (healthy=green, training=amber, disabled=grey, error=red); consume from SSE-driven state
+- [x] T040 [US1] In `ui/src/components/ServerCard.svelte`, render a detector status pill next to the existing server pills using the four-state color map (healthy=green, training=amber, disabled=grey, error=red); consume from SSE-driven state
 - [ ] T041 [US1] In `ui/src/components/ServerDetail.svelte`, add a "Recent spikes" section reusing the existing list styling (channel, time, observed vs expected); populate from `fetchRecentSpikes` on mount and refresh on `recent_spike` SSE events
 
 #### Logging + ops
