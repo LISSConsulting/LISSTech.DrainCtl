@@ -156,6 +156,24 @@ type TelemetryConfig struct {
 	RetentionIntervalMinutes  int `json:"retention_interval_minutes"`  // retention sweep cadence, default 15
 }
 
+// EvtSpikeConfig holds event-log anomaly detection settings. Zero value is
+// fully disabled; numeric fields are promoted to defaults by ClampEvtSpike.
+type EvtSpikeConfig struct {
+	Enabled                  bool     `json:"enabled"`
+	MinCount                 int      `json:"min_count"`
+	Threshold                float64  `json:"threshold"`
+	CooldownMinutes          int      `json:"cooldown_minutes"`
+	SlotMaturityObservations int      `json:"slot_maturity_observations"`
+	PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
+	HalfLifeBuckets          int      `json:"half_life_buckets"`
+	PriorStrength            float64  `json:"prior_strength"`
+	MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
+	BaselinePath             string   `json:"baseline_path"`
+	DisabledChannels         []string `json:"disabled_channels"`
+	AddedChannels            []string `json:"added_channels"`
+	SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
+}
+
 // Config is the top-level config file structure (config.json).
 type Config struct {
 	GracePeriod   int    `json:"grace_period"` // minutes
@@ -177,6 +195,8 @@ type Config struct {
 	Performance PerformanceConfig `json:"performance"`
 	Retention   RetentionConfig   `json:"retention"`
 	Telemetry   TelemetryConfig   `json:"telemetry"`
+
+	EvtSpike EvtSpikeConfig `json:"evtspike"`
 }
 
 // DashboardJSON holds dashboard settings in config.json.
@@ -239,6 +259,7 @@ func DefaultConfig() *Config {
 		Performance:             PerformanceConfig{CollectPerSession: true},
 		Retention:               RetentionConfig{MetricsDays: DefaultMetricsDays, AuditDays: DefaultAuditDays},
 		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
+		EvtSpike:                EvtSpikeConfig{DisabledChannels: []string{}, AddedChannels: []string{}},
 	}
 }
 
