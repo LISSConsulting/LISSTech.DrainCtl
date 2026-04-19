@@ -23,6 +23,7 @@ type NotifyState struct {
 	LastAlertNotify       map[string]time.Time             // key = target URL (alert trigger)
 	LastSessionWarnNotify map[string]time.Time             // key = target URL (session_warning trigger)
 	LastPerfNotify        map[string]map[Trigger]time.Time // key = target URL -> trigger -> last sent
+	LastSpikeNotify       map[string]map[string]time.Time  // key = target URL -> "host|channel" -> last sent
 }
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
@@ -42,6 +43,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	}
 	if state.LastPerfNotify == nil {
 		state.LastPerfNotify = make(map[string]map[Trigger]time.Time)
+	}
+	if state.LastSpikeNotify == nil {
+		state.LastSpikeNotify = make(map[string]map[string]time.Time)
 	}
 
 	// Reset alert tracking when returning to healthy.
@@ -85,6 +89,19 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	if result.Performance != nil {
 		payload["performance"] = result.Performance
 	}
+	if trigger == TriggerEventSpike && result.Spike != nil {
+		s := result.Spike
+		payload["spike"] = map[string]any{
+			"channel":            s.Channel,
+			"window_start":       s.WindowStart.Format(time.RFC3339),
+			"window_end":         s.WindowEnd.Format(time.RFC3339),
+			"observed":           s.Observed,
+			"expected":           s.Expected,
+			"tail_probability":   s.TailProbability,
+			"confirmation_count": s.ConfirmationCount,
+			"first_seen_at":      s.FirstSeenAt.Format(time.RFC3339),
+		}
+	}
 
 	var wg sync.WaitGroup
 	for _, target := range targets {
@@ -96,28 +113,48 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 			continue
 		}
 
-		// For repeating triggers (alert, session_warning, perf triggers), check
-		// per-target repeat interval.
+		// For repeating triggers (alert, session_warning, perf, event_spike),
+		// check per-target repeat interval.
 		if isRepeatTrigger(trigger) {
 			now := time.Now()
 			repeatInterval := time.Duration(target.RepeatMinutes) * time.Minute
-			lastSent := getLastSent(state, target.URL, trigger)
 
-			if repeatInterval > 0 {
-				if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
+			if trigger == TriggerEventSpike {
+				if result.Spike == nil {
 					continue
 				}
+				spikeKey := result.Spike.Host + "|" + result.Spike.Channel
+				lastSent := time.Time{}
+				if m, ok := state.LastSpikeNotify[target.URL]; ok {
+					lastSent = m[spikeKey]
+				}
+				if repeatInterval > 0 {
+					if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
+						continue
+					}
+				} else if !lastSent.IsZero() {
+					continue
+				}
+				if state.LastSpikeNotify[target.URL] == nil {
+					state.LastSpikeNotify[target.URL] = make(map[string]time.Time)
+				}
+				state.LastSpikeNotify[target.URL][spikeKey] = now
 			} else {
-				if !lastSent.IsZero() {
+				lastSent := getLastSent(state, target.URL, trigger)
+				if repeatInterval > 0 {
+					if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
+						continue
+					}
+				} else if !lastSent.IsZero() {
 					continue
 				}
-			}
-			setLastSent(state, target.URL, trigger, now)
+				setLastSent(state, target.URL, trigger, now)
 
-			// Critical supersedes warning: refresh the warning cooldown so
-			// it cannot fire independently while the critical state persists.
-			if sub := subordinateTrigger(trigger); sub != "" {
-				setLastSent(state, target.URL, sub, now)
+				// Critical supersedes warning: refresh the warning cooldown so
+				// it cannot fire independently while the critical state persists.
+				if sub := subordinateTrigger(trigger); sub != "" {
+					setLastSent(state, target.URL, sub, now)
+				}
 			}
 		}
 
@@ -452,7 +489,7 @@ var perfTriggers = map[Trigger]bool{
 
 // isRepeatTrigger returns true for triggers that use per-target repeat intervals.
 func isRepeatTrigger(t Trigger) bool {
-	return t == TriggerAlert || t == TriggerSessionWarning || perfTriggers[t]
+	return t == TriggerAlert || t == TriggerSessionWarning || t == TriggerEventSpike || perfTriggers[t]
 }
 
 // subordinateTrigger returns the lower-severity trigger that should be
