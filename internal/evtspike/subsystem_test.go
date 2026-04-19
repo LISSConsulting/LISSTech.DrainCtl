@@ -915,6 +915,125 @@ func TestSubsystem_Reload_DisabledChannels_RestartsSubsystem_US5(t *testing.T) {
 	}
 }
 
+// TestSubsystem_SecurityChannelOptIn_PrivilegeGranted covers the success half of
+// T023a: when cfg.SecurityChannelEnabled=true and EnablePrivilege succeeds,
+// Subscribe is invoked for Security alongside the default channels and
+// EnablePrivilege is called exactly once at Start. The dedicated-account
+// failure half lives in TestSubsystem_SecurityChannelOptIn_PrivilegeNotAssigned.
+func TestSubsystem_SecurityChannelOptIn_PrivilegeGranted(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.SecurityChannelEnabled = true
+	s.OnSpike = func(SpikePayload) {}
+
+	var privCalls atomic.Int32
+	s.EnablePrivilege = func() error {
+		privCalls.Add(1)
+		return nil
+	}
+
+	var subMu sync.Mutex
+	var subscribed []string
+	s.Subscribe = func(_ context.Context, channel, _ string, _ *atomic.Int64) error {
+		subMu.Lock()
+		subscribed = append(subscribed, channel)
+		subMu.Unlock()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.initChannels(ctx, nil)
+
+	if got := privCalls.Load(); got != 1 {
+		t.Errorf("EnablePrivilege call count: got %d want 1", got)
+	}
+
+	subMu.Lock()
+	gotSub := append([]string(nil), subscribed...)
+	subMu.Unlock()
+	if !containsFold(gotSub, SecurityChannel) {
+		t.Errorf("%q not subscribed when privilege granted; subscribed=%v", SecurityChannel, gotSub)
+	}
+	if !containsFold(gotSub, "Application") {
+		t.Errorf("default channel %q missing from subscribed set; subscribed=%v", "Application", gotSub)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !containsFold(s.channels, SecurityChannel) {
+		t.Errorf("%q missing from s.channels after Start; channels=%v", SecurityChannel, s.channels)
+	}
+}
+
+// TestSubsystem_SecurityChannelOptIn_PrivilegeNotAssigned covers the dedicated-
+// account half of T023a: when AdjustTokenPrivileges returns
+// ERROR_NOT_ALL_ASSIGNED (surfaced as ErrPrivilegeNotAssigned), the subsystem
+// must skip the Security subscription, log a warning, and continue subscribing
+// all other default channels.
+func TestSubsystem_SecurityChannelOptIn_PrivilegeNotAssigned(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.SecurityChannelEnabled = true
+	s.OnSpike = func(SpikePayload) {}
+
+	var privCalls atomic.Int32
+	s.EnablePrivilege = func() error {
+		privCalls.Add(1)
+		return ErrPrivilegeNotAssigned
+	}
+
+	var subMu sync.Mutex
+	var subscribed []string
+	s.Subscribe = func(_ context.Context, channel, _ string, _ *atomic.Int64) error {
+		subMu.Lock()
+		subscribed = append(subscribed, channel)
+		subMu.Unlock()
+		return nil
+	}
+
+	logBuf := &safeBuf{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.initChannels(ctx, nil)
+
+	if got := privCalls.Load(); got != 1 {
+		t.Errorf("EnablePrivilege call count: got %d want 1", got)
+	}
+
+	subMu.Lock()
+	gotSub := append([]string(nil), subscribed...)
+	subMu.Unlock()
+	if containsFold(gotSub, SecurityChannel) {
+		t.Errorf("%q subscribed despite ErrPrivilegeNotAssigned; subscribed=%v", SecurityChannel, gotSub)
+	}
+	if len(gotSub) != len(Defaults) {
+		t.Errorf("subscribed channel count: got %d want %d (Defaults excluding Security)", len(gotSub), len(Defaults))
+	}
+	if !containsFold(gotSub, "Application") || !containsFold(gotSub, "System") {
+		t.Errorf("core default channels missing after Security skip; subscribed=%v", gotSub)
+	}
+
+	log := logBuf.String()
+	if !strings.Contains(log, "evtspike=skipped") {
+		t.Errorf("expected 'evtspike=skipped' warning in log; got:\n%s", log)
+	}
+	if !strings.Contains(log, "channel=Security") {
+		t.Errorf("expected warning to name channel=Security; got:\n%s", log)
+	}
+	if !strings.Contains(log, "level=WARN") {
+		t.Errorf("expected WARN-level skip log; got:\n%s", log)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if containsFold(s.channels, SecurityChannel) {
+		t.Errorf("%q in s.channels despite ErrPrivilegeNotAssigned; channels=%v", SecurityChannel, s.channels)
+	}
+}
+
 // waitForBaselineWrittenAt polls the baseline file until LoadBaseline returns a
 // BaselineFile whose WrittenAt equals the expected timestamp. The synchronous
 // tick send guarantees persistenceLoop has entered the case branch, but
