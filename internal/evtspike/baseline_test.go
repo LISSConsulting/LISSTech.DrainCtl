@@ -321,3 +321,115 @@ func TestLoadBaseline_TruncatedFileWarnsAndRenames(t *testing.T) {
 		t.Errorf("expected slog warning evtspike=baseline_corrupt, got %d records", len(h.records))
 	}
 }
+
+// TestLoadBaseline_OversizeFileIsRenamed — T111. A 17 MB file exceeds the
+// 16 MB cap; LoadBaseline must refuse, rename .oversize-*.bak, and return
+// fresh baseline. Without the cap a tampered file could pressure memory.
+func TestLoadBaseline_OversizeFileIsRenamed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "oversize.json")
+	// 17 MB of garbage — just beyond the 16 MB cap.
+	payload := bytes.Repeat([]byte("x"), 17<<20)
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h := &capturingHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	bf, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if bf.SchemaVersion != SchemaVersion || len(bf.Channels) != 0 {
+		t.Errorf("oversize did not return fresh baseline: %+v", bf)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.oversize-*.bak"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one .oversize-*.bak, got %v", matches)
+	}
+	if !hasWarnWithEvtspike(h, "baseline_oversize") {
+		t.Errorf("expected slog warning evtspike=baseline_oversize")
+	}
+}
+
+// TestLoadBaseline_ZeroSchemaVersionIsRenamed — T111. Strict equality: a
+// zero SchemaVersion (missing in JSON or explicitly 0) is rejected.
+func TestLoadBaseline_ZeroSchemaVersionIsRenamed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "zero.json")
+	// Valid JSON, explicitly zero schema.
+	bf := &BaselineFile{SchemaVersion: 0, Channels: map[string]ChannelState{}}
+	data, _ := json.Marshal(bf)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h := &capturingHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	got, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if got.SchemaVersion != SchemaVersion {
+		t.Errorf("zero schema was accepted: got schema=%d", got.SchemaVersion)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.incompat-*.bak"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one .incompat-*.bak, got %v", matches)
+	}
+	if !hasWarnWithEvtspike(h, "baseline_incompat") {
+		t.Errorf("expected slog warning evtspike=baseline_incompat")
+	}
+}
+
+// TestLoadBaseline_ClampsOutOfBandFloats — T111. Negative Alpha/Beta and
+// oversize N values must be clamped on load with a single WARN.
+func TestLoadBaseline_ClampsOutOfBandFloats(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clamp.json")
+
+	bf := &BaselineFile{
+		SchemaVersion: SchemaVersion,
+		WrittenAt:     time.Date(2026, 4, 19, 0, 0, 0, 0, time.UTC),
+		Host:          "test",
+		Channels: map[string]ChannelState{
+			"Application": {
+				Slots:  [96]GammaState{0: {Alpha: -5, Beta: 1e20, N: -3}},
+				Global: GammaState{Alpha: 1e20, Beta: -0.5, N: 1_000_000_001},
+			},
+		},
+	}
+	data, _ := json.Marshal(bf)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h := &capturingHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	got, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	cs := got.Channels["Application"]
+	if cs.Slots[0].Alpha != 0 || cs.Slots[0].N != 0 {
+		t.Errorf("slot[0] negative values not clamped to 0: %+v", cs.Slots[0])
+	}
+	if cs.Slots[0].Beta != gammaStateMaxAlphaBeta {
+		t.Errorf("slot[0] oversize Beta not clamped: got %v want %v", cs.Slots[0].Beta, gammaStateMaxAlphaBeta)
+	}
+	if cs.Global.Alpha != gammaStateMaxAlphaBeta || cs.Global.Beta != 0 || cs.Global.N != gammaStateMaxN {
+		t.Errorf("global out-of-band not clamped: %+v", cs.Global)
+	}
+	if !hasWarnWithEvtspike(h, "baseline_clamped") {
+		t.Errorf("expected slog warning evtspike=baseline_clamped")
+	}
+}

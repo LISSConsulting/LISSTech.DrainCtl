@@ -20,6 +20,15 @@ var emailTemplateRaw string
 
 var emailTmpl = template.Must(template.New("email").Parse(emailTemplateRaw))
 
+// smtpDialTimeout bounds the TCP/TLS handshake; smtpOverallDeadline bounds
+// the entire greeting + AUTH + DATA sequence past connect. Both are var (not
+// const) so tests can swap them to millisecond scales without growing the
+// suite by minutes.
+var (
+	smtpDialTimeout     = 10 * time.Second
+	smtpOverallDeadline = 30 * time.Second
+)
+
 type emailData struct {
 	Subject           string
 	Preview           string // hidden preview text shown by email clients
@@ -285,9 +294,21 @@ func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, 
 }
 
 func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) error {
-	c, err := smtp.Dial(addr)
+	d := net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := d.Dial("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp dial: %w", err)
+	}
+	// Arm the read deadline BEFORE smtp.NewClient — NewClient reads the
+	// server greeting and will hang on a silent-accept server otherwise.
+	if err := conn.SetDeadline(time.Now().Add(smtpOverallDeadline)); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtp set deadline: %w", err)
+	}
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtp new client: %w", err)
 	}
 	defer func() { _ = c.Close() }()
 
@@ -312,9 +333,14 @@ func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) 
 }
 
 func sendSMTPS(addr, host string, target NotificationTarget, msg []byte) error {
-	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host})
+	d := &net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := tls.DialWithDialer(d, "tcp", addr, &tls.Config{ServerName: host})
 	if err != nil {
 		return fmt.Errorf("smtps dial: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(smtpOverallDeadline)); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtps set deadline: %w", err)
 	}
 
 	c, err := smtp.NewClient(conn, host)

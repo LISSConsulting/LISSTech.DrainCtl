@@ -8,11 +8,22 @@ import (
 )
 
 const (
-	slotsPerDay                     = 96
-	minGlobalN                      = 20
-	confirmM                        = 3
-	confirmN                        = 2
-	maxNBinIter                     = 50000
+	slotsPerDay = 96
+	minGlobalN  = 20
+	confirmM    = 3
+	confirmN    = 2
+	// maxNBinIter bounds the negative-binomial CDF iteration. Raised from
+	// 50k after codex review 2026-04-19 flagged silent miss on extreme floods
+	// — at 50k the partial cdf still carried meaningful residual mass and
+	// `1 - cdf` over-estimated the true tail. 10 M iterations are ~0.5 s
+	// worst-case and the inner-loop underflow short-circuit means the
+	// typical cost stays microseconds. See plan Phase C3.
+	maxNBinIter = 10_000_000
+	// negBinUnderflow is the PMF threshold below which we stop iterating.
+	// When pmf falls below this the geometric-decaying remainder is
+	// negligible for any alert-threshold comparison (thresholds are at
+	// least 1e-12 in production).
+	negBinUnderflow                 = 1e-300
 	robustCapProb                   = 0.99
 	defaultSlotMaturityObservations = 7
 )
@@ -104,17 +115,28 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 		d.LastAlert = now
 	}
 
-	// Robust cap: during a confirmed anomaly, clamp the update to the 99th percentile of the current posterior so a sustained flood cannot poison the baseline and mask a follow-up anomaly (SC-004 / US2 Independent Test).
+	// Robust cap: during a confirmed anomaly, clamp the update to the 99th
+	// percentile of the current posterior so a sustained flood cannot poison
+	// the baseline and mask a follow-up anomaly (SC-004 / US2 Independent
+	// Test). If the quantile iteration overflows (extreme flood beyond our
+	// float precision), skip the baseline update entirely — updating with
+	// a saturated sentinel would re-introduce the poisoning path the cap
+	// exists to prevent (plan C3).
 	updateY := float64(count)
+	skipBaseline := false
 	if anomalous {
-		cap := float64(negBinQuantile(robustCapProb, scoring.Alpha, scoring.Beta))
-		if updateY > cap {
-			updateY = cap
+		capY, ok := negBinQuantile(robustCapProb, scoring.Alpha, scoring.Beta)
+		if !ok {
+			skipBaseline = true
+		} else if updateY > float64(capY) {
+			updateY = float64(capY)
 		}
 	}
 
-	ewmaUpdate(s, updateY, d.Cfg.Rho)
-	ewmaUpdate(&d.Global, updateY, d.Cfg.Rho)
+	if !skipBaseline {
+		ewmaUpdate(s, updateY, d.Cfg.Rho)
+		ewmaUpdate(&d.Global, updateY, d.Cfg.Rho)
+	}
 
 	return Result{
 		Count:     count,
@@ -176,6 +198,12 @@ func negBinUpperTail(y int, alpha, beta float64) float64 {
 		if cdf >= 1.0 {
 			return 0.0
 		}
+		if pmf < negBinUnderflow {
+			// Remaining mass is bounded by a geometric tail with ratio
+			// approaching q — negligible compared to any alert threshold.
+			// Stop iterating; treat remaining tail as zero.
+			break
+		}
 	}
 	tail := 1.0 - cdf
 	if tail < 0 {
@@ -184,29 +212,39 @@ func negBinUpperTail(y int, alpha, beta float64) float64 {
 	return tail
 }
 
-// negBinQuantile returns the smallest y such that P(Y <= y) >= prob.
-func negBinQuantile(prob float64, alpha, beta float64) int {
+// negBinQuantile returns the smallest y such that P(Y <= y) >= prob and a
+// boolean `ok` that is false iff the iteration hit maxNBinIter without
+// reaching prob (an extreme-flood signal). Callers MUST branch on ok:
+// returning a best-effort y on overflow would silently disable downstream
+// flood-poisoning protection (FR-009 / plan C3).
+func negBinQuantile(prob float64, alpha, beta float64) (int, bool) {
 	if prob <= 0 {
-		return 0
+		return 0, true
 	}
 	p := beta / (beta + 1.0)
 	q := 1.0 - p
 
 	logPMF0 := alpha * math.Log(p)
 	if logPMF0 < -700 {
-		return 0
+		return 0, true
 	}
 	pmf := math.Exp(logPMF0)
 	cdf := pmf
 	if cdf >= prob {
-		return 0
+		return 0, true
 	}
 	for k := 0; k < maxNBinIter; k++ {
 		pmf *= ((float64(k) + alpha) / float64(k+1)) * q
 		cdf += pmf
-		if cdf >= prob || pmf == 0 {
-			return k + 1
+		if cdf >= prob {
+			return k + 1, true
+		}
+		if pmf == 0 {
+			// PMF underflowed to zero before reaching prob — the true
+			// quantile is beyond our floating-point precision; signal
+			// overflow so the caller refuses to update the baseline.
+			return maxNBinIter, false
 		}
 	}
-	return maxNBinIter
+	return maxNBinIter, false
 }
