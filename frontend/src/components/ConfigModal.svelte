@@ -6,7 +6,7 @@
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity } from 'lucide-svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren } from 'lucide-svelte';
 
     let { onclose } = $props();
 
@@ -725,6 +725,18 @@
                             {/if}
                         </div>
                     {/if}
+                {/if}
+
+                <!-- Event Log Anomaly Detection -->
+                {#if config.evtspike}
+                    <div class="settings-group">
+                        <div class="section-header"><Siren size={14} strokeWidth={2.5} /> Event Log Anomaly Detection</div>
+                        <div class="settings-hint">Watches Windows event-log channels and fires notifications on the event_spike trigger when a confirmed anomaly is detected.</div>
+                        <label class="settings-check">
+                            <input type="checkbox" bind:checked={config.evtspike.enabled} />
+                            Enable detector
+                        </label>
+                    </div>
                 {/if}
 
                 <!-- Notification Targets -->

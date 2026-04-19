@@ -166,6 +166,11 @@ let mockSettings = {
     { type: 'email', url: 'smtps://smtp.office365.com:587', from: 'alerts@contoso.com', to: ['manager@contoso.com'], triggers: ['alert', 'cpu_critical', 'memory_critical', 'input_delay_critical'], repeat_minutes: 480, enabled: true },
     { type: 'webhook', url: 'https://grafana.internal/api/annotations', secret: '', triggers: ['drain_on', 'drain_off', 'alert', 'healthy'], repeat_minutes: 0, enabled: true },
   ],
+  evtspike: {
+    // Only `enabled` is exposed via /api/v1/settings per FR-028. Admin-only
+    // evtspike fields live in config.json and are not surfaced in the mock.
+    enabled: false,
+  },
 };
 
 /**

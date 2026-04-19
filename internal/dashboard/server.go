@@ -192,6 +192,11 @@ type DashboardServer struct {
 	// (no-op for that field). nil threshold/gracePeriod/pollInterval mean the fields were absent.
 	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *dc.PerformanceConfig) error
 
+	// testPutEvtSpikeEnabledFunc, if non-nil, is called by handlePutSettings
+	// instead of dc.UpdateEvtSpikeEnabled for the evtspike.enabled flag. Nil
+	// enabled means the field was absent from the request body (no-op).
+	testPutEvtSpikeEnabledFunc func(enabled *bool) error
+
 	// evtspikeStatus returns the current detector status for a host. Set by
 	// the evtspike subsystem at Start; nil when the feature is off or not yet
 	// wired. See evtspike.go handleEvtSpikeStatus for nil semantics.
@@ -663,18 +668,27 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 			Enabled:       t.Enabled,
 		}
 	}
+	// evtspike surface is intentionally narrow: the modal only exposes the
+	// enabled toggle per FR-028. Other evtspike fields (thresholds, channel
+	// lists, baseline_path, security-channel gate) stay admin-only in
+	// config.json and are not leaked here.
+	type evtspikeView struct {
+		Enabled bool `json:"enabled"`
+	}
 	out := struct {
 		Notifications           []targetView         `json:"notifications"`
 		SessionWarningThreshold int                  `json:"session_warning_threshold"`
 		GracePeriod             int                  `json:"grace_period"`
 		PollInterval            int                  `json:"poll_interval"`
 		Performance             dc.PerformanceConfig `json:"performance"`
+		EvtSpike                evtspikeView         `json:"evtspike"`
 	}{
 		Notifications:           views,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
 		Performance:             cfg.Performance,
+		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -702,6 +716,12 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		ClearSecret bool `json:"clear_secret,omitempty"`
 	}
 
+	// evtspikeInput narrows the modal's write surface to just the enabled
+	// flag (FR-028). Admin-only evtspike fields are not accepted here; those
+	// belong in config.json.
+	type evtspikeInput struct {
+		Enabled *bool `json:"enabled,omitempty"`
+	}
 	// Use pointer-to-slice so we can distinguish absent ("don't change") from
 	// explicit empty array ("clear all notifications").
 	var in struct {
@@ -710,6 +730,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		GracePeriod             *int                  `json:"grace_period,omitempty"`
 		PollInterval            *int                  `json:"poll_interval,omitempty"`
 		Performance             *dc.PerformanceConfig `json:"performance,omitempty"`
+		EvtSpike                *evtspikeInput        `json:"evtspike,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -820,6 +841,24 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	} else {
 		if err := dc.UpdateNotifySettings(notifications, in.SessionWarningThreshold, in.GracePeriod, in.PollInterval, in.Performance); err != nil {
 			slog.Error("update settings failed", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	var evtspikeEnabled *bool
+	if in.EvtSpike != nil {
+		evtspikeEnabled = in.EvtSpike.Enabled
+	}
+	if ds.testPutEvtSpikeEnabledFunc != nil {
+		if err := ds.testPutEvtSpikeEnabledFunc(evtspikeEnabled); err != nil {
+			slog.Error("update evtspike enabled failed (test hook)", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := dc.UpdateEvtSpikeEnabled(evtspikeEnabled); err != nil {
+			slog.Error("update evtspike enabled failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1578,16 +1617,23 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 	for i := range redacted {
 		redacted[i].Secret = ""
 	}
+	// Narrow evtspike to the enabled flag only — SSE must not leak admin-only
+	// fields (thresholds, channel lists, baseline_path, security gate).
+	type evtspikeView struct {
+		Enabled bool `json:"enabled"`
+	}
 	resp := struct {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
 		Performance             dc.PerformanceConfig    `json:"performance"`
+		EvtSpike                evtspikeView            `json:"evtspike"`
 	}{
 		Notifications:           redacted,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		Performance:             cfg.Performance,
+		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
 	}
 	if resp.Notifications == nil {
 		resp.Notifications = []dc.NotificationTarget{}
