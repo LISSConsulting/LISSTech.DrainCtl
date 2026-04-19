@@ -189,7 +189,7 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 ### Tests for User Story 5
 
 - [x] T066 [P] [US5] Integration test in `internal/evtspike/subsystem_test.go`: running subsystem → call `Reload(newCfg)` with a changed `threshold` → next `ObserveBucket` uses new value (inspect internal config)
-- [ ] T067 [P] [US5] Integration test in `internal/evtspike/subsystem_test.go`: call `Reload(newCfg)` with a changed `disabled_channels` → assert subsystem performs Stop+Start (detectable via a "channel list changed" slog line), no alert storm
+- [x] T067 [P] [US5] Integration test in `internal/evtspike/subsystem_test.go`: call `Reload(newCfg)` with a changed `disabled_channels` → assert subsystem performs Stop+Start (detectable via a "channel list changed" slog line), no alert storm
 - [ ] T068 [P] [US5] Integration test in `internal/svc/svc_test.go`: file watcher picks up a mtime change on `config.json` → `EvtSpike.Reload` is called with the new config
 
 ### Implementation for User Story 5

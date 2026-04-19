@@ -3,9 +3,12 @@
 package evtspike
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +16,25 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
+
+// safeBuf is a bytes.Buffer guarded by a mutex so a slog.TextHandler can write
+// to it concurrently with the test goroutine reading String().
+type safeBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
 
 // noopSubscribe is a stand-in for the real EvtSubscribe used by
 // Subsystem.Start. Tests drive bucket counters directly, so we just need the
@@ -790,6 +812,106 @@ func TestSubsystem_Reload_ThresholdHotApplied_US5(t *testing.T) {
 		if d.Cfg.Threshold != 1e-3 {
 			t.Errorf("post-reload %s: d.Cfg.Threshold=%g want 1e-3", ch, d.Cfg.Threshold)
 		}
+	}
+}
+
+// TestSubsystem_Reload_DisabledChannels_RestartsSubsystem_US5 covers T067:
+// calling Reload with a changed DisabledChannels list must trigger an internal
+// Stop+Start so detectors and subscriptions realign with the new channel set.
+// Assertions:
+//   - A "channel_list_changed" slog line is emitted (the contract marker).
+//   - The "evtspike=start" line fires AFTER "channel_list_changed" (proving
+//     Start was re-invoked by the reload path, not just a state mutation).
+//   - The newly-disabled channel is gone from s.channels and s.detectors.
+//   - A retained channel's *Detector instance is rebuilt (different pointer
+//     than pre-reload) — the Stop side rebuilt the map from scratch.
+//   - OnSpike is not called during the transition (no alert storm, per US5's
+//     Independent Test).
+func TestSubsystem_Reload_DisabledChannels_RestartsSubsystem_US5(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+
+	var onSpikeCalls atomic.Int32
+	s.OnSpike = func(SpikePayload) { onSpikeCalls.Add(1) }
+
+	logBuf := &safeBuf{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	const disabledChannel = "Application"
+	const retainedChannel = "System"
+
+	s.mu.Lock()
+	if _, ok := s.detectors[disabledChannel]; !ok {
+		s.mu.Unlock()
+		t.Fatalf("premise broken: %q not subscribed at Start; got channels=%v", disabledChannel, s.channels)
+	}
+	preReloadDetector, ok := s.detectors[retainedChannel]
+	if !ok {
+		s.mu.Unlock()
+		t.Fatalf("premise broken: %q not subscribed at Start; got channels=%v", retainedChannel, s.channels)
+	}
+	s.mu.Unlock()
+
+	// Clear the baseline log output captured during the initial Start so the
+	// assertions below only reflect what Reload emitted.
+	logBuf.mu.Lock()
+	logBuf.b.Reset()
+	logBuf.mu.Unlock()
+
+	newCfg := s.cfg
+	newCfg.DisabledChannels = []string{disabledChannel}
+
+	if err := s.Reload(newCfg); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	log := logBuf.String()
+	changedIdx := strings.Index(log, "channel_list_changed")
+	if changedIdx < 0 {
+		t.Fatalf("expected 'channel_list_changed' slog marker after Reload; captured log:\n%s", log)
+	}
+	startIdx := strings.Index(log, "evtspike=start")
+	if startIdx < 0 {
+		t.Fatalf("expected 'evtspike=start' slog line (proving Start was re-invoked); captured log:\n%s", log)
+	}
+	if startIdx <= changedIdx {
+		t.Errorf("'evtspike=start' at %d should follow 'channel_list_changed' at %d; captured log:\n%s",
+			startIdx, changedIdx, log)
+	}
+	stopIdx := strings.Index(log, "evtspike=stop")
+	if stopIdx < 0 || stopIdx >= startIdx {
+		t.Errorf("expected 'evtspike=stop' to precede 'evtspike=start' (Stop+Start order); captured log:\n%s", log)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, stillThere := s.detectors[disabledChannel]; stillThere {
+		t.Errorf("%q still in detectors map after Reload disabled it", disabledChannel)
+	}
+	for _, ch := range s.channels {
+		if strings.EqualFold(ch, disabledChannel) {
+			t.Errorf("%q still in s.channels after Reload disabled it; channels=%v", disabledChannel, s.channels)
+		}
+	}
+	postReloadDetector, ok := s.detectors[retainedChannel]
+	if !ok {
+		t.Fatalf("retained channel %q missing from detectors after Reload; channels=%v", retainedChannel, s.channels)
+	}
+	if postReloadDetector == preReloadDetector {
+		t.Errorf("retained channel %q detector pointer did not change across Reload — Stop+Start did not rebuild state",
+			retainedChannel)
+	}
+
+	if got := onSpikeCalls.Load(); got != 0 {
+		t.Errorf("OnSpike fired %d times during Reload transition; alert storm expected to be 0", got)
 	}
 }
 
