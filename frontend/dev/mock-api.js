@@ -783,12 +783,47 @@ function handleRequest(method, pathname, body, query = {}) {
   }
 
   // GET /api/evtspike/spikes?host=<host>&limit=<n> — recent confirmed spikes.
+  // Dev-mock generates a deterministic 0..3-spike history per host so the
+  // ServerDetail "Recent Spikes" tile renders in all its populated states
+  // without a real backend.
   if (method === 'GET' && pathname === '/api/evtspike/spikes') {
     const host = query.host;
     if (!host || !state.has(host)) {
       return { status: 404, body: { error: 'unknown_host' } };
     }
-    return { status: 200, body: [] };
+    let h = 0;
+    for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
+    // Mostly populated (1–3 spikes) with ~12% of hosts showing the empty state
+    // so the dev dashboard exercises both populated and empty paths of the tile.
+    const mod = Math.abs(h) % 8;
+    const count = mod === 0 ? 0 : 1 + (mod % 3);
+    const channels = [
+      'Microsoft-Windows-Winlogon/Operational',
+      'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',
+      'Application',
+      'Security',
+    ];
+    const nowMs = Date.now();
+    const limit = Math.min(50, Math.max(1, Number(query.limit ?? 20)));
+    const spikes = [];
+    for (let i = 0; i < Math.min(count, limit); i++) {
+      const ageSec = 120 + i * 900 + Math.abs(h >> (i + 1)) % 600;
+      const end = nowMs - ageSec * 1000;
+      const start = end - 10_000;
+      spikes.push({
+        id: Math.abs(h) * 100 + i,
+        host,
+        channel: channels[(Math.abs(h) + i) % channels.length],
+        window_start: new Date(start).toISOString(),
+        window_end: new Date(end).toISOString(),
+        observed: 35 + ((Math.abs(h) >> (i + 2)) & 0x3f),
+        expected: 1.2 + (i * 0.6),
+        tail_probability: 1e-6 * Math.pow(10, -(i + 1)),
+        confirmation_count: 2 + (i % 2),
+        first_seen_at: new Date(start - 20_000).toISOString(),
+      });
+    }
+    return { status: 200, body: spikes };
   }
 
   // GET /api/v1/maintenance/status — mirrors contracts/http-maintenance.md
