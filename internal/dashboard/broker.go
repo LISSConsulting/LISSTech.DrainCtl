@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 )
 
 // SSEEvent is a single event broadcast to all connected browsers.
@@ -40,12 +42,16 @@ type Broker struct {
 	mu          sync.RWMutex
 	subscribers map[string]*subscriber
 	nextID      int
+
+	stateMu       sync.Mutex
+	detectorState map[string]string
 }
 
 // NewBroker creates an empty broker.
 func NewBroker() *Broker {
 	return &Broker{
-		subscribers: make(map[string]*subscriber),
+		subscribers:   make(map[string]*subscriber),
+		detectorState: make(map[string]string),
 	}
 }
 
@@ -128,4 +134,60 @@ func (b *Broker) Count() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.subscribers)
+}
+
+// PublishDetectorStatus broadcasts a detector_status SSE event only when the
+// host's reported state differs from the last one broadcast. Subsystems may
+// call this every evaluation cycle; only transitions reach subscribers, so
+// the stream stays quiet on steady state.
+//
+// Returns true when an event was emitted, false when the call was suppressed.
+func (b *Broker) PublishDetectorStatus(status evtspike.DetectorStatus) bool {
+	b.stateMu.Lock()
+	prev, seen := b.detectorState[status.Host]
+	if seen && prev == status.State {
+		b.stateMu.Unlock()
+		return false
+	}
+	b.detectorState[status.Host] = status.State
+	b.stateMu.Unlock()
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		slog.Warn("sse: PublishDetectorStatus: marshal failed", "host", status.Host, "error", err)
+		return false
+	}
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "detector_status",
+		Host:      status.Host,
+		Data:      data,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.Warn("sse: PublishDetectorStatus: envelope marshal failed", "host", status.Host, "error", err)
+		return false
+	}
+	b.Broadcast(payload)
+	return true
+}
+
+// PublishRecentSpike broadcasts a recent_spike SSE event. Every call emits —
+// spikes are by construction distinct events, no dedup.
+func (b *Broker) PublishRecentSpike(entry evtspike.RecentSpikeEntry) {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		slog.Warn("sse: PublishRecentSpike: marshal failed", "host", entry.Host, "error", err)
+		return
+	}
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "recent_spike",
+		Host:      entry.Host,
+		Data:      data,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.Warn("sse: PublishRecentSpike: envelope marshal failed", "host", entry.Host, "error", err)
+		return
+	}
+	b.Broadcast(payload)
 }
