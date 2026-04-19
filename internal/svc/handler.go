@@ -571,13 +571,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Start evtspike subsystem if enabled. OnSpike forwards to spikeCh which
 	// the Execute loop drains; this keeps notifyState access single-threaded
-	// (only the Execute goroutine calls SendNotification).
+	// (only the Execute goroutine calls SendNotification). Dashboard ring
+	// buffer and SSE broker calls are thread-safe, so they run directly from
+	// the subsystem goroutine without passing through spikeCh.
 	var evtSpikeSub *evtspike.Subsystem
 	if fullCfg.EvtSpike.Enabled {
 		host, _ := os.Hostname()
 		spikeCh = make(chan dc.SpikePayload, 16)
 		evtSpikeSub = evtspike.New(fullCfg.EvtSpike, host)
 		evtSpikeSub.OnSpike = func(p dc.SpikePayload) {
+			if dashState != nil && dashState.OnEvtSpikeIngest != nil {
+				dashState.OnEvtSpikeIngest(p)
+			}
 			select {
 			case spikeCh <- p:
 			default:
@@ -585,10 +590,24 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					"host", p.Host, "channel", p.Channel)
 			}
 		}
+		evtSpikeSub.OnStatusChange = func(status evtspike.DetectorStatus) {
+			if dashState != nil && dashState.OnEvtSpikeStatus != nil {
+				dashState.OnEvtSpikeStatus(status)
+			}
+		}
 		if err := evtSpikeSub.Start(ctx); err != nil {
 			slog.Warn("evtspike=start_failed", "error", err)
 			spikeCh = nil
 		} else {
+			if dashState != nil && dashState.RegisterEvtSpikeStatusFunc != nil {
+				localHost := host
+				dashState.RegisterEvtSpikeStatusFunc(func(h string) evtspike.DetectorStatus {
+					if h != localHost {
+						return evtspike.DetectorStatus{}
+					}
+					return evtSpikeSub.Status()
+				})
+			}
 			slog.Info("evtspike=enabled", "host", host)
 		}
 	}
