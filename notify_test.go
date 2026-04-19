@@ -1493,3 +1493,99 @@ func TestEventSpikePayload_DefaultSeverity(t *testing.T) {
 		t.Errorf("payload.status = %v, want %q", got, "warning")
 	}
 }
+
+// TestSendNotification_SpikeCooldownRolledBackOnWebhookFailure — T109. A
+// webhook that returns 500 must leave LastSpikeNotify empty for that
+// (target, host|channel) pair so the next confirmation fires through. Pre-
+// patch, the cooldown timestamp was written before dispatch and never rolled
+// back, so a transient failure consumed the entire repeat interval.
+func TestSendNotification_SpikeCooldownRolledBackOnWebhookFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "simulated failure", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+	}
+	result, _ := newSpikeResult()
+	state := &NotifyState{}
+
+	SendNotification(targets, state, result, TriggerEventSpike, "")
+
+	state.SpikeMu.Lock()
+	defer state.SpikeMu.Unlock()
+	m := state.LastSpikeNotify[srv.URL]
+	key := result.Spike.Host + "|" + result.Spike.Channel
+	if m != nil {
+		if ts, ok := m[key]; ok && !ts.IsZero() {
+			t.Errorf("LastSpikeNotify[%s][%s] = %v after send failure; want zero (rolled back)",
+				srv.URL, key, ts)
+		}
+	}
+}
+
+// TestSendNotification_SpikeCooldownConsumedOnSuccess — T109. A webhook that
+// returns 200 must leave the timestamp set so the repeat interval actually
+// holds.
+func TestSendNotification_SpikeCooldownConsumedOnSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+	}
+	result, _ := newSpikeResult()
+	state := &NotifyState{}
+
+	SendNotification(targets, state, result, TriggerEventSpike, "")
+
+	state.SpikeMu.Lock()
+	defer state.SpikeMu.Unlock()
+	m := state.LastSpikeNotify[srv.URL]
+	key := result.Spike.Host + "|" + result.Spike.Channel
+	if m == nil {
+		t.Fatalf("LastSpikeNotify[%s] not set after successful dispatch", srv.URL)
+	}
+	if ts := m[key]; ts.IsZero() {
+		t.Errorf("LastSpikeNotify[%s][%s] = zero after successful dispatch", srv.URL, key)
+	}
+}
+
+// TestSendNotification_MultiTargetOneFailsOneSucceeds — T109. Cross-target
+// isolation for cooldown accounting under concurrent dispatch: a failure on
+// target A must not affect the cooldown for target B, and vice versa.
+func TestSendNotification_MultiTargetOneFailsOneSucceeds(t *testing.T) {
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "bad", http.StatusInternalServerError)
+	}))
+	defer failSrv.Close()
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer okSrv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: failSrv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+		{Type: "webhook", URL: okSrv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+	}
+	result, _ := newSpikeResult()
+	state := &NotifyState{}
+
+	SendNotification(targets, state, result, TriggerEventSpike, "")
+
+	key := result.Spike.Host + "|" + result.Spike.Channel
+	state.SpikeMu.Lock()
+	defer state.SpikeMu.Unlock()
+	if m := state.LastSpikeNotify[failSrv.URL]; m != nil {
+		if ts, ok := m[key]; ok && !ts.IsZero() {
+			t.Errorf("failing target: cooldown not rolled back: %v", ts)
+		}
+	}
+	m := state.LastSpikeNotify[okSrv.URL]
+	if m == nil || m[key].IsZero() {
+		t.Errorf("succeeding target: cooldown was not set")
+	}
+}

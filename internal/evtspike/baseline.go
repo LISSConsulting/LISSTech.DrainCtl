@@ -20,6 +20,23 @@ import (
 // can reject mismatched files rather than silently misinterpret them.
 const SchemaVersion = 1
 
+// maxBaselineFileSize caps how large a baseline file may grow before we
+// consider it tampered and refuse to load. 16 MB is ~60x the natural upper
+// bound of a 54-channel baseline (~260 KB) — big enough to never trip on
+// legitimate growth, small enough that an oversize file cannot pressure
+// memory during load.
+const maxBaselineFileSize = 16 << 20
+
+// gammaStateMaxAlphaBeta clamps loaded Alpha/Beta so a tampered file cannot
+// poison the detector with values that would overflow later arithmetic.
+// 1e9 is ~300 years of worst-case observations, far above any real run.
+// Zero is a legitimate un-observed-slot value and is not clamped up.
+const gammaStateMaxAlphaBeta = 1e9
+
+// gammaStateMaxN caps N similarly. Observation counts in realistic runs
+// stay under 1M; 1e9 is defensive.
+const gammaStateMaxN = 1_000_000_000
+
 // baselineMutexName is deliberately distinct from config.go's configMutexName —
 // coupling baseline writes to config writes would block each other despite
 // protecting unrelated state.
@@ -96,31 +113,33 @@ func WriteBaseline(path string, bf *BaselineFile) error {
 	return nil
 }
 
-// LoadBaseline reads and deserializes a baseline from path, handling the four
-// startup cases in data-model.md §3 load protocol:
-//
-//  1. File missing — warn, return fresh BaselineFile, NO rename (FR-019).
-//  2. File unreadable (AV lock / transient EACCES) — warn, return fresh, NO
-//     rename so the next load can retry once the lock clears.
-//  3. JSON unmarshal error — warn, rename to .corrupt-YYYYMMDD-HHMMSS.bak,
-//     return fresh.
-//  4. SchemaVersion > 1 — warn, rename to .incompat-YYYYMMDD-HHMMSS.bak,
-//     return fresh.
-//
-// LoadBaseline never returns a non-nil error in current code paths; the
-// signature reserves room for future fatal conditions (e.g., empty path) that
-// should block subsystem start rather than silently rebuild state.
+// LoadBaseline reads and deserializes a baseline from path per data-model.md
+// §3's startup protocol. The error return is reserved for future fatal
+// conditions (e.g. empty path) — today every recoverable case returns a
+// fresh baseline so subsystem start is never blocked on a missing or
+// damaged file.
 func LoadBaseline(path string) (*BaselineFile, error) {
 	if path == "" {
 		return nil, fmt.Errorf("load baseline: empty path")
 	}
 
-	data, err := os.ReadFile(path)
+	fi, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("", "evtspike", "baseline_missing", "path", path)
 			return freshBaseline(), nil
 		}
+		slog.Warn("", "evtspike", "baseline_unreadable", "path", path, "error", err.Error())
+		return freshBaseline(), nil
+	}
+	if fi.Size() > maxBaselineFileSize {
+		renamed := renameWithSuffix(path, "oversize")
+		slog.Warn("", "evtspike", "baseline_oversize", "path", path, "renamed", renamed, "size", fi.Size())
+		return freshBaseline(), nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
 		slog.Warn("", "evtspike", "baseline_unreadable", "path", path, "error", err.Error())
 		return freshBaseline(), nil
 	}
@@ -132,13 +151,57 @@ func LoadBaseline(path string) (*BaselineFile, error) {
 		return freshBaseline(), nil
 	}
 
-	if bf.SchemaVersion > SchemaVersion {
+	// Strict schema equality: reject future AND malformed (zero/negative)
+	// versions. All three end up archived as .incompat-<ts>.bak.
+	if bf.SchemaVersion != SchemaVersion {
 		renamed := renameWithSuffix(path, "incompat")
 		slog.Warn("", "evtspike", "baseline_incompat", "path", path, "renamed", renamed, "schema_version", bf.SchemaVersion)
 		return freshBaseline(), nil
 	}
 
+	clampLoadedBaseline(&bf, path)
 	return &bf, nil
+}
+
+// clampLoadedBaseline guards the detector against tampered/out-of-band
+// values from a loaded baseline file. Zero values are LEGITIMATE — an
+// un-observed slot naturally has Alpha=Beta=N=0 — so we only clamp
+// negative or overflow. Any clamp emits a single WARN with the path.
+func clampLoadedBaseline(bf *BaselineFile, path string) {
+	clamped := 0
+	clampGamma := func(g *GammaState) {
+		if g.Alpha < 0 {
+			g.Alpha = 0
+			clamped++
+		} else if g.Alpha > gammaStateMaxAlphaBeta {
+			g.Alpha = gammaStateMaxAlphaBeta
+			clamped++
+		}
+		if g.Beta < 0 {
+			g.Beta = 0
+			clamped++
+		} else if g.Beta > gammaStateMaxAlphaBeta {
+			g.Beta = gammaStateMaxAlphaBeta
+			clamped++
+		}
+		if g.N < 0 {
+			g.N = 0
+			clamped++
+		} else if g.N > gammaStateMaxN {
+			g.N = gammaStateMaxN
+			clamped++
+		}
+	}
+	for name, cs := range bf.Channels {
+		for i := range cs.Slots {
+			clampGamma(&cs.Slots[i])
+		}
+		clampGamma(&cs.Global)
+		bf.Channels[name] = cs
+	}
+	if clamped > 0 {
+		slog.Warn("", "evtspike", "baseline_clamped", "path", path, "values_clamped", clamped)
+	}
 }
 
 func freshBaseline() *BaselineFile {
