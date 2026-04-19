@@ -88,7 +88,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 - [x] T020 [P] [US1] Contract test in `internal/dashboard/server_test.go`: `GET /api/evtspike/spikes?host=X&limit=20` returns newest-first ring-buffer content; `limit=500` clamped to 50
 - [x] T021 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: fake `Subscriber` feeds 50-event bursts in 2-of-3 windows; assert `OnSpike` invoked exactly once per cooldown with a `SpikePayload` matching invariants from `data-model.md` §5
 - [x] T022 [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: single-window transient burst (one window over threshold, next two clean) does NOT call `OnSpike` (confirms 2-of-3 suppression)
-- [ ] T023 [P] [US1] Integration test in `internal/dashboard/broker_test.go`: state transition `disabled → training → healthy` emits exactly one `detector_status` SSE event per transition; same-state no-op emits zero
+- [x] T023 [P] [US1] Integration test in `internal/dashboard/broker_test.go`: state transition `disabled → training → healthy` emits exactly one `detector_status` SSE event per transition; same-state no-op emits zero
 
 ### Implementation for User Story 1
 
@@ -110,7 +110,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 #### Dashboard surface
 
-- [ ] T034 [US1] In `internal/dashboard/broker.go`, add `detector_status` and `recent_spike` SSE event types to the broker dispatch; reuse existing fan-out and backpressure logic
+- [x] T034 [US1] In `internal/dashboard/broker.go`, add `detector_status` and `recent_spike` SSE event types to the broker dispatch; reuse existing fan-out and backpressure logic
 - [x] T035 [US1] In `internal/dashboard/server.go`, add `GET /api/evtspike/status?host=<hostname>` handler returning `DetectorStatus` per `contracts/dashboard-sse-events.md`; require authenticated session
 - [x] T036 [US1] In `internal/dashboard/server.go`, add `GET /api/evtspike/spikes?host=<hostname>&limit=<1..50>` handler serving from an in-memory ring buffer (capacity 20 per host), backed by a new `internal/dashboard/spikestore.go` ring-buffer type; default limit 20, clamp to 50
 - [ ] T037 [US1] In the subsystem's `OnSpike` call path (service-side), additionally push the spike to the dashboard's ring buffer and emit a `recent_spike` broker event; fire a `detector_status` broker event on state transitions in `Subsystem.Start` (state derivation per `DeriveState`)
