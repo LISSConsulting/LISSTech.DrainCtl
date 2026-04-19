@@ -204,6 +204,86 @@ func TestSendEmailSMTP(t *testing.T) {
 	}
 }
 
+// TestEventSpikePayload_EmailTemplate verifies the rendered MJML → HTML output
+// for an event_spike payload: subject emoji matches per-target severity, preview
+// text carries the channel and observed/expected values, and the card body
+// lists Observed-vs-Expected and Confirmation-Window rows. Corresponds to
+// TestEventSpikePayload_EmailTemplate in contracts/event_spike-payload.md.
+func TestEventSpikePayload_EmailTemplate(t *testing.T) {
+	base, spike := newSpikeResult()
+	const warnEmoji = "\u26A0"      // ⚠ (optionally followed by VS-16 U+FE0F)
+	const alertEmoji = "\U0001F6A8" // 🚨
+	const infoEmoji = "\u2139"      // ℹ
+
+	cases := []struct {
+		name      string
+		severity  string
+		wantEmoji string
+		skipEmoji string
+	}{
+		{"warning", "warning", warnEmoji, alertEmoji},
+		{"alert", "alert", alertEmoji, warnEmoji},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := *base
+			r.Status = tc.severity
+			subject := NotificationSubject(&r, TriggerEventSpike, "")
+
+			if !strings.Contains(subject, tc.wantEmoji) {
+				t.Errorf("subject %q missing expected severity emoji %q", subject, tc.wantEmoji)
+			}
+			if strings.Contains(subject, tc.skipEmoji) {
+				t.Errorf("subject %q unexpectedly contains the other-severity emoji %q", subject, tc.skipEmoji)
+			}
+			if strings.Contains(subject, infoEmoji) {
+				t.Errorf("subject %q fell back to info emoji despite valid severity %q", subject, tc.severity)
+			}
+
+			html, err := renderEmailHTML(&r, subject, TriggerEventSpike, "")
+			if err != nil {
+				t.Fatalf("renderEmailHTML: %v", err)
+			}
+			if html == "" {
+				t.Fatal("empty HTML")
+			}
+
+			if !strings.Contains(html, tc.wantEmoji) {
+				t.Errorf("rendered HTML missing severity emoji %q", tc.wantEmoji)
+			}
+
+			// Preview text (hidden div at top of body) must carry channel + observed/expected.
+			previewWants := []string{
+				spike.Channel,
+				"47 events",
+				"~3.2",
+				"Tail probability",
+			}
+			for _, want := range previewWants {
+				if !strings.Contains(html, want) {
+					t.Errorf("rendered HTML missing preview fragment %q", want)
+				}
+			}
+
+			// Card body rows — label text must be present verbatim.
+			cardRows := []string{"Observed vs Expected", "Confirmation Window"}
+			for _, want := range cardRows {
+				if !strings.Contains(html, want) {
+					t.Errorf("rendered HTML missing card row %q", want)
+				}
+			}
+
+			// Card body values — observed, expected, confirmation count.
+			for _, want := range []string{"47", "3.2", "3 of last 3 windows"} {
+				if !strings.Contains(html, want) {
+					t.Errorf("rendered HTML missing card value %q", want)
+				}
+			}
+		})
+	}
+}
+
 func TestNotificationSubject(t *testing.T) {
 	dur := 8100.0 // 2h 15m
 	grace := 3600 // 1h
