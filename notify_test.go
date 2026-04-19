@@ -1589,3 +1589,82 @@ func TestSendNotification_MultiTargetOneFailsOneSucceeds(t *testing.T) {
 		t.Errorf("succeeding target: cooldown was not set")
 	}
 }
+
+// TestTargetIsolation_TwoHealthyOneFailing — T094d / FR-025 / SC-009. A 500
+// from one target must not prevent delivery to the other two healthy targets,
+// and must not leave any state that blocks a subsequent spike from reaching
+// the healthy targets (detection continues unaffected).
+func TestTargetIsolation_TwoHealthyOneFailing(t *testing.T) {
+	var ok1Count, ok2Count, failCount int32
+
+	ok1Srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&ok1Count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ok1Srv.Close()
+	ok2Srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&ok2Count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ok2Srv.Close()
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&failCount, 1)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer failSrv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: ok1Srv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+		{Type: "webhook", URL: ok2Srv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+		{Type: "webhook", URL: failSrv.URL, Triggers: []Trigger{TriggerEventSpike}, RepeatMinutes: 10},
+	}
+	result, _ := newSpikeResult()
+	state := &NotifyState{}
+
+	SendNotification(targets, state, result, TriggerEventSpike, "")
+
+	if got := atomic.LoadInt32(&ok1Count); got != 1 {
+		t.Errorf("healthy target 1: want 1 call, got %d", got)
+	}
+	if got := atomic.LoadInt32(&ok2Count); got != 1 {
+		t.Errorf("healthy target 2: want 1 call, got %d", got)
+	}
+	if got := atomic.LoadInt32(&failCount); got != 1 {
+		t.Errorf("failing target: want 1 attempt, got %d", got)
+	}
+
+	key := result.Spike.Host + "|" + result.Spike.Channel
+	state.SpikeMu.Lock()
+	// Healthy targets must have cooldowns set.
+	if m := state.LastSpikeNotify[ok1Srv.URL]; m == nil || m[key].IsZero() {
+		t.Error("healthy target 1: cooldown not set after delivery")
+	}
+	if m := state.LastSpikeNotify[ok2Srv.URL]; m == nil || m[key].IsZero() {
+		t.Error("healthy target 2: cooldown not set after delivery")
+	}
+	// Failing target must have its cooldown rolled back so the next spike can retry it.
+	if m := state.LastSpikeNotify[failSrv.URL]; m != nil {
+		if ts, ok := m[key]; ok && !ts.IsZero() {
+			t.Errorf("failing target: cooldown not rolled back after 500: %v", ts)
+		}
+	}
+	state.SpikeMu.Unlock()
+
+	// Verify detection continues: a second distinct spike (different channel)
+	// still reaches both healthy targets and the failing target can attempt again.
+	result2, _ := newSpikeResult()
+	result2.Spike.Channel = "Microsoft-Windows-Security-Auditing/Operational"
+	result2.Host = result2.Spike.Host
+
+	SendNotification(targets, state, result2, TriggerEventSpike, "")
+
+	if got := atomic.LoadInt32(&ok1Count); got != 2 {
+		t.Errorf("healthy target 1 second spike: want 2 calls total, got %d", got)
+	}
+	if got := atomic.LoadInt32(&ok2Count); got != 2 {
+		t.Errorf("healthy target 2 second spike: want 2 calls total, got %d", got)
+	}
+	if got := atomic.LoadInt32(&failCount); got != 2 {
+		t.Errorf("failing target second spike: want 2 attempts total, got %d", got)
+	}
+}
