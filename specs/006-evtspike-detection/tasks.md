@@ -164,7 +164,7 @@ Previously described the standalone `evtspike` binary as a Windows service forwa
 ### Tests for User Story 4
 
 - [x] T059 [P] [US4] Integration test in `internal/evtspike/subsystem_test.go`: mature a slot, Stop+Start the subsystem, assert loaded baseline's `GammaState` values equal pre-stop values (bit-for-bit via `reflect.DeepEqual`)
-- [ ] T060 [P] [US4] Integration test in `internal/evtspike/subsystem_test.go`: post-restart, inject a normal-rate bucket → NO `OnSpike`; inject an anomalous bucket → `OnSpike` fires on the first eligible confirmation window
+- [x] T060 [P] [US4] Integration test in `internal/evtspike/subsystem_test.go`: post-restart, inject a normal-rate bucket → NO `OnSpike`; inject an anomalous bucket → `OnSpike` fires on the first eligible confirmation window
 - [ ] T061 [P] [US4] Unit test in `internal/evtspike/baseline_test.go`: write a baseline file with `SchemaVersion=99`, then `LoadBaseline` → returns fresh baseline, writes warning to slog, renames original to `.incompat-YYYYMMDD-HHMMSS.bak`
 - [ ] T062 [P] [US4] Unit test in `internal/evtspike/baseline_test.go`: write a baseline file, truncate to half its bytes, then `LoadBaseline` → returns fresh baseline, writes warning, renames original to `.corrupt-YYYYMMDD-HHMMSS.bak`
 
