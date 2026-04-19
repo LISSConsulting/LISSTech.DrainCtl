@@ -30,6 +30,22 @@ var (
 // function calls the procedure directly to surface it as
 // ErrPrivilegeNotAssigned.
 func EnableSecurityPrivilege() error {
+	return adjustSecurityPrivilege(windows.SE_PRIVILEGE_ENABLED)
+}
+
+// DisableSecurityPrivilege clears SE_PRIVILEGE_ENABLED on SeSecurityPrivilege
+// so the process token reverts to not holding the privilege while still
+// retaining it in its "available" set. Called on Security-channel opt-out
+// (plan Phase A3) so a later AddedChannels=Security attempt is rejected at
+// EvtSubscribe time with ErrPrivilegeNotAssigned instead of silently
+// succeeding.
+func DisableSecurityPrivilege() error {
+	return adjustSecurityPrivilege(0)
+}
+
+// adjustSecurityPrivilege is the shared AdjustTokenPrivileges body used by
+// both Enable and Disable. attrs is SE_PRIVILEGE_ENABLED or 0.
+func adjustSecurityPrivilege(attrs uint32) error {
 	var token windows.Token
 	if err := windows.OpenProcessToken(
 		windows.CurrentProcess(),
@@ -53,7 +69,7 @@ func EnableSecurityPrivilege() error {
 	tp := windows.Tokenprivileges{
 		PrivilegeCount: 1,
 		Privileges: [1]windows.LUIDAndAttributes{
-			{Luid: luid, Attributes: windows.SE_PRIVILEGE_ENABLED},
+			{Luid: luid, Attributes: attrs},
 		},
 	}
 

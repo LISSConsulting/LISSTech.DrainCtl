@@ -571,47 +571,50 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		// (lastConfigFetch is zero, dashRegistered is false).
 	}
 
-	// Start evtspike subsystem if enabled. OnSpike forwards to spikeCh which
-	// the Execute loop drains; this keeps notifyState access single-threaded
-	// (only the Execute goroutine calls SendNotification). Dashboard ring
-	// buffer and SSE broker calls are thread-safe, so they run directly from
-	// the subsystem goroutine without passing through spikeCh.
-	var evtSpikeSub *evtspike.Subsystem
-	if fullCfg.EvtSpike.Enabled {
-		host, _ := os.Hostname()
-		spikeCh = make(chan dc.SpikePayload, 16)
-		evtSpikeSub = evtspike.New(fullCfg.EvtSpike, host)
-		evtSpikeSub.OnSpike = func(p dc.SpikePayload) {
-			if dashState != nil && dashState.OnEvtSpikeIngest != nil {
-				dashState.OnEvtSpikeIngest(p)
-			}
-			select {
-			case spikeCh <- p:
-			default:
-				slog.Warn("evtspike=spike_dropped reason=channel_full",
-					"host", p.Host, "channel", p.Channel)
-			}
+	// Construct the evtspike subsystem unconditionally so a later
+	// enabled=false→true config reload can bring it up without restart.
+	// Subsystem.Start is idempotent w.r.t. cfg.Enabled: when disabled it
+	// captures startCtx and returns without launching loops, so a later
+	// Reload(Enabled=true) can hydrate. spikeCh is also allocated
+	// unconditionally because OnSpike closes over it; a nil channel would
+	// drop every future spike to the default: arm of the select.
+	// OnSpike forwards to spikeCh which the Execute loop drains; this keeps
+	// notifyState access single-threaded (only the Execute goroutine calls
+	// SendNotification). Dashboard ring buffer and SSE broker calls are
+	// thread-safe, so they run directly from the subsystem goroutine without
+	// passing through spikeCh.
+	host, _ := os.Hostname()
+	spikeCh = make(chan dc.SpikePayload, 16)
+	evtSpikeSub := evtspike.New(fullCfg.EvtSpike, host)
+	evtSpikeSub.OnSpike = func(p dc.SpikePayload) {
+		if dashState != nil && dashState.OnEvtSpikeIngest != nil {
+			dashState.OnEvtSpikeIngest(p)
 		}
-		evtSpikeSub.OnStatusChange = func(status evtspike.DetectorStatus) {
-			if dashState != nil && dashState.OnEvtSpikeStatus != nil {
-				dashState.OnEvtSpikeStatus(status)
-			}
+		select {
+		case spikeCh <- p:
+		default:
+			slog.Warn("evtspike=spike_dropped reason=channel_full",
+				"host", p.Host, "channel", p.Channel)
 		}
-		if err := evtSpikeSub.Start(ctx); err != nil {
-			slog.Warn("evtspike=start_failed", "error", err)
-			spikeCh = nil
-		} else {
-			if dashState != nil && dashState.RegisterEvtSpikeStatusFunc != nil {
-				localHost := host
-				dashState.RegisterEvtSpikeStatusFunc(func(h string) evtspike.DetectorStatus {
-					if h != localHost {
-						return evtspike.DetectorStatus{}
-					}
-					return evtSpikeSub.Status()
-				})
-			}
-			slog.Info("evtspike=enabled", "host", host)
+	}
+	evtSpikeSub.OnStatusChange = func(status evtspike.DetectorStatus) {
+		if dashState != nil && dashState.OnEvtSpikeStatus != nil {
+			dashState.OnEvtSpikeStatus(status)
 		}
+	}
+	if dashState != nil && dashState.RegisterEvtSpikeStatusFunc != nil {
+		localHost := host
+		dashState.RegisterEvtSpikeStatusFunc(func(h string) evtspike.DetectorStatus {
+			if h != localHost {
+				return evtspike.DetectorStatus{}
+			}
+			return evtSpikeSub.Status()
+		})
+	}
+	if err := evtSpikeSub.Start(ctx); err != nil {
+		slog.Warn("evtspike=start_failed", "error", err)
+	} else if fullCfg.EvtSpike.Enabled {
+		slog.Info("evtspike=enabled", "host", host)
 	}
 
 	// Timers.
@@ -827,10 +830,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 }
 
 // applyEvtSpikeConfigReload calls sub.Reload when the EvtSpike block has
-// changed between loads. sub may be nil (feature disabled at startup); that
-// case is a no-op. Equality is reflect.DeepEqual so the helper can accept
-// two whole EvtSpikeConfig snapshots — both scalar and channel-list mutations
-// are detected by one compare.
+// changed between loads. sub is always non-nil now that Execute constructs
+// and Start()s the subsystem unconditionally — an Enabled toggle is handled
+// by Reload's Enabled-diff branch, not by skipping the call. Equality is
+// reflect.DeepEqual so the helper accepts two whole EvtSpikeConfig snapshots
+// — both scalar and channel-list mutations are detected by one compare.
 //
 // Split out from Execute's configCh branch so the T068 integration test can
 // drive the exact code path Execute wires in, without a runnable SCM.
