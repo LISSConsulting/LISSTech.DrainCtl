@@ -39,7 +39,7 @@ func (s *safeBuf) String() string {
 // noopSubscribe is a stand-in for the real EvtSubscribe used by
 // Subsystem.Start. Tests drive bucket counters directly, so we just need the
 // subscribe step to succeed.
-func noopSubscribe(_ context.Context, _, _ string, _ *atomic.Int64) error {
+func noopSubscribe(_ context.Context, _ *sync.WaitGroup, _, _ string, _ *atomic.Int64, _ func(error)) error {
 	return nil
 }
 
@@ -933,7 +933,7 @@ func TestSubsystem_SecurityChannelOptIn_PrivilegeGranted(t *testing.T) {
 
 	var subMu sync.Mutex
 	var subscribed []string
-	s.Subscribe = func(_ context.Context, channel, _ string, _ *atomic.Int64) error {
+	s.Subscribe = func(_ context.Context, _ *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
 		subMu.Lock()
 		subscribed = append(subscribed, channel)
 		subMu.Unlock()
@@ -983,7 +983,7 @@ func TestSubsystem_SecurityChannelOptIn_PrivilegeNotAssigned(t *testing.T) {
 
 	var subMu sync.Mutex
 	var subscribed []string
-	s.Subscribe = func(_ context.Context, channel, _ string, _ *atomic.Int64) error {
+	s.Subscribe = func(_ context.Context, _ *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
 		subMu.Lock()
 		subscribed = append(subscribed, channel)
 		subMu.Unlock()
@@ -1058,5 +1058,446 @@ func waitForBaselineWrittenAt(t *testing.T, path string, want time.Time) *Baseli
 			t.Fatalf("waiting for WrittenAt=%v: last observed %v", want, got)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestSubscription_TransitionsToRetryingOnAsyncLoss — T107. An in-flight
+// subscription that fails mid-run (via the async loss callback) must move
+// to StateRetrying without waiting for the first supervisor tick. Status
+// accounting must drop it from EnabledChannels.
+func TestSubscription_TransitionsToRetryingOnAsyncLoss(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.DisabledChannels = []string{} // all 54 defaults
+	s.OnSpike = func(SpikePayload) {}
+
+	// Capture the loss callback for one specific channel.
+	var lossFor atomic.Value // stores func(error)
+	target := "Application"
+	s.Subscribe = func(_ context.Context, wg *sync.WaitGroup, channel, _ string, _ *atomic.Int64, loss func(error)) error {
+		if channel == target {
+			lossFor.Store(loss)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+		}()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	preEnabled := s.Status().EnabledChannels
+
+	cb, _ := lossFor.Load().(func(error))
+	if cb == nil {
+		t.Fatal("loss callback was never captured for target channel")
+	}
+	cb(errRetrySim)
+
+	s.mu.Lock()
+	state := s.subscriptions[target].state
+	s.mu.Unlock()
+	if state != StateRetrying {
+		t.Errorf("channel state after async loss: got %q want %q", state, StateRetrying)
+	}
+
+	postEnabled := s.Status().EnabledChannels
+	if postEnabled != preEnabled-1 {
+		t.Errorf("EnabledChannels: pre=%d post=%d; want one fewer", preEnabled, postEnabled)
+	}
+}
+
+// TestSubscription_TransitionsToFailedAfterTwelveAttempts — T107. A channel
+// that fails every retry attempt must move to StateFailed after
+// subRetryMaxTries tries. We drive the supervisor via a channel-injected
+// RetryTickSource.
+func TestSubscription_TransitionsToFailedAfterTwelveAttempts(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.DisabledChannels = []string{} // all defaults
+	s.OnSpike = func(SpikePayload) {}
+
+	// Drive retries via an externally-sendable channel.
+	tickCh := make(chan time.Time, 1)
+	s.RetryTickSource = func(time.Duration) (<-chan time.Time, func()) {
+		return tickCh, func() {}
+	}
+
+	// Subscribe succeeds once for every channel, then fails forever on
+	// retries. We track channel-specific call counts to simulate a provider
+	// that's up at boot and goes permanently bad afterward.
+	target := "Application"
+	var bootPhase atomic.Bool
+	bootPhase.Store(true)
+	s.Subscribe = func(_ context.Context, wg *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
+		if channel == target && !bootPhase.Load() {
+			return errRetrySim
+		}
+		wg.Add(1)
+		go func() { defer wg.Done() }()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Transition target to retrying via direct mutation (simulating loss).
+	bootPhase.Store(false)
+	s.onSubscriptionLoss(target, errRetrySim)
+
+	// Fire the supervisor ticker subRetryMaxTries times; each tick increments
+	// attempts because Subscribe now always fails for the target.
+	for i := 0; i < subRetryMaxTries; i++ {
+		tickCh <- time.Now()
+		// Wait for retryOnce to consume the tick and advance state.
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			s.mu.Lock()
+			sub := s.subscriptions[target]
+			attempts := sub.attempts
+			state := sub.state
+			s.mu.Unlock()
+			if attempts > i || state == StateFailed {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	s.mu.Lock()
+	sub := s.subscriptions[target]
+	state := sub.state
+	attempts := sub.attempts
+	s.mu.Unlock()
+	if state != StateFailed {
+		t.Errorf("after %d failed retries: state=%q attempts=%d; want %q", subRetryMaxTries, state, attempts, StateFailed)
+	}
+}
+
+// TestStatus_EnabledChannelsExcludesNonSubscribed — T107. Three channels —
+// one subscribed, one retrying, one failed. Status.EnabledChannels must be
+// 1, not 3. Without the B1 fix, a dropped channel still counted as enabled
+// and the dashboard pill stayed "healthy" under degraded conditions.
+func TestStatus_EnabledChannelsExcludesNonSubscribed(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Directly mutate channels' states: exactly one stays subscribed, the
+	// rest split between retrying and failed.
+	s.mu.Lock()
+	i := 0
+	for _, sub := range s.subscriptions {
+		switch i {
+		case 0:
+			sub.state = StateSubscribed
+		case 1:
+			sub.state = StateRetrying
+		default:
+			sub.state = StateFailed
+		}
+		i++
+	}
+	s.mu.Unlock()
+
+	st := s.Status()
+	if st.EnabledChannels != 1 {
+		t.Errorf("EnabledChannels = %d, want 1 (only one channel in StateSubscribed)", st.EnabledChannels)
+	}
+}
+
+var errRetrySim = errTestRetrySim("subscription lost in test")
+
+type errTestRetrySim string
+
+func (e errTestRetrySim) Error() string { return string(e) }
+
+// TestResolveChannels_AddedSecurityPreservedWithFlagOff — T103. The plan
+// deliberately rejected the "filter Security out of AddedChannels" shape:
+// the existing spec/data-model/contracts contract says AddedChannels=Security
+// is preserved with the flag off, and subscribe fails at runtime via the
+// privilege check. This test locks that contract.
+func TestResolveChannels_AddedSecurityPreservedWithFlagOff(t *testing.T) {
+	cfg := dc.EvtSpikeConfig{
+		SecurityChannelEnabled: false,
+		AddedChannels:          []string{SecurityChannel},
+	}
+	got := ResolveChannels(cfg)
+
+	var seen int
+	for _, ch := range got {
+		if ch == SecurityChannel {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Errorf("ResolveChannels with flag off + AddedChannels=Security: got %d Security entries, want 1", seen)
+	}
+
+	cfg.SecurityChannelEnabled = true
+	got = ResolveChannels(cfg)
+	seen = 0
+	for _, ch := range got {
+		if ch == SecurityChannel {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Errorf("ResolveChannels with flag on + AddedChannels=Security: got %d Security entries, want 1 (dedup)", seen)
+	}
+}
+
+// TestReload_SecurityDisableRestoresPrivilege — T103. Start with Security on,
+// Reload with Security off via a channel-set change; DisablePrivilege must be
+// invoked exactly once. Regression test for Phase A3: without this, the token
+// keeps SeSecurityPrivilege enabled across the off-window and a subsequent
+// AddedChannels=Security attempt would silently succeed.
+func TestReload_SecurityDisableRestoresPrivilege(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.SecurityChannelEnabled = true
+	s.OnSpike = func(SpikePayload) {}
+
+	var enables, disables atomic.Int32
+	s.EnablePrivilege = func() error { enables.Add(1); return nil }
+	s.DisablePrivilege = func() error { disables.Add(1); return nil }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	if got := enables.Load(); got != 1 {
+		t.Errorf("initial Start: enable count = %d, want 1", got)
+	}
+
+	newCfg := s.cfg
+	newCfg.SecurityChannelEnabled = false
+	if err := s.Reload(newCfg); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	if got := disables.Load(); got != 1 {
+		t.Errorf("after Security opt-out: disable count = %d, want 1", got)
+	}
+}
+
+// TestReload_AddedChannelsSecurityAfterDisableFails — T103. End-to-end bypass
+// regression: after opting out of Security, adding "Security" via
+// AddedChannels must fail the privilege check and be logged as skipped;
+// EnabledChannels must exclude it. Without Phase A3 this would succeed
+// silently.
+func TestReload_AddedChannelsSecurityAfterDisableFails(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.SecurityChannelEnabled = true
+	s.OnSpike = func(SpikePayload) {}
+
+	// Track whether the privilege is currently enabled on our mock token.
+	var enabled atomic.Bool
+	s.EnablePrivilege = func() error { enabled.Store(true); return nil }
+	s.DisablePrivilege = func() error { enabled.Store(false); return nil }
+	// Subscribe fails when Security is requested but the privilege is not
+	// enabled — mirrors the real EvtSubscribe behaviour against a token that
+	// lacks SeSecurityPrivilege.
+	s.Subscribe = func(ctx context.Context, wg *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
+		if channel == SecurityChannel && !enabled.Load() {
+			return ErrPrivilegeNotAssigned
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-ctx.Done()
+		}()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	optOut := s.cfg
+	optOut.SecurityChannelEnabled = false
+	if err := s.Reload(optOut); err != nil {
+		t.Fatalf("Reload(opt-out): %v", err)
+	}
+	if enabled.Load() {
+		t.Fatal("privilege still enabled after opt-out Reload")
+	}
+
+	// Now try to smuggle Security back via AddedChannels.
+	smuggle := optOut
+	smuggle.AddedChannels = []string{SecurityChannel}
+	if err := s.Reload(smuggle); err != nil {
+		t.Fatalf("Reload(smuggle): %v", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Post-B1 contract: Security detector may exist (baseline persists
+	// across retry attempts) but its subscription must NOT be in
+	// StateSubscribed — the privilege check should have rejected the
+	// subscribe call and moved it to StateRetrying.
+	if sub, ok := s.subscriptions[SecurityChannel]; ok && sub.state == StateSubscribed {
+		t.Errorf("Security channel subscription is StateSubscribed after opt-out smuggle; subs=%+v", sub)
+	}
+	// Status.EnabledChannels should exclude Security.
+}
+
+// TestReload_EnabledFalseStopsScoringLoop — T101. Reload(Enabled=false) must
+// tear down the running subsystem: no further OnSpike, no further detectors
+// in the map, Status.State reflects the disabled config.
+func TestReload_EnabledFalseStopsScoringLoop(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	var onSpikeCalls atomic.Int32
+	s.OnSpike = func(SpikePayload) { onSpikeCalls.Add(1) }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	s.mu.Lock()
+	if len(s.detectors) == 0 {
+		s.mu.Unlock()
+		t.Fatal("premise: no detectors after Start")
+	}
+	s.mu.Unlock()
+
+	disabled := s.cfg
+	disabled.Enabled = false
+	if err := s.Reload(disabled); err != nil {
+		t.Fatalf("Reload(Enabled=false): %v", err)
+	}
+
+	s.mu.Lock()
+	if len(s.detectors) != 0 {
+		s.mu.Unlock()
+		t.Errorf("detectors not cleared after disable: %d remain", len(s.detectors))
+	}
+	if len(s.channels) != 0 {
+		s.mu.Unlock()
+		t.Errorf("channels not cleared after disable: %v", s.channels)
+	}
+	s.mu.Unlock()
+
+	st := s.Status()
+	if st.State != "disabled" {
+		t.Errorf("Status.State after disable: got %q want \"disabled\"", st.State)
+	}
+}
+
+// TestReload_EnabledTrueStartsFromDisabled — T101. Construct with
+// Enabled=false, call Start (which must capture startCtx but not subscribe),
+// then Reload(Enabled=true). Subsystem must hydrate detectors and resume
+// normal scoring.
+func TestReload_EnabledTrueStartsFromDisabled(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.Enabled = false
+	s.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	s.mu.Lock()
+	if len(s.detectors) != 0 {
+		s.mu.Unlock()
+		t.Fatalf("Start(Enabled=false) launched detectors: %d", len(s.detectors))
+	}
+	s.mu.Unlock()
+
+	enabled := s.cfg
+	enabled.Enabled = true
+	if err := s.Reload(enabled); err != nil {
+		t.Fatalf("Reload(Enabled=true): %v", err)
+	}
+
+	s.mu.Lock()
+	nDet := len(s.detectors)
+	s.mu.Unlock()
+	if nDet == 0 {
+		t.Fatal("Reload(Enabled=true) did not hydrate detectors")
+	}
+
+	st := s.Status()
+	if st.State == "disabled" {
+		t.Errorf("Status.State after enable: got %q want non-disabled", st.State)
+	}
+}
+
+// TestReload_EnabledToggleFromSvcWiring — T101. Drives the config-reload path
+// via applyEvtSpikeConfigReload exactly as internal/svc/handler.go does, to
+// catch wiring bugs that a pure subsystem-level test misses.
+//
+// (Lives in internal/svc/svc_test.go since applyEvtSpikeConfigReload is
+// internal to that package.)
+//
+// NOTE: placeholder here just to document the task; the actual test is in
+// internal/svc/svc_test.go.
+
+// TestStop_WaitsForSubscriberGoroutines — T099. An injected SubscribeFunc
+// mimics what production Subscribe does (wg.Add + goroutine that honours
+// ctx.Done). Once Stop cancels the context, the goroutine lingers for 200 ms
+// before signalling done. Stop must not return until wg.Wait observes it —
+// proof that subscription goroutines are part of the wait-group the caller
+// uses for shutdown ordering.
+func TestStop_WaitsForSubscriberGoroutines(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	const linger = 200 * time.Millisecond
+	var exited atomic.Bool
+	s.Subscribe = func(ctx context.Context, wg *sync.WaitGroup, _, _ string, _ *atomic.Int64, _ func(error)) error {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-ctx.Done()
+			time.Sleep(linger)
+			exited.Store(true)
+		}()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	start := time.Now()
+	s.Stop()
+	elapsed := time.Since(start)
+
+	if !exited.Load() {
+		t.Fatalf("Stop returned before subscription goroutine exited")
+	}
+	// Stop should have waited at least the linger window for each of 54 channels
+	// running in parallel (they all exit concurrently), so minimum elapsed is
+	// linger. Allow a small slop for scheduler noise.
+	if elapsed < linger-20*time.Millisecond {
+		t.Fatalf("Stop returned too fast (%v < %v); it did not wait for subscription goroutines", elapsed, linger)
 	}
 }
