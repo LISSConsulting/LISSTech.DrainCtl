@@ -4,15 +4,65 @@ package evtspike
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func captureSlog(t *testing.T) *capturingHandler {
+	t.Helper()
+	h := &capturingHandler{}
+	orig := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	return h
+}
+
+func hasWarnWithEvtspike(h *capturingHandler, value string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level != slog.LevelWarn {
+			continue
+		}
+		var match bool
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "evtspike" && a.Value.String() == value {
+				match = true
+				return false
+			}
+			return true
+		})
+		if match {
+			return true
+		}
+	}
+	return false
+}
 
 func makeSampleBaseline() *BaselineFile {
 	cs := ChannelState{
@@ -185,5 +235,89 @@ func TestLoadBaseline_IncompatibleVersionRenamesAndRebuilds(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("expected original path to be gone after rename, got err=%v", err)
+	}
+}
+
+// TestLoadBaseline_SchemaVersion99WarnsAndRenames covers T061 / SC-005:
+// a baseline file from a future schema must not be silently misinterpreted —
+// LoadBaseline must rebuild fresh, archive the original with a timestamped
+// .incompat-*.bak suffix, and emit a slog warning so operators can see the
+// downgrade in logs.
+func TestLoadBaseline_SchemaVersion99WarnsAndRenames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v99.json")
+
+	payload, err := json.Marshal(map[string]any{
+		"schema_version": 99,
+		"host":           "future",
+		"channels":       map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := captureSlog(t)
+
+	bf, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if bf == nil || bf.SchemaVersion != SchemaVersion || len(bf.Channels) != 0 {
+		t.Fatalf("expected fresh baseline, got %#v", bf)
+	}
+
+	matches := glob(t, path, ".incompat-*.bak")
+	if len(matches) != 1 {
+		t.Fatalf("expected one .incompat-*.bak, got %v", matches)
+	}
+	if !regexp.MustCompile(`\.incompat-\d{8}-\d{6}\.bak$`).MatchString(matches[0]) {
+		t.Errorf("rename suffix shape mismatch: %s", matches[0])
+	}
+	if !hasWarnWithEvtspike(h, "baseline_incompat") {
+		t.Errorf("expected slog warning evtspike=baseline_incompat, got %d records", len(h.records))
+	}
+}
+
+// TestLoadBaseline_TruncatedFileWarnsAndRenames covers T062: a baseline file
+// truncated mid-write (crash, antivirus quarantine, disk-full) must surface as
+// the corrupt-JSON branch — rebuild fresh, rename to .corrupt-*.bak, warn.
+func TestLoadBaseline_TruncatedFileWarnsAndRenames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "truncated.json")
+
+	if err := WriteBaseline(path, makeSampleBaseline()); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	full, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	if len(full) < 4 {
+		t.Fatalf("seed file unexpectedly small: %d bytes", len(full))
+	}
+	if err := os.WriteFile(path, full[:len(full)/2], 0o600); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	h := captureSlog(t)
+
+	bf, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if bf == nil || bf.SchemaVersion != SchemaVersion || len(bf.Channels) != 0 {
+		t.Fatalf("expected fresh baseline, got %#v", bf)
+	}
+
+	matches := glob(t, path, ".corrupt-*.bak")
+	if len(matches) != 1 {
+		t.Fatalf("expected one .corrupt-*.bak, got %v", matches)
+	}
+	if !regexp.MustCompile(`\.corrupt-\d{8}-\d{6}\.bak$`).MatchString(matches[0]) {
+		t.Errorf("rename suffix shape mismatch: %s", matches[0])
+	}
+	if !hasWarnWithEvtspike(h, "baseline_corrupt") {
+		t.Errorf("expected slog warning evtspike=baseline_corrupt, got %d records", len(h.records))
 	}
 }
