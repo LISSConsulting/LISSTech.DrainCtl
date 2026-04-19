@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -33,7 +34,12 @@ func requireMachineAccount(next http.Handler) http.Handler {
 		if !strings.HasSuffix(name, "$") {
 			slog.Warn("sspi: agent route rejected non-machine account",
 				slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username)
-			http.Error(w, "machine account required", http.StatusForbidden)
+			msg, _ := json.Marshal(map[string]string{
+				"error": "machine account required: this endpoint accepts only COMPUTERNAME$ principals; " + auth.Username + " is a human user account",
+			})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(msg)
 			return
 		}
 		next.ServeHTTP(w, r)
