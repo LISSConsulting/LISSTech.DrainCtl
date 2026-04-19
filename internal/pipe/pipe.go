@@ -22,10 +22,11 @@ const PipeName = `\\.\pipe\drainctl`
 
 // PipeRequest is the JSON request sent by clients.
 type PipeRequest struct {
-	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server"
+	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server", "register"
 	Limit       int    `json:"limit,omitempty"`        // for history
 	ChangesOnly bool   `json:"changes_only,omitempty"` // for history
 	Hostname    string `json:"hostname,omitempty"`     // for remove-server
+	URL         string `json:"url,omitempty"`          // for register
 }
 
 // PipeResponse is the JSON response returned by the service.
@@ -39,9 +40,23 @@ type PipeResponse struct {
 type PipeHandler interface {
 	HandleStatus() *dc.CheckResult
 	HandleHistory(limit int, changesOnly bool) []dc.AuditRecord
-	HandleServers() json.RawMessage           // nil if dashboard not enabled
-	HandleRemoveServer(hostname string) error // ErrNotFound or nil
+	HandleServers() json.RawMessage                              // nil if dashboard not enabled
+	HandleRemoveServer(hostname string) error                    // ErrNotFound or nil
+	HandleRegister(dashboardURL string) (json.RawMessage, error) // SSPI call made under service identity
 }
+
+// registerDeadline is the per-connection deadline applied when handling a
+// "register" command. Registration calls out to the dashboard over HTTPS with
+// SSPI Negotiate, so the default 5s pipe deadline is too tight.
+const registerDeadline = 30 * time.Second
+
+// ErrPipeUnavailable signals that the pipe could not be dialled at all — the
+// service is not installed, not running, or the pipe is otherwise unreachable.
+// Callers use this to distinguish bootstrap / service-down conditions (where a
+// direct-HTTP fallback is appropriate) from service-reported errors surfaced
+// over a working pipe (where retrying under a different identity would either
+// duplicate the operation or hide the real failure).
+var ErrPipeUnavailable = errors.New("pipe unavailable")
 
 // ServePipe runs the named pipe server using a simple goroutine-per-connection
 // model with the Windows named pipe API.
@@ -139,6 +154,22 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 			resp = PipeResponse{OK: true}
 		}
 
+	case "register":
+		if req.URL == "" {
+			resp = PipeResponse{OK: false, Error: "url required"}
+			break
+		}
+		// Extend the connection deadline: register makes an outbound HTTPS
+		// call under the service's machine-account identity, which takes
+		// longer than the default 5 s pipe deadline.
+		_ = conn.SetDeadline(time.Now().Add(registerDeadline))
+		raw, err := handler.HandleRegister(req.URL)
+		if err != nil {
+			resp = PipeResponse{OK: false, Error: err.Error()}
+		} else {
+			resp = PipeResponse{OK: true, Data: raw}
+		}
+
 	default:
 		resp = PipeResponse{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Cmd)}
 	}
@@ -190,15 +221,36 @@ func RemoveServerViaPipe(hostname string) error {
 	return err
 }
 
-// pipeRPC connects to the service pipe, sends a request, and reads the response.
-func pipeRPC(req PipeRequest) (*PipeResponse, error) {
-	conn, err := dialPipe()
+// RegisterViaPipe asks the service to register this host with the dashboard.
+// The service performs the SSPI Negotiate + HTTPS call under its own
+// machine-account identity, which is required by the dashboard's
+// requireMachineAccount middleware. Returns the raw JSON response so callers
+// can decode it to dashboard.RegisterResult without this package importing the
+// dashboard package.
+func RegisterViaPipe(dashboardURL string) (json.RawMessage, error) {
+	resp, err := pipeRPCTimeout(PipeRequest{Cmd: "register", URL: dashboardURL}, registerDeadline)
 	if err != nil {
 		return nil, err
 	}
+	return resp.Data, nil
+}
+
+// pipeRPC connects to the service pipe, sends a request, and reads the response.
+func pipeRPC(req PipeRequest) (*PipeResponse, error) {
+	return pipeRPCTimeout(req, 5*time.Second)
+}
+
+// pipeRPCTimeout is pipeRPC with a caller-supplied deadline for commands that
+// may take longer than the 5 s default (e.g. "register", which performs an
+// outbound SSPI + HTTPS call on the service side).
+func pipeRPCTimeout(req PipeRequest, timeout time.Duration) (*PipeResponse, error) {
+	conn, err := dialPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrPipeUnavailable, err)
+	}
 	defer func() { _ = conn.Close() }()
 
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	data, _ := json.Marshal(req)
 	if _, err := conn.Write(data); err != nil {
