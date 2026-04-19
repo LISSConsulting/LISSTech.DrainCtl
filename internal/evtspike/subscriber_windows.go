@@ -5,6 +5,7 @@ package evtspike
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -26,8 +27,14 @@ const evtSubscribeToFutureEvents = 1
 // are counted and their handles closed immediately. The goroutine exits when
 // ctx is cancelled; Subscribe itself returns as soon as the subscription is
 // established (or fails) so callers can iterate many channels without
-// blocking.
-func Subscribe(ctx context.Context, channel, query string, counter *atomic.Int64) error {
+// blocking. wg owns the drain goroutine's lifetime — Subscribe runs Add(1)
+// synchronously before launching, so Stop's Wait cannot race Add.
+//
+// loss (may be nil) is invoked from the drain goroutine if EvtNext reports
+// an error that signals the subscription has gone bad mid-run — the Windows
+// runtime never recovers a bad handle, so the goroutine closes handles,
+// calls loss, and exits so the supervisor can drive a re-subscribe.
+func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, counter *atomic.Int64, loss func(error)) error {
 	chPtr, _ := windows.UTF16PtrFromString(channel)
 	qPtr, _ := windows.UTF16PtrFromString(query)
 
@@ -49,7 +56,9 @@ func Subscribe(ctx context.Context, channel, query string, counter *atomic.Int64
 	}
 	sub := r
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		defer func() {
 			_, _, _ = procEvtClose.Call(sub)
 			_ = windows.CloseHandle(sigEvent)
