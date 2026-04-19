@@ -188,6 +188,58 @@ func TestSlotMaturityObservations_UsesConfigValue(t *testing.T) {
 	}
 }
 
+// TestRobustUpdate_SlotNotPoisoned_30Consecutive exercises US2 SC-004: under a
+// 30-bucket sustained flood (y=100 against an expected rate of ~1), the slot's
+// posterior mean must grow by ≤2× — i.e., the robust cap is clamping update y
+// at the 99th percentile of the NegBin posterior rather than letting the raw
+// count train the baseline into the flood regime.
+func TestRobustUpdate_SlotNotPoisoned_30Consecutive(t *testing.T) {
+	d := NewDetector(0.1, 60, 360, testCfg())
+	base := time.Date(2026, 4, 15, 10, 0, 0, 0, time.Local)
+
+	// Converge slot 40 near its steady-state mean of ~1 by replaying 10 days
+	// of 15-minute morning windows (900 y=1 observations into the same slot).
+	// A single-session 90-observation window leaves the slot far from
+	// steady-state given a 360-bucket EWMA half-life, so the flood assertion
+	// would be dominated by convergence rather than the robust cap.
+	const trainingDays = 10
+	const bucketsPerSlotVisit = 90
+	for day := 0; day < trainingDays; day++ {
+		dayStart := base.Add(time.Duration(day) * 24 * time.Hour)
+		for i := 0; i < bucketsPerSlotVisit; i++ {
+			d.ObserveBucket(dayStart.Add(time.Duration(i)*10*time.Second), 1)
+		}
+	}
+
+	slot := timeSlot(base)
+	if d.Slots[slot].N < bucketsPerSlotVisit*trainingDays {
+		t.Fatalf("slot %d undertrained: N=%d", slot, d.Slots[slot].N)
+	}
+
+	meanBefore := d.Slots[slot].Alpha / d.Slots[slot].Beta
+
+	floodStart := base.Add(time.Duration(trainingDays) * 24 * time.Hour)
+	for i := 0; i < 30; i++ {
+		r := d.ObserveBucket(floodStart.Add(time.Duration(i)*10*time.Second), 100)
+		if !r.Anomalous {
+			t.Fatalf("flood observation %d should be anomalous: count=%d mean=%.4f tail=%e",
+				i, r.Count, r.Mean, r.TailProb)
+		}
+	}
+
+	if d.Slots[slot].N != bucketsPerSlotVisit*trainingDays+30 {
+		t.Fatalf("expected %d total observations in slot %d, got %d",
+			bucketsPerSlotVisit*trainingDays+30, slot, d.Slots[slot].N)
+	}
+
+	meanAfter := d.Slots[slot].Alpha / d.Slots[slot].Beta
+	ratio := meanAfter / meanBefore
+	if ratio > 2.0 {
+		t.Errorf("slot %d mean grew by %.2fx under 30-bucket y=100 flood (before=%.4f after=%.4f); robust cap ineffective",
+			slot, ratio, meanBefore, meanAfter)
+	}
+}
+
 func TestSlotMaturityObservations_ZeroPromotedToDefault(t *testing.T) {
 	cfg := DetectorConfig{
 		MinCount:  10,
