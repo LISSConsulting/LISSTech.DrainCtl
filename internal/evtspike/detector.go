@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package evtspike
 
 import (
 	"math"
@@ -8,13 +8,13 @@ import (
 )
 
 const (
-	slotsPerDay   = 96 // 15-minute slots
-	minSlotN      = 5  // minimum observations before trusting a slot
-	minGlobalN    = 20
-	confirmM      = 3
-	confirmN      = 2
-	maxNBinIter   = 50000 // cap NegBin recurrence loops
-	robustCapProb = 0.99
+	slotsPerDay                     = 96
+	minGlobalN                      = 20
+	confirmM                        = 3
+	confirmN                        = 2
+	maxNBinIter                     = 50000
+	robustCapProb                   = 0.99
+	defaultSlotMaturityObservations = 7
 )
 
 // GammaState holds the sufficient statistics of a Gamma(alpha, beta) posterior.
@@ -26,10 +26,11 @@ type GammaState struct {
 
 // DetectorConfig holds tuning parameters.
 type DetectorConfig struct {
-	MinCount  int           // absolute floor — don't alert below this
-	Threshold float64       // tail probability threshold (e.g. 1e-4)
-	Rho       float64       // forgetting factor per bucket
-	Cooldown  time.Duration // suppress repeat alerts
+	MinCount                 int
+	Threshold                float64
+	Rho                      float64
+	Cooldown                 time.Duration
+	SlotMaturityObservations int
 }
 
 // Detector is a Gamma-Poisson Bayesian spike detector with time-of-day
@@ -68,6 +69,10 @@ func NewDetector(meanPerBucket float64, priorStrength float64, halfLifeBuckets f
 	}
 	cfg.Rho = rho
 
+	if cfg.SlotMaturityObservations <= 0 {
+		cfg.SlotMaturityObservations = defaultSlotMaturityObservations
+	}
+
 	d := &Detector{Cfg: cfg}
 	d.Global = GammaState{Alpha: alpha, Beta: beta}
 	for i := range d.Slots {
@@ -81,13 +86,11 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 	slot := timeSlot(now)
 	s := &d.Slots[slot]
 
-	// Pick scoring state: slot if mature, else global.
 	scoring := s
-	if s.N < minSlotN {
+	if s.N < d.Cfg.SlotMaturityObservations {
 		if d.Global.N >= minGlobalN {
 			scoring = &d.Global
 		}
-		// else score with immature slot (wide prior → conservative)
 	}
 
 	mean := scoring.Alpha / scoring.Beta
@@ -101,7 +104,6 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 		d.LastAlert = now
 	}
 
-	// Robust update: cap y during anomalies to avoid poisoning baseline.
 	updateY := float64(count)
 	if anomalous {
 		cap := float64(negBinQuantile(robustCapProb, scoring.Alpha, scoring.Beta))
@@ -110,7 +112,6 @@ func (d *Detector) ObserveBucket(now time.Time, count int) Result {
 		}
 	}
 
-	// Discounted posterior update — both slot and global.
 	ewmaUpdate(s, updateY, d.Cfg.Rho)
 	ewmaUpdate(&d.Global, updateY, d.Cfg.Rho)
 
@@ -162,7 +163,7 @@ func negBinUpperTail(y int, alpha, beta float64) float64 {
 	q := 1.0 - p
 
 	logPMF0 := alpha * math.Log(p)
-	if logPMF0 < -700 { // underflow guard
+	if logPMF0 < -700 {
 		return 0.0
 	}
 	pmf := math.Exp(logPMF0)
