@@ -139,7 +139,11 @@ const FETCH_TIMEOUT_MS = 20_000;
  * Automatically aborts after FETCH_TIMEOUT_MS milliseconds.
  * Throws an ApiError on non-2xx responses or timeout.
  *
- * @param {string} path - Path relative to BASE, e.g. '/health'
+ * Paths starting with `/api/` are used verbatim so callers can target
+ * sibling surfaces like `/api/evtspike/...`; other paths are prepended
+ * with `BASE` (`/api/v1`).
+ *
+ * @param {string} path - Path relative to BASE (e.g. `/health`) or an absolute `/api/...` path
  * @param {RequestInit} [options]
  * @returns {Promise<Response>}
  */
@@ -152,9 +156,11 @@ async function apiFetch(path, options = {}) {
         ? AbortSignal.any([timeoutController.signal, callerSignal])
         : timeoutController.signal;
 
+    const url = path.startsWith('/api/') ? path : `${BASE}${path}`;
+
     let response;
     try {
-        response = await fetch(`${BASE}${path}`, {
+        response = await fetch(url, {
             credentials: 'include',
             ...rest,
             signal,
@@ -459,4 +465,75 @@ export async function sendNotifyTest(target = null) {
     }
     if (!body.results) body.results = [];
     return body;
+}
+
+// ---------------------------------------------------------------------------
+// Event Log Anomaly Detection (evtspike)
+// ---------------------------------------------------------------------------
+
+/**
+ * DetectorStatus mirrors Go's internal/evtspike.DetectorStatus. See
+ * specs/006-evtspike-detection/contracts/dashboard-sse-events.md for the
+ * authoritative shape. A response with `state: "disabled"` is 200 OK, not 503 —
+ * disabled is a configuration choice, not a transient failure.
+ *
+ * @typedef {Object} DetectorStatus
+ * @property {string} host
+ * @property {'healthy'|'training'|'disabled'|'error'} state
+ * @property {number} enabled_channels
+ * @property {number} mature_channels
+ * @property {string} [error_reason]     - populated only when state === 'error'
+ * @property {string} [last_spike_at]    - ISO-8601; omitted if no spike ever observed
+ */
+
+/**
+ * RecentSpike is one entry from GET /api/evtspike/spikes. Mirrors Go's
+ * internal/evtspike.RecentSpikeEntry (SpikePayload + server-assigned ID).
+ *
+ * @typedef {Object} RecentSpike
+ * @property {number} id                 - monotonic int64, stable within a service run
+ * @property {string} host
+ * @property {string} channel
+ * @property {string} window_start       - ISO-8601 UTC
+ * @property {string} window_end         - ISO-8601 UTC
+ * @property {number} observed
+ * @property {number} expected
+ * @property {number} tail_probability
+ * @property {number} confirmation_count - 2 or 3 (per data-model.md §5)
+ * @property {string} first_seen_at      - ISO-8601 UTC
+ */
+
+/**
+ * GET /api/evtspike/status?host=<host>
+ *
+ * Returns the current evtspike detector status for one registered host.
+ * 200 with `state: "disabled"` when the feature is off; 404 for unknown host.
+ *
+ * @param {string} host
+ * @returns {Promise<DetectorStatus>}
+ */
+export async function fetchEvtSpikeStatus(host) {
+    const res = await apiFetch(`/api/evtspike/status?host=${encodeURIComponent(host)}`);
+    return /** @type {DetectorStatus} */ (await res.json());
+}
+
+/**
+ * GET /api/evtspike/spikes?host=<host>&limit=<1..50>
+ *
+ * Returns the most-recent confirmed spikes for one host, newest first, from
+ * the server-side ring buffer. Empty array for a registered host with no
+ * spikes — not a 404. Default limit matches the server's 20-entry ring buffer;
+ * the server clamps to [1, 50].
+ *
+ * @param {string} host
+ * @param {number} [limit=20]
+ * @returns {Promise<RecentSpike[]>}
+ */
+export async function fetchRecentSpikes(host, limit = 20) {
+    const params = new URLSearchParams({
+        host,
+        limit: String(limit),
+    });
+    const res = await apiFetch(`/api/evtspike/spikes?${params}`);
+    return /** @type {RecentSpike[]} */ (await res.json());
 }
