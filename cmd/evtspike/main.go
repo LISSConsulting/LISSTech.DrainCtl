@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"golang.org/x/sys/windows"
 )
 
@@ -121,15 +122,16 @@ func main() {
 	}
 	fmt.Printf("  subscribed to %d/%d channels\n", active, len(channels))
 
-	cfg := DetectorConfig{
-		MinCount:  10,
-		Threshold: 1e-4,
-		Cooldown:  10 * time.Minute,
+	cfg := evtspike.DetectorConfig{
+		MinCount:                 10,
+		Threshold:                1e-4,
+		Cooldown:                 10 * time.Minute,
+		SlotMaturityObservations: 7,
 	}
 
-	detectors := make([]*Detector, len(channels))
+	detectors := make([]*evtspike.Detector, len(channels))
 	for i := range detectors {
-		detectors[i] = NewDetector(0.1, 60, 360, cfg)
+		detectors[i] = evtspike.NewDetector(0.1, 60, 360, cfg)
 	}
 
 	fmt.Println("evtspike: watching Application + System (Level 0-4), 10s buckets")
@@ -194,7 +196,7 @@ func subscribe(ctx context.Context, channel, query string, counter *atomic.Int64
 
 	go func() {
 		defer func() {
-			procEvtClose.Call(sub)
+			_, _, _ = procEvtClose.Call(sub)
 			_ = windows.CloseHandle(sigEvent)
 		}()
 
@@ -202,17 +204,14 @@ func subscribe(ctx context.Context, channel, query string, counter *atomic.Int64
 		var returned uint32
 
 		for {
-			// Wait for signal or 1 second, whichever comes first.
-			windows.WaitForSingleObject(sigEvent, 1000)
+			_, _ = windows.WaitForSingleObject(sigEvent, 1000)
 
-			// Check cancellation.
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
 
-			// Drain all available events.
 			for {
 				r, _, _ := procEvtNext.Call(
 					sub, 64,
@@ -225,7 +224,7 @@ func subscribe(ctx context.Context, channel, query string, counter *atomic.Int64
 				}
 				counter.Add(int64(returned))
 				for j := range returned {
-					procEvtClose.Call(evts[j])
+					_, _, _ = procEvtClose.Call(evts[j])
 				}
 			}
 		}
