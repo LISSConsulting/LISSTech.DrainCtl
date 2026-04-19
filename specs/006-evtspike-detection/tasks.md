@@ -174,7 +174,7 @@ Most persistence code is already in Foundational (T013-T015). Remaining tasks:
 
 - [x] T063 [US4] In `internal/evtspike/subsystem.go`, hook `LoadBaseline` at subsystem start: if a file is returned, seed the per-channel `Detector.Slots` and `Detector.Global` from `BaselineFile.Channels[name]`; for newly added channels not in the file, start with fresh state (do not error)
 - [x] T064 [US4] In `internal/evtspike/subsystem.go` `Stop()`, flush in-memory state to a `BaselineFile` and call `WriteBaseline` one final time (covers crash-less shutdown)
-- [ ] T065 [US4] Verify the periodic persistence ticker (already in T024) calls `WriteBaseline` every `PersistIntervalSeconds` (default 900 = 15 min per R1); add a test in `subsystem_test.go` that a mock clock advance triggers the write
+- [x] T065 [US4] Verify the periodic persistence ticker (already in T024) calls `WriteBaseline` every `PersistIntervalSeconds` (default 900 = 15 min per R1); add a test in `subsystem_test.go` that a mock clock advance triggers the write
 
 **Checkpoint**: Warm restart is verified and no-alert-storm on restart is guaranteed.
 
