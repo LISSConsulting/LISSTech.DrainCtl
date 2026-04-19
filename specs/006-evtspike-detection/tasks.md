@@ -32,7 +32,7 @@ Single-project Windows-only layout (per plan.md Structure Decision). Paths below
 
 - [x] T001 Create empty `internal/evtspike/` package directory with a placeholder `doc.go` file containing `//go:build windows` and a one-line package comment, so subsequent parallel file adds don't race on directory creation
 - [x] T002 [P] Create the fixture directory `specs/006-evtspike-detection/fixtures/` with placeholder `normal-day.json` and `stress.json` files (filled during SC-validation tasks in Phase 9)
-- [ ] T003 [P] Update `CLAUDE.md` Architecture section with a single-line note about the new `internal/evtspike` subsystem (additive, non-breaking)
+- [x] T003 [P] Update `CLAUDE.md` Architecture section with a single-line note about the new `internal/evtspike` subsystem (additive, non-breaking)
 
 ---
 
