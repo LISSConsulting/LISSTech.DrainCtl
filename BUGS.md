@@ -50,7 +50,17 @@ Original report below for historical context.
 
 ---
 
-### 3. Config reload doesn't re-run self-register when URL changes to local
+### 3. Config reload doesn't re-run self-register when URL changes to local — FIXED 2026-04-19
+
+**Status:** Fixed.
+
+**Change:**
+- `internal/svc/handler.go`: added an `else if` branch after the `disabled → enabled` self-register block. The new branch fires when `dashState != nil && !dashRegistered && !cfg.DashboardOnly && isLocalDashboard(newDashCfg.URL) && !isLocalDashboard(dashCfg.URL)` — i.e. the URL just changed to name this machine. Calls `dashState.Register(h)` immediately (in-memory, no HTTP round-trip) and sets `dashRegistered = true`. Idempotency is guaranteed by the `!dashRegistered` guard which the URL-change path at line 796 already resets when the URL changes.
+- `internal/svc/handler_test.go`: `TestIsLocalDashboard_MatchesHostname` — unit covers case-insensitive hostname match and explicit rejection of "localhost". `TestIsLocalDashboard_URLBecameLocal` — verifies the transition predicate `isLocalDashboard(new) && !isLocalDashboard(old)` holds when old is stale and new is local, confirming the reload branch will fire.
+
+**Verification:** `go test ./internal/svc/ -run TestIsLocalDashboard` green; `go test ./...` all green; `just lint` 0 issues. Codex review: NO ISSUES.
+
+Original report below for historical context.
 
 **Surfaced:** 2026-04-18 during T067 validation on MDS-LDC1-RDS12.
 
