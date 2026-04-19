@@ -19,8 +19,11 @@ import (
 
 // mockHandler implements PipeHandler for tests.
 type mockHandler struct {
-	statusResult  *dc.CheckResult
-	historyResult []dc.AuditRecord
+	statusResult   *dc.CheckResult
+	historyResult  []dc.AuditRecord
+	registerResult json.RawMessage
+	registerErr    error
+	registerCalls  []string
 }
 
 func (m *mockHandler) HandleStatus() *dc.CheckResult {
@@ -37,6 +40,14 @@ func (m *mockHandler) HandleServers() json.RawMessage {
 
 func (m *mockHandler) HandleRemoveServer(_ string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (m *mockHandler) HandleRegister(url string) (json.RawMessage, error) {
+	m.registerCalls = append(m.registerCalls, url)
+	if m.registerErr != nil {
+		return nil, m.registerErr
+	}
+	return m.registerResult, nil
 }
 
 // pipeCall writes req to handlePipeConn via an in-memory net.Pipe and returns
@@ -259,6 +270,59 @@ func TestHandlePipeConn_StatusMarshalError(t *testing.T) {
 	}
 }
 
+func TestHandlePipeConn_RegisterOK(t *testing.T) {
+	handler := &mockHandler{
+		registerResult: json.RawMessage(`{"tls_fingerprint":"abc123"}`),
+	}
+
+	resp := pipeCall(t, PipeRequest{Cmd: "register", URL: "https://dash.example:8443"}, handler)
+
+	if !resp.OK {
+		t.Fatalf("expected OK=true, got OK=false error=%q", resp.Error)
+	}
+	var result struct {
+		TLSFingerprint string `json:"tls_fingerprint"`
+	}
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if result.TLSFingerprint != "abc123" {
+		t.Errorf("tls_fingerprint: got %q, want %q", result.TLSFingerprint, "abc123")
+	}
+	if len(handler.registerCalls) != 1 || handler.registerCalls[0] != "https://dash.example:8443" {
+		t.Errorf("registerCalls: got %v, want [https://dash.example:8443]", handler.registerCalls)
+	}
+}
+
+func TestHandlePipeConn_RegisterMissingURL(t *testing.T) {
+	handler := &mockHandler{}
+
+	resp := pipeCall(t, PipeRequest{Cmd: "register"}, handler)
+
+	if resp.OK {
+		t.Fatal("expected OK=false when URL is empty")
+	}
+	if !strings.Contains(resp.Error, "url required") {
+		t.Errorf("error = %q, want 'url required'", resp.Error)
+	}
+	if len(handler.registerCalls) != 0 {
+		t.Errorf("registerCalls: got %d, want 0 (handler must not be invoked)", len(handler.registerCalls))
+	}
+}
+
+func TestHandlePipeConn_RegisterHandlerError(t *testing.T) {
+	handler := &mockHandler{registerErr: fmt.Errorf("register: status 401")}
+
+	resp := pipeCall(t, PipeRequest{Cmd: "register", URL: "https://dash.example:8443"}, handler)
+
+	if resp.OK {
+		t.Fatal("expected OK=false when handler returns error")
+	}
+	if !strings.Contains(resp.Error, "status 401") {
+		t.Errorf("error = %q, want substring 'status 401'", resp.Error)
+	}
+}
+
 func TestReadPipeResponse_ContinuesOnMoreData(t *testing.T) {
 	r := &scriptedReader{steps: []readStep{
 		{data: []byte(`{"ok":true,"data":"`), err: windows.ERROR_MORE_DATA},
@@ -324,4 +388,26 @@ func (c *captureHandler) HandleServers() json.RawMessage { return nil }
 
 func (c *captureHandler) HandleRemoveServer(_ string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (c *captureHandler) HandleRegister(_ string) (json.RawMessage, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable guards the
+// discrimination the CLI register-command fallback relies on: when the
+// service's pipe is unreachable the error must be detectable via
+// errors.Is(err, ErrPipeUnavailable) so we only bootstrap via direct HTTP in
+// that one case. If this wrap is ever removed a human register call would
+// silently retry under the operator's token on every service-side failure.
+func TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable(t *testing.T) {
+	// No service / pipe listener is running in the test process, so dialPipe
+	// fails with ERROR_FILE_NOT_FOUND. That must come back wrapped.
+	_, err := RegisterViaPipe("https://dash.invalid")
+	if err == nil {
+		t.Fatal("expected error when no pipe listener is running")
+	}
+	if !errors.Is(err, ErrPipeUnavailable) {
+		t.Errorf("errors.Is(err, ErrPipeUnavailable) = false; err = %v", err)
+	}
 }

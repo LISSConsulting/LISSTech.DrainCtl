@@ -3,11 +3,14 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/spf13/cobra"
 )
 
@@ -55,8 +58,14 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 			}
 			slog.Info(fmt.Sprintf("config=DashboardURL set to %q", dashURL))
 
-			// Register with the dashboard.
-			regResult, regErr := dashboard.Register(dashURL)
+			// Register with the dashboard. Prefer routing through the service
+			// pipe so the registration call runs under the machine-account
+			// identity the dashboard's requireMachineAccount middleware
+			// demands. Fall back to a direct HTTP call (CLI's own token) only
+			// when the service pipe is unavailable — e.g. the bootstrap case
+			// where DrainCtl has just been installed and the service hasn't
+			// started yet, or the caller is running as SYSTEM.
+			regResult, regErr := registerThroughServiceOrDirect(dashURL)
 			if regErr != nil {
 				slog.Warn("registration failed (service will retry on next check)", "error", regErr)
 				return nil
@@ -79,4 +88,36 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 	cmd.Flags().Bool("auto", false, "Discover dashboard via DNS SRV record (_drainctl._tcp.<domain>)")
 	cmd.Flags().Bool("pin", false, "Auto-pin the dashboard's TLS certificate fingerprint on first registration")
 	return cmd
+}
+
+// registerThroughServiceOrDirect routes the dashboard registration call
+// through the service pipe when the service is reachable. The service holds
+// the machine-account credentials the dashboard's register endpoint requires;
+// calling dashboard.Register() from a human user's CLI process yields a 401.
+//
+// Fallback is narrow: only when the pipe itself is unreachable (service not
+// installed / not started — the bootstrap case) do we fall back to a direct
+// HTTP call. Errors returned by the service over a working pipe — e.g. the
+// dashboard rejected the request, the HTTPS call timed out, TLS pinning
+// mismatched — are surfaced as-is. Retrying those under the caller's user
+// token would either duplicate a registration the service already attempted
+// or swap a genuine failure mode for a spurious 401.
+func registerThroughServiceOrDirect(dashURL string) (*dashboard.RegisterResult, error) {
+	raw, err := pipe.RegisterViaPipe(dashURL)
+	if err != nil {
+		if errors.Is(err, pipe.ErrPipeUnavailable) {
+			slog.Info("register: service pipe unreachable, falling back to direct call", "error", err)
+			return dashboard.Register(dashURL)
+		}
+		return nil, err
+	}
+	slog.Info("registered via service pipe")
+	var res dashboard.RegisterResult
+	if len(raw) == 0 {
+		return &res, nil
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decode register response: %w", err)
+	}
+	return &res, nil
 }

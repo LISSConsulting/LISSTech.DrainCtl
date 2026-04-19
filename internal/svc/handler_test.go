@@ -4,14 +4,19 @@ package svc
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
+
+// Compile-time guarantee: serviceHandler satisfies pipe.PipeHandler.
+var _ pipe.PipeHandler = (*serviceHandler)(nil)
 
 // newHandlerStore opens a telemetry.DB backed by a fresh drainctl.db in a
 // temp dir and returns a serviceHandler bound to its AuditStore. Caller
@@ -220,6 +225,26 @@ func TestSyncPerfCollector_DisableClearsLastPerf(t *testing.T) {
 	}
 	if lastPerf.Load() != nil {
 		t.Error("lastPerf not cleared after disabling perfmon")
+	}
+}
+
+// TestHandleRegister_EmptyURLReturnsError guards the defensive check that
+// keeps dashboard.Register from being called without a URL.  The pipe layer
+// filters empty URLs too, but this handler stays callable directly from tests
+// and should reject the obviously-invalid input itself.
+func TestHandleRegister_EmptyURLReturnsError(t *testing.T) {
+	h, _, cleanup := newHandlerStore(t)
+	defer cleanup()
+
+	raw, err := h.HandleRegister("")
+	if err == nil {
+		t.Fatal("HandleRegister(\"\"): got nil error, want non-nil")
+	}
+	if raw != nil {
+		t.Errorf("HandleRegister(\"\"): got non-nil raw=%q", string(raw))
+	}
+	if !strings.Contains(err.Error(), "url required") {
+		t.Errorf("err = %q, want substring 'url required'", err.Error())
 	}
 }
 
