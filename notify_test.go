@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -1172,5 +1173,166 @@ func TestSendNtfy_DoFails_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "http post") {
 		t.Errorf("error = %q, want prefix 'http post'", err)
+	}
+}
+
+// ── event_spike contract tests ───────────────────────────────────────────────
+
+// newSpikeResult constructs a CheckResult with a populated Spike payload and
+// the deterministic timestamps the contract examples use, so contract tests
+// can compare exact wire shape without hitting time.Now() drift.
+func newSpikeResult() (*CheckResult, *SpikePayload) {
+	winStart := time.Date(2026, 4, 16, 14, 22, 42, 0, time.UTC)
+	winEnd := winStart.Add(10 * time.Second)
+	firstSeen := winStart.Add(-10 * time.Second)
+	connAllowed := true
+	spike := &SpikePayload{
+		Host:              "RDSH-04",
+		Channel:           "Microsoft-Windows-Winlogon/Operational",
+		WindowStart:       winStart,
+		WindowEnd:         winEnd,
+		Observed:          47,
+		Expected:          3.2,
+		TailProbability:   2.1e-7,
+		ConfirmationCount: 3,
+		FirstSeenAt:       firstSeen,
+	}
+	res := &CheckResult{
+		Host:               spike.Host,
+		Status:             "alert",
+		DrainModeLabel:     "AllowAll",
+		ConnectionsAllowed: &connAllowed,
+		Version:            "26.106.12",
+		Timestamp:          winEnd,
+		Message:            "Event count 47 in 10s bucket; expected ~3.2 at this time-of-day; tail probability 2.1e-7.",
+		Spike:              spike,
+	}
+	return res, spike
+}
+
+// TestEventSpikePayload_Shape verifies the full contract shape of an
+// event_spike webhook body: top-level envelope fields plus the spike
+// sub-object schema from contracts/event_spike-payload.md.
+func TestEventSpikePayload_Shape(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		capturedBody = body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerEventSpike}},
+	}
+	result, spike := newSpikeResult()
+
+	SendNotification(targets, &NotifyState{}, result, TriggerEventSpike, "")
+
+	if len(capturedBody) == 0 {
+		t.Fatal("webhook captured no body — SendNotification did not dispatch event_spike")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v\nbody: %s", err, capturedBody)
+	}
+
+	envelope := map[string]any{
+		"event":   string(TriggerEventSpike),
+		"host":    spike.Host,
+		"version": "26.106.12",
+		"status":  "alert",
+		"message": result.Message,
+	}
+	for key, want := range envelope {
+		got, ok := payload[key]
+		if !ok {
+			t.Errorf("payload missing top-level field %q", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("payload[%q] = %v, want %v", key, got, want)
+		}
+	}
+	if _, ok := payload["timestamp"].(string); !ok {
+		t.Errorf("payload missing string field 'timestamp'; got %T", payload["timestamp"])
+	}
+	if _, ok := payload["subject"].(string); !ok {
+		t.Errorf("payload missing string field 'subject'; got %T", payload["subject"])
+	}
+
+	subRaw, ok := payload["spike"]
+	if !ok {
+		t.Fatal("payload missing 'spike' sub-object")
+	}
+	sub, ok := subRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("'spike' is %T, want map[string]any", subRaw)
+	}
+	if got, _ := sub["channel"].(string); got != spike.Channel {
+		t.Errorf("spike.channel = %v, want %q", sub["channel"], spike.Channel)
+	}
+	if got, _ := sub["window_start"].(string); got != spike.WindowStart.Format(time.RFC3339) {
+		t.Errorf("spike.window_start = %v, want %q", sub["window_start"], spike.WindowStart.Format(time.RFC3339))
+	}
+	if got, _ := sub["window_end"].(string); got != spike.WindowEnd.Format(time.RFC3339) {
+		t.Errorf("spike.window_end = %v, want %q", sub["window_end"], spike.WindowEnd.Format(time.RFC3339))
+	}
+	if got, _ := sub["observed"].(float64); int(got) != spike.Observed {
+		t.Errorf("spike.observed = %v, want %d", sub["observed"], spike.Observed)
+	}
+	if got, _ := sub["expected"].(float64); got != spike.Expected {
+		t.Errorf("spike.expected = %v, want %v", sub["expected"], spike.Expected)
+	}
+	if got, _ := sub["tail_probability"].(float64); got != spike.TailProbability {
+		t.Errorf("spike.tail_probability = %v, want %v", sub["tail_probability"], spike.TailProbability)
+	}
+	if got, _ := sub["confirmation_count"].(float64); int(got) != spike.ConfirmationCount {
+		t.Errorf("spike.confirmation_count = %v, want %d", sub["confirmation_count"], spike.ConfirmationCount)
+	}
+	if got, _ := sub["first_seen_at"].(string); got != spike.FirstSeenAt.Format(time.RFC3339) {
+		t.Errorf("spike.first_seen_at = %v, want %q", sub["first_seen_at"], spike.FirstSeenAt.Format(time.RFC3339))
+	}
+}
+
+// TestEventSpikePayload_HMAC verifies that an event_spike webhook body is
+// signed with HMAC-SHA256 over the raw request body when a secret is
+// configured on the target.
+func TestEventSpikePayload_HMAC(t *testing.T) {
+	const secret = "spike-test-secret"
+	var capturedBody []byte
+	var capturedSig string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		capturedBody = body
+		capturedSig = r.Header.Get("X-DrainCtl-Signature")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Secret: secret, Triggers: []Trigger{TriggerEventSpike}},
+	}
+	result, _ := newSpikeResult()
+
+	SendNotification(targets, &NotifyState{}, result, TriggerEventSpike, "")
+
+	if len(capturedBody) == 0 {
+		t.Fatal("webhook captured no body — SendNotification did not dispatch event_spike")
+	}
+	// The body MUST contain the spike sub-object: HMAC over a body without
+	// it would be the wrong contract.
+	if !strings.Contains(string(capturedBody), `"spike"`) {
+		t.Fatalf("webhook body missing 'spike' sub-object:\n%s", capturedBody)
+	}
+	wantSig := webhookSignature(secret, capturedBody)
+	if capturedSig != wantSig {
+		t.Errorf("X-DrainCtl-Signature = %q, want %q", capturedSig, wantSig)
 	}
 }

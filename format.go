@@ -58,6 +58,7 @@ type CheckResult struct {
 	ChangedBy            string          `json:"changed_by,omitempty"`
 	Sessions             *SessionSummary `json:"sessions,omitempty"`
 	Performance          *PerfSnapshot   `json:"performance,omitempty"`
+	Spike                *SpikePayload   `json:"spike,omitempty"`
 	Message              string          `json:"message"`
 	ExitCode             int             `json:"exit_code"`
 }
