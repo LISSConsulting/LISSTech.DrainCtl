@@ -1220,6 +1220,156 @@ func TestStatus_EnabledChannelsExcludesNonSubscribed(t *testing.T) {
 	}
 }
 
+// TestSubscription_TransitionsToRetryingOnInitialFailure — T107. A channel
+// that fails Subscribe at boot must enter StateRetrying with attempts=1
+// rather than being dropped. EnabledChannels must exclude it.
+func TestSubscription_TransitionsToRetryingOnInitialFailure(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	target := "Application"
+	s.Subscribe = func(_ context.Context, wg *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
+		if channel == target {
+			return errRetrySim
+		}
+		wg.Add(1)
+		go func() { defer wg.Done() }()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	s.mu.Lock()
+	sub := s.subscriptions[target]
+	s.mu.Unlock()
+
+	if sub == nil {
+		t.Fatal("subscription entry not created for failed channel")
+	}
+	if sub.state != StateRetrying {
+		t.Errorf("initial failure: state=%q, want %q", sub.state, StateRetrying)
+	}
+	if sub.attempts != 1 {
+		t.Errorf("initial failure: attempts=%d, want 1", sub.attempts)
+	}
+
+	s.mu.Lock()
+	total := len(s.channels)
+	s.mu.Unlock()
+	st := s.Status()
+	if st.EnabledChannels != total-1 {
+		t.Errorf("EnabledChannels=%d, want %d (target in retrying)", st.EnabledChannels, total-1)
+	}
+}
+
+// TestSubscription_RecoversToSubscribed — T107. After entering StateRetrying,
+// a successful retry on the supervisor's next tick returns the channel to
+// StateSubscribed and increments EnabledChannels.
+func TestSubscription_RecoversToSubscribed(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	tickCh := make(chan time.Time, 1)
+	s.RetryTickSource = func(time.Duration) (<-chan time.Time, func()) {
+		return tickCh, func() {}
+	}
+
+	target := "Application"
+	var allowRetry atomic.Bool
+	s.Subscribe = func(_ context.Context, wg *sync.WaitGroup, channel, _ string, _ *atomic.Int64, _ func(error)) error {
+		if channel == target && !allowRetry.Load() {
+			return errRetrySim
+		}
+		wg.Add(1)
+		go func() { defer wg.Done() }()
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	s.mu.Lock()
+	startState := s.subscriptions[target].state
+	s.mu.Unlock()
+	if startState != StateRetrying {
+		t.Fatalf("pre-condition: channel state=%q, want %q", startState, StateRetrying)
+	}
+
+	preEnabled := s.Status().EnabledChannels
+
+	allowRetry.Store(true)
+	tickCh <- time.Now()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		state := s.subscriptions[target].state
+		s.mu.Unlock()
+		if state == StateSubscribed {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	s.mu.Lock()
+	recoveredState := s.subscriptions[target].state
+	s.mu.Unlock()
+	if recoveredState != StateSubscribed {
+		t.Errorf("after retry: state=%q, want %q", recoveredState, StateSubscribed)
+	}
+
+	postEnabled := s.Status().EnabledChannels
+	if postEnabled != preEnabled+1 {
+		t.Errorf("EnabledChannels: pre=%d post=%d; want one more after recovery", preEnabled, postEnabled)
+	}
+}
+
+// TestStatus_MatureChannelsExcludesRetrying — T107. Status.MatureChannels
+// must only count channels in StateSubscribed; channels in other states are
+// excluded even when their detector is technically mature.
+func TestStatus_MatureChannelsExcludesRetrying(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	now := time.Now()
+	s.mu.Lock()
+	for _, d := range s.detectors {
+		trainOneChannel(d, now, 200, 1)
+	}
+	// Keep exactly one channel in StateSubscribed; move the rest to StateRetrying.
+	count := 0
+	for _, sub := range s.subscriptions {
+		if count == 0 {
+			sub.state = StateSubscribed
+		} else {
+			sub.state = StateRetrying
+		}
+		count++
+	}
+	s.mu.Unlock()
+
+	st := s.Status()
+	if st.MatureChannels != 1 {
+		t.Errorf("MatureChannels=%d, want 1 (only subscribed channels count)", st.MatureChannels)
+	}
+}
+
 var errRetrySim = errTestRetrySim("subscription lost in test")
 
 type errTestRetrySim string
