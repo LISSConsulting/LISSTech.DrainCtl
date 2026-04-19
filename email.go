@@ -21,23 +21,30 @@ var emailTemplateRaw string
 var emailTmpl = template.Must(template.New("email").Parse(emailTemplateRaw))
 
 type emailData struct {
-	Subject      string
-	Host         string
-	Mode         string
-	Status       string
-	Duration     string // drain-state duration (omitted for perf/session triggers)
-	GracePeriod  string // grace period (only for drain-state triggers)
-	ChangedBy    string // who changed drain state (omitted for perf/session triggers)
-	Sessions     string // e.g. "45 of 50 (90%)"
-	PerfSummary  string // e.g. "CPU 67% · Mem 92% · Delay 38ms"
-	Timestamp    string
-	Message      string
-	Trigger      string
-	StatusColor  string // badge background
-	BorderColor  string // left accent border
-	CardBg       string // card background tint
-	BlockquoteBg string // message blockquote background
-	IsDrain      bool   // true for drain-state triggers, controls which detail rows render
+	Subject           string
+	Preview           string // hidden preview text shown by email clients
+	Host              string
+	Mode              string
+	Status            string
+	Duration          string // drain-state duration (omitted for perf/session triggers)
+	GracePeriod       string // grace period (only for drain-state triggers)
+	ChangedBy         string // who changed drain state (omitted for perf/session triggers)
+	Sessions          string // e.g. "45 of 50 (90%)"
+	PerfSummary       string // e.g. "CPU 67% · Mem 92% · Delay 38ms"
+	Timestamp         string
+	Message           string
+	Trigger           string
+	StatusColor       string // badge background
+	BorderColor       string // left accent border
+	CardBg            string // card background tint
+	BlockquoteBg      string // message blockquote background
+	IsDrain           bool   // true for drain-state triggers, controls which detail rows render
+	IsSpike           bool   // true for event_spike trigger — swaps detail rows for spike data
+	SpikeChannel      string
+	SpikeObserved     string
+	SpikeExpected     string
+	SpikeConfirmation string
+	SpikeWindow       string
 }
 
 // sanitizeHeader strips CR, LF, and NUL from a string to prevent
@@ -108,6 +115,15 @@ func emailStatus(drainStatus string, trigger Trigger) (label string, colors emai
 		return label, emailColors{"#b87843", "#b87843", "#fdf6f0", "#faf0e6"}
 	case TriggerCPUCritical, TriggerMemoryCritical, TriggerInputDelayCritical:
 		return label, emailColors{"#9e2a3b", "#9e2a3b", "#fdf0f2", "#fae6ea"}
+	case TriggerEventSpike:
+		switch drainStatus {
+		case "warning":
+			return label, emailColors{"#b87843", "#b87843", "#fdf6f0", "#faf0e6"}
+		case "alert":
+			return label, emailColors{"#9e2a3b", "#9e2a3b", "#fdf0f2", "#fae6ea"}
+		default:
+			return label, emailColors{"#7a5a5a", "#7a5a5a", "#f7f3f3", "#f0eaea"}
+		}
 	}
 	switch drainStatus {
 	case "Healthy":
@@ -126,7 +142,8 @@ func emailStatus(drainStatus string, trigger Trigger) (label string, colors emai
 func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, changedBy string) (string, error) {
 	status, colors := emailStatus(result.Status, trigger)
 
-	isDrain := !perfTriggers[trigger] && trigger != TriggerSessionWarning
+	isSpike := trigger == TriggerEventSpike
+	isDrain := !perfTriggers[trigger] && trigger != TriggerSessionWarning && !isSpike
 
 	dur := ""
 	grace := ""
@@ -141,6 +158,27 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 		if changedBy != "" {
 			cb = changedBy
 		}
+	}
+
+	spikeChannel := ""
+	spikeObserved := ""
+	spikeExpected := ""
+	spikeConfirmation := ""
+	spikeWindow := ""
+	preview := result.Message
+	if isSpike && result.Spike != nil {
+		s := result.Spike
+		spikeChannel = s.Channel
+		spikeObserved = fmt.Sprintf("%d", s.Observed)
+		spikeExpected = fmt.Sprintf("%.1f", s.Expected)
+		spikeConfirmation = fmt.Sprintf("%d of last 3 windows", s.ConfirmationCount)
+		if !s.WindowStart.IsZero() && !s.WindowEnd.IsZero() {
+			spikeWindow = fmt.Sprintf("%s \u2013 %s",
+				s.WindowStart.Format("15:04:05"),
+				s.WindowEnd.Format("15:04:05"))
+		}
+		preview = fmt.Sprintf("%s: %d events, expected ~%.1f. Tail probability %g.",
+			s.Channel, s.Observed, s.Expected, s.TailProbability)
 	}
 
 	// Session summary
@@ -171,23 +209,30 @@ func renderEmailHTML(result *CheckResult, subject string, trigger Trigger, chang
 	}
 
 	data := emailData{
-		Subject:      subject,
-		Host:         result.Host,
-		Mode:         humanModeLabel(result.DrainModeLabel),
-		Status:       status,
-		Duration:     dur,
-		GracePeriod:  grace,
-		ChangedBy:    cb,
-		Sessions:     sessions,
-		PerfSummary:  perfSummary,
-		Timestamp:    result.Timestamp.Format("2006-01-02 15:04:05 MST"),
-		Message:      result.Message,
-		Trigger:      string(trigger),
-		StatusColor:  colors.Badge,
-		BorderColor:  colors.Border,
-		CardBg:       colors.CardBg,
-		BlockquoteBg: colors.Blockquote,
-		IsDrain:      isDrain,
+		Subject:           subject,
+		Preview:           preview,
+		Host:              result.Host,
+		Mode:              humanModeLabel(result.DrainModeLabel),
+		Status:            status,
+		Duration:          dur,
+		GracePeriod:       grace,
+		ChangedBy:         cb,
+		Sessions:          sessions,
+		PerfSummary:       perfSummary,
+		Timestamp:         result.Timestamp.Format("2006-01-02 15:04:05 MST"),
+		Message:           result.Message,
+		Trigger:           string(trigger),
+		StatusColor:       colors.Badge,
+		BorderColor:       colors.Border,
+		CardBg:            colors.CardBg,
+		BlockquoteBg:      colors.Blockquote,
+		IsDrain:           isDrain,
+		IsSpike:           isSpike,
+		SpikeChannel:      spikeChannel,
+		SpikeObserved:     spikeObserved,
+		SpikeExpected:     spikeExpected,
+		SpikeConfirmation: spikeConfirmation,
+		SpikeWindow:       spikeWindow,
 	}
 
 	var buf bytes.Buffer
