@@ -208,7 +208,7 @@ Previously specified an MSI `<Feature Id="SecurityEventLog">` with `LsaAddAccoun
 
 The single Security-opt-in test now lives in Phase 3 as part of the subsystem tests (T023a below) rather than as a Phase 8 MSI test.
 
-- [ ] T023a [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: set `cfg.SecurityChannelEnabled = true` on a LocalSystem-compatible mock; assert `EnableSecurityPrivilege()` is called exactly once at Start; if the mock simulates `ERROR_NOT_ALL_ASSIGNED` (dedicated-account scenario), assert Security is skipped from `ResolveChannels` output and a warning is logged, but other channels continue to subscribe.
+- [x] T023a [P] [US1] Integration test in `internal/evtspike/subsystem_test.go`: set `cfg.SecurityChannelEnabled = true` on a LocalSystem-compatible mock; assert `EnableSecurityPrivilege()` is called exactly once at Start; if the mock simulates `ERROR_NOT_ALL_ASSIGNED` (dedicated-account scenario), assert Security is skipped from `ResolveChannels` output and a warning is logged, but other channels continue to subscribe.
 
 ---
 
