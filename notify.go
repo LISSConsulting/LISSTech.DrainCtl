@@ -20,11 +20,16 @@ import (
 )
 
 // NotifyState tracks per-target notification timing for repeat intervals.
+// SpikeMu guards LastSpikeNotify against concurrent dispatch goroutines — the
+// main SendNotification loop writes speculative cooldown timestamps and
+// rollback-on-failure happens from dispatch goroutines for other targets,
+// so every read/write in the event_spike branch must be under SpikeMu.
 type NotifyState struct {
 	LastAlertNotify       map[string]time.Time             // key = target URL (alert trigger)
 	LastSessionWarnNotify map[string]time.Time             // key = target URL (session_warning trigger)
 	LastPerfNotify        map[string]map[Trigger]time.Time // key = target URL -> trigger -> last sent
 	LastSpikeNotify       map[string]map[string]time.Time  // key = target URL -> "host|channel" -> last sent
+	SpikeMu               sync.Mutex                       // guards LastSpikeNotify
 }
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
@@ -105,6 +110,10 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 	}
 
 	var wg sync.WaitGroup
+	// spikeRollback is set per-iteration to the closure that restores the
+	// LastSpikeNotify entry if the dispatch fails. nil for non-event_spike
+	// triggers; called from inside each dispatch goroutine on send error.
+	var spikeRollback func()
 	for _, target := range targets {
 		// Skip disabled targets (nil Enabled means enabled by default).
 		if target.Enabled != nil && !*target.Enabled {
@@ -125,22 +134,57 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 					continue
 				}
 				spikeKey := result.Spike.Host + "|" + result.Spike.Channel
-				lastSent := time.Time{}
+
+				// All LastSpikeNotify access — read, optimistic write,
+				// dispatch-goroutine rollback — must be under SpikeMu.
+				// Dispatch goroutines for earlier targets can roll back
+				// while this loop body writes a later target's timestamp;
+				// concurrent map writes without sync are a Go data race.
+				state.SpikeMu.Lock()
+				var prev time.Time
+				var hadPrev bool
+				var lastSent time.Time
 				if m, ok := state.LastSpikeNotify[target.URL]; ok {
-					lastSent = m[spikeKey]
+					if v, present := m[spikeKey]; present {
+						prev = v
+						hadPrev = true
+						lastSent = v
+					}
 				}
 				if repeatInterval > 0 {
 					if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
+						state.SpikeMu.Unlock()
 						continue
 					}
 				} else if !lastSent.IsZero() {
+					state.SpikeMu.Unlock()
 					continue
 				}
 				if state.LastSpikeNotify[target.URL] == nil {
 					state.LastSpikeNotify[target.URL] = make(map[string]time.Time)
 				}
 				state.LastSpikeNotify[target.URL][spikeKey] = now
+				state.SpikeMu.Unlock()
+
+				// Build the rollback closure for the dispatch goroutine.
+				// A transient send failure should NOT consume the repeat
+				// window for this (host, channel) pair on this target.
+				targetURL := target.URL
+				spikeRollback = func() {
+					state.SpikeMu.Lock()
+					defer state.SpikeMu.Unlock()
+					m := state.LastSpikeNotify[targetURL]
+					if m == nil {
+						return
+					}
+					if hadPrev {
+						m[spikeKey] = prev
+					} else {
+						delete(m, spikeKey)
+					}
+				}
 			} else {
+				spikeRollback = nil
 				lastSent := getLastSent(state, target.URL, trigger)
 				if repeatInterval > 0 {
 					if !lastSent.IsZero() && now.Sub(lastSent) < repeatInterval {
@@ -180,6 +224,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		t := target // capture for goroutine
 		r := dispatchResult
 		pl := dispatchPayload
+		rb := spikeRollback // capture per-iteration closure for this target
 		switch t.Type {
 		case "webhook":
 			wg.Add(1)
@@ -187,6 +232,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				defer wg.Done()
 				if err := sendWebhook(t.URL, t.Secret, pl); err != nil {
 					slog.Warn("webhook notification failed", "error", err, "url", t.URL)
+					if rb != nil {
+						rb()
+					}
 				} else {
 					slog.Info("", "notify", "webhook", "event", string(trigger), "url", t.URL)
 				}
@@ -211,6 +259,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				defer wg.Done()
 				if err := sendNtfy(t.URL, title, ntfyMsg, priority, tags); err != nil {
 					slog.Warn("ntfy notification failed", "error", err, "url", t.URL)
+					if rb != nil {
+						rb()
+					}
 				} else {
 					slog.Info("", "notify", "ntfy", "event", string(trigger), "url", t.URL)
 				}
@@ -222,6 +273,9 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 				defer wg.Done()
 				if err := sendEmail(t, r, trigger, changedBy); err != nil {
 					slog.Warn("email notification failed", "error", err, "url", t.URL)
+					if rb != nil {
+						rb()
+					}
 				} else {
 					slog.Info("", "notify", "email", "event", string(trigger), "to", t.To)
 				}

@@ -32,10 +32,25 @@ func TestNegBinUpperTail_LargeCount(t *testing.T) {
 }
 
 func TestNegBinQuantile(t *testing.T) {
-	q99 := negBinQuantile(0.99, 6.0, 60.0)
+	q99, ok := negBinQuantile(0.99, 6.0, 60.0)
+	if !ok {
+		t.Fatalf("negBinQuantile reported overflow on normal parameters")
+	}
 	mean := 6.0 / 60.0
 	if float64(q99) < mean {
 		t.Errorf("99th percentile %d should be >= mean %.2f", q99, mean)
+	}
+}
+
+// TestNegBinQuantile_ExtremeCapSignalsOverflow — T110. When prob is
+// effectively unreachable within float precision (tiny prior with huge
+// tail), negBinQuantile must return ok=false rather than maxNBinIter-as-int.
+// A quantile of 1.0 is unreachable because the infinite PMF sum is
+// asymptotic to 1 — any implementation will hit the iteration cap first.
+func TestNegBinQuantile_ExtremeCapSignalsOverflow(t *testing.T) {
+	// prob=1.0 is unreachable via a partial CDF.
+	if _, ok := negBinQuantile(1.0, 1.0, 0.001); ok {
+		t.Error("expected ok=false for unreachable quantile (prob=1.0 with heavy-tailed prior)")
 	}
 }
 
