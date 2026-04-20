@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -32,6 +34,10 @@ func requireMachineAccount(next http.Handler) http.Handler {
 			name = name[idx+1:]
 		}
 		if !strings.HasSuffix(name, "$") {
+			if isLocalSystemLoopback(r, auth) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			slog.Warn("sspi: agent route rejected non-machine account",
 				slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username)
 			msg, _ := json.Marshal(map[string]string{
@@ -44,6 +50,29 @@ func requireMachineAccount(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isLocalSystemLoopback(r *http.Request, auth *AuthInfo) bool {
+	if auth == nil || !strings.EqualFold(auth.Username, `NT AUTHORITY\SYSTEM`) {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isLocalSystemForHost(r *http.Request, auth *AuthInfo, hostname string) bool {
+	if !isLocalSystemLoopback(r, auth) {
+		return false
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(local, hostname)
 }
 
 // requireSession returns middleware that validates the drainctl_session cookie
