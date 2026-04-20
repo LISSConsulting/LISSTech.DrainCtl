@@ -31,7 +31,19 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Windows-first delivery**: Confirm every new or moved Go file will carry
+  `//go:build windows`, and name every affected operator surface: root package, CLI,
+  DLL/interop, service, dashboard, PowerShell, installer.
+- **Stable operator surfaces**: List every public command, API, config field, output
+  shape, or automation-facing behavior that changes. For each one, record whether it is
+  updated, unchanged, or deprecated with migration notes.
+- **Tests and zero-noise verification**: Identify the automated tests required at unit
+  and boundary level. State the verification commands required for completion, at minimum
+  `go test ./...`, `just lint`, and any feature-specific checks.
+- **Config and release discipline**: Confirm configuration stays in the existing JSON
+  flow and describe any migration, retention, stored-data, or release-artifact impact.
+- **Operational observability**: Describe the logging, telemetry, dashboard, Event Log,
+  audit, or CLI inspection paths that prove the feature works and can be diagnosed.
 
 ## Project Structure
 
