@@ -3,6 +3,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -478,5 +479,123 @@ func TestAPI_EvtSpikeSpikes_NilStore_EmptyArray(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+// ── handleReportSpike ─────────────────────────────────────────────────────────
+
+// TestHandleReportSpike_ValidSpike_Inserted verifies the happy path: a
+// registered host POSTs a valid SpikePayload → 200 {"ok":true}, ring buffer
+// gains one entry retrievable via handleEvtSpikeSpikes.
+func TestHandleReportSpike_ValidSpike_Inserted(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.spikestore = NewSpikeStore()
+
+	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewReader(body))
+	ds.handleReportSpike(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	entries := ds.spikestore.Recent("SRV01", 10)
+	if len(entries) != 1 {
+		t.Fatalf("ring size = %d, want 1", len(entries))
+	}
+	if entries[0].Channel != "Application" {
+		t.Errorf("channel = %q, want Application", entries[0].Channel)
+	}
+}
+
+// TestHandleReportSpike_InvalidJSON_400 verifies that a malformed body
+// returns 400 without panicking.
+func TestHandleReportSpike_InvalidJSON_400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewBufferString("not json"))
+	ds.handleReportSpike(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestHandleReportSpike_EmptyHost_400 verifies that a valid JSON body with a
+// missing host field is rejected with 400.
+func TestHandleReportSpike_EmptyHost_400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	spike := makeSpike("SRV01", "Application", time.Now())
+	spike.Host = ""
+	body, _ := json.Marshal(spike)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewReader(body))
+	ds.handleReportSpike(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestHandleReportSpike_UnregisteredHost_403 verifies that a spike for an
+// unregistered host is rejected with 403.
+func TestHandleReportSpike_UnregisteredHost_403(t *testing.T) {
+	ds := newTestServer(t)
+	// SRV01 intentionally not registered.
+
+	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewReader(body))
+	ds.handleReportSpike(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// TestHandleReportSpike_NilStore_200 verifies the feature-off path: when no
+// SpikeStore is wired (subsystem disabled), the endpoint still returns 200 so
+// the remote agent doesn't retry indefinitely.
+func TestHandleReportSpike_NilStore_200(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	// ds.spikestore intentionally left nil.
+
+	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewReader(body))
+	ds.handleReportSpike(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+// TestHandleReportSpike_DedupIdenticalPosts verifies that posting the same
+// spike twice stores only one entry — guards against remote-agent retry loops.
+func TestHandleReportSpike_DedupIdenticalPosts(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.spikestore = NewSpikeStore()
+
+	spike := makeSpike("SRV01", "Application", time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC))
+	body, _ := json.Marshal(spike)
+
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/spike", bytes.NewReader(body))
+		ds.handleReportSpike(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("POST %d: status = %d, want 200", i+1, w.Code)
+		}
+	}
+	entries := ds.spikestore.Recent("SRV01", 10)
+	if len(entries) != 1 {
+		t.Fatalf("ring size = %d after 3 identical posts, want 1", len(entries))
 	}
 }

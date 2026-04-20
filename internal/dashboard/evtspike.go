@@ -4,9 +4,12 @@ package dashboard
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 )
 
@@ -77,4 +80,54 @@ func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.R
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(entries)
+}
+
+// handleReportSpike serves POST /api/v1/spike. Accepts a JSON SpikePayload
+// pushed by a remote agent when its evtspike subsystem confirms a spike and
+// the agent isn't the local-dashboard host (the local path appends via
+// OnEvtSpikeIngest already). The body's Host must match the authenticated
+// machine account. Duplicate (Channel, WindowStart) posts are silently
+// ignored so a retrying agent can't double-insert.
+func (ds *DashboardServer) handleReportSpike(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16384))
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var spike dc.SpikePayload
+	if err := json.Unmarshal(body, &spike); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if spike.Host == "" {
+		http.Error(w, "host field required", http.StatusBadRequest)
+		return
+	}
+	if !ds.state.IsRegistered(spike.Host) {
+		http.Error(w, "host not registered", http.StatusForbidden)
+		return
+	}
+	auth := GetAuthInfo(r)
+	if auth != nil && !isAuthorizedForHost(auth, spike.Host, ds.cfg.Group) {
+		slog.Warn("dashboard: spike rejected: identity mismatch",
+			slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "claimed_host", spike.Host)
+		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
+		return
+	}
+
+	if ds.spikestore == nil {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+		return
+	}
+	entry, inserted := ds.spikestore.AppendDedup(spike.Host, spike)
+	if inserted {
+		ds.broker.PublishRecentSpike(entry)
+		slog.Info("dashboard=spike_ingested",
+			"host", spike.Host, "channel", spike.Channel,
+			"observed", spike.Observed, "expected", spike.Expected)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }

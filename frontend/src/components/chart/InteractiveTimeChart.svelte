@@ -16,6 +16,7 @@
      *               crosshair + dot + tooltip
      */
     import { getContext } from 'svelte';
+    import { counterLabel, isPercentCounter } from '../../lib/utils.js';
 
     /** @type {{ points: {t:number,v:number}[], counter: string, color: string, hideHover?: boolean }} */
     let { points, counter, color, hideHover = false } = $props();
@@ -25,16 +26,7 @@
     // ── Y-axis tick generation ───────────────────────────────────────────
     // Percent counters pin to 0/25/50/75/100. Everything else auto-scales to
     // the data domain LayerCake computed (yDomain is reactive).
-    const PCT_COUNTERS = new Set([
-        'cpu_pct',
-        'cpu_p95_pct',
-        'mem_pct',
-        'session_cpu_p95_pct',
-        'session_cpu_p50_pct',
-        'rfx_quality_pct',
-        'rfx_loss_pct',
-    ]);
-    let isPct = $derived(PCT_COUNTERS.has(counter));
+    let isPct = $derived(isPercentCounter(counter));
 
     let yTicks = $derived.by(() => {
         if (isPct) return [0, 25, 50, 75, 100];
@@ -248,7 +240,7 @@
 
     <text x={tx + TIP_PAD} y={ty + 16} class="tip-time">{formatTooltipTime(p.t)}</text>
     <text x={tx + TIP_PAD} y={ty + 36} class="tip-val"
-        >{counter}: <tspan font-weight="700" fill={color}>{formatY(p.v)}</tspan></text
+        >{counterLabel(counter)}: <tspan font-weight="700" fill={color}>{formatY(p.v)}</tspan></text
     >
 {/if}
 
