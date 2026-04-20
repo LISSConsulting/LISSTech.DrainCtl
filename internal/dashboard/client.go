@@ -183,8 +183,8 @@ func ReportState(dashboardURL string, result *dc.CheckResult) {
 }
 
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
-// Makes an initial request, and if a 401 is returned, acquires an SSPI client
-// token and retries with the Authorization header.
+// It supports multi-leg NTLM/Kerberos exchanges by feeding server challenge
+// tokens back into the SSPI client context until the handshake completes.
 func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
 	logDebug := func(msg string) {
 		slog.Debug("negotiate: " + msg)
@@ -198,18 +198,6 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
-
-	logDebug("step=initial_request")
-	resp, err := dashClientPtr.Load().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	logDebug(fmt.Sprintf("step=initial_response status=%d", resp.StatusCode))
-	if resp.StatusCode != http.StatusUnauthorized {
-		return resp, nil
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
 
 	logDebug("step=sspi_acquire_credentials")
 	cred, err := negotiate.AcquireCurrentUserCredentials()
@@ -232,22 +220,63 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 		_ = secCtx.Release()
 	}()
 
-	logDebug(fmt.Sprintf("step=retry_request token_len=%d", len(token)))
-	req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create retry request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
-	req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
+	for attempt := 1; attempt <= 5; attempt++ {
+		logDebug(fmt.Sprintf("step=request attempt=%d token_len=%d", attempt, len(token)))
+		req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "DrainCtl/"+dc.Version)
+		if len(token) > 0 {
+			req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(token))
+		}
 
-	logDebug("step=retry_do")
-	resp2, err := dashClientPtr.Load().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http retry request: %w", err)
+		resp, err := dashClientPtr.Load().Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("http request: %w", err)
+		}
+		logDebug(fmt.Sprintf("step=response attempt=%d status=%d", attempt, resp.StatusCode))
+		if resp.StatusCode != http.StatusUnauthorized {
+			return resp, nil
+		}
+
+		challenge, ok := negotiateChallenge(resp.Header.Values("Www-Authenticate"))
+		if !ok {
+			return resp, nil
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		authDone, nextToken, err := secCtx.Update(challenge)
+		if err != nil {
+			return nil, fmt.Errorf("sspi client update: %w", err)
+		}
+		token = nextToken
+		if authDone && len(token) == 0 {
+			return nil, fmt.Errorf("sspi negotiation completed without final token but server still returned 401")
+		}
 	}
-	logDebug(fmt.Sprintf("step=retry_response status=%d", resp2.StatusCode))
-	return resp2, nil
+
+	return nil, fmt.Errorf("sspi negotiation did not complete after 5 attempts")
+}
+
+func negotiateChallenge(values []string) ([]byte, bool) {
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part == "Negotiate" {
+				return nil, true
+			}
+			if strings.HasPrefix(part, "Negotiate ") {
+				token, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(part, "Negotiate ")))
+				if err == nil {
+					return token, true
+				}
+			}
+		}
+	}
+	return nil, false
 }
 
 // targetSPN derives the HTTP service SPN from a URL, e.g. "HTTP/server.domain.com".
