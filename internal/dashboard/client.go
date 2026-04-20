@@ -128,6 +128,36 @@ func Register(dashboardURL string) (*RegisterResult, error) {
 	return &RegisterResult{TLSFingerprint: result.TLSFingerprint}, nil
 }
 
+// ReportSpike pushes a single confirmed SpikePayload to the dashboard server
+// so the central Recent Spikes ring renders spikes from remote agents. The
+// local-dashboard code path (Subsystem.OnSpike → state.OnEvtSpikeIngest)
+// handles same-process spikes already, so callers should skip this when
+// dashState is non-nil. Errors are logged and swallowed — the agent also
+// delivers the spike via notifications, so a transient dashboard outage never
+// suppresses the alert itself.
+func ReportSpike(dashboardURL string, spike *dc.SpikePayload) {
+	payload, err := json.Marshal(spike)
+	if err != nil {
+		slog.Warn("dashboard: spike marshal failed", "error", err)
+		return
+	}
+	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/spike", payload)
+	if err != nil {
+		slog.Warn("dashboard: spike report failed", "error", err, "host", spike.Host)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		slog.Warn("dashboard: spike report rejected",
+			"status", resp.StatusCode, "host", spike.Host, "channel", spike.Channel)
+		return
+	}
+	slog.Info("dashboard=spike_reported",
+		"host", spike.Host, "channel", spike.Channel,
+		"observed", spike.Observed, "expected", spike.Expected)
+}
+
 // ReportState sends the latest CheckResult to the dashboard server.
 // Errors are logged but never crash the service.
 func ReportState(dashboardURL string, result *dc.CheckResult) {
