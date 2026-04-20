@@ -29,7 +29,7 @@ description: "Task list for remaining persistent telemetry consumers"
 **Purpose**: Establish the shared API, state, and verification scaffolding used by all stories.
 
 - [x] T001 Review current history consumers in `frontend/src/App.svelte`, `frontend/src/lib/state.svelte.js`, `frontend/src/components/MetricsChart.svelte`, `frontend/src/components/ServerTable.svelte`, and `frontend/src/components/ServerDetail.svelte`; record any newly discovered in-scope/deferred surfaces in `specs/008-sqlite-chart-consumers/plan.md`
-- [ ] T002 [P] Add or refine fleet/seed API client helpers and JSDoc shapes in `frontend/src/lib/api.js` to match `specs/008-sqlite-chart-consumers/contracts/http-fleet-metrics.md` and `specs/008-sqlite-chart-consumers/contracts/http-metrics-seed.md`
+- [x] T002 [P] Add or refine fleet/seed API client helpers and JSDoc shapes in `frontend/src/lib/api.js` to match `specs/008-sqlite-chart-consumers/contracts/http-fleet-metrics.md` and `specs/008-sqlite-chart-consumers/contracts/http-metrics-seed.md`
 - [ ] T003 [P] Add shared Overview window state scaffolding and non-authoritative local UI persistence boundaries in `frontend/src/lib/state.svelte.js`
 - [ ] T004 [P] Add reusable dashboard test fixtures/helpers for fleet metrics and metrics-seed responses in `internal/dashboard/server_test.go`
 
