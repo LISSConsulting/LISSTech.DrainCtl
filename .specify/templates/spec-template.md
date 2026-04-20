@@ -100,6 +100,30 @@
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
 
+## Constitution Alignment *(mandatory)*
+
+<!--
+  ACTION REQUIRED: Show how the feature complies with the project constitution.
+  Be concrete and name the real surfaces, tests, and operational signals involved.
+-->
+
+### Operator Surface Impact
+
+- **Affected surfaces**: [root package, CLI, DLL/interop, service, dashboard,
+  PowerShell, installer, docs]
+- **Public behavior changes**: [commands, API shapes, config fields, output formats,
+  migrations, or "None"]
+- **Compatibility / migration**: [required operator action, compatibility notes, or
+  "None"]
+
+### Quality and Observability Impact
+
+- **Required tests**: [unit, integration, contract, manual validation boundaries]
+- **Operational signals**: [logs, telemetry, dashboard widgets, Event Log, audit rows,
+  CLI output, alerts]
+- **Configuration / data impact**: [config.json changes, retention, migrations,
+  persistence ownership, or "None"]
+
 ## Success Criteria *(mandatory)*
 
 <!--

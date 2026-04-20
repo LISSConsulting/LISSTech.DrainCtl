@@ -8,7 +8,9 @@ description: "Task list template for feature implementation"
 **Input**: Design documents from `/specs/[###-feature-name]/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
+**Tests**: Tests are required whenever the constitution or feature scope makes them
+load-bearing. Include the unit, contract, integration, or end-to-end tasks needed to
+prove the affected behavior and boundaries.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -51,6 +53,7 @@ description: "Task list template for feature implementation"
 - [ ] T001 Create project structure per implementation plan
 - [ ] T002 Initialize [language] project with [framework] dependencies
 - [ ] T003 [P] Configure linting and formatting tools
+- [ ] T004 Record Constitution Check outcomes in `specs/[###-feature-name]/plan.md`
 
 ---
 
@@ -79,7 +82,7 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 1 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 1 ⚠️
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
@@ -94,6 +97,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
 - [ ] T016 [US1] Add validation and error handling
 - [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T018 [US1] Update operator-facing docs or contracts impacted by User Story 1
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -105,7 +109,7 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 2 ⚠️
 
 - [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
@@ -116,6 +120,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T021 [US2] Implement [Service] in src/services/[service].py
 - [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
+- [ ] T024 [US2] Update operator-facing docs or contracts impacted by User Story 2
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -127,7 +132,7 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 3 ⚠️
 
 - [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
@@ -137,6 +142,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
 - [ ] T027 [US3] Implement [Service] in src/services/[service].py
 - [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T029 [US3] Update operator-facing docs or contracts impacted by User Story 3
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -153,8 +159,10 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
-- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
+- [ ] TXXX [P] Additional unit tests in tests/unit/
 - [ ] TXXX Security hardening
+- [ ] TXXX Verify observability paths (logs, telemetry, dashboard, Event Log, alerts)
+- [ ] TXXX Verify config, migration, and retention behavior
 - [ ] TXXX Run quickstart.md validation
 
 ---
@@ -178,7 +186,7 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Within Each User Story
 
-- Tests (if included) MUST be written and FAIL before implementation
+- Required tests MUST be written and FAIL before implementation
 - Models before services
 - Services before endpoints
 - Core implementation before integration
@@ -245,7 +253,7 @@ With multiple developers:
 - [P] tasks = different files, no dependencies
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
-- Verify tests fail before implementing
+- Verify required tests fail before implementing
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
