@@ -118,6 +118,34 @@ Most work lands in `internal/dashboard/server.go` and the frontend Overview stat
 chart components. Reuse `internal/telemetry/metrics.go` and the existing `/api/v1/metrics/{host}`
 response shape rather than introducing a second storage stack or new dashboard service.
 
+## Historical Consumer Inventory (T001 review — 2026-04-20)
+
+### In-Scope: Migrate to Retained Telemetry
+
+| Surface | Variable | File | Accumulation | Persistence | Reads | Migration Path |
+|---------|----------|------|--------------|-------------|-------|----------------|
+| Fleet LOAD + HIC charts | `metricsHistory` | `state.svelte.js` → `MetricsChart.svelte` | `appendMetricsSample()` every 30 s; synthesized from mock seed on cold start | localStorage (`drainctl:metrics`) | `MetricsChart` LOAD and HIC tabs | Replace mock seed + live accumulation with `fetchMetrics('_fleet', ...)` retained query |
+| Fleet SESSIONS charts | `sessionHistory` | `state.svelte.js` → `MetricsChart.svelte` | `appendSessionSample()` every 30 s; synthesized from mock seed on cold start | localStorage (`drainctl:session-history`) | `MetricsChart` Session Metrics tab | Same fleet sentinel query, session counters |
+| Fleet REMOTE FX charts | `remoteFxHistory` | `state.svelte.js` → `MetricsChart.svelte` | `appendRfxSample()` every 30 s; synthesized from mock seed on cold start | localStorage (`drainctl:rfx-history`) | `MetricsChart` Remote FX tab | Same fleet sentinel query, RFX counters |
+| Per-host sparklines | `serverMetrics[host]` | `state.svelte.js` → `ServerTable.svelte`, `ServerDetail.svelte` | `appendServerMetricsSample(host, …)` every 30 s + SSE perf events; seeded via mock `fetchAllServerMetrics()` on cold start | localStorage (`drainctl:server-metrics`) | `ServerTable` sparkline columns; `ServerDetail` sparkline row | Replace mock seed with production `GET /api/v1/metrics` seed route; live accumulation from poll/SSE continues as before |
+
+### Confirmed Deferred: No Migration Needed
+
+| Surface | Variable | Why Deferred |
+|---------|----------|--------------|
+| Per-host anomaly spikes | `recentSpikes[host]` | Already server-authoritative: seeded from `fetchRecentSpikes()` REST on `ServerDetail` expand; updated live via SSE `recent_spike` events. Not localStorage-persisted. No migration required. |
+| Per-host detector status | `detectorStatuses[host]` | Already transient and server-authoritative: seeded from `fetchEvtSpikeStatus()` on expand; updated via SSE `detector_status`. Not localStorage-persisted. No migration required. |
+| Drain state transitions | `HistoryModal` / `fetchHistory()` | Already a production REST API (`GET /api/v1/history/{host}`); not localStorage-based. No migration required. |
+| ServerDetail durable CPU chart | `chart.svelte` tile (per-host) | Already uses the production `fetchMetrics(host, from, to, …)` SQLite-backed API. The 5M/1H/1D/3D/5D pill state is persisted to localStorage as UI preference, not as historical data. Already migrated; no action needed. |
+
+### Implementation Gotchas Discovered During Review
+
+1. **`clearStaleState()` / `MOCK_VERSION = "3.6"`** (`state.svelte.js` lines 45–58): On module init, if the mock version sentinel mismatches it wipes **all** `drainctl:*` localStorage keys. When the mock endpoint is removed, bump `MOCK_VERSION` (or drop the sentinel entirely) so the first post-migration page load does not erase accumulated UI preferences for existing users.
+
+2. **`ServerDetail.svelte` fleet-fallback** (line ~24): `serverHistory = $derived(appState.serverMetrics.get(host) ?? appState.metricsHistory)` — when the per-host ring buffer is empty it currently falls back to the fleet aggregate, which is semantically misleading. After migration the production seed should fill `serverMetrics` on cold start; if no data arrives for a host the fallback must become an explicit empty state rather than the fleet aggregate.
+
+3. **Fleet-seed synthesis block in `App.svelte`** (lines 230–314): The existing mock seed synthesizes `fleetHistory`, `sessHistory`, and `rfxHistSeed` by iterating parallel per-host arrays. This entire block is replaced by a single `fetchMetrics('_fleet', …)` call returning retained series directly; no client-side synthesis is needed.
+
 ## Complexity Tracking
 
 > Constitution check passed; no violations require justification at planning time.
