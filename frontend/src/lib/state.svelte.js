@@ -37,6 +37,10 @@ const LS_SESSION_HISTORY = 'drainctl:session-history';
 const LS_RFX_HISTORY = 'drainctl:rfx-history';
 const LS_RFX_AVAILABLE = 'drainctl:rfx-available';
 
+// Non-authoritative UI-preference keys: persisted as operator convenience only.
+// These do NOT represent retained history; history authority belongs to the backend.
+const LS_OVERVIEW_WINDOW = 'drainctl:overview-window';
+
 /**
  * If the stored mock-data version doesn't match the current MOCK_VERSION,
  * wipe all drainctl:* keys so the dashboard starts fresh with new mock data.
@@ -92,6 +96,26 @@ function lsGetDate(key) {
     }
 }
 
+/**
+ * Shared Overview time-window preset definitions (FR-008a).
+ * Exported so pill controls and data-fetch callers share one source of truth.
+ * @type {Array<{key: OverviewWindowPreset, label: string, ms: number}>}
+ */
+export const OVERVIEW_WINDOW_PRESETS = [
+    { key: '5min', label: '5M', ms: 5 * 60 * 1000 },
+    { key: '1hour', label: '1H', ms: 60 * 60 * 1000 },
+    { key: '1day', label: '1D', ms: 24 * 60 * 60 * 1000 },
+    { key: '3day', label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
+    { key: '5day', label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
+];
+
+function lsGetOverviewWindow() {
+    const raw = lsGet(LS_OVERVIEW_WINDOW, null);
+    return OVERVIEW_WINDOW_PRESETS.some((p) => p.key === raw)
+        ? /** @type {OverviewWindowPreset} */ (raw)
+        : /** @type {OverviewWindowPreset} */ ('1hour');
+}
+
 /** Return a debounced function that delays invoking `fn` until `ms` ms after the last call. */
 function debounce(fn, ms) {
     let timer;
@@ -144,6 +168,11 @@ const persistRfxHistory = debounce((data) => {
 const persistRfxAvailable = debounce((v) => {
     try {
         localStorage.setItem(LS_RFX_AVAILABLE, JSON.stringify(v));
+    } catch {}
+}, 300);
+const persistOverviewWindow = debounce((v) => {
+    try {
+        localStorage.setItem(LS_OVERVIEW_WINDOW, JSON.stringify(v));
     } catch {}
 }, 300);
 
@@ -210,6 +239,8 @@ const persistRfxAvailable = debounce((v) => {
  * @property {number} pct   - 0–100
  * @property {number} count
  */
+
+/** @typedef {'5min'|'1hour'|'1day'|'3day'|'5day'} OverviewWindowPreset */
 
 /**
  * @typedef {Object} Counters
@@ -294,6 +325,14 @@ let rfxAvailable = $state(/** @type {boolean} */ (lsGet(LS_RFX_AVAILABLE, false)
 /** @type {'performance'|'sessions'|'remotefx'} */
 let overviewSubTab = $state('performance');
 
+/** @type {OverviewWindowPreset} */
+let overviewWindow = $state(lsGetOverviewWindow());
+
+/** Milliseconds for the active Overview window preset. Read-only derived; set `overviewWindow` to change. */
+const overviewWindowMs = $derived(
+    OVERVIEW_WINDOW_PRESETS.find((p) => p.key === overviewWindow)?.ms ?? 60 * 60 * 1000
+);
+
 /**
  * Shared hovered data index for synchronized crosshairs across all charts.
  * Set by whichever chart the user is currently hovering; cleared on mouseleave.
@@ -340,6 +379,9 @@ $effect.root(() => {
     });
     $effect(() => {
         persistRfxAvailable(rfxAvailable);
+    });
+    $effect(() => {
+        persistOverviewWindow(overviewWindow);
     });
 });
 
@@ -567,6 +609,17 @@ export const appState = {
     },
     set overviewSubTab(v) {
         overviewSubTab = v;
+    },
+
+    get overviewWindow() {
+        return overviewWindow;
+    },
+    set overviewWindow(v) {
+        overviewWindow = v;
+    },
+
+    get overviewWindowMs() {
+        return overviewWindowMs;
     },
 
     // Derived — read-only
