@@ -308,6 +308,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	rma := requireMachineAccount
 	mux.Handle("POST /api/v1/register", rlw(wa(rma(http.HandlerFunc(ds.handleRegister)))))
 	mux.Handle("POST /api/v1/report", rlw(wa(rma(http.HandlerFunc(ds.handleReport)))))
+	mux.Handle("POST /api/v1/spike", rlw(wa(rma(http.HandlerFunc(ds.handleReportSpike)))))
 
 	// Auth routes — create and invalidate dashboard sessions.
 	// POST /api/v1/auth/negotiate: short-circuits to 200 for existing valid sessions;
