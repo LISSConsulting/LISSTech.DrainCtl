@@ -41,12 +41,35 @@
     let {
         host,
         counter = 'cpu_pct',
-        windowMs = 5 * 24 * 60 * 60 * 1000,
+        windowMs = 24 * 60 * 60 * 1000,
         resolution = 'auto',
         color = 'var(--color-accent)',
         height = 200,
         refreshMs = 0,
     } = $props();
+
+    // Persisted zoom-pill choice. The last pill the operator clicked sticks
+    // across page reloads and server-card switches so they don't have to re-pick
+    // their preferred zoom every time. Manual wheel/drag zooms are intentionally
+    // not persisted — those are transient inspection gestures.
+    const ZOOM_PRESET_STORAGE_KEY = 'drainctl.chart.zoomPillMs';
+    function readStoredPresetMs() {
+        try {
+            const raw = localStorage.getItem(ZOOM_PRESET_STORAGE_KEY);
+            if (!raw) return null;
+            const n = Number(raw);
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch {
+            return null;
+        }
+    }
+    function writeStoredPresetMs(ms) {
+        try {
+            localStorage.setItem(ZOOM_PRESET_STORAGE_KEY, String(ms));
+        } catch {
+            /* localStorage disabled / full — preset just won't persist */
+        }
+    }
 
     /** @type {import('./api.js').MetricsResponse | null} */
     let response = $state(null);
@@ -117,8 +140,14 @@
         const key = `${host}|${counter}|${windowMs}|${resolution}`;
         if (key === lastPropKey) return;
         lastPropKey = key;
+        // Prefer the operator's most recent pill choice (validated against the
+        // current PRESETS so a stale/renamed value falls back cleanly) over the
+        // prop default. Without this, flipping between server cards would reset
+        // the zoom every time.
+        const stored = readStoredPresetMs();
+        const span = stored != null && PRESETS.some((p) => p.ms === stored) ? stored : windowMs;
         const to = new Date();
-        const from = new Date(to.getTime() - windowMs);
+        const from = new Date(to.getTime() - span);
         viewFrom = from;
         viewTo = to;
         if (debounceTimer) {
@@ -263,6 +292,7 @@
             clearTimeout(debounceTimer);
             debounceTimer = null;
         }
+        writeStoredPresetMs(spanMs);
         load(from, to);
     }
 

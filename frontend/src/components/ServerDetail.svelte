@@ -481,9 +481,10 @@
         </div>
     {/if}
 
-    <!-- Tile 5: Durable CPU history (5-day chart from /api/v1/metrics/{host}) -->
+    <!-- Tile 5: Durable CPU history. Zoom pill (5M/1H/1D/3D/5D) is
+         user-controlled and persisted in localStorage; default is 1 day. -->
     <div class="d-tile d-tile-chart">
-        <div class="d-tile-label">5-Day CPU History</div>
+        <div class="d-tile-label">CPU History</div>
         <Chart host={server.host} counter="cpu_pct" height={140} refreshMs={30_000} />
     </div>
 </div>
