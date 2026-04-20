@@ -514,7 +514,7 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 	user := ""
 	if auth != nil {
 		user = auth.Username
-		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) {
+		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) && !isLocalSystemForHost(r, auth, req.Hostname) {
 			slog.Warn("dashboard: register rejected: identity mismatch",
 				slog.Int("event_id", dc.EvtAccessDenied), "user", user, "claimed_host", req.Hostname)
 			http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
@@ -562,7 +562,7 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	}
 
 	auth := GetAuthInfo(r)
-	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) {
+	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) && !isLocalSystemForHost(r, auth, result.Host) {
 		slog.Warn("dashboard: report rejected: identity mismatch",
 			slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "claimed_host", result.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
