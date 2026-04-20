@@ -27,6 +27,7 @@
     import { LayerCake, Svg } from 'layercake';
     import InteractiveTimeChart from '../components/chart/InteractiveTimeChart.svelte';
     import { fetchMetrics } from './api.js';
+    import { counterLabel, isPercentCounter } from './utils.js';
 
     /** @type {{
      *   host: string,
@@ -245,9 +246,9 @@
     // windows as clickable affordances. Tolerance when matching current span
     // to a preset is 1 % to account for float drift from wheel zoom.
     const PRESETS = [
-        { label: 'MIN', ms: 60 * 1000 },
-        { label: 'HOUR', ms: 60 * 60 * 1000 },
-        { label: 'DAY', ms: 24 * 60 * 60 * 1000 },
+        { label: '5M', ms: 5 * 60 * 1000 },
+        { label: '1H', ms: 60 * 60 * 1000 },
+        { label: '1D', ms: 24 * 60 * 60 * 1000 },
         { label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
         { label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
     ];
@@ -300,6 +301,12 @@
 
     let tier = $derived(response?.tier ?? resolution);
 
+    // Percent counters (CPU %, Memory %, …) pin the Y-axis to 0–100 so ticks
+    // like 75 % / 100 % don't scale to a pixel Y above the chart area and spill
+    // up into the card above. Non-percent counters keep the auto-upper-bound
+    // behaviour (LayerCake treats null as "use dataMax").
+    let yDomain = $derived(isPercentCounter(counter) ? [0, 100] : [0, null]);
+
     // FR-019: flag when the requested window reaches further into the past
     // than the chosen tier still retains. `oldest_available` is the oldest
     // row in the tier for this host (not just within the request window);
@@ -318,7 +325,7 @@
 <div class="chart-wrap" style="height:{height}px" role="img" aria-label="{counter} history for {host}">
     <div class="chart-controls">
         <span class="chart-meta-inline">
-            <span class="meta-counter">{counter}</span>
+            <span class="meta-counter" title={counter}>{counterLabel(counter)}</span>
             <span class="meta-tier">tier={tier}</span>
         </span>
         <div class="zoom-pills" role="group" aria-label="Zoom preset">
@@ -367,7 +374,7 @@
                 x="t"
                 y="v"
                 xDomain={[viewFrom.getTime(), viewTo.getTime()]}
-                yDomain={[0, null]}
+                {yDomain}
                 padding={{ top: 12, right: 16, bottom: 28, left: 52 }}
             >
                 <Svg>

@@ -65,6 +65,42 @@ func (s *SpikeStore) Append(host string, spike evtspike.SpikePayload) evtspike.R
 	return entry
 }
 
+// AppendDedup is like Append but drops payloads whose (Channel, WindowStart)
+// matches the ring's newest entry. Guards against an occasional double-POST
+// from a remote agent (e.g., a retry after a transient network blip); the
+// identity is strong enough because the detector confirms at most one spike
+// per (channel, window). Returns (entry, true) on insert, zero-value+false on
+// dedup.
+func (s *SpikeStore) AppendDedup(host string, spike evtspike.SpikePayload) (evtspike.RecentSpikeEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ring, ok := s.hosts[host]
+	if ok && ring.size > 0 {
+		prevIdx := ring.head - 1
+		if prevIdx < 0 {
+			prevIdx += spikeStoreHostCapacity
+		}
+		prev := ring.buf[prevIdx].SpikePayload
+		if prev.Channel == spike.Channel && prev.WindowStart.Equal(spike.WindowStart) {
+			return evtspike.RecentSpikeEntry{}, false
+		}
+	}
+	entry := evtspike.RecentSpikeEntry{
+		ID:           s.nextID.Add(1),
+		SpikePayload: spike,
+	}
+	if !ok {
+		ring = &hostRing{buf: make([]evtspike.RecentSpikeEntry, spikeStoreHostCapacity)}
+		s.hosts[host] = ring
+	}
+	ring.buf[ring.head] = entry
+	ring.head = (ring.head + 1) % spikeStoreHostCapacity
+	if ring.size < spikeStoreHostCapacity {
+		ring.size++
+	}
+	return entry, true
+}
+
 // Recent returns up to limit newest-first entries for host. Returns an empty
 // (non-nil) slice when the host has no recorded spikes so JSON renders `[]`.
 func (s *SpikeStore) Recent(host string, limit int) []evtspike.RecentSpikeEntry {

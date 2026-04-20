@@ -701,6 +701,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				Spike:     &spike,
 			}
 			dc.SendNotification(notifyTargets, notifyState, spikeResult, dc.TriggerEventSpike, "")
+			// Propagate to a remote central dashboard. The local-dashboard path
+			// (dashState != nil) already appended via OnEvtSpikeIngest when the
+			// subsystem fired OnSpike — reporting again would double-insert.
+			if dashState == nil && dashCfg.URL != "" && dashRegistered {
+				spikeCopy := spike
+				go dashboard.ReportSpike(dashCfg.URL, &spikeCopy)
+			}
 
 		case <-dashBootstrap:
 			// First async dashboard registration attempt after startup.

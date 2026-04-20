@@ -89,3 +89,74 @@ export function dur(sec) {
     const h = Math.floor(m / 60);
     return h + 'h ' + (m % 60) + 'm';
 }
+
+/**
+ * Counters whose values are expressed as 0–100 percentages. Used to pin chart
+ * Y-axis domains to [0,100] so ticks don't render outside the plot area when
+ * the observed data stays well below 100%.
+ */
+export const PERCENT_COUNTERS = new Set([
+    'cpu_pct',
+    'cpu_p95_pct',
+    'mem_pct',
+    'mem_pct_used',
+    'session_cpu_p95_pct',
+    'session_cpu_p50_pct',
+    'rfx_quality_pct',
+    'rfx_quality_pct_p50',
+    'rfx_loss_pct',
+    'rfx_loss_pct_p50',
+]);
+
+/** @param {string} counter */
+export function isPercentCounter(counter) {
+    return PERCENT_COUNTERS.has(counter);
+}
+
+/**
+ * Human-readable labels for the perfmon/session counters emitted by
+ * checkResultSamples() in internal/dashboard/server.go. Anything not mapped
+ * falls back to the raw key so new counters are still visible while awaiting a
+ * label.
+ */
+const COUNTER_LABELS = {
+    cpu_pct: 'CPU',
+    cpu_p95_pct: 'CPU p95',
+    mem_pct: 'Memory',
+    mem_pct_used: 'Memory',
+    mem_avail_mb: 'Memory Available',
+    mem_total_mb: 'Memory Total',
+    pages_sec: 'Pages/sec',
+    disk_queue: 'Disk Queue',
+    tcp_retrans_sec: 'TCP Retrans/s',
+    input_delay_p50_ms: 'Input Delay p50',
+    input_delay_p95_ms: 'Input Delay p95',
+    input_delay_max_ms: 'Input Delay max',
+    session_cpu_p95_pct: 'Session CPU p95',
+    session_cpu_p50_pct: 'Session CPU p50',
+    session_mem_p95_bytes: 'Session Memory p95',
+    session_mem_p50_bytes: 'Session Memory p50',
+    sessions_total: 'Sessions',
+    sessions_active: 'Active Sessions',
+    sessions_disconnected: 'Disconnected Sessions',
+    sessions_max: 'Max Sessions',
+    rfx_fps_out: 'RFX FPS Out',
+    rfx_fps_out_p50: 'RFX FPS Out p50',
+    rfx_skip_server_sec: 'RFX Skip Server',
+    rfx_skip_net_sec: 'RFX Skip Net',
+    rfx_encode_ms: 'RFX Encode',
+    rfx_encode_ms_p50: 'RFX Encode p50',
+    rfx_quality_pct: 'RFX Quality',
+    rfx_quality_pct_p50: 'RFX Quality p50',
+    rfx_rtt_ms: 'RFX RTT',
+    rfx_rtt_ms_p50: 'RFX RTT p50',
+    rfx_loss_pct: 'RFX Loss',
+    rfx_loss_pct_p50: 'RFX Loss p50',
+    rfx_skip_server_sec_p50: 'RFX Skip Server p50',
+    rfx_skip_net_sec_p50: 'RFX Skip Net p50',
+};
+
+/** @param {string} counter */
+export function counterLabel(counter) {
+    return COUNTER_LABELS[counter] || counter;
+}
