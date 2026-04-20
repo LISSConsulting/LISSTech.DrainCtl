@@ -273,21 +273,43 @@ export async function deleteServer(host) {
 // ---------------------------------------------------------------------------
 
 /**
+ * MetricsSeedSample is one record from GET /api/v1/metrics (the per-host seed route).
+ * Field names match the JSON tags produced by the backend for sparkline cold-start seeding.
+ *
+ * @typedef {Object} MetricsSeedSample
+ * @property {number} time         - Unix timestamp (ms)
+ * @property {number} cpu          - Average CPU % for this host
+ * @property {number} mem          - Memory used % for this host
+ * @property {number} inputDelay   - Input delay (ms)
+ * @property {number} sessions     - Total session count for this host
+ * @property {number} diskQueue    - Disk queue length
+ * @property {number} tcpRetrans   - TCP retransmits/sec
+ */
+
+/**
  * GET /api/v1/metrics
  *
- * Returns a map of hostname → MetricsSample[] containing the last
- * MAX_PERF_HISTORY samples per server. Used by App.svelte to seed
- * appState.serverMetrics on a cold start so sparklines are visible
- * immediately without waiting for polling cycles to accumulate data.
+ * Returns a bounded recent retained-history slice per host for dashboard consumers
+ * that need per-host history on cold start (e.g. sparkline seeding).
  *
- * This endpoint is only served by the dev mock; in production the client
- * accumulates samples from the regular /api/v1/servers poll.
- *
- * @returns {Promise<Record<string, import('./state.svelte.js').MetricsSample[]>>}
+ * @param {object} [opts]
+ * @param {Date|string} [opts.from]         - inclusive lower bound; omit for server default
+ * @param {Date|string} [opts.to]           - exclusive upper bound; omit for server default
+ * @param {'raw'} [opts.resolution]         - only `raw` is supported in the initial version
+ * @param {string[]} [opts.counters]        - omit for all counters
+ * @param {number} [opts.limit]             - max points per host; server-side bounded
+ * @returns {Promise<Record<string, MetricsSeedSample[]>>}
  */
-export async function fetchAllServerMetrics() {
-    const res = await apiFetch('/metrics');
-    return /** @type {Record<string, any[]>} */ (await res.json());
+export async function fetchAllServerMetrics({ from, to, resolution, counters, limit } = {}) {
+    const params = new URLSearchParams();
+    if (from != null) params.set('from', from instanceof Date ? from.toISOString() : from);
+    if (to != null) params.set('to', to instanceof Date ? to.toISOString() : to);
+    if (resolution != null) params.set('resolution', resolution);
+    if (counters && counters.length > 0) params.set('counters', counters.join(','));
+    if (limit != null) params.set('limit', String(limit));
+    const qs = params.toString();
+    const res = await apiFetch(qs ? `/metrics?${qs}` : '/metrics');
+    return /** @type {Record<string, MetricsSeedSample[]>} */ (await res.json());
 }
 
 /**
@@ -339,6 +361,23 @@ export async function fetchMetrics(host, from, to, resolution = 'auto', counters
     }
     const res = await apiFetch(`/metrics/${encodeURIComponent(host)}?${params}`, { signal });
     return /** @type {MetricsResponse} */ (await res.json());
+}
+
+/**
+ * GET /api/v1/metrics/_fleet
+ *
+ * Fleet-wide sentinel form of the per-host metrics query. The response shape
+ * is identical to MetricsResponse with host always equal to "_fleet".
+ *
+ * @param {Date|string} from                         - inclusive lower bound
+ * @param {Date|string} to                           - exclusive upper bound (must be > from)
+ * @param {'raw'|'5min'|'hourly'|'auto'} [resolution='auto']
+ * @param {string[]} [counters]                      - omitted → all known counters
+ * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer zoom/pan supersedes it
+ * @returns {Promise<MetricsResponse>}
+ */
+export async function fetchFleetMetrics(from, to, resolution = 'auto', counters, signal) {
+    return fetchMetrics('_fleet', from, to, resolution, counters, signal);
 }
 
 // ---------------------------------------------------------------------------
