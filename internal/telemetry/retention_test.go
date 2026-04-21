@@ -64,6 +64,19 @@ func seedAudit(t *testing.T, db *DB, tsMs int64, host string, newState int) {
 	}
 }
 
+func seedEventSpike(t *testing.T, db *DB, windowStartMs int64, host, channel string) {
+	t.Helper()
+	if _, err := db.writer.Exec(
+		`INSERT INTO event_spikes
+		    (host, channel, window_start_ms, window_end_ms, observed, expected,
+		     tail_probability, confirmation_count, first_seen_at_ms, created_at_ms)
+		 VALUES (?, ?, ?, ?, 10, 5.0, 0.001, 3, ?, ?)`,
+		host, channel, windowStartMs, windowStartMs+5*60*1000, windowStartMs, windowStartMs,
+	); err != nil {
+		t.Fatalf("seed event_spikes ts=%d host=%s channel=%s: %v", windowStartMs, host, channel, err)
+	}
+}
+
 func countRows(t *testing.T, db *DB, query string) int {
 	t.Helper()
 	var n int
@@ -81,18 +94,20 @@ func TestRetention_DeletesOlderThanThreshold(t *testing.T) {
 	old5Min := now.Add(-8 * 24 * time.Hour).Truncate(time.Hour).UnixMilli()
 	oldHourly := now.Add(-60 * 24 * time.Hour).Truncate(time.Hour).UnixMilli()
 	oldAudit := now.Add(-400 * 24 * time.Hour).UnixMilli()
+	oldSpike := now.Add(-400 * 24 * time.Hour).UnixMilli()
 
 	seedRaw(t, db, oldRaw, "SRV01", "cpu.util", 1)
 	seed5Min(t, db, old5Min, "SRV01", "cpu.util")
 	seedHourly(t, db, oldHourly, "SRV01", "cpu.util")
 	seedAudit(t, db, oldAudit, "SRV01", 1)
+	seedEventSpike(t, db, oldSpike, "SRV01", "Application")
 
 	res := r.RunOnce(context.Background(), now)
 	if res.Outcome != "success" {
 		t.Fatalf("outcome=%s reason=%s", res.Outcome, res.Reason)
 	}
-	if res.RowsAffected != 4 {
-		t.Errorf("rows_affected=%d, want 4", res.RowsAffected)
+	if res.RowsAffected != 5 {
+		t.Errorf("rows_affected=%d, want 5", res.RowsAffected)
 	}
 
 	if n := countRows(t, db, `SELECT COUNT(*) FROM metrics_raw`); n != 0 {
@@ -106,6 +121,9 @@ func TestRetention_DeletesOlderThanThreshold(t *testing.T) {
 	}
 	if n := countRows(t, db, `SELECT COUNT(*) FROM audit`); n != 0 {
 		t.Errorf("audit remaining=%d, want 0", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM event_spikes`); n != 0 {
+		t.Errorf("event_spikes remaining=%d, want 0", n)
 	}
 }
 
@@ -163,12 +181,16 @@ func TestRetention_PerTierThresholds(t *testing.T) {
 	seedAudit(t, db, auditCutoff-1, "SRV01", 1)
 	seedAudit(t, db, auditCutoff, "SRV02", 1)
 
+	// event_spikes shares the audit cutoff; seed one past and one at boundary.
+	seedEventSpike(t, db, auditCutoff-1, "SRV01", "Application")
+	seedEventSpike(t, db, auditCutoff, "SRV01", "System")
+
 	res := r.RunOnce(context.Background(), now)
 	if res.Outcome != "success" {
 		t.Fatalf("outcome=%s reason=%s", res.Outcome, res.Reason)
 	}
-	if res.RowsAffected != 4 {
-		t.Errorf("rows_affected=%d, want 4 (one per tier)", res.RowsAffected)
+	if res.RowsAffected != 5 {
+		t.Errorf("rows_affected=%d, want 5 (one per tier)", res.RowsAffected)
 	}
 
 	if n := countRows(t, db, `SELECT COUNT(*) FROM metrics_raw`); n != 1 {
@@ -182,6 +204,9 @@ func TestRetention_PerTierThresholds(t *testing.T) {
 	}
 	if n := countRows(t, db, `SELECT COUNT(*) FROM audit`); n != 1 {
 		t.Errorf("audit remaining=%d, want 1", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM event_spikes`); n != 1 {
+		t.Errorf("event_spikes remaining=%d, want 1 (boundary kept)", n)
 	}
 }
 

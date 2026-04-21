@@ -418,6 +418,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	metricsStore := telemetry.NewMetricsStore(telDB)
 	maintenanceStore := telemetry.NewMaintenanceStore(telDB)
+	serverStore := telemetry.NewServerStore(telDB)
+	eventSpikeStore := telemetry.NewEventSpikeStore(telDB)
 
 	auditStore, err := telemetry.NewAuditStore(ctx, telDB)
 	if err != nil {
@@ -544,7 +546,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// Start dashboard if enabled.
 	var dashState *dashboard.ServerState
 	if dashCfg.Enabled {
-		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore)
+		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
 		if err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
@@ -566,6 +568,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// Running to the SCM without waiting on network I/O.
 	var useRemoteConfig bool
 	var lastConfigFetch time.Time
+	// Cached most-recent successful pull-config response. When the local
+	// config.json watcher fires, we re-apply this cached remote on top of the
+	// freshly-loaded local values so the dashboard's authoritative settings
+	// aren't briefly overwritten by local defaults during the
+	// local-reload → next-remote-fetch window (up to FetchInterval seconds).
+	var lastRemote *dashboard.RemoteSettings
 	dashConfigFailures := 0
 	dashRegistered := false
 
@@ -669,6 +677,56 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		dashBootstrap = time.After(5 * time.Second)
 	}
 
+	// fetchRemoteConfig pulls from the dashboard, applies results, and
+	// reconciles the evtspike/perf/ticker subsystems. Extracted so that both
+	// the every-poll fetch AND inline-after-successful-registration paths
+	// exercise exactly the same code path. Returns early when no dashboard
+	// URL is configured or when we're still inside a failure-backoff window.
+	fetchRemoteConfig := func() {
+		if dashCfg.URL == "" {
+			return
+		}
+		if dashConfigFailures > 0 &&
+			time.Since(lastConfigFetch) < backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
+			return
+		}
+		lastConfigFetch = time.Now()
+		slog.Debug("dashboard config fetch", "url", dashCfg.URL)
+		var cfgRemote *dashboard.RemoteSettings
+		var cfgErr error
+		if dashState != nil {
+			cfgRemote, cfgErr = dashboard.GetSettings()
+		} else {
+			cfgRemote, cfgErr = dashboard.FetchSettings(dashCfg.URL)
+		}
+		if cfgErr != nil {
+			dashConfigFailures++
+			nextIn := backoffDuration(dashCfg.FetchInterval, dashConfigFailures)
+			slog.Warn("dashboard: settings refresh failed, using cached",
+				"error", cfgErr, "next_retry_in", nextIn.Round(time.Second))
+			return
+		}
+		dashConfigFailures = 0
+		useRemoteConfig = true
+		lastRemote = cfgRemote
+		oldPerfCfg := cfg.Performance
+		oldPollInterval := cfg.PollInterval
+		effectiveEvtSpike := prevEvtSpikeCfg
+		applyRemoteConfig(cfgRemote, &cfg, &notifyTargets, &effectiveEvtSpike)
+		handler.cfg.Store(&cfg)
+		syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf)
+		if cfg.PollInterval != oldPollInterval {
+			pollTicker.Reset(cfg.PollInterval)
+			slog.Info("config=poll-interval-remote",
+				"old", oldPollInterval, "new", cfg.PollInterval)
+		}
+		if err := applyEvtSpikeConfigReload(evtSpikeSub, prevEvtSpikeCfg, effectiveEvtSpike); err != nil {
+			slog.Warn("evtspike remote reload failed", "error", err)
+		} else {
+			prevEvtSpikeCfg = effectiveEvtSpike
+		}
+	}
+
 	for {
 		select {
 		case c := <-r:
@@ -715,8 +773,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if dashCfg.URL != "" && !dashRegistered {
 				if registerWithDashboard(&dashCfg) {
 					dashRegistered = true
-					lastConfigFetch = time.Time{} // trigger config fetch on next poll
 					dashConfigFailures = 0
+					// Pull config immediately on successful registration so
+					// the agent doesn't spend up to one PollInterval running
+					// local defaults before the dashboard authoritative
+					// settings arrive.
+					fetchRemoteConfig()
 				}
 			}
 
@@ -726,42 +788,17 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if dashCfg.URL != "" && !dashRegistered {
 				if registerWithDashboard(&dashCfg) {
 					dashRegistered = true
-					lastConfigFetch = time.Time{} // trigger config fetch on this tick
 					dashConfigFailures = 0
+					// Same register-triggered fetch as the bootstrap path.
+					fetchRemoteConfig()
 				}
 			}
 
-			// Periodically re-fetch settings from dashboard.
-			// Uses wall-clock time so the interval is independent of PollInterval
-			// changes at runtime. The interval doubles on each consecutive failure
-			// (exponential backoff) so a downed dashboard does not generate log
-			// spam every poll.
-			if dashCfg.URL != "" && time.Since(lastConfigFetch) >= backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
-				lastConfigFetch = time.Now()
-				slog.Debug("dashboard config fetch", "url", dashCfg.URL)
-				var cfgRemote *dashboard.RemoteSettings
-				var cfgErr error
-				if dashState != nil {
-					cfgRemote, cfgErr = dashboard.GetSettings()
-				} else {
-					cfgRemote, cfgErr = dashboard.FetchSettings(dashCfg.URL)
-				}
-				if cfgErr != nil {
-					dashConfigFailures++
-					nextIn := backoffDuration(dashCfg.FetchInterval, dashConfigFailures)
-					slog.Warn("dashboard: settings refresh failed, using cached", "error", cfgErr, "next_retry_in", nextIn.Round(time.Minute))
-				} else {
-					dashConfigFailures = 0
-					useRemoteConfig = true
-					slog.Debug("diag: step=apply_remote_config")
-					oldPerfCfg := cfg.Performance
-					applyRemoteConfig(cfgRemote, &cfg, &notifyTargets)
-					handler.cfg.Store(&cfg) // sync updated GracePeriod/threshold to pipe handler
-					slog.Debug("diag: step=sync_perf_collector", "old_enabled", oldPerfCfg.Enabled, "new_enabled", cfg.Performance.Enabled)
-					syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf)
-					slog.Debug("diag: step=sync_perf_done")
-				}
-			}
+			// Pull remote config on every poll (Option B). Cheap — one
+			// LoadConfig + JSON encode per agent per poll. Failures back off
+			// exponentially from FetchInterval inside fetchRemoteConfig so a
+			// downed dashboard doesn't spam warnings every tick.
+			fetchRemoteConfig()
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
 				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
@@ -786,6 +823,16 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("memory limit updated", "mb", memLimitMB)
 			}
 			newCfg := newFullCfg.ToServiceConfig()
+			effectiveEvtSpike := newFullCfg.EvtSpike
+			// Merge the cached dashboard-authoritative values on top of the
+			// freshly-loaded local config so a local config.json edit doesn't
+			// briefly revert to local defaults for settings the dashboard owns
+			// (PollInterval, GracePeriod, SessionWarningThreshold, Performance,
+			// Notifications, EvtSpike.Enabled) during the up-to-FetchInterval
+			// window before the next remote fetch re-applies them.
+			if useRemoteConfig && lastRemote != nil && newFullCfg.Dashboard.URL != "" {
+				applyRemoteConfig(lastRemote, &newCfg, &notifyTargets, &effectiveEvtSpike)
+			}
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
@@ -817,7 +864,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Start dashboard on hot-reload if it was just enabled.
 			// Also self-register the local host if dashboard URL points here.
 			if newDashCfg.Enabled && !dashCfg.Enabled {
-				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore); err != nil {
+				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
 					dashState = st
@@ -850,12 +897,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			slog.Info("config=reloaded")
 
 			// Hot-apply evtspike config changes to the running subsystem.
-			// Reload itself diffs old vs. new internally, but the helper skips
-			// the call entirely on a no-op so log noise stays bounded.
-			if err := applyEvtSpikeConfigReload(evtSpikeSub, prevEvtSpikeCfg, newFullCfg.EvtSpike); err != nil {
+			// effectiveEvtSpike is the local-reloaded EvtSpikeConfig with any
+			// cached-remote Enabled override applied on top, so an admin-edited
+			// config.json doesn't clobber the dashboard's evtspike toggle.
+			if err := applyEvtSpikeConfigReload(evtSpikeSub, prevEvtSpikeCfg, effectiveEvtSpike); err != nil {
 				slog.Warn("evtspike reload failed", "error", err)
 			}
-			prevEvtSpikeCfg = newFullCfg.EvtSpike
+			prevEvtSpikeCfg = effectiveEvtSpike
 
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.

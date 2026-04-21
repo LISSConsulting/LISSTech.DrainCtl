@@ -342,7 +342,18 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 // applyRemoteConfig updates service config from dashboard-sourced settings.
 // Values are clamped to their valid ranges so a misconfigured or compromised dashboard
 // cannot inject out-of-range values into the service.
-func applyRemoteConfig(remote *dashboard.RemoteSettings, cfg *dc.ServiceConfig, targets *[]dc.NotificationTarget) {
+//
+// evtSpike, when non-nil, receives the remote EvtSpike toggle: remote overrides
+// the locally-loaded enabled flag so the dashboard's Event-log detector checkbox
+// propagates to every connected agent. Other EvtSpike fields (channels, baseline
+// path, detector tuning) remain local-only — the dashboard ConfigModal only
+// exposes the enabled flag.
+func applyRemoteConfig(
+	remote *dashboard.RemoteSettings,
+	cfg *dc.ServiceConfig,
+	targets *[]dc.NotificationTarget,
+	evtSpike *dc.EvtSpikeConfig,
+) {
 	*targets = remote.Notifications
 	if remote.SessionWarningThreshold >= 0 {
 		t := remote.SessionWarningThreshold
@@ -358,9 +369,22 @@ func applyRemoteConfig(remote *dashboard.RemoteSettings, cfg *dc.ServiceConfig, 
 		}
 		cfg.GracePeriod = time.Duration(gp) * time.Minute
 	}
+	if remote.PollInterval > 0 {
+		pi := remote.PollInterval
+		if pi < 10 {
+			pi = 10
+		}
+		if pi > dc.MaxPollInterval {
+			pi = dc.MaxPollInterval
+		}
+		cfg.PollInterval = time.Duration(pi) * time.Second
+	}
 	// Apply remote performance config unless locally force-disabled.
 	if remote.Performance != nil && !cfg.Performance.ForceDisabled {
 		remote.Performance.ForceDisabled = cfg.Performance.ForceDisabled // preserve local flag
 		cfg.Performance = *remote.Performance
+	}
+	if evtSpike != nil && remote.EvtSpikeEnabled != nil {
+		evtSpike.Enabled = *remote.EvtSpikeEnabled
 	}
 }

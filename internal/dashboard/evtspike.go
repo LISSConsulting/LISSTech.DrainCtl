@@ -3,14 +3,34 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
+)
+
+// spikeQueryTimeout bounds individual /api/evtspike/spikes calls.
+const spikeQueryTimeout = 5 * time.Second
+
+const (
+	// spikeDefaultLimit is the default ?limit= when neither from/to nor an
+	// explicit limit is supplied. Preserves the pre-009 contract.
+	spikeDefaultLimit = 20
+
+	// spikeListMaxLimit caps ?limit= on the recent-list mode (no from/to).
+	spikeListMaxLimit = 50
+
+	// spikeRangeMaxLimit caps the row count when ?from / ?to are supplied.
+	// Big enough to cover a 5-day window even under an active detector;
+	// small enough that a pathological query can't exhaust the reader pool.
+	spikeRangeMaxLimit = 500
 )
 
 // EvtSpikeStatusFunc returns the detector status for a registered host. The
@@ -46,11 +66,19 @@ func (ds *DashboardServer) handleEvtSpikeStatus(w http.ResponseWriter, r *http.R
 	_ = enc.Encode(status)
 }
 
-// handleEvtSpikeSpikes serves GET /api/evtspike/spikes?host=<hostname>&limit=<1..50>.
-// Returns 200 with a (possibly empty) JSON array of RecentSpikeEntry, newest
-// first, for a registered host. 404 for unknown hosts. The limit param defaults
-// to 20 and is clamped to [1, 50] per contracts/dashboard-sse-events.md. Empty
-// result for a registered host with no spikes is 200 [], not 404.
+// handleEvtSpikeSpikes serves GET /api/evtspike/spikes?host=<hostname>&limit=<1..50>
+// or GET /api/evtspike/spikes?host=<hostname>&from=<iso>&to=<iso>.
+//
+// Mode A (recent list, pre-009 contract): no from/to → returns newest-first
+// entries capped by limit (default 20, clamped [1,50]).
+//
+// Mode B (range query, 009+): both from and to supplied → returns newest-first
+// entries whose window_start falls in [from, to), capped at spikeRangeMaxLimit.
+// Backs the SpikeSwimlane chart.
+//
+// Returns 200 with a (possibly empty) JSON array of RecentSpikeEntry. 404 for
+// unknown hosts. 400 if from/to are malformed or one is supplied without the
+// other. Empty result for a registered host with no spikes is 200 [], not 404.
 func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	if host == "" || !ds.state.IsRegistered(host) {
@@ -58,22 +86,68 @@ func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	limit := spikeStoreDefaultLimit
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil {
-			if n < 1 {
-				n = 1
-			}
-			if n > spikeStoreMaxLimit {
-				n = spikeStoreMaxLimit
-			}
-			limit = n
-		}
-	}
+	fromRaw := r.URL.Query().Get("from")
+	toRaw := r.URL.Query().Get("to")
 
 	entries := []evtspike.RecentSpikeEntry{}
-	if ds.spikestore != nil {
-		entries = ds.spikestore.Recent(host, limit)
+
+	if fromRaw != "" || toRaw != "" {
+		// Mode B: range query.
+		if fromRaw == "" || toRaw == "" {
+			writeJSONError(w, "from_and_to_both_required", http.StatusBadRequest)
+			return
+		}
+		from, err := time.Parse(time.RFC3339Nano, fromRaw)
+		if err != nil {
+			writeJSONError(w, "invalid_from", http.StatusBadRequest)
+			return
+		}
+		to, err := time.Parse(time.RFC3339Nano, toRaw)
+		if err != nil {
+			writeJSONError(w, "invalid_to", http.StatusBadRequest)
+			return
+		}
+		if !to.After(from) {
+			writeJSONError(w, "to_must_be_after_from", http.StatusBadRequest)
+			return
+		}
+
+		if ds.spikes != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), spikeQueryTimeout)
+			defer cancel()
+			rows, err := ds.spikes.Range(ctx, host, from, to, spikeRangeMaxLimit)
+			if err != nil {
+				slog.Warn("dashboard: event_spikes range failed", "host", host, "error", err) //nolint:gosec // host is validated against registered server list
+				writeJSONError(w, "storage_error", http.StatusInternalServerError)
+				return
+			}
+			entries = toRecentSpikeEntries(rows)
+		}
+	} else {
+		// Mode A: recent list.
+		limit := spikeDefaultLimit
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				if n < 1 {
+					n = 1
+				}
+				if n > spikeListMaxLimit {
+					n = spikeListMaxLimit
+				}
+				limit = n
+			}
+		}
+		if ds.spikes != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), spikeQueryTimeout)
+			defer cancel()
+			rows, err := ds.spikes.Recent(ctx, host, limit)
+			if err != nil {
+				slog.Warn("dashboard: event_spikes recent failed", "host", host, "error", err) //nolint:gosec // host is validated against registered server list
+				writeJSONError(w, "storage_error", http.StatusInternalServerError)
+				return
+			}
+			entries = toRecentSpikeEntries(rows)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -115,12 +189,12 @@ func (ds *DashboardServer) handleReportSpike(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if ds.spikestore == nil {
+	if ds.spikes == nil {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 		return
 	}
-	entry, inserted := ds.spikestore.AppendDedup(spike.Host, spike)
+	entry, inserted := ds.insertSpike(spike)
 	if inserted {
 		ds.broker.PublishRecentSpike(entry)
 		slog.Info("dashboard=spike_ingested",
@@ -130,4 +204,29 @@ func (ds *DashboardServer) handleReportSpike(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// toRecentSpikeEntries adapts telemetry.EventSpike rows into the wire type
+// returned by /api/evtspike/spikes and the `recent_spike` SSE event. The JSON
+// field names on RecentSpikeEntry (via embedded SpikePayload) match the
+// pre-009 contract verbatim.
+func toRecentSpikeEntries(rows []telemetry.EventSpike) []evtspike.RecentSpikeEntry {
+	out := make([]evtspike.RecentSpikeEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, evtspike.RecentSpikeEntry{
+			ID: row.ID,
+			SpikePayload: dc.SpikePayload{
+				Host:              row.Host,
+				Channel:           row.Channel,
+				WindowStart:       row.WindowStart,
+				WindowEnd:         row.WindowEnd,
+				Observed:          row.Observed,
+				Expected:          row.Expected,
+				TailProbability:   row.TailProbability,
+				ConfirmationCount: row.ConfirmationCount,
+				FirstSeenAt:       row.FirstSeenAt,
+			},
+		})
+	}
+	return out
 }

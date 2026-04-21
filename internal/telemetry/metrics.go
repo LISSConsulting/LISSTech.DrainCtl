@@ -21,6 +21,7 @@ type Tier int
 
 const (
 	TierRaw     Tier = iota // metrics_raw: full-resolution, ~25 h retention
+	TierOneMin              // virtual tier: 1-minute GROUP BY on metrics_raw (no table; bounded by raw retention)
 	TierFiveMin             // metrics_5min: 5-minute buckets, ~6 d retention
 	TierHourly              // metrics_hourly: hourly buckets, configured retention
 )
@@ -30,6 +31,8 @@ func (t Tier) TierName() string {
 	switch t {
 	case TierRaw:
 		return "raw"
+	case TierOneMin:
+		return "1min"
 	case TierFiveMin:
 		return "5min"
 	case TierHourly:
@@ -164,6 +167,10 @@ func (s *MetricsStore) QueryRange(
 		if err := s.queryRaw(ctx, sr, host, fromMs, toMs, counters); err != nil {
 			return nil, err
 		}
+	case TierOneMin:
+		if err := s.queryOneMin(ctx, sr, host, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
 	case TierFiveMin:
 		if err := s.queryAggregated(ctx, sr, "metrics_5min", host, fromMs, toMs, counters); err != nil {
 			return nil, err
@@ -209,6 +216,39 @@ func (s *MetricsStore) queryRaw(
 	return rows.Err()
 }
 
+// queryOneMin buckets metrics_raw into 1-minute groups on the fly. No
+// materialised table — short windows (≤1h) easily fit within the raw tier's
+// ~25-hour retention, so the on-the-fly GROUP BY avoids a whole separate
+// aggregator + storage cost for a resolution only used by the 15M/1H pills.
+func (s *MetricsStore) queryOneMin(
+	ctx context.Context,
+	sr *Series,
+	host string,
+	fromMs, toMs int64,
+	counters []string,
+) error {
+	q, args := buildOneMinQuery(host, fromMs, toMs, counters)
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: metrics_raw 1min query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var bucketMs int64
+		var counter string
+		var avg, min, max float64
+		if err := rows.Scan(&bucketMs, &counter, &avg, &min, &max); err != nil {
+			return fmt.Errorf("telemetry: metrics_raw 1min scan: %w", err)
+		}
+		cs := getOrMakeCounter(sr, counter)
+		cs.T = append(cs.T, bucketMs)
+		cs.Avg = append(cs.Avg, avg)
+		cs.Min = append(cs.Min, min)
+		cs.Max = append(cs.Max, max)
+	}
+	return rows.Err()
+}
+
 func (s *MetricsStore) queryAggregated(
 	ctx context.Context,
 	sr *Series,
@@ -241,8 +281,10 @@ func (s *MetricsStore) queryAggregated(
 }
 
 // tierBoundsSQL maps each Tier to a prebuilt bounds query (avoids runtime SQL formatting).
+// TierOneMin shares metrics_raw's bounds — it's a virtual tier over the same rows.
 var tierBoundsSQL = map[Tier]string{
 	TierRaw:     `SELECT MIN(ts), MAX(ts) FROM metrics_raw WHERE host = ?`,
+	TierOneMin:  `SELECT MIN(ts), MAX(ts) FROM metrics_raw WHERE host = ?`,
 	TierFiveMin: `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_5min WHERE host = ?`,
 	TierHourly:  `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_hourly WHERE host = ?`,
 }
@@ -270,6 +312,24 @@ func (s *MetricsStore) BoundsForTier(ctx context.Context, host string, tier Tier
 		newest = &t
 	}
 	return oldest, newest, nil
+}
+
+// buildOneMinQuery groups metrics_raw into 1-minute buckets using integer
+// division on ts (milliseconds). Returns (bucket_ms, counter, avg, min, max).
+func buildOneMinQuery(host string, fromMs, toMs int64, counters []string) (string, []any) {
+	args := []any{host, fromMs, toMs}
+	q := `SELECT (ts / 60000) * 60000 AS bucket_ts, counter,
+	             AVG(value), MIN(value), MAX(value)
+	      FROM metrics_raw
+	      WHERE host = ? AND ts >= ? AND ts < ?`
+	if len(counters) > 0 {
+		q += " AND counter IN (" + placeholders(len(counters)) + ")"
+		for _, c := range counters {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC"
+	return q, args
 }
 
 func buildRawQuery(host string, fromMs, toMs int64, counters []string) (string, []any) {
@@ -321,6 +381,28 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (
 	return q, args
 }
 
+// buildOneMinQueryFleet groups metrics_raw into 1-minute buckets across all
+// requested hosts, then averages across hosts within each bucket.
+func buildOneMinQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
+	args := make([]any, 0, len(hosts)+2+len(counters))
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	q := `SELECT (ts / 60000) * 60000 AS bucket_ts, counter,
+	             AVG(value), MIN(value), MAX(value)
+	      FROM metrics_raw
+	      WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
+	if len(counters) > 0 {
+		q += " AND counter IN (" + placeholders(len(counters)) + ")"
+		for _, c := range counters {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC"
+	return q, args
+}
+
 func buildAggQueryFleet(table string, hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
 	args := make([]any, 0, len(hosts)+2+len(counters))
 	for _, h := range hosts {
@@ -353,7 +435,8 @@ func (s *MetricsStore) BoundsForTierFleet(ctx context.Context, hosts []string, t
 	ph := placeholders(len(hosts))
 	var q string
 	switch tier {
-	case TierRaw:
+	case TierRaw, TierOneMin:
+		// TierOneMin is a virtual view of metrics_raw — shares its bounds.
 		q = `SELECT MIN(ts), MAX(ts) FROM metrics_raw WHERE host IN (` + ph + `)`
 	case TierFiveMin:
 		q = `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_5min WHERE host IN (` + ph + `)`
@@ -415,6 +498,10 @@ func (s *MetricsStore) QueryRangeFleet(
 		if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, counters); err != nil {
 			return nil, err
 		}
+	case TierOneMin:
+		if err := s.queryOneMinFleet(ctx, sr, hosts, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
 	case TierFiveMin:
 		if err := s.queryAggregatedFleet(ctx, sr, "metrics_5min", hosts, fromMs, toMs, counters); err != nil {
 			return nil, err
@@ -427,6 +514,38 @@ func (s *MetricsStore) QueryRangeFleet(
 		return nil, fmt.Errorf("telemetry: tier %q not available in this version", tier.TierName())
 	}
 	return sr, nil
+}
+
+// queryOneMinFleet is the fleet sibling of queryOneMin — 1-minute grouping of
+// metrics_raw across all registered hosts, then one row per (bucket, counter)
+// via sample-count-weighted aggregation.
+func (s *MetricsStore) queryOneMinFleet(
+	ctx context.Context,
+	sr *Series,
+	hosts []string,
+	fromMs, toMs int64,
+	counters []string,
+) error {
+	q, args := buildOneMinQueryFleet(hosts, fromMs, toMs, counters)
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet metrics_raw 1min query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var bucketMs int64
+		var counter string
+		var avg, min, max float64
+		if err := rows.Scan(&bucketMs, &counter, &avg, &min, &max); err != nil {
+			return fmt.Errorf("telemetry: fleet metrics_raw 1min scan: %w", err)
+		}
+		cs := getOrMakeCounter(sr, counter)
+		cs.T = append(cs.T, bucketMs)
+		cs.Avg = append(cs.Avg, avg)
+		cs.Min = append(cs.Min, min)
+		cs.Max = append(cs.Max, max)
+	}
+	return rows.Err()
 }
 
 func (s *MetricsStore) queryRawFleet(

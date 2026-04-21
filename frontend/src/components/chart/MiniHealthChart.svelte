@@ -164,12 +164,28 @@
         })(),
     );
 
+    /** Short datetime format based on the visible span; matches the shared
+     * formatter used by DualAxisChart and InteractiveTimeChart so every
+     * Overview chart's x-axis reads the same. */
+    function formatAxisTime(ms, spanMs) {
+        const d = new Date(ms);
+        if (spanMs < 2 * 60 * 60 * 1000) {
+            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        }
+        if (spanMs < 48 * 60 * 60 * 1000) {
+            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+        if (spanMs < 14 * 24 * 60 * 60 * 1000) {
+            return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+        }
+        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
+    }
+
     // ── X-axis time labels (5 evenly-spaced ticks, using timeKey) ─────────────
     let xLabels = $derived(
         (() => {
             const n = history.length;
             if (n < 2) return /** @type {{x:number,label:string}[]} */ ([]);
-            const now = Date.now();
             const indices = [
                 0,
                 Math.floor((n - 1) * 0.25),
@@ -178,15 +194,13 @@
                 n - 1,
             ];
             const unique = [...new Set(indices)];
+            const firstT = /** @type {any} */ (history[0])?.[timeKey];
+            const lastT = /** @type {any} */ (history[n - 1])?.[timeKey];
+            const spanMs = Number.isFinite(firstT) && Number.isFinite(lastT) ? lastT - firstT : 0;
             return unique.map((i) => {
-                const diff = now - /** @type {any} */ ((history[i])?.[timeKey] ?? now);
-                const lbl =
-                    i === n - 1
-                        ? 'now'
-                        : diff < 60_000
-                          ? `${Math.round(diff / 1000)}s`
-                          : `${Math.round(diff / 60_000)}m`;
-                return { x: xs(i, n), label: lbl };
+                const t = /** @type {any} */ (history[i])?.[timeKey];
+                const label = Number.isFinite(t) ? formatAxisTime(t, spanMs) : '';
+                return { x: xs(i, n), label };
             });
         })(),
     );
@@ -522,14 +536,17 @@
                             yChartTop + 2,
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
                         )}
-                        {@const diffMs =
-                            Date.now() - /** @type {any} */ ((history[displayIndex])?.[timeKey] ?? Date.now())}
-                        {@const timeStr =
-                            diffMs < 1200
-                                ? 'now'
-                                : diffMs < 60_000
-                                  ? `${Math.round(diffMs / 1000)}s ago`
-                                  : `${Math.round(diffMs / 60_000)}m ago`}
+                        {@const hoverT = /** @type {any} */ ((history[displayIndex])?.[timeKey])}
+                        {@const timeStr = Number.isFinite(hoverT)
+                            ? new Date(hoverT).toLocaleString('en', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                  hour12: false,
+                              })
+                            : '—'}
 
                         <rect
                             x={tipX + 4}

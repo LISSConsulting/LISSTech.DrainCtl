@@ -14,8 +14,10 @@
 
 const MAX_EVENTS = 200;
 const MAX_METRICS = 60;
-// Matches the server-side per-host ring buffer in internal/dashboard/spikestore.go.
-const MAX_RECENT_SPIKES = 20;
+// Live SSE-append cap for the per-host spike buffer. The swimlane chart fetches
+// its own window via fetchSpikeRange; this Map is only the live-accumulation
+// layer for spikes that arrive while a ServerDetail row is already expanded.
+const MAX_RECENT_SPIKES = 50;
 
 /**
  * Must match MOCK_VERSION in frontend/dev/mock-api.js.
@@ -88,7 +90,7 @@ function lsGetDate(key) {
  * @type {Array<{key: OverviewWindowPreset, label: string, ms: number}>}
  */
 export const OVERVIEW_WINDOW_PRESETS = [
-    { key: '5min', label: '5M', ms: 5 * 60 * 1000 },
+    { key: '15min', label: '15M', ms: 15 * 60 * 1000 },
     { key: '1hour', label: '1H', ms: 60 * 60 * 1000 },
     { key: '1day', label: '1D', ms: 24 * 60 * 60 * 1000 },
     { key: '3day', label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
@@ -201,7 +203,7 @@ const persistOverviewWindow = debounce((v) => {
  * @property {number} count
  */
 
-/** @typedef {'5min'|'1hour'|'1day'|'3day'|'5day'} OverviewWindowPreset */
+/** @typedef {'15min'|'1hour'|'1day'|'3day'|'5day'} OverviewWindowPreset */
 
 /**
  * @typedef {Object} Counters

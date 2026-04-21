@@ -27,7 +27,6 @@
     import ConfigModal from './components/ConfigModal.svelte';
     import HistoryModal from './components/HistoryModal.svelte';
     import Toast from './components/Toast.svelte';
-    import MaintenanceStatus from './lib/maintenance-status.svelte';
 
     // ---------------------------------------------------------------------------
     // Initialise theme once on load
@@ -553,14 +552,6 @@
                     <CounterGrid />
                     <StateBar />
                     <MetricsChart />
-                    <div class="maint-slot">
-                        <MaintenanceStatus
-                            jobs={maintenanceJobs}
-                            serverTime={maintenanceServerTime}
-                            loading={maintenanceLoading}
-                            error={maintenanceError}
-                        />
-                    </div>
                 {:else if appState.currentView === 'servers'}
                     <ServerTable onhistoryclick={(host) => (historyHost = host)} />
                 {:else if appState.currentView === 'events'}
@@ -570,7 +561,14 @@
         {/key}
     </main>
 
-    <Footer onrefresh={refresh} {refreshing} />
+    <Footer
+        onrefresh={refresh}
+        {refreshing}
+        {maintenanceJobs}
+        {maintenanceServerTime}
+        {maintenanceLoading}
+        {maintenanceError}
+    />
 
     {#if configOpen}
         <ConfigModal onclose={() => (configOpen = false)} />
@@ -614,7 +612,4 @@
         to { transform: rotate(360deg); }
     }
 
-    .maint-slot {
-        margin-top: 20px;
-    }
 </style>
