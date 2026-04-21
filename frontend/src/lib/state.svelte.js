@@ -318,6 +318,14 @@ const overviewWindowMs = $derived(
 );
 
 /**
+ * Tracks whether the current Overview time window was set by a preset pill ('preset')
+ * or by an interactive gesture such as wheel-zoom ('zoom') or drag-pan ('pan').
+ * When 'zoom' or 'pan', the fleet fetch uses a custom from/to rather than the preset range.
+ * @type {'preset'|'zoom'|'pan'}
+ */
+let overviewWindowSource = $state(/** @type {'preset'|'zoom'|'pan'} */ ('preset'));
+
+/**
  * Shared hovered data index for synchronized crosshairs across all charts.
  * Set by whichever chart the user is currently hovering; cleared on mouseleave.
  * @type {number|null}
@@ -582,12 +590,27 @@ export const appState = {
     get overviewWindow() {
         return overviewWindow;
     },
+    /**
+     * Switch to a named preset. Resets the window source to 'preset' and
+     * clears any pinned/hovered chart index so crosshairs don't point at a
+     * stale position in the new time range.
+     */
     set overviewWindow(v) {
         overviewWindow = v;
+        overviewWindowSource = 'preset';
+        hoveredChartIndex = null;
+        pinnedChartIndex = null;
     },
 
     get overviewWindowMs() {
         return overviewWindowMs;
+    },
+
+    get overviewWindowSource() {
+        return overviewWindowSource;
+    },
+    set overviewWindowSource(v) {
+        overviewWindowSource = v;
     },
 
     // Derived — read-only
