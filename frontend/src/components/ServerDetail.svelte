@@ -19,8 +19,8 @@
         server.max_sessions > 0 ? Math.min((server.sessions / server.max_sessions) * 100, 100) : null,
     );
 
-    // Per-server ring buffer; fall back to fleet aggregate
-    let serverHistory = $derived(appState.serverMetrics.get(server.host) ?? appState.metricsHistory);
+    // Per-server ring buffer seeded with retained SQLite history on cold start.
+    let serverHistory = $derived(appState.serverMetrics.get(server.host) ?? []);
     let cpuHistory = $derived(serverHistory.map((h) => h.cpu ?? 0));
     let memHistory = $derived(serverHistory.map((h) => h.mem ?? 0));
     let sessionsHistory = $derived(serverHistory.map((h) => h.sessions ?? 0));
