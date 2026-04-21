@@ -22,7 +22,7 @@ const MAX_RECENT_SPIKES = 20;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.6';
+const MOCK_VERSION = '3.7';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
