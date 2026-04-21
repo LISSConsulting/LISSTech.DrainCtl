@@ -1,7 +1,7 @@
 <script>
     import { fly } from 'svelte/transition';
     import { LayerCake, Svg } from 'layercake';
-    import { appState } from '../lib/state.svelte.js';
+    import { appState, OVERVIEW_WINDOW_PRESETS } from '../lib/state.svelte.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { fetchFleetMetrics } from '../lib/api.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
@@ -594,6 +594,22 @@
             <Grid2x2 size={13} strokeWidth={2.2} />
         {/if}
     </button>
+</div>
+
+<!-- ── Window preset pills ── -->
+<div class="window-pills">
+    {#each OVERVIEW_WINDOW_PRESETS as preset}
+        <button
+            class="window-pill"
+            class:active={appState.overviewWindow === preset.key}
+            onclick={() => {
+                appState.overviewWindow = preset.key;
+            }}
+            aria-pressed={appState.overviewWindow === preset.key}
+        >
+            {preset.label}
+        </button>
+    {/each}
 </div>
 
 {#key activeTab}
@@ -1229,5 +1245,50 @@
         .rfx-grid {
             grid-template-columns: 1fr;
         }
+    }
+
+    /* ── Window preset pills ── */
+    .window-pills {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 12px;
+    }
+
+    .window-pill {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        box-shadow: 2px 2px 0 var(--color-shadow);
+        background: var(--color-surface);
+        color: var(--color-muted);
+        cursor: pointer;
+        transition:
+            transform 0.08s linear,
+            box-shadow 0.08s linear,
+            color 0.08s linear,
+            background 0.08s linear;
+        white-space: nowrap;
+    }
+
+    .window-pill:hover {
+        color: var(--color-fg);
+        transform: translate(-1px, -1px);
+        box-shadow: 3px 3px 0 var(--color-shadow);
+    }
+
+    .window-pill:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+    }
+
+    .window-pill.active {
+        background: var(--color-accent);
+        color: #fff;
+        border-color: var(--color-accent);
     }
 </style>
