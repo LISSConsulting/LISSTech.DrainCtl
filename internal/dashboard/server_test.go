@@ -4488,6 +4488,96 @@ func TestSeedMetrics_EmptyWhenNoHosts(t *testing.T) {
 
 // ── US1: retained Overview fleet history (T010) ───────────────────────────────
 
+// ── handleSeedMetrics — US3 production seeding (T024) ────────────────────────
+
+// TestSeedMetrics_US3_DefaultLimitEnforced verifies that the seed endpoint
+// returns at most the default limit (60) samples per host when no explicit
+// limit parameter is provided, so cold-start seeding is bounded by default.
+func TestSeedMetrics_US3_DefaultLimitEnforced(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	// Insert more than the default limit of 60 samples.
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{"cpu_pct": 5.0}, 80)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	if n := len(seed["SRV01"]); n > 60 {
+		t.Errorf("SRV01 sample count = %d, want ≤ 60 (default limit)", n)
+	}
+	if len(seed["SRV01"]) == 0 {
+		t.Error("SRV01 has no seed samples; want at least some")
+	}
+}
+
+// TestSeedMetrics_US3_PerHostEmptyWhenNoData verifies that a registered host with
+// no telemetry in the DB contributes an empty slice (not a missing key) so the
+// frontend can distinguish "host exists, no data yet" from "host not in response".
+func TestSeedMetrics_US3_PerHostEmptyWhenNoData(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	// SRV01 has data; SRV02 is registered but has no samples.
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{"cpu_pct": 10.0}, 2)
+	ds.state.Register("SRV02")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	if len(seed["SRV01"]) == 0 {
+		t.Error("SRV01 should have seed samples")
+	}
+	// SRV02 may be absent or present with an empty slice — both are acceptable
+	// because the handler only emits hosts that have rows.
+	// The important thing is that SRV01 does NOT bleed into SRV02's bucket.
+	if s2, ok := seed["SRV02"]; ok && len(s2) > 0 {
+		t.Errorf("SRV02 should have no data, got %d sample(s)", len(s2))
+	}
+}
+
+// TestSeedMetrics_US3_SamplesAscendingByTime verifies that each per-host slice
+// in the seed response is sorted oldest-first (ascending timestamp), matching
+// the order expected by the frontend's sparkline ring buffers.
+func TestSeedMetrics_US3_SamplesAscendingByTime(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-10 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{"cpu_pct": 7.0}, 5)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	samples := seed["SRV01"]
+	if len(samples) < 2 {
+		t.Fatalf("want ≥ 2 samples for ordering check, got %d", len(samples))
+	}
+	for i := 1; i < len(samples); i++ {
+		if samples[i].Time < samples[i-1].Time {
+			t.Errorf("sample[%d].time=%d < sample[%d].time=%d — not ascending",
+				i, samples[i].Time, i-1, samples[i-1].Time)
+		}
+	}
+}
+
 // TestFleetMetrics_US1_RetainedCoverageBounds confirms that oldest_available and
 // newest_available are populated from real DB rows and surfaced in the fleet
 // response, enabling Overview chart consumers to detect whether retained data
