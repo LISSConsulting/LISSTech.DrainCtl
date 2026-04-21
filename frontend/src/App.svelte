@@ -170,6 +170,7 @@
     // ---------------------------------------------------------------------------
 
     let refreshing = $state(false);
+    let metricSeedDone = false;
 
     /**
      * Pull fresh data from the API and update global state.
@@ -181,13 +182,12 @@
         refreshing = true;
         try {
             // Fetch config once on the first successful refresh (lazy load).
-            // Also fetch metric history in parallel when serverMetrics is empty so
-            // sparklines are populated immediately on a cold start.
+            // Seed retained per-host history on the first call so sparklines
+            // show historical data immediately, before any live polls accumulate.
             const calls = /** @type {Promise<any>[]} */ ([fetchServers(), fetchHealth()]);
             const needsConfig = appState.config === null;
-            const needsMetricSeed = appState.serverMetrics.size === 0;
             if (needsConfig) calls.push(fetchSettings());
-            const metricSeedPromise = needsMetricSeed
+            const metricSeedPromise = !metricSeedDone
                 ? fetchAllServerMetrics().catch(() => null)
                 : Promise.resolve(null);
 
@@ -211,12 +211,13 @@
             appState.connected = true;
             appState.lastUpdated = new Date();
 
-            // Seed per-server metric history from GET /api/v1/metrics (cold start only).
-            // seedServerMetrics skips hosts that already have live data so this is safe
-            // to call even when some samples have arrived via earlier poll cycles.
+            // Seed per-server ring buffers from retained history on the first load.
+            // Overwrites any stale browser-local data so SQLite-retained history is
+            // authoritative at cold start; subsequent refreshes skip this entirely.
             if (seedData) {
                 const seedMap = new Map(Object.entries(seedData));
                 seedServerMetrics(seedMap);
+                metricSeedDone = true;
             }
 
             // Detect and log server state transitions.
