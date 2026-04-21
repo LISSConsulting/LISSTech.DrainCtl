@@ -8,33 +8,64 @@ load from SQLite-backed telemetry instead of browser-local warm-up state.
 ## Prerequisites
 
 - A local or staging DrainCtl build with feature `008-sqlite-chart-consumers`
-- Historical telemetry already present in `drainctl.db`
+- Historical telemetry already present in `drainctl.db` (at least one full poll cycle)
 - A browser profile with cleared `localStorage` for the dashboard origin
 
-## Validation Flow
+---
 
-1. Start the service and open the dashboard in a fresh browser profile.
-2. Confirm the Overview page renders retained history without waiting for multiple poll
-   cycles to accumulate browser-local samples.
-3. Switch between the `5M`, `1H`, `1D`, `3D`, and `5D` pills.
-4. Verify LOAD, HIC, SESSIONS, and REMOTE FX all move to the same shared window.
-5. Use wheel zoom and drag pan; confirm rapid gestures do not leave stale data on screen.
-6. Stop and restart the service, then refresh the dashboard.
-7. Confirm pre-restart retained history is still visible.
-8. Clear browser-local storage again and reload.
-9. Confirm migrated historical surfaces still load from retained telemetry.
+## User Story 1 Validation — Overview Retained History (MVP)
 
-## Empty/Unavailable Validation
+### Fresh-session load
 
-1. Select a window where one chart family has no retained data.
-2. Confirm that chart remains visible with an explicit empty or unavailable state.
-3. Confirm the other chart families continue rendering normally in the same shared window.
+1. Start the service and open the dashboard in a fresh browser profile (or with cleared
+   `localStorage`).
+2. Navigate to the Overview page.
+3. Confirm that all four chart families render retained history immediately — without
+   waiting for multiple poll cycles to accumulate browser-local samples:
+   - **LOAD**: CPU %, Memory %, Sessions lines are populated
+   - **HIC**: Input Delay, Pages/sec, TCP Retrans, Disk Queue charts show data
+   - **SESSIONS**: Sessions Trend, Utilization, Session CPU, Session Memory show data
+   - **REMOTEFX**: Tab is hidden if no RFX telemetry has been collected; visible and
+     populated if RFX counters are present in the retained store
+4. Stop and restart the service, then refresh the dashboard.
+5. Confirm pre-restart retained history is still visible on a fresh browser load.
 
-## Error-State Validation
+### Empty state validation
 
-1. Force the metrics query path to fail in a test build or fixture.
-2. Confirm the affected chart remains visible and shows an explicit error state.
+1. Select a time range where retained data does not exist (e.g. using browser DevTools to
+   temporarily block the fleet endpoint or by querying a time before the service started).
+2. Confirm that each chart family shows **"No retained history for this window"** rather
+   than a blank or broken chart.
+3. Confirm no browser-local fallback is substituted.
+
+### Error state validation
+
+1. Force the fleet metrics query to fail (e.g. temporarily firewall the API route or
+   return a 500 from a test build).
+2. Confirm each chart family shows **"Unable to reach the metrics endpoint"** in red.
 3. Confirm the UI does not substitute browser-local history as fallback truth.
+
+---
+
+## User Story 2 Validation — Shared Window Navigation (US2, not yet shipped)
+
+> These steps apply after Phase 4 (US2) is complete.
+
+1. On the Overview page, click each window pill: `5M`, `1H`, `1D`, `3D`, `5D`.
+2. Verify LOAD, HIC, SESSIONS, and REMOTE FX all move to the same shared window.
+3. Use wheel zoom and drag pan; confirm rapid gestures do not leave stale data on screen.
+
+---
+
+## User Story 3 Validation — Remaining Historical Consumers (US3, not yet shipped)
+
+> These steps apply after Phase 5 (US3) is complete.
+
+1. Clear browser-local storage and reload.
+2. Confirm that per-host sparklines in the server table show retained history cold.
+3. Confirm that the Server Detail view fallback history loads from retained telemetry.
+
+---
 
 ## Suggested Verification Commands
 
