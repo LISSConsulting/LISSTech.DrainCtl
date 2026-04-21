@@ -771,25 +771,20 @@ export function removeEvtSpikeState(host) {
 }
 
 /**
- * Bulk-seed per-server metric ring buffers from a pre-fetched history map.
- * Only writes entries for hosts that have no existing data, so calling this
- * after the regular poll cycle has already begun is safe — it will not
- * overwrite live-accumulated samples.
+ * Seed per-server metric ring buffers from retained SQLite history on startup.
+ * Called once (before live polls accumulate); overwrites any stale browser-local
+ * data so the backend is authoritative at cold start.
  *
- * A single Map replacement is used instead of one appendServerMetricsSample
- * call per sample to avoid creating thousands of intermediate Maps (which
- * would thrash GC for a 50-server fleet × 60 samples).
+ * A single Map replacement avoids creating N intermediate Maps for large fleets.
  *
- * @param {Map<string, MetricsSample[]>} seedData
+ * @param {Map<string, import('./api.js').MetricsSeedSample[]>} seedData
  */
 export function seedServerMetrics(seedData) {
     const next = new Map(serverMetrics);
     let changed = false;
     for (const [host, samples] of seedData) {
-        if (!next.has(host) || (next.get(host)?.length ?? 0) === 0) {
-            next.set(host, samples.slice(-MAX_METRICS));
-            changed = true;
-        }
+        next.set(host, samples.slice(-MAX_METRICS));
+        changed = true;
     }
     if (changed) serverMetrics = next;
 }
