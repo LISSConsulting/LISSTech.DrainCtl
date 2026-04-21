@@ -129,8 +129,8 @@ description: "Task list for remaining persistent telemetry consumers"
 - [x] T031 Clean up stale browser-local-authority comments and dead code paths in `frontend/src/App.svelte`, `frontend/src/lib/api.js`, `frontend/src/lib/state.svelte.js`, and `internal/dashboard/server.go`
 - [x] T032 Verify observability paths for retained-history empty, unavailable, and query-error states in `internal/dashboard/server.go`, `frontend/src/components/MetricsChart.svelte`, and `specs/008-sqlite-chart-consumers/quickstart.md`
 - [ ] T033 Run the validation flow in `specs/008-sqlite-chart-consumers/quickstart.md` against a fresh browser profile and record any doc fixes in that file
-- [ ] T034 Run `go test ./...` and fix any failures in touched files
-- [ ] T035 Run `just lint` and fix any warnings in touched files
+- [x] T034 Run `go test ./...` and fix any failures in touched files
+- [x] T035 Run `just lint` and fix any warnings in touched files
 
 ---
 
