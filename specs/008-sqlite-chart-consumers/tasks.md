@@ -90,7 +90,7 @@ description: "Task list for remaining persistent telemetry consumers"
 
 - [x] T018 [P] [US2] Implement shared Overview window/preset state, reset behavior, and source tracking in `frontend/src/lib/state.svelte.js`
 - [x] T019 [P] [US2] Update Overview bootstrap and event wiring in `frontend/src/App.svelte` so all chart families use one shared time window
-- [ ] T020 [US2] Add 5M/1H/1D/3D/5D pill controls and shared selection behavior in `frontend/src/components/MetricsChart.svelte`
+- [x] T020 [US2] Add 5M/1H/1D/3D/5D pill controls and shared selection behavior in `frontend/src/components/MetricsChart.svelte`
 - [ ] T021 [US2] Add shared wheel-zoom, drag-pan, and stale-response handling in `frontend/src/components/MetricsChart.svelte` and `frontend/src/components/chart/InteractiveTimeChart.svelte`
 - [ ] T022 [US2] Preserve current legends, current-value displays, and chart-family semantics under shared-window navigation in `frontend/src/components/MetricsChart.svelte`
 - [ ] T023 [US2] Update navigation and empty/error-state validation steps in `specs/008-sqlite-chart-consumers/contracts/http-fleet-metrics.md` and `specs/008-sqlite-chart-consumers/quickstart.md`
