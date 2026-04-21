@@ -213,3 +213,26 @@ With multiple developers:
 - Tests are intentionally included because this feature changes storage-backed query behavior and operator-visible dashboard output
 - Do not introduce a new telemetry class unless implementation proves the retained store cannot express an already-approved chart semantic
 - Do not let browser-local history become fallback truth for empty or error states
+
+---
+
+## Phase 8 — event_spikes + servers SQLite migration + swimlane (2026-04-21)
+
+Scope extension folded into 008: retire the last two in-memory stores (per-host spike
+ring buffer in `internal/dashboard/spikestore.go` and the `servers.json` atomic-rename
+roster) and replace the RECENT SPIKES table with a swimlane chart. Retention for
+`event_spikes` shares the drain-mode `AuditDays` window per operator request.
+
+- [x] T036 Schema — add `event_spikes` and `servers` tables to `internal/telemetry/schema.go`; update `schema_test.go` wantTables
+- [x] T037 EventSpikeStore — new `internal/telemetry/event_spikes.go` with `Insert`/`Recent`/`Range`; `ON CONFLICT DO NOTHING` on `(host, channel, window_start_ms)`; plain-data `EventSpike` struct (no upward package deps). Tests in `event_spikes_test.go`
+- [x] T038 Retention — add `event_spikes` tier to `retention.go`'s chunked-DELETE loop using `auditCutoff`; update `retention_test.go` for new row counts
+- [x] T039 ServerStore — new `internal/telemetry/servers.go` with `Register/Remove/IsRegistered/Update/Get/All/Import/BackdateLastSeen`; JSON blob `last_result_json` column. Tests in `servers_test.go`
+- [x] T040 Wire stores into `StartDashboard`: extended signature with `*telemetry.ServerStore`, `*telemetry.EventSpikeStore`; rewrote `internal/dashboard/store.go` `ServerState` as a thin wrapper; updated `internal/svc/handler.go` callers
+- [x] T041 One-shot boot migration `MigrateLegacyServersJSON` — reads any pre-009 `servers.json`, imports rows, renames to `servers.json.migrated.<ts>`. Tests in `migrate_servers_json_test.go`
+- [x] T042 Extend `GET /api/evtspike/spikes` with optional `from`/`to` RFC3339Nano params → range query (max 500 rows); preserves pre-009 `limit` recent-list contract
+- [x] T043 Delete `internal/dashboard/spikestore.go` + `spikestore_test.go`; rewrote `evtspike_test.go` fixtures against SQLite-backed store (`newTestServerWithSpikes`)
+- [x] T044 Frontend — add `fetchSpikeRange(host, from, to)` in `frontend/src/lib/api.js`; update `state.svelte.js` `MAX_RECENT_SPIKES` comment (SSE live-accumulation cap, no longer mirrors a server-side ring)
+- [x] T045 New `frontend/src/components/SpikeSwimlane.svelte` — lanes derived from visible channels, `sqrt(observed)` dot sizing, severity-bucketed color (observed/expected ratio), 5M/1H/1D/3D/5D pill with localStorage persistence, hover tooltip with timestamp/observed/expected/tail_probability
+- [x] T046 Swap RECENT SPIKES tile in `ServerDetail.svelte` for `<SpikeSwimlane host={server.host} height={180} />`; drop dead `.d-spikes-*` CSS, `channelShort`, `fmtExpected` helpers; dev `mock-api.js` gains range-mode synthetic data
+- [x] T047 Verification — `just lint` clean, `go test ./...` all pass (8 new EventSpikes tests, 7 new Servers tests, 4 new migration tests, 4 new evtspike range handler tests), `pnpm build` clean, browser check of swimlane on RDSH07 detail row confirms pill switching + tooltip rendering
+- [x] T048 Chronicle entry under `CHRONICLE.md` "008 extension — event_spikes + servers SQLite migration + swimlane"

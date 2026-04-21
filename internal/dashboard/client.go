@@ -317,12 +317,21 @@ func hostName() (string, error) {
 	return os.Hostname()
 }
 
-// RemoteSettings holds dashboard settings fetched by the service agent.
+// RemoteSettings holds dashboard settings fetched by the service agent. Every
+// field that the dashboard's ConfigModal edits must be represented here so
+// connected agents pick the change up on the next fetch cycle; otherwise the
+// dashboard's authoritative config diverges from what the agents actually run.
+//
+// Pointer fields (`EvtSpikeEnabled`) distinguish "absent → don't change" from
+// "explicit value" so older dashboards that don't send the field won't
+// unexpectedly flip the flag.
 type RemoteSettings struct {
 	Notifications           []dc.NotificationTarget `json:"notifications"`
 	SessionWarningThreshold int                     `json:"session_warning_threshold"`
 	GracePeriod             int                     `json:"grace_period"`
+	PollInterval            int                     `json:"poll_interval,omitempty"`
 	Performance             *dc.PerformanceConfig   `json:"performance,omitempty"`
+	EvtSpikeEnabled         *bool                   `json:"evtspike_enabled,omitempty"`
 }
 
 // FetchSettings retrieves dashboard settings via the agent config endpoint.

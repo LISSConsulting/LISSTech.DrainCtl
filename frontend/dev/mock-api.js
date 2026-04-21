@@ -703,7 +703,7 @@ function handleRequest(method, pathname, body, query = {}) {
       return { status: 400, body: { error: 'invalid_range' } };
     }
     const reqRes = query.resolution || 'auto';
-    if (!['raw', '5min', 'hourly', 'auto'].includes(reqRes)) {
+    if (!['raw', '1min', '5min', 'hourly', 'auto'].includes(reqRes)) {
       return { status: 400, body: { error: 'invalid_resolution' } };
     }
     const counters = (query.counters || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -787,10 +787,13 @@ function handleRequest(method, pathname, body, query = {}) {
     };
   }
 
-  // GET /api/evtspike/spikes?host=<host>&limit=<n> — recent confirmed spikes.
-  // Dev-mock generates a deterministic 0..3-spike history per host so the
-  // ServerDetail "Recent Spikes" tile renders in all its populated states
-  // without a real backend.
+  // GET /api/evtspike/spikes?host=<host>&limit=<n>
+  // GET /api/evtspike/spikes?host=<host>&from=<iso>&to=<iso>
+  // Dev-mock generates a deterministic spike history per host so the
+  // ServerDetail SpikeSwimlane renders in all its populated states without
+  // a real backend. Range mode (from/to) populates the full window; recent
+  // mode (limit) falls back to a small 0–3 spike list consistent with the
+  // pre-009 behavior.
   if (method === 'GET' && pathname === '/api/evtspike/spikes') {
     const host = query.host;
     if (!host || !state.has(host)) {
@@ -798,17 +801,91 @@ function handleRequest(method, pathname, body, query = {}) {
     }
     let h = 0;
     for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
-    // Mostly populated (1–3 spikes) with ~12% of hosts showing the empty state
-    // so the dev dashboard exercises both populated and empty paths of the tile.
-    const mod = Math.abs(h) % 8;
-    const count = mod === 0 ? 0 : 1 + (mod % 3);
-    const channels = [
+    // Realistic Windows event channels an evtspike deployment would watch.
+    // The full pool is 20; each host draws a deterministic slice of it via
+    // the host hash, so you see 2-channel quiet hosts and 20-channel noisy
+    // hosts without changing the mock.
+    const channelPool = [
       'Microsoft-Windows-Winlogon/Operational',
       'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',
+      'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational',
+      'Microsoft-Windows-TerminalServices-SessionBroker/Operational',
+      'Microsoft-Windows-TerminalServices-Gateway/Operational',
+      'Microsoft-Windows-TaskScheduler/Operational',
+      'Microsoft-Windows-GroupPolicy/Operational',
+      'Microsoft-Windows-DNS-Client/Operational',
+      'Microsoft-Windows-PrintService/Operational',
+      'Microsoft-Windows-Kernel-Boot/Operational',
+      'Microsoft-Windows-Kernel-PnP/Operational',
+      'Microsoft-Windows-Ntfs/Operational',
+      'Microsoft-Windows-SMBClient/Operational',
+      'Microsoft-Windows-SMBServer/Operational',
+      'Microsoft-Windows-WindowsUpdateClient/Operational',
+      'Microsoft-Windows-Authentication/AuthenticationPolicyFailures-DomainController',
       'Application',
+      'System',
       'Security',
+      'Setup',
     ];
+    // Channel budget: how many distinct channels THIS host has ever fired on.
+    // Draws from [2, pool.length] via a second-order hash so the distribution
+    // is varied — most hosts end up mid-count, a few show just 2, one or two
+    // saturate the full pool so you can exercise the swimlane scroll path.
+    const secondHash = Math.abs((h * 2654435761) | 0);
+    const hostChannelCount = 2 + (secondHash % (channelPool.length - 1));
+    // Rotated slice so quiet hosts aren't all biased to the same first two
+    // channels of the pool.
+    const rotateOffset = Math.abs(h) % channelPool.length;
+    const channels = [];
+    for (let i = 0; i < hostChannelCount; i++) {
+      channels.push(channelPool[(rotateOffset + i) % channelPool.length]);
+    }
     const nowMs = Date.now();
+
+    // Range mode: synthesize spikes across [from, to) at pseudo-random intervals.
+    if (query.from && query.to) {
+      const fromMs = Date.parse(query.from);
+      const toMs = Date.parse(query.to);
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+        return { status: 400, body: { error: 'invalid_range' } };
+      }
+      const emptyHost = Math.abs(h) % 8 === 0;
+      if (emptyHost) return { status: 200, body: [] };
+
+      const windowMs = toMs - fromMs;
+      // Scale spike count to window size: ~1 spike per hour, capped at 80.
+      const targetCount = Math.min(80, Math.max(3, Math.round(windowMs / (60 * 60_000))));
+      const spikes = [];
+      for (let i = 0; i < targetCount; i++) {
+        // Deterministic "random" position within window using host hash.
+        const r = Math.abs((h * (i + 1)) ^ (i * 0x9e3779b1)) % 1000;
+        const frac = r / 1000;
+        const endMs = fromMs + Math.floor(frac * windowMs);
+        const startMs = endMs - 10_000;
+        const channel = channels[(Math.abs(h) + i) % channels.length];
+        const observed = 30 + ((Math.abs(h * (i + 3))) % 500);
+        const expected = 1.5 + (((Math.abs(h) >> i) & 0x7) * 0.8);
+        spikes.push({
+          id: Math.abs(h) * 1000 + i,
+          host,
+          channel,
+          window_start: new Date(startMs).toISOString(),
+          window_end: new Date(endMs).toISOString(),
+          observed,
+          expected,
+          tail_probability: 1e-6 * Math.pow(10, -((i % 4) + 1)),
+          confirmation_count: 2 + (i % 3),
+          first_seen_at: new Date(startMs - 20_000).toISOString(),
+        });
+      }
+      // Newest first.
+      spikes.sort((a, b) => Date.parse(b.window_end) - Date.parse(a.window_end));
+      return { status: 200, body: spikes };
+    }
+
+    // Recent-list mode (pre-009 contract).
+    const mod = Math.abs(h) % 8;
+    const count = mod === 0 ? 0 : 1 + (mod % 3);
     const limit = Math.min(50, Math.max(1, Number(query.limit ?? 20)));
     const spikes = [];
     for (let i = 0; i < Math.min(count, limit); i++) {

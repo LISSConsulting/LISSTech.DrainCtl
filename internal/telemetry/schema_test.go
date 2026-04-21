@@ -16,6 +16,8 @@ func TestApplySchema_FreshDB(t *testing.T) {
 		"metrics_5min",
 		"metrics_hourly",
 		"maintenance_jobs",
+		"event_spikes",
+		"servers",
 	}
 	for _, tbl := range wantTables {
 		var name string

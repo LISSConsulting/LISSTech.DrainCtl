@@ -117,6 +117,14 @@ func (r *Retention) RunOnce(ctx context.Context, now time.Time) Result {
                         SELECT ts, host, new_state FROM audit WHERE ts < ? LIMIT 10000)`,
 			cutoff: auditCutoff,
 		},
+		{
+			// event_spikes shares the drain-mode audit retention window so an
+			// operator tuning AuditDays gets a matching spike-history horizon.
+			label: "event_spikes",
+			query: `DELETE FROM event_spikes WHERE id IN (
+                        SELECT id FROM event_spikes WHERE window_start_ms < ? LIMIT 10000)`,
+			cutoff: auditCutoff,
+		},
 	}
 
 	var total int64
