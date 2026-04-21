@@ -107,7 +107,7 @@ description: "Task list for remaining persistent telemetry consumers"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T024 [US3] Add production metrics-seed handler tests for bounded per-host history, empty responses, and `storage_error` behavior in `internal/dashboard/server_test.go`
+- [x] T024 [US3] Add production metrics-seed handler tests for bounded per-host history, empty responses, and `storage_error` behavior in `internal/dashboard/server_test.go`
 
 ### Implementation for User Story 3
 
