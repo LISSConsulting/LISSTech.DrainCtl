@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -353,6 +354,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	})))
 
 	// Management / UI routes — require a valid dashboard session cookie.
+	mux.Handle("GET /api/v1/metrics", rlw(rs(http.HandlerFunc(ds.handleSeedMetrics))))
 	mux.Handle("GET /api/v1/metrics/{host}", rlw(rs(http.HandlerFunc(ds.handleMetrics))))
 	mux.Handle("GET /api/v1/audit", rlw(rs(http.HandlerFunc(ds.handleAudit))))
 	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
@@ -1555,6 +1557,154 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// seedMetricsCounters are the raw-tier counter names queried for the metrics seed route.
+var seedMetricsCounters = []string{
+	"cpu_pct",
+	"mem_avail_mb",
+	"mem_total_mb",
+	"input_delay_p95_ms",
+	"sessions_total",
+	"disk_queue",
+	"tcp_retrans_sec",
+}
+
+// handleSeedMetrics serves GET /api/v1/metrics (no {host}) per
+// contracts/http-metrics-seed.md.  Returns bounded recent raw-tier history
+// per registered host for sparkline cold-start seeding.
+func (ds *DashboardServer) handleSeedMetrics(w http.ResponseWriter, r *http.Request) {
+	if ds.ms == nil {
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	q := r.URL.Query()
+
+	if res := q.Get("resolution"); res != "" && res != "raw" {
+		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	from := now.Add(-30 * time.Minute)
+	to := now
+
+	if s := q.Get("from"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			writeJSONError(w, "invalid_range", http.StatusBadRequest)
+			return
+		}
+		from = t
+	}
+	if s := q.Get("to"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			writeJSONError(w, "invalid_range", http.StatusBadRequest)
+			return
+		}
+		to = t
+	}
+	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+
+	limit := 60
+	if s := q.Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 {
+			writeJSONError(w, "invalid_range", http.StatusBadRequest)
+			return
+		}
+		if n > 200 {
+			n = 200
+		}
+		limit = n
+	}
+
+	type seedSampleJSON struct {
+		Time       int64   `json:"time"`
+		CPU        float64 `json:"cpu"`
+		Mem        float64 `json:"mem"`
+		InputDelay float64 `json:"inputDelay"`
+		Sessions   int     `json:"sessions"`
+		DiskQueue  float64 `json:"diskQueue"`
+		TcpRetrans float64 `json:"tcpRetrans"`
+	}
+
+	infos := ds.state.All()
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result := make(map[string][]seedSampleJSON, len(infos))
+	for _, info := range infos {
+		host := info.Hostname
+		sr, err := ds.ms.QueryRange(ctx, host, from, to, telemetry.TierRaw, seedMetricsCounters)
+		if err != nil {
+			slog.Error("seed metrics: query failed", "host", host, "error", err) //nolint:gosec
+			writeJSONError(w, "storage_error", http.StatusInternalServerError)
+			return
+		}
+
+		byTs := make(map[int64]*seedSampleJSON)
+		availByTs := make(map[int64]float64)
+		totalByTs := make(map[int64]float64)
+
+		for name, cs := range sr.Data {
+			for i, ts := range cs.T {
+				s, ok := byTs[ts]
+				if !ok {
+					s = &seedSampleJSON{Time: ts}
+					byTs[ts] = s
+				}
+				v := cs.Avg[i]
+				switch name {
+				case "cpu_pct":
+					s.CPU = v
+				case "mem_avail_mb":
+					availByTs[ts] = v
+				case "mem_total_mb":
+					totalByTs[ts] = v
+				case "input_delay_p95_ms":
+					s.InputDelay = v
+				case "sessions_total":
+					s.Sessions = int(v)
+				case "disk_queue":
+					s.DiskQueue = v
+				case "tcp_retrans_sec":
+					s.TcpRetrans = v
+				}
+			}
+		}
+
+		for ts, avail := range availByTs {
+			if total, ok := totalByTs[ts]; ok && total > 0 {
+				if s, ok := byTs[ts]; ok {
+					s.Mem = (1 - avail/total) * 100
+				}
+			}
+		}
+
+		tss := make([]int64, 0, len(byTs))
+		for ts := range byTs {
+			tss = append(tss, ts)
+		}
+		sort.Slice(tss, func(i, j int) bool { return tss[i] < tss[j] })
+		if len(tss) > limit {
+			tss = tss[len(tss)-limit:]
+		}
+
+		samples := make([]seedSampleJSON, 0, len(tss))
+		for _, ts := range tss {
+			samples = append(samples, *byTs[ts])
+		}
+		result[host] = samples
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 // handleAudit serves GET /api/v1/audit per contracts/http-audit.md.
