@@ -109,6 +109,7 @@ load from SQLite-backed telemetry instead of browser-local warm-up state.
 ```powershell
 go test ./...
 just lint
+just frontend
 ```
 
 ## Review Targets
