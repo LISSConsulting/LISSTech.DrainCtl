@@ -65,7 +65,7 @@ description: "Task list for remaining persistent telemetry consumers"
 
 ### Implementation for User Story 1
 
-- [ ] T011 [P] [US1] Replace synthesized fleet bootstrap logic in `frontend/src/App.svelte` with retained fleet-history loading for Overview charts
+- [x] T011 [P] [US1] Replace synthesized fleet bootstrap logic in `frontend/src/App.svelte` with retained fleet-history loading for Overview charts
 - [ ] T012 [P] [US1] Narrow `metricsHistory`, `sessionHistory`, and `remoteFxHistory` usage in `frontend/src/lib/state.svelte.js` so they no longer behave as browser-local retained-history authorities
 - [ ] T013 [US1] Rewire LOAD and HIC Overview data preparation in `frontend/src/components/MetricsChart.svelte` to consume retained fleet series while preserving current aggregation semantics
 - [ ] T014 [US1] Rewire SESSIONS and REMOTE FX Overview data preparation in `frontend/src/components/MetricsChart.svelte` to consume retained fleet series while preserving current aggregation semantics
