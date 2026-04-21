@@ -5,14 +5,9 @@
     import {
         appState,
         addEvent,
-        appendMetricsSample,
         appendServerMetricsSample,
         removeServerMetrics,
         seedServerMetrics,
-        appendSessionSample,
-        appendRfxSample,
-        deriveP95,
-        deriveP50,
         setDetectorStatus,
         appendRecentSpike,
         removeEvtSpikeState,
@@ -316,91 +311,9 @@
             prevAlerts.clear();
             for (const [host, state] of nextAlerts) prevAlerts.set(host, state);
 
-            // Compute fleet-wide P95 for health metrics — reveals outlier servers that
-            // averages would smooth out. CPU and memory stay as averages (capacity planning).
-            const s = appState.servers;
-            const perfSvs = s.filter((sv) => sv.perf);
-
-            const cpu = perfSvs.length ? perfSvs.reduce((a, sv) => a + (sv.perf.cpu_pct || 0), 0) / perfSvs.length : 0;
-            const cpuP95Vals = perfSvs.map((sv) => sv.perf.cpu_p95_pct || sv.perf.cpu_pct || 0);
-            const cpuP95 = deriveP95(cpuP95Vals);
-            const memSvs = s.filter((sv) => sv.perf?.mem_total_mb > 0);
-            const memPct = memSvs.length
-                ? memSvs.reduce((a, sv) => a + (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100, 0) /
-                  memSvs.length
-                : 0;
-            const idVals = perfSvs.map((sv) => sv.perf.input_delay_p95_ms || 0);
-            const psVals = perfSvs.map((sv) => sv.perf.pages_sec || 0);
-            const trVals = perfSvs.map((sv) => sv.perf.tcp_retrans_sec || 0);
-            const dqVals = perfSvs.map((sv) => sv.perf.disk_queue || 0);
-            const inputDelay = deriveP95(idVals);
-            const pagesPerSec = deriveP95(psVals);
-            const tcpRetrans = deriveP95(trVals);
-            const diskQueue = deriveP95(dqVals);
-            const sessions = s.reduce((a, sv) => a + (sv.sessions || 0), 0);
-
-            const ts = Date.now();
-            appendMetricsSample({
-                time: ts,
-                cpu,
-                cpuP95,
-                mem: memPct,
-                inputDelay,
-                sessions,
-                pagesPerSec,
-                tcpRetrans,
-                diskQueue,
-                p50InputDelay: deriveP50(idVals),
-                p50PagesPerSec: deriveP50(psVals),
-                p50TcpRetrans: deriveP50(trVals),
-                p50DiskQueue: deriveP50(dqVals),
-            });
-
-            // Fleet session aggregates
-            const totalActive = s.reduce((a, sv) => a + (sv.sessions_active ?? sv.sessions ?? 0), 0);
-            const totalDisconnected = s.reduce((a, sv) => a + (sv.sessions_disconnected ?? 0), 0);
-            const totalAll = totalActive + totalDisconnected;
-            const totalMax = s.reduce((a, sv) => a + (sv.max_sessions ?? 0), 0);
-            const scpuVals = perfSvs.map((sv) => sv.perf.session_cpu_p95_pct ?? null).filter((v) => v != null);
-            const smemVals = perfSvs.map((sv) => sv.perf.session_mem_p95_bytes ?? null).filter((v) => v != null);
-            const scpuP50Vals = perfSvs.map((sv) => sv.perf.session_cpu_p50_pct ?? null).filter((v) => v != null);
-            const smemP50Vals = perfSvs.map((sv) => sv.perf.session_mem_p50_bytes ?? null).filter((v) => v != null);
-            appendSessionSample({
-                ts,
-                active: totalActive,
-                disconnected: totalDisconnected,
-                total: totalAll,
-                utilization: totalMax > 0 ? Math.round((totalAll / totalMax) * 100) : 0,
-                sessionCpuP95: deriveP95(/** @type {number[]} */ (scpuVals)),
-                sessionMemP95: deriveP95(/** @type {number[]} */ (smemVals)),
-                sessionCpuP50: deriveP50(/** @type {number[]} */ (scpuP50Vals)),
-                sessionMemP50: deriveP50(/** @type {number[]} */ (smemP50Vals)),
-            });
-
-            // Fleet RemoteFX aggregates
-            const rfxSvs = perfSvs.filter((sv) => sv.perf.rfx_available);
-            appState.rfxAvailable = rfxSvs.length > 0;
-            if (rfxSvs.length > 0) {
-                appendRfxSample({
-                    ts,
-                    fpsOut: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_fps_out ?? 0)),
-                    encodeMs: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_encode_ms ?? 0)),
-                    quality: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_quality_pct ?? 0)),
-                    rtt: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_rtt_ms ?? 0)),
-                    loss: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_loss_pct ?? 0)),
-                    skipServer: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_server_sec ?? 0)),
-                    skipNet: deriveP95(rfxSvs.map((sv) => sv.perf.rfx_skip_net_sec ?? 0)),
-                    fpsOutP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_fps_out_p50 ?? 0)),
-                    encodeMsP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_encode_ms_p50 ?? 0)),
-                    qualityP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_quality_pct_p50 ?? 0)),
-                    rttP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_rtt_ms_p50 ?? 0)),
-                    lossP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_loss_pct_p50 ?? 0)),
-                    skipServerP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_server_sec_p50 ?? 0)),
-                    skipNetP50: deriveP50(rfxSvs.map((sv) => sv.perf.rfx_skip_net_sec_p50 ?? 0)),
-                });
-            }
-
             // Per-server ring buffers for per-host sparklines in ServerDetail.
+            const s = appState.servers;
+            const ts = Date.now();
             for (const sv of s) {
                 if (sv.perf) {
                     const svMemPct =
