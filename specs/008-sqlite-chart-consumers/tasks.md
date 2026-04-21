@@ -61,7 +61,7 @@ description: "Task list for remaining persistent telemetry consumers"
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [US1] Add backend retained-history tests for `_fleet` data, empty series responses, and retained coverage bounds in `internal/dashboard/server_test.go`
+- [x] T010 [US1] Add backend retained-history tests for `_fleet` data, empty series responses, and retained coverage bounds in `internal/dashboard/server_test.go`
 
 ### Implementation for User Story 1
 
