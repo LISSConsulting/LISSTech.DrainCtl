@@ -3,6 +3,7 @@
     import { LayerCake, Svg } from 'layercake';
     import { appState } from '../lib/state.svelte.js';
     import { resolveThresholds } from '../lib/thresholds.js';
+    import { fetchFleetMetrics } from '../lib/api.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
     import {
@@ -142,7 +143,75 @@
     let cpuThresh = $derived(resolveThresholds('cpu', perfCfg));
     let memThresh = $derived(resolveThresholds('mem', perfCfg));
 
-    let history = $derived(appState.metricsHistory);
+    // ── Fleet retained-history fetch ──────────────────────────────────────────
+    /** @type {import('../lib/api.js').MetricsResponse|null} */
+    let fleetResponse = $state(null);
+    let fleetLoading = $state(false);
+    let fleetError = $state(false);
+
+    $effect(() => {
+        const windowMs = appState.overviewWindowMs;
+        let cancelled = false;
+        fleetLoading = true;
+        fleetError = false;
+        const now = new Date();
+        const from = new Date(now.getTime() - windowMs);
+        fetchFleetMetrics(from, now)
+            .then((data) => {
+                if (!cancelled) {
+                    fleetResponse = data;
+                    fleetLoading = false;
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    fleetError = true;
+                    fleetLoading = false;
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    /**
+     * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
+     * Uses cpu_pct timestamps as the canonical index; other counters fill in by position.
+     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
+     * @returns {import('../lib/state.svelte.js').MetricsSample[]}
+     */
+    function adaptFleetToMetricsSamples(series) {
+        const cpu = series['cpu_pct'];
+        if (!cpu || cpu.t.length === 0) return [];
+        const avail = series['mem_avail_mb']?.avg ?? [];
+        const total = series['mem_total_mb']?.avg ?? [];
+        const sess = series['sessions_total']?.avg ?? [];
+        const id = series['input_delay_p95_ms']?.avg ?? [];
+        const ps = series['pages_sec']?.avg ?? [];
+        const tr = series['tcp_retrans_sec']?.avg ?? [];
+        const dq = series['disk_queue']?.avg ?? [];
+        return cpu.t.map((ts, i) => {
+            const a = avail[i] ?? 0;
+            const m = total[i] ?? 0;
+            return {
+                time: ts,
+                cpu: cpu.avg[i] ?? 0,
+                cpuP95: cpu.max[i] ?? cpu.avg[i] ?? 0,
+                mem: m > 0 ? (1 - a / m) * 100 : 0,
+                sessions: Math.round(sess[i] ?? 0),
+                inputDelay: id[i] ?? 0,
+                pagesPerSec: ps[i] ?? 0,
+                tcpRetrans: tr[i] ?? 0,
+                diskQueue: dq[i] ?? 0,
+                p50InputDelay: 0,
+                p50PagesPerSec: 0,
+                p50TcpRetrans: 0,
+                p50DiskQueue: 0,
+            };
+        });
+    }
+
+    let history = $derived(adaptFleetToMetricsSamples(fleetResponse?.series ?? {}));
     let sessionMax = $derived(Math.max(...history.map((h) => h.sessions ?? 0), 1));
     let hasRight = $derived(showSessions);
 
