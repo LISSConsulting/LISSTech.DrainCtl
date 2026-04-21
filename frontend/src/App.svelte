@@ -219,96 +219,9 @@
             // Seed per-server metric history from GET /api/v1/metrics (cold start only).
             // seedServerMetrics skips hosts that already have live data so this is safe
             // to call even when some samples have arrived via earlier poll cycles.
-            // Also synthesize fleet-wide metricsHistory so LOAD and HIC charts are
-            // populated immediately instead of waiting N×30 s to fill.
             if (seedData) {
                 const seedMap = new Map(Object.entries(seedData));
                 seedServerMetrics(seedMap);
-
-                if (appState.metricsHistory.length < 2) {
-                    const hosts = [...seedMap.values()];
-                    const sampleCount = Math.max(...hosts.map((h) => h.length), 0);
-                    /** @type {import('./lib/state.svelte.js').MetricsSample[]} */
-                    const fleetHistory = [];
-                    /** @type {import('./lib/state.svelte.js').SessionSample[]} */
-                    const sessHistory = [];
-                    /** @type {import('./lib/state.svelte.js').RfxSample[]} */
-                    const rfxHistSeed = [];
-                    for (let i = 0; i < sampleCount; i++) {
-                        const slices = hosts.map((h) => h[i]).filter(Boolean);
-                        if (slices.length === 0) continue;
-                        const cpuVals = slices.map((s) => s.cpu ?? 0);
-                        const memVals = slices.map((s) => s.mem ?? 0);
-                        const avgCpu = cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length;
-                        const avgMem = memVals.reduce((a, b) => a + b, 0) / memVals.length;
-                        const totalSess = slices.reduce((a, s) => a + (s.sessions ?? 0), 0);
-                        const idV = slices.map((s) => s.inputDelay ?? 0);
-                        const psV = slices.map((s) => s.pagesPerSec ?? 0);
-                        const trV = slices.map((s) => s.tcpRetrans ?? 0);
-                        const dqV = slices.map((s) => s.diskQueue ?? 0);
-                        fleetHistory.push({
-                            time: slices[0].time,
-                            cpu: avgCpu,
-                            cpuP95: deriveP95(slices.map((s) => s.cpuP95 ?? 0)),
-                            mem: avgMem,
-                            sessions: totalSess,
-                            inputDelay: deriveP95(idV),
-                            pagesPerSec: deriveP95(psV),
-                            tcpRetrans: deriveP95(trV),
-                            diskQueue: deriveP95(dqV),
-                            p50InputDelay: deriveP50(idV),
-                            p50PagesPerSec: deriveP50(psV),
-                            p50TcpRetrans: deriveP50(trV),
-                            p50DiskQueue: deriveP50(dqV),
-                        });
-
-                        // Session aggregate history
-                        const active = slices.reduce((a, s) => a + (s.sessionsActive ?? s.sessions ?? 0), 0);
-                        const disconnected = slices.reduce((a, s) => a + (s.sessionsDisconnected ?? 0), 0);
-                        const total = active + disconnected;
-                        const maxAll = slices.reduce((a, s) => a + (s.maxSessions ?? 0), 0);
-                        sessHistory.push({
-                            ts: slices[0].time,
-                            active,
-                            disconnected,
-                            total,
-                            utilization: maxAll > 0 ? Math.round((total / maxAll) * 100) : 0,
-                            sessionCpuP95: deriveP95(slices.map((s) => s.sessionCpuP95 ?? 0)),
-                            sessionMemP95: deriveP95(slices.map((s) => s.sessionMemP95 ?? 0)),
-                            sessionCpuP50: deriveP50(slices.map((s) => s.sessionCpuP50 ?? 0)),
-                            sessionMemP50: deriveP50(slices.map((s) => s.sessionMemP50 ?? 0)),
-                        });
-
-                        // RemoteFX aggregate history
-                        rfxHistSeed.push({
-                            ts: slices[0].time,
-                            fpsOut: deriveP95(slices.map((s) => s.rfxFpsOut ?? 0)),
-                            encodeMs: deriveP95(slices.map((s) => s.rfxEncodeMs ?? 0)),
-                            quality: deriveP95(slices.map((s) => s.rfxQuality ?? 0)),
-                            rtt: deriveP95(slices.map((s) => s.rfxRtt ?? 0)),
-                            loss: deriveP95(slices.map((s) => s.rfxLoss ?? 0)),
-                            skipServer: deriveP95(slices.map((s) => s.rfxSkipServer ?? 0)),
-                            skipNet: deriveP95(slices.map((s) => s.rfxSkipNet ?? 0)),
-                            fpsOutP50: deriveP50(slices.map((s) => s.rfxFpsOutP50 ?? 0)),
-                            encodeMsP50: deriveP50(slices.map((s) => s.rfxEncodeMsP50 ?? 0)),
-                            qualityP50: deriveP50(slices.map((s) => s.rfxQualityP50 ?? 0)),
-                            rttP50: deriveP50(slices.map((s) => s.rfxRttP50 ?? 0)),
-                            lossP50: deriveP50(slices.map((s) => s.rfxLossP50 ?? 0)),
-                            skipServerP50: deriveP50(slices.map((s) => s.rfxSkipServerP50 ?? 0)),
-                            skipNetP50: deriveP50(slices.map((s) => s.rfxSkipNetP50 ?? 0)),
-                        });
-                    }
-                    if (fleetHistory.length > 0) {
-                        appState.metricsHistory = fleetHistory;
-                    }
-                    if (sessHistory.length > 0) {
-                        appState.sessionHistory = sessHistory;
-                    }
-                    if (rfxHistSeed.length > 0) {
-                        appState.remoteFxHistory = rfxHistSeed;
-                        appState.rfxAvailable = true;
-                    }
-                }
             }
 
             // Detect and log server state transitions.
