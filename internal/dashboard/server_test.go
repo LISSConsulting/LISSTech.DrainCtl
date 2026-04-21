@@ -4595,3 +4595,113 @@ func TestFleetMetrics_US1_OverviewCounterFamilies(t *testing.T) {
 		}
 	}
 }
+
+// ── handleFleetMetrics — US2 tier/degradation/bounds (T017) ─────────────────
+
+// TestFleetMetrics_US2_ExplicitResolutionOverrides verifies that the fleet
+// endpoint honours explicit resolution parameters regardless of window size,
+// matching the same contract as the per-host metrics handler. This matters for
+// the shared-window navigation (US2) where the frontend may force a specific
+// tier when the operator selects a preset (5M/1H/1D/3D/5D).
+func TestFleetMetrics_US2_ExplicitResolutionOverrides(t *testing.T) {
+	cases := []struct {
+		name       string
+		resolution string
+		window     time.Duration
+	}{
+		// A 3D window would pick hourly under auto; explicit raw overrides it.
+		{"raw overrides 3D window", "raw", 3 * 24 * time.Hour},
+		// A 5M window would pick raw under auto; explicit 5min overrides it.
+		{"5min overrides 5M window", "5min", 5 * time.Minute},
+		// A 5M window would pick raw under auto; explicit hourly overrides it.
+		{"hourly overrides 5M window", "hourly", 5 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds, ms, closeDB := newTestServerWithStore(t)
+			defer closeDB()
+			now := time.Now().UTC().Truncate(time.Second)
+			base := now.Add(-tc.window)
+			insertFleetSamples(t, ds, ms, []string{"SRV01"}, base,
+				map[string]float64{"cpu_pct": 10.0}, 2)
+
+			from := base.Format(time.RFC3339)
+			to := now.Format(time.RFC3339)
+			url := "/api/v1/metrics/_fleet?from=" + from + "&to=" + to + "&resolution=" + tc.resolution
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, url, nil)
+			r.SetPathValue("host", "_fleet")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+			}
+			if got := decodeMetricsTier(t, w); got != tc.resolution {
+				t.Errorf("tier = %q, want %q", got, tc.resolution)
+			}
+		})
+	}
+}
+
+// TestFleetMetrics_US2_DegradationWhenRawPurged verifies that the fleet endpoint
+// degrades from raw to 5min when raw coverage does not reach the requested from
+// timestamp, and then to hourly when 5min is also insufficient.
+func TestFleetMetrics_US2_DegradationWhenRawPurged(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Raw oldest = now-2m. A 30m window (from = now-30m) will not be covered.
+	// Both 5min and hourly are empty, so the handler degrades all the way to hourly.
+	base := now.Add(-2 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base,
+		map[string]float64{"cpu_pct": 5.0}, 2)
+
+	from := now.Add(-30 * time.Minute).Format(time.RFC3339)
+	to := now.Add(-25 * time.Minute).Format(time.RFC3339)
+	url := "/api/v1/metrics/_fleet?from=" + from + "&to=" + to + "&resolution=auto"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	if got := decodeMetricsTier(t, w); got != "hourly" {
+		t.Errorf("tier = %q, want hourly after full degradation", got)
+	}
+}
+
+// TestFleetMetrics_US2_ResponseBoundsPresent verifies that oldest_available and
+// newest_available are populated when fleet data exists, enabling the frontend to
+// display coverage feedback for the selected shared window.
+func TestFleetMetrics_US2_ResponseBoundsPresent(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	base := now.Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01", "SRV02"}, base,
+		map[string]float64{"cpu_pct": 20.0}, 3)
+
+	from := base.Add(-time.Minute).Format(time.RFC3339)
+	to := now.Format(time.RFC3339)
+	url := "/api/v1/metrics/_fleet?from=" + from + "&to=" + to + "&resolution=raw"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+	if resp.OldestAvailable == nil {
+		t.Error("oldest_available is nil; want non-null when data exists")
+	}
+	if resp.NewestAvailable == nil {
+		t.Error("newest_available is nil; want non-null when data exists")
+	}
+}
