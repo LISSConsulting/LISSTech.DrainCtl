@@ -42,7 +42,7 @@ description: "Task list for remaining persistent telemetry consumers"
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
 - [x] T005 Implement `_fleet` host support and fleet aggregation query plumbing in `internal/dashboard/server.go`, reusing `internal/telemetry/metrics.go` tier selection and preserving current LOAD/HIC/SESSIONS/REMOTE FX semantics
-- [ ] T006 Implement the bounded production metrics-seed route in `internal/dashboard/server.go` for recent per-host retained history used by sparkline consumers
+- [x] T006 Implement the bounded production metrics-seed route in `internal/dashboard/server.go` for recent per-host retained history used by sparkline consumers
 - [ ] T007 Wire `frontend/src/lib/api.js` to the production fleet and metrics-seed routes and remove the dev-only assumption called out in its `fetchAllServerMetrics()` comments
 - [ ] T008 Update `frontend/src/lib/state.svelte.js` so retained telemetry, not browser-local history, is treated as the authoritative source for migrated historical surfaces
 - [ ] T009 Add foundational handler coverage in `internal/dashboard/server_test.go` for `_fleet`, metrics-seed, invalid range/resolution, bounded responses, and `storage_error` behavior
