@@ -84,7 +84,7 @@ description: "Task list for remaining persistent telemetry consumers"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T017 [US2] Add backend tier/degradation tests for fleet windows and response bounds in `internal/dashboard/server_test.go`
+- [x] T017 [US2] Add backend tier/degradation tests for fleet windows and response bounds in `internal/dashboard/server_test.go`
 
 ### Implementation for User Story 2
 
