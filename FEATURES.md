@@ -15,20 +15,6 @@ Forward-looking list of features we're thinking about. Lives here until it eithe
 
 ## Proposed
 
-### F1. Fleet-wide persistence for Overview charts (LOAD + Health Indicators)
-
-**Status:** `proposed`
-
-**Current behavior:** Overview page's LOAD and Health Indicators charts read from `appState.metricsHistory`, an in-memory Svelte ring buffer persisted only to `localStorage`. Data is client-local, lost on browser switch, doesn't survive cold-start across machines. Per-host detail chart is SQL-backed (feature 007); fleet-wide is not.
-
-**Why:** operators asking "what did fleet load look like at 3am last Tuesday" currently have no answer unless a browser was left open. Retention of fleet aggregates matches the same operational need 007 solved for per-host.
-
-**Scope sketch:** new endpoint `/api/v1/metrics/_fleet?counters=...&from=...&to=...&resolution=auto` that server-side `GROUP BY bucket_ts` across registered hosts and returns averages/P95. Frontend `App.svelte` replaces the synthesized `fleetHistory` cold-start with a `fetchMetrics('_fleet', …)` call; `MetricsChart` consumes the same shape it gets today. ~100–150 lines Go + OpenAPI entry + frontend rewiring. Promote to a `specs/008-fleet-metrics/` when ready.
-
-**Deferred from 007:** feature 007 spec was explicitly per-host (FR-017, SC-001 all say "each host / every host"). Fleet-wide was not in scope.
-
----
-
 ### F2. `drainctl register` via service pipe (resolves BUGS #1)
 
 **Status:** `scoped`
