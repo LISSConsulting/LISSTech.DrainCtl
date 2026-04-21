@@ -151,11 +151,15 @@
 
     // Pan offset: milliseconds before "now" that the TO boundary is anchored.
     // 0 = live (to = now); positive = panned into the past.
+    // Reactive — changing it triggers the fleet fetch.
     let panOffsetMs = $state(0);
     // True while the user is actively drag-panning the LOAD chart.
     let isDragging = $state(false);
+    // Plain vars during drag: not reactive so the fleet effect is not triggered
+    // on every mousemove pixel. panOffsetMs is committed only on mouseup.
     let dragStartX = 0;
     let dragStartOffset = 0;
+    let dragPendingOffsetMs = 0;
 
     $effect(() => {
         const windowMs = appState.overviewWindowMs;
@@ -208,6 +212,7 @@
         isDragging = true;
         dragStartX = e.clientX;
         dragStartOffset = panOffsetMs;
+        dragPendingOffsetMs = panOffsetMs;
         appState.hoveredChartIndex = null;
         appState.pinnedChartIndex = null;
     }
@@ -219,15 +224,22 @@
         const dMs = (dx / Math.max(loadContainerW, 1)) * appState.overviewWindowMs;
         // Dragging right = moving back in time (larger offset from now).
         // Dragging left = moving forward in time (smaller offset, min 0 = live).
-        panOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
-        appState.overviewWindowSource = 'pan';
+        dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
     }
 
     function onLoadChartMouseUp() {
+        if (isDragging && dragPendingOffsetMs !== panOffsetMs) {
+            panOffsetMs = dragPendingOffsetMs;
+            appState.overviewWindowSource = 'pan';
+        }
         isDragging = false;
     }
 
     function onLoadChartMouseLeave() {
+        if (isDragging && dragPendingOffsetMs !== panOffsetMs) {
+            panOffsetMs = dragPendingOffsetMs;
+            appState.overviewWindowSource = 'pan';
+        }
         isDragging = false;
     }
 
