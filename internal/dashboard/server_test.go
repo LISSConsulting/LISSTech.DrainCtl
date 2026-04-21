@@ -4065,3 +4065,147 @@ func TestCheckResult_EvtSpikeStatusRoundTrip(t *testing.T) {
 		t.Errorf("CheckResult without EvtSpikeStatus should not emit the field: %s", absent)
 	}
 }
+
+// ── Test fixtures: fleet metrics and metrics-seed (feature 008) ───────────────
+
+// counterTestSeries mirrors the JSON shape of one series in a metrics response.
+// Promoted from per-test anonymous structs so fleet and seed tests share the type.
+type counterTestSeries struct {
+	T   []int64   `json:"t"`
+	Avg []float64 `json:"avg"`
+	Min []float64 `json:"min"`
+	Max []float64 `json:"max"`
+}
+
+// metricsTestResp mirrors the full JSON wire format of GET /api/v1/metrics/{host}.
+// Used for both fleet (_fleet) and per-host assertions.
+type metricsTestResp struct {
+	Host            string                        `json:"host"`
+	Tier            string                        `json:"tier"`
+	From            string                        `json:"from"`
+	To              string                        `json:"to"`
+	OldestAvailable *string                       `json:"oldest_available"`
+	NewestAvailable *string                       `json:"newest_available"`
+	Series          map[string]*counterTestSeries `json:"series"`
+}
+
+// metricsSeedEntry mirrors one per-host sample from GET /api/v1/metrics.
+// Field names match the JSON tags expected by the frontend MetricsSeedSample typedef.
+type metricsSeedEntry struct {
+	Time       int64   `json:"time"`
+	CPU        float64 `json:"cpu"`
+	Mem        float64 `json:"mem"`
+	InputDelay float64 `json:"inputDelay"`
+	Sessions   int     `json:"sessions"`
+	DiskQueue  float64 `json:"diskQueue"`
+	TcpRetrans float64 `json:"tcpRetrans"`
+}
+
+// decodeMetricsResp decodes a metrics handler response body into metricsTestResp.
+func decodeMetricsResp(t *testing.T, w *httptest.ResponseRecorder) metricsTestResp {
+	t.Helper()
+	var resp metricsTestResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decodeMetricsResp: %v (body=%s)", err, w.Body.String())
+	}
+	return resp
+}
+
+// decodeMetricsSeedResp decodes a metrics-seed handler response body.
+func decodeMetricsSeedResp(t *testing.T, w *httptest.ResponseRecorder) map[string][]metricsSeedEntry {
+	t.Helper()
+	var resp map[string][]metricsSeedEntry
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decodeMetricsSeedResp: %v (body=%s)", err, w.Body.String())
+	}
+	return resp
+}
+
+// insertFleetSamples appends raw telemetry samples for each host/counter pair.
+// Samples are evenly spaced from base at 30 s ticks. Hosts not already
+// registered in ds.state are registered automatically.
+//
+// vals maps counter name → the constant value inserted for every tick.
+func insertFleetSamples(
+	t *testing.T,
+	ds *DashboardServer,
+	ms *telemetry.MetricsStore,
+	hosts []string,
+	base time.Time,
+	vals map[string]float64,
+	count int,
+) {
+	t.Helper()
+	for _, h := range hosts {
+		ds.state.Register(h)
+	}
+	samples := make([]telemetry.Sample, 0, len(hosts)*len(vals)*count)
+	for _, h := range hosts {
+		for counter, v := range vals {
+			for i := range count {
+				samples = append(samples, telemetry.Sample{
+					Ts:      base.Add(time.Duration(i) * 30 * time.Second),
+					Host:    h,
+					Counter: counter,
+					Value:   v,
+				})
+			}
+		}
+	}
+	if err := ms.Append(context.Background(), samples); err != nil {
+		t.Fatalf("insertFleetSamples: %v", err)
+	}
+}
+
+// metricsURL builds a GET /api/v1/metrics/{host} query URL.
+func metricsURL(host string, from, to time.Time, resolution string, counters []string) string {
+	u := fmt.Sprintf("/api/v1/metrics/%s?from=%s&to=%s",
+		host,
+		from.UTC().Format(time.RFC3339),
+		to.UTC().Format(time.RFC3339),
+	)
+	if resolution != "" {
+		u += "&resolution=" + resolution
+	}
+	if len(counters) > 0 {
+		u += "&counters=" + strings.Join(counters, ",")
+	}
+	return u
+}
+
+// TestFleetFixtureShapes validates fixture helper types and functions against
+// the wire-format contracts before any fleet or seed handler tests use them.
+func TestFleetFixtureShapes(t *testing.T) {
+	metricsJSON := `{"host":"_fleet","tier":"5min","from":"2026-01-01T00:00:00Z","to":"2026-01-01T01:00:00Z","oldest_available":null,"newest_available":null,"series":{}}`
+	w := &httptest.ResponseRecorder{Body: bytes.NewBufferString(metricsJSON)}
+	resp := decodeMetricsResp(t, w)
+	if resp.Host != "_fleet" {
+		t.Errorf("metricsTestResp.host = %q, want _fleet", resp.Host)
+	}
+	if resp.Series == nil {
+		t.Error("metricsTestResp.series should not be nil on empty JSON object")
+	}
+
+	seedJSON := `{"SRV01":[{"time":1000000,"cpu":12.5,"mem":40.0,"inputDelay":5,"sessions":10,"diskQueue":0.1,"tcpRetrans":0.05}]}`
+	w2 := &httptest.ResponseRecorder{Body: bytes.NewBufferString(seedJSON)}
+	seed := decodeMetricsSeedResp(t, w2)
+	if len(seed["SRV01"]) != 1 {
+		t.Fatalf("metricsSeedEntry len = %d, want 1", len(seed["SRV01"]))
+	}
+	if seed["SRV01"][0].CPU != 12.5 {
+		t.Errorf("metricsSeedEntry.CPU = %v, want 12.5", seed["SRV01"][0].CPU)
+	}
+
+	u := metricsURL("_fleet", time.Unix(0, 0).UTC(), time.Unix(3600, 0).UTC(), "raw", []string{"cpu_pct"})
+	if !strings.Contains(u, "_fleet") || !strings.Contains(u, "cpu_pct") {
+		t.Errorf("metricsURL unexpected output: %s", u)
+	}
+
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	base := time.Now().UTC().Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"S01", "S02"}, base, map[string]float64{"cpu_pct": 42.0}, 3)
+	if !ds.state.IsRegistered("S01") || !ds.state.IsRegistered("S02") {
+		t.Error("insertFleetSamples must register provided hosts")
+	}
+}
