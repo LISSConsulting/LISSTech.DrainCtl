@@ -28,6 +28,23 @@
         sessions: { width: 3.5, dash: '10,5' },
     };
 
+    /** Pick a short datetime format based on the visible time span. Mirrors
+     * the formatter used in InteractiveTimeChart so every Overview chart
+     * agrees on how axis labels read. */
+    function formatAxisTime(ms, spanMs) {
+        const d = new Date(ms);
+        if (spanMs < 2 * 60 * 60 * 1000) {
+            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        }
+        if (spanMs < 48 * 60 * 60 * 1000) {
+            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+        if (spanMs < 14 * 24 * 60 * 60 * 1000) {
+            return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+        }
+        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
+    }
+
     // X-axis labels — up to 5 evenly spaced ticks (only when showXAxis is true)
     let xLabels = $derived(
         (() => {
@@ -42,15 +59,12 @@
                 n - 1,
             ];
             const unique = [...new Set(indices)];
-            const now = Date.now();
+            const firstT = history[0]?.time;
+            const lastT = history[n - 1]?.time;
+            const spanMs = Number.isFinite(firstT) && Number.isFinite(lastT) ? lastT - firstT : 0;
             return unique.map((i) => {
-                const diffMs = now - (history[i]?.time ?? now);
-                const label =
-                    i === n - 1
-                        ? 'now'
-                        : diffMs < 60_000
-                          ? `${Math.round(diffMs / 1000)}s`
-                          : `${Math.round(diffMs / 60_000)}m`;
+                const t = history[i]?.time;
+                const label = Number.isFinite(t) ? formatAxisTime(t, spanMs) : '';
                 return { x: $xScale(i), label };
             });
         })(),
@@ -279,13 +293,16 @@
         {@const th = tipHeight(vis)}
         {@const tx = cx + 14 + TIP_W > $width ? cx - TIP_W - 10 : cx + 14}
         {@const ty = Math.max(2, Math.min($height - th - 2, $yScale(50) - th / 2))}
-        {@const diffMs = Date.now() - (d.time ?? Date.now())}
-        {@const timeStr =
-            diffMs < 1200
-                ? 'now'
-                : diffMs < 60_000
-                  ? `${Math.round(diffMs / 1000)}s ago`
-                  : `${Math.round(diffMs / 60_000)}m ago`}
+        {@const timeStr = Number.isFinite(d.time)
+            ? new Date(d.time).toLocaleString('en', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false,
+              })
+            : '—'}
 
         <!-- Tooltip shadow (neobrutalist offset) -->
         <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} rx="6" fill="var(--color-shadow)" />

@@ -204,10 +204,12 @@ type DashboardServer struct {
 	// wired. See evtspike.go handleEvtSpikeStatus for nil semantics.
 	evtspikeStatus EvtSpikeStatusFunc
 
-	// spikestore backs GET /api/evtspike/spikes. Populated by the evtspike
-	// subsystem at Start via dashboard.OnSpike wiring; nil until that wires up
-	// or when the feature is off (handler then returns 200 []).
-	spikestore *SpikeStore
+	// spikes backs GET /api/evtspike/spikes and the remote-agent POST /api/v1/spike
+	// path. SQLite-backed (telemetry.EventSpikeStore) since feature 009 — previously
+	// a per-host in-memory ring buffer. Always non-nil once StartDashboard returns;
+	// the handler still tolerates nil so zero-telemetry bring-up paths (e.g. tests)
+	// keep working.
+	spikes *telemetry.EventSpikeStore
 
 	// remoteEvtSpikeStatus caches the DetectorStatus most recently reported by
 	// each registered agent via /api/v1/report. Remote hosts don't run a local
@@ -225,8 +227,16 @@ type DashboardServer struct {
 // ms may be nil; when nil, metrics ingest is skipped (degraded mode).
 // as may be nil; when nil, /api/v1/audit returns storage_error.
 // mnt may be nil; when nil, /api/v1/maintenance/status returns storage_error.
-func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms *telemetry.MetricsStore, as *telemetry.AuditStore, mnt *telemetry.MaintenanceStore) (*ServerState, error) {
-	state := NewServerState(dataDir)
+// srv and sps are required — the dashboard depends on the SQLite-backed
+// server roster and spike store since feature 009.
+func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms *telemetry.MetricsStore, as *telemetry.AuditStore, mnt *telemetry.MaintenanceStore, srv *telemetry.ServerStore, sps *telemetry.EventSpikeStore) (*ServerState, error) {
+	// One-shot import of any legacy servers.json produced by a pre-009 binary.
+	// Renames the file so the import is idempotent across reboots.
+	if err := MigrateLegacyServersJSON(ctx, dataDir, srv); err != nil {
+		slog.Warn("dashboard: legacy servers.json migration failed", "error", err)
+	}
+
+	state := NewServerState(srv)
 
 	ds := &DashboardServer{
 		state:                state,
@@ -236,7 +246,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		ms:                   ms,
 		as:                   as,
 		mnt:                  mnt,
-		spikestore:           NewSpikeStore(),
+		spikes:               sps,
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
 	}
 
@@ -245,14 +255,16 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	state.OnUpdate = ds.broadcastServerUpdate
 
 	// Wire evtspike ingestion: the service's Subsystem.OnSpike callback calls
-	// OnEvtSpikeIngest to append the spike to the per-host ring and emit a
-	// recent_spike SSE event. OnEvtSpikeStatus emits detector_status on
-	// transitions; the broker dedups so callers can emit liberally.
-	// RegisterEvtSpikeStatusFunc installs the pull-based status lookup that
-	// backs GET /api/evtspike/status.
+	// OnEvtSpikeIngest to persist the spike to event_spikes and emit a
+	// recent_spike SSE event on first-time insert. OnEvtSpikeStatus emits
+	// detector_status on transitions; the broker dedups so callers may emit
+	// liberally. RegisterEvtSpikeStatusFunc installs the pull-based status
+	// lookup that backs GET /api/evtspike/status.
 	state.OnEvtSpikeIngest = func(spike evtspike.SpikePayload) evtspike.RecentSpikeEntry {
-		entry := ds.spikestore.Append(spike.Host, spike)
-		ds.broker.PublishRecentSpike(entry)
+		entry, inserted := ds.insertSpike(spike)
+		if inserted {
+			ds.broker.PublishRecentSpike(entry)
+		}
 		return entry
 	}
 	state.OnEvtSpikeStatus = func(status evtspike.DetectorStatus) {
@@ -1208,10 +1220,15 @@ func writeJSONError(w http.ResponseWriter, code string, status int) {
 }
 
 // resolveMetricsTier maps a request's resolution parameter to a concrete tier.
-// Explicit "raw"/"5min"/"hourly" pass through. "auto" picks by window size
-// (≤1h → raw, 1h–24h → 5min, >24h → hourly, per research.md §8) then
-// degrades to the next coarser tier if the chosen tier's oldest row does
-// not cover `from`. Hourly is never degraded (it is the coarsest tier).
+// Explicit "raw"/"1min"/"5min"/"hourly" pass through. "auto" picks by window
+// size (≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to the next
+// coarser tier if the chosen tier's oldest row does not cover `from`.
+// Hourly is never degraded (it is the coarsest tier).
+//
+// The 1-minute tier is a virtual GROUP BY on metrics_raw — the 15M/1H
+// dashboard pills map directly to it (15 and 60 buckets respectively). A 1H
+// window at the old raw tier returned 3600 per-second samples per host,
+// which turned the area chart into a solid noise block.
 func (ds *DashboardServer) resolveMetricsTier(
 	ctx context.Context,
 	host string,
@@ -1221,6 +1238,8 @@ func (ds *DashboardServer) resolveMetricsTier(
 	switch resolution {
 	case "raw":
 		return telemetry.TierRaw, nil
+	case "1min":
+		return telemetry.TierOneMin, nil
 	case "5min":
 		return telemetry.TierFiveMin, nil
 	case "hourly":
@@ -1231,8 +1250,8 @@ func (ds *DashboardServer) resolveMetricsTier(
 	var tier telemetry.Tier
 	switch {
 	case window <= time.Hour:
-		tier = telemetry.TierRaw
-	case window <= 24*time.Hour:
+		tier = telemetry.TierOneMin
+	case window <= 36*time.Hour:
 		tier = telemetry.TierFiveMin
 	default:
 		tier = telemetry.TierHourly
@@ -1247,7 +1266,8 @@ func (ds *DashboardServer) resolveMetricsTier(
 			return tier, nil
 		}
 		switch tier {
-		case telemetry.TierRaw:
+		case telemetry.TierRaw, telemetry.TierOneMin:
+			// Both share metrics_raw's bounds; falling through either goes to 5min.
 			tier = telemetry.TierFiveMin
 		case telemetry.TierFiveMin:
 			tier = telemetry.TierHourly
@@ -1299,7 +1319,7 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 	if resStr == "" {
 		resStr = "auto"
 	}
-	if resStr != "auto" && resStr != "raw" && resStr != "5min" && resStr != "hourly" {
+	if resStr != "auto" && resStr != "raw" && resStr != "1min" && resStr != "5min" && resStr != "hourly" {
 		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
 		return
 	}
@@ -1403,6 +1423,8 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 	switch resolution {
 	case "raw":
 		return telemetry.TierRaw, nil
+	case "1min":
+		return telemetry.TierOneMin, nil
 	case "5min":
 		return telemetry.TierFiveMin, nil
 	case "hourly":
@@ -1412,8 +1434,8 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 	var tier telemetry.Tier
 	switch {
 	case window <= time.Hour:
-		tier = telemetry.TierRaw
-	case window <= 24*time.Hour:
+		tier = telemetry.TierOneMin
+	case window <= 36*time.Hour:
 		tier = telemetry.TierFiveMin
 	default:
 		tier = telemetry.TierHourly
@@ -1427,7 +1449,7 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 			return tier, nil
 		}
 		switch tier {
-		case telemetry.TierRaw:
+		case telemetry.TierRaw, telemetry.TierOneMin:
 			tier = telemetry.TierFiveMin
 		case telemetry.TierFiveMin:
 			tier = telemetry.TierHourly
@@ -1465,7 +1487,7 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 	if resStr == "" {
 		resStr = "auto"
 	}
-	if resStr != "auto" && resStr != "raw" && resStr != "5min" && resStr != "hourly" {
+	if resStr != "auto" && resStr != "raw" && resStr != "1min" && resStr != "5min" && resStr != "hourly" {
 		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
 		return
 	}

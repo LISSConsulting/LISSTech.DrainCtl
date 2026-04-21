@@ -331,7 +331,7 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
  *
  * @typedef {Object} MetricsResponse
  * @property {string} host
- * @property {'raw'|'5min'|'hourly'} tier          - tier the server actually served (may differ from requested)
+ * @property {'raw'|'1min'|'5min'|'hourly'} tier          - tier the server actually served (may differ from requested)
  * @property {string} from                         - ISO-8601 UTC (echo of request)
  * @property {string} to                           - ISO-8601 UTC (echo of request)
  * @property {string|null} oldest_available        - ISO-8601 UTC; null when the tier holds no rows for this host
@@ -345,7 +345,7 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
  * @param {string} host
  * @param {Date|string} from                         - inclusive lower bound
  * @param {Date|string} to                           - exclusive upper bound (must be > from)
- * @param {'raw'|'5min'|'hourly'|'auto'} [resolution='auto']
+ * @param {'raw'|'1min'|'5min'|'hourly'|'auto'} [resolution='auto']
  * @param {string[]} [counters]                      - omitted → all known counters
  * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer zoom/pan supersedes it
  * @returns {Promise<MetricsResponse>}
@@ -371,7 +371,7 @@ export async function fetchMetrics(host, from, to, resolution = 'auto', counters
  *
  * @param {Date|string} from                         - inclusive lower bound
  * @param {Date|string} to                           - exclusive upper bound (must be > from)
- * @param {'raw'|'5min'|'hourly'|'auto'} [resolution='auto']
+ * @param {'raw'|'1min'|'5min'|'hourly'|'auto'} [resolution='auto']
  * @param {string[]} [counters]                      - omitted → all known counters
  * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer zoom/pan supersedes it
  * @returns {Promise<MetricsResponse>}
@@ -544,19 +544,42 @@ export async function fetchEvtSpikeStatus(host) {
  * GET /api/evtspike/spikes?host=<host>&limit=<1..50>
  *
  * Returns the most-recent confirmed spikes for one host, newest first, from
- * the server-side ring buffer. Empty array for a registered host with no
- * spikes — not a 404. Default limit matches the server's 20-entry ring buffer;
- * the server clamps to [1, 50].
+ * the SQLite event_spikes table. Empty array for a registered host with no
+ * spikes — not a 404. Default limit is 20; the server clamps to [1, 50].
  *
  * @param {string} host
  * @param {number} [limit=20]
+ * @param {AbortSignal} [signal]
  * @returns {Promise<RecentSpike[]>}
  */
-export async function fetchRecentSpikes(host, limit = 20) {
+export async function fetchRecentSpikes(host, limit = 20, signal) {
     const params = new URLSearchParams({
         host,
         limit: String(limit),
     });
-    const res = await apiFetch(`/api/evtspike/spikes?${params}`);
+    const res = await apiFetch(`/api/evtspike/spikes?${params}`, { signal });
+    return /** @type {RecentSpike[]} */ (await res.json());
+}
+
+/**
+ * GET /api/evtspike/spikes?host=<host>&from=<iso>&to=<iso>
+ *
+ * Returns confirmed spikes for one host whose window_start falls in [from, to),
+ * newest first. Used by the SpikeSwimlane chart — server clamps at 500 rows,
+ * more than enough for a 5-day window on a busy fleet member.
+ *
+ * @param {string} host
+ * @param {Date} from
+ * @param {Date} to
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<RecentSpike[]>}
+ */
+export async function fetchSpikeRange(host, from, to, signal) {
+    const params = new URLSearchParams({
+        host,
+        from: from.toISOString(),
+        to: to.toISOString(),
+    });
+    const res = await apiFetch(`/api/evtspike/spikes?${params}`, { signal });
     return /** @type {RecentSpike[]} */ (await res.json());
 }

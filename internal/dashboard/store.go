@@ -3,21 +3,25 @@
 package dashboard
 
 import (
-	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"slices"
-	"sync"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// ServerInfo describes a registered server and its last known state.
+// serverStoreOpTimeout bounds every underlying SQLite call so a pathological
+// lock or disk stall can't wedge an HTTP handler. Matches the 5 s envelope
+// used for metrics Append in StartDashboard.
+const serverStoreOpTimeout = 5 * time.Second
+
+// ServerInfo describes a registered server and its last known state. JSON
+// field names are the dashboard wire contract — do not change without a
+// coordinated frontend update.
 type ServerInfo struct {
 	Hostname     string          `json:"hostname"`
 	RegisteredAt time.Time       `json:"registered_at"`
@@ -25,11 +29,12 @@ type ServerInfo struct {
 	LastSeen     time.Time       `json:"last_seen,omitempty"`
 }
 
-// ServerState manages the set of registered servers, persisted to servers.json.
+// ServerState manages the set of registered servers, persisted to the
+// SQLite `servers` table via telemetry.ServerStore. Replaces the pre-009
+// servers.json file-based implementation.
 type ServerState struct {
-	mu      sync.RWMutex
-	servers map[string]*ServerInfo
-	path    string
+	store *telemetry.ServerStore
+
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
 	// Used by DashboardServer to broadcast SSE events.
 	OnUpdate func(hostname string)
@@ -37,7 +42,7 @@ type ServerState struct {
 	// CheckResult so that both the HTTP and local-report paths write metrics.
 	OnMetrics func(result dc.CheckResult)
 	// OnEvtSpikeIngest, if non-nil, pushes a confirmed spike into the
-	// dashboard's per-host ring buffer and emits a recent_spike SSE event.
+	// dashboard's per-host spike store and emits a recent_spike SSE event.
 	// Wired by StartDashboard; the evtspike subsystem calls it from its
 	// OnSpike callback.
 	OnEvtSpikeIngest func(spike evtspike.SpikePayload) evtspike.RecentSpikeEntry
@@ -57,105 +62,121 @@ type ServerState struct {
 	GetRemoteEvtSpikeStatus func(host string) evtspike.DetectorStatus
 }
 
-// NewServerState creates a ServerState backed by servers.json in dataDir.
-// If the file exists it is loaded; otherwise the state starts empty.
-func NewServerState(dataDir string) *ServerState {
-	s := &ServerState{
-		servers: make(map[string]*ServerInfo),
-		path:    filepath.Join(dataDir, "servers.json"),
-	}
-	s.load()
-	return s
+// NewServerState wraps a telemetry.ServerStore with the callback plumbing the
+// dashboard needs. The store must be open for the lifetime of the returned
+// ServerState.
+func NewServerState(store *telemetry.ServerStore) *ServerState {
+	return &ServerState{store: store}
 }
 
-// Register adds (or re-registers) a hostname and persists the change.
+// Register adds (or re-registers) a hostname. Idempotent — re-registering an
+// existing host preserves its original RegisteredAt timestamp.
 func (s *ServerState) Register(hostname string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.servers[hostname]; !ok {
-		s.servers[hostname] = &ServerInfo{
-			Hostname:     hostname,
-			RegisteredAt: time.Now(),
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	if err := s.store.Register(ctx, hostname); err != nil {
+		slog.Error("dashboard: register failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 	}
-	s.save()
 }
 
-// Remove deletes a server by hostname and persists. Returns true if found.
+// Remove deletes a server by hostname. Returns true if found.
 func (s *ServerState) Remove(hostname string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.servers[hostname]; !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	found, err := s.store.Remove(ctx, hostname)
+	if err != nil {
+		slog.Error("dashboard: remove failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 		return false
 	}
-	delete(s.servers, hostname)
-	s.save()
-	return true
+	return found
 }
 
-// IsRegistered returns true if the hostname is known.
+// IsRegistered returns true if the hostname is known. On storage error, logs
+// and returns false — denying the calling handler is safer than falsely
+// accepting an unregistered host.
 func (s *ServerState) IsRegistered(hostname string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	_, ok := s.servers[hostname]
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	ok, err := s.store.IsRegistered(ctx, hostname)
+	if err != nil {
+		slog.Error("dashboard: is_registered failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return false
+	}
 	return ok
 }
 
-// Update sets the last result and last-seen time for a registered host.
+// Update sets the last result and last-seen time for a registered host. No-op
+// for unregistered hosts. After persistence, fires OnUpdate + OnMetrics in
+// order (both may be nil).
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
-	s.mu.Lock()
-	_, registered := s.servers[hostname]
-	if registered {
-		s.servers[hostname].LastResult = result
-		s.servers[hostname].LastSeen = time.Now()
-	}
-	// Copy server list under lock for persistence outside lock.
-	var snapshot []ServerInfo
-	if registered {
-		snapshot = make([]ServerInfo, 0, len(s.servers))
-		for _, info := range s.servers {
-			snapshot = append(snapshot, *info)
+	lastJSON := ""
+	if result != nil {
+		data, err := json.Marshal(result)
+		if err != nil {
+			slog.Error("dashboard: update marshal failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+			return
 		}
+		lastJSON = string(data)
 	}
-	cb := s.OnUpdate
-	mcb := s.OnMetrics
-	s.mu.Unlock()
 
-	// Persist and callbacks AFTER releasing the lock.
-	if registered {
-		s.saveSnapshot(snapshot)
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	updated, err := s.store.Update(ctx, hostname, lastJSON)
+	if err != nil {
+		slog.Error("dashboard: update failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return
 	}
-	if registered && cb != nil {
-		cb(hostname)
+	if !updated {
+		return
 	}
-	if registered && mcb != nil {
-		mcb(*result)
+
+	if s.OnUpdate != nil {
+		s.OnUpdate(hostname)
+	}
+	if s.OnMetrics != nil && result != nil {
+		s.OnMetrics(*result)
 	}
 }
 
 // Get returns a snapshot of the named server, or nil if not registered.
 func (s *ServerState) Get(hostname string) *ServerInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	info, ok := s.servers[hostname]
-	if !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	info, err := s.store.Get(ctx, hostname)
+	if err != nil {
+		slog.Error("dashboard: get failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 		return nil
 	}
-	copy := *info
-	return &copy
+	if info == nil {
+		return nil
+	}
+	out, err := toDashboardServerInfo(*info)
+	if err != nil {
+		slog.Error("dashboard: get unmarshal failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return nil
+	}
+	return &out
 }
 
 // All returns a snapshot of all servers sorted by hostname.
 func (s *ServerState) All() []ServerInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]ServerInfo, 0, len(s.servers))
-	for _, info := range s.servers {
-		out = append(out, *info)
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	rows, err := s.store.All(ctx)
+	if err != nil {
+		slog.Error("dashboard: all failed", "error", err)
+		return []ServerInfo{}
 	}
-	slices.SortFunc(out, func(a, b ServerInfo) int {
-		return cmp.Compare(a.Hostname, b.Hostname)
-	})
+	out := make([]ServerInfo, 0, len(rows))
+	for _, row := range rows {
+		info, err := toDashboardServerInfo(row)
+		if err != nil {
+			slog.Warn("dashboard: all unmarshal skipped row",
+				"host", row.Hostname, "error", err)
+			continue
+		}
+		out = append(out, info)
+	}
 	return out
 }
 
@@ -180,55 +201,32 @@ func GetSettings() (*RemoteSettings, error) {
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
+	evtEnabled := cfg.EvtSpike.Enabled
 	return &RemoteSettings{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
+		PollInterval:            cfg.PollInterval,
 		Performance:             &cfg.Performance,
+		EvtSpikeEnabled:         &evtEnabled,
 	}, nil
 }
 
-func (s *ServerState) load() {
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return
+// toDashboardServerInfo lifts a telemetry.ServerInfo into the dashboard-shape
+// ServerInfo, unmarshalling the stored CheckResult JSON blob when present.
+func toDashboardServerInfo(row telemetry.ServerInfo) (ServerInfo, error) {
+	out := ServerInfo{
+		Hostname:     row.Hostname,
+		RegisteredAt: row.RegisteredAt,
+		LastSeen:     row.LastSeen,
 	}
-	var list []ServerInfo
-	if err := json.Unmarshal(data, &list); err != nil {
-		return
+	if row.LastResultJSON == "" {
+		return out, nil
 	}
-	for i := range list {
-		s.servers[list[i].Hostname] = &list[i]
+	var r dc.CheckResult
+	if err := json.Unmarshal([]byte(row.LastResultJSON), &r); err != nil {
+		return ServerInfo{}, fmt.Errorf("unmarshal last_result_json: %w", err)
 	}
-}
-
-// save copies the server list under the current lock and writes to disk.
-// Callers must hold s.mu.
-func (s *ServerState) save() {
-	list := make([]ServerInfo, 0, len(s.servers))
-	for _, info := range s.servers {
-		list = append(list, *info)
-	}
-	s.saveSnapshot(list)
-}
-
-// saveSnapshot writes a pre-built server list to disk without acquiring the lock.
-func (s *ServerState) saveSnapshot(list []ServerInfo) {
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		slog.Error("dashboard: marshal servers failed", "error", err)
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		slog.Error("dashboard: create data dir failed", "error", err)
-		return
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		slog.Error("dashboard: write tmp file failed", "error", err)
-		return
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		slog.Error("dashboard: rename tmp file failed", "error", err)
-	}
+	out.LastResult = &r
+	return out, nil
 }

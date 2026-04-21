@@ -20,7 +20,7 @@ func TestApplyRemoteConfig_SetsTargets(t *testing.T) {
 		SessionWarningThreshold: -1, // below zero — should not update
 		GracePeriod:             0,  // zero — should not update
 	}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if len(targets) != 1 {
 		t.Errorf("targets len = %d, want 1", len(targets))
 	}
@@ -30,7 +30,7 @@ func TestApplyRemoteConfig_SessionThresholdClampsAbove100(t *testing.T) {
 	cfg := &dc.ServiceConfig{SessionWarningThreshold: 80}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: 999, GracePeriod: 0}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.SessionWarningThreshold != 100 {
 		t.Errorf("SessionWarningThreshold = %d, want 100 (clamped from 999)", cfg.SessionWarningThreshold)
 	}
@@ -40,7 +40,7 @@ func TestApplyRemoteConfig_SessionThresholdZeroAllowed(t *testing.T) {
 	cfg := &dc.ServiceConfig{SessionWarningThreshold: 80}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: 0, GracePeriod: 0}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.SessionWarningThreshold != 0 {
 		t.Errorf("SessionWarningThreshold = %d, want 0 (zero disables session warnings)", cfg.SessionWarningThreshold)
 	}
@@ -50,7 +50,7 @@ func TestApplyRemoteConfig_SessionThresholdNegativeSkipped(t *testing.T) {
 	cfg := &dc.ServiceConfig{SessionWarningThreshold: 80}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: -1, GracePeriod: 0}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.SessionWarningThreshold != 80 {
 		t.Errorf("SessionWarningThreshold = %d, want 80 (negative should be skipped)", cfg.SessionWarningThreshold)
 	}
@@ -60,7 +60,7 @@ func TestApplyRemoteConfig_GracePeriodClampsAbove1440(t *testing.T) {
 	cfg := &dc.ServiceConfig{GracePeriod: 30 * time.Minute}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: -1, GracePeriod: 9999}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.GracePeriod != 1440*time.Minute {
 		t.Errorf("GracePeriod = %v, want %v (clamped from 9999 min)", cfg.GracePeriod, 1440*time.Minute)
 	}
@@ -70,7 +70,7 @@ func TestApplyRemoteConfig_GracePeriodValidValue(t *testing.T) {
 	cfg := &dc.ServiceConfig{GracePeriod: 30 * time.Minute}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: -1, GracePeriod: 60}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.GracePeriod != 60*time.Minute {
 		t.Errorf("GracePeriod = %v, want %v", cfg.GracePeriod, 60*time.Minute)
 	}
@@ -80,9 +80,65 @@ func TestApplyRemoteConfig_GracePeriodZeroSkipped(t *testing.T) {
 	cfg := &dc.ServiceConfig{GracePeriod: 30 * time.Minute}
 	targets := []dc.NotificationTarget{}
 	remote := &dashboard.RemoteSettings{SessionWarningThreshold: -1, GracePeriod: 0}
-	applyRemoteConfig(remote, cfg, &targets)
+	applyRemoteConfig(remote, cfg, &targets, nil)
 	if cfg.GracePeriod != 30*time.Minute {
 		t.Errorf("GracePeriod = %v, want %v (zero should be skipped)", cfg.GracePeriod, 30*time.Minute)
+	}
+}
+
+func TestApplyRemoteConfig_PollIntervalAppliedAndClamped(t *testing.T) {
+	cfg := &dc.ServiceConfig{PollInterval: 60 * time.Second}
+	targets := []dc.NotificationTarget{}
+	// In-range value is applied verbatim.
+	remote := &dashboard.RemoteSettings{PollInterval: 30}
+	applyRemoteConfig(remote, cfg, &targets, nil)
+	if cfg.PollInterval != 30*time.Second {
+		t.Errorf("PollInterval = %v, want 30s", cfg.PollInterval)
+	}
+	// Below floor clamps to 10.
+	remote = &dashboard.RemoteSettings{PollInterval: 1}
+	applyRemoteConfig(remote, cfg, &targets, nil)
+	if cfg.PollInterval != 10*time.Second {
+		t.Errorf("PollInterval = %v, want 10s (clamped from 1)", cfg.PollInterval)
+	}
+	// Above ceiling clamps to MaxPollInterval.
+	remote = &dashboard.RemoteSettings{PollInterval: dc.MaxPollInterval + 1000}
+	applyRemoteConfig(remote, cfg, &targets, nil)
+	if cfg.PollInterval != time.Duration(dc.MaxPollInterval)*time.Second {
+		t.Errorf("PollInterval = %v, want %ds (clamped)", cfg.PollInterval, dc.MaxPollInterval)
+	}
+	// Zero is treated as "field absent" — don't overwrite.
+	cfg.PollInterval = 45 * time.Second
+	remote = &dashboard.RemoteSettings{PollInterval: 0}
+	applyRemoteConfig(remote, cfg, &targets, nil)
+	if cfg.PollInterval != 45*time.Second {
+		t.Errorf("PollInterval = %v, want 45s (zero should not overwrite)", cfg.PollInterval)
+	}
+}
+
+func TestApplyRemoteConfig_EvtSpikeEnabledTogglesSubsystemCfg(t *testing.T) {
+	cfg := &dc.ServiceConfig{}
+	targets := []dc.NotificationTarget{}
+	evt := &dc.EvtSpikeConfig{Enabled: false}
+	trueVal := true
+	remote := &dashboard.RemoteSettings{EvtSpikeEnabled: &trueVal}
+	applyRemoteConfig(remote, cfg, &targets, evt)
+	if !evt.Enabled {
+		t.Error("EvtSpikeEnabled not propagated: evt.Enabled still false")
+	}
+	// Flip back to false via explicit pointer.
+	falseVal := false
+	remote = &dashboard.RemoteSettings{EvtSpikeEnabled: &falseVal}
+	applyRemoteConfig(remote, cfg, &targets, evt)
+	if evt.Enabled {
+		t.Error("EvtSpikeEnabled=false not applied: evt.Enabled still true")
+	}
+	// Nil pointer → do not change.
+	evt.Enabled = true
+	remote = &dashboard.RemoteSettings{EvtSpikeEnabled: nil}
+	applyRemoteConfig(remote, cfg, &targets, evt)
+	if !evt.Enabled {
+		t.Error("nil EvtSpikeEnabled should preserve existing value (true)")
 	}
 }
 
