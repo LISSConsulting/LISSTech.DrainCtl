@@ -5,9 +5,11 @@
  * Mutation helpers `addEvent`, `appendMetricsSample`, and
  * `appendServerMetricsSample` keep array caps enforced.
  *
- * servers, health, metricsHistory, serverMetrics, events, and lastUpdated are
- * persisted to localStorage so they survive page reloads. Writes are debounced
- * at 300 ms to avoid thrashing. connected and config are intentionally transient.
+ * servers, health, serverMetrics, events, and lastUpdated are persisted to
+ * localStorage so they survive page reloads. Writes are debounced at 300 ms to
+ * avoid thrashing. connected and config are intentionally transient.
+ * metricsHistory, sessionHistory, and remoteFxHistory are NOT persisted —
+ * the backend is authoritative for retained fleet history.
  */
 
 const MAX_EVENTS = 200;
@@ -28,13 +30,10 @@ const MOCK_VERSION = '3.6';
 
 const LS_SERVERS = 'drainctl:servers';
 const LS_HEALTH = 'drainctl:health';
-const LS_METRICS = 'drainctl:metrics';
 const LS_SERVER_METRICS = 'drainctl:server-metrics';
 const LS_EVENTS = 'drainctl:events';
 const LS_LAST_UPDATED = 'drainctl:last-updated';
 const LS_MOCK_VERSION = 'drainctl:mock-version';
-const LS_SESSION_HISTORY = 'drainctl:session-history';
-const LS_RFX_HISTORY = 'drainctl:rfx-history';
 const LS_RFX_AVAILABLE = 'drainctl:rfx-available';
 
 // Non-authoritative UI-preference keys: persisted as operator convenience only.
@@ -135,11 +134,6 @@ const persistHealth = debounce((data) => {
         localStorage.setItem(LS_HEALTH, JSON.stringify(data));
     } catch {}
 }, 300);
-const persistMetrics = debounce((data) => {
-    try {
-        localStorage.setItem(LS_METRICS, JSON.stringify(data));
-    } catch {}
-}, 300);
 const persistServerMetrics = debounce((map) => {
     try {
         localStorage.setItem(LS_SERVER_METRICS, JSON.stringify([...map.entries()]));
@@ -153,16 +147,6 @@ const persistEvents = debounce((data) => {
 const persistLastUpdated = debounce((date) => {
     try {
         localStorage.setItem(LS_LAST_UPDATED, JSON.stringify(date ? date.getTime() : null));
-    } catch {}
-}, 300);
-const persistSessionHistory = debounce((data) => {
-    try {
-        localStorage.setItem(LS_SESSION_HISTORY, JSON.stringify(data));
-    } catch {}
-}, 300);
-const persistRfxHistory = debounce((data) => {
-    try {
-        localStorage.setItem(LS_RFX_HISTORY, JSON.stringify(data));
     } catch {}
 }, 300);
 const persistRfxAvailable = debounce((v) => {
@@ -270,7 +254,7 @@ let config = $state(null);
 let events = $state(/** @type {(string|Record<string,unknown>)[]} */ (lsGet(LS_EVENTS, [])));
 
 /** @type {MetricsSample[]} */
-let metricsHistory = $state(/** @type {MetricsSample[]} */ (lsGet(LS_METRICS, [])));
+let metricsHistory = $state(/** @type {MetricsSample[]} */ ([]));
 
 /**
  * Per-server metric ring buffers (capped at MAX_METRICS each).
@@ -314,10 +298,10 @@ let eventHostFilter = $state('');
 let lastUpdated = $state(lsGetDate(LS_LAST_UPDATED));
 
 /** @type {SessionSample[]} */
-let sessionHistory = $state(/** @type {SessionSample[]} */ (lsGet(LS_SESSION_HISTORY, [])));
+let sessionHistory = $state(/** @type {SessionSample[]} */ ([]));
 
 /** @type {RfxSample[]} */
-let remoteFxHistory = $state(/** @type {RfxSample[]} */ (lsGet(LS_RFX_HISTORY, [])));
+let remoteFxHistory = $state(/** @type {RfxSample[]} */ ([]));
 
 /** True when at least one server reports RemoteFX data. */
 let rfxAvailable = $state(/** @type {boolean} */ (lsGet(LS_RFX_AVAILABLE, false)));
@@ -360,9 +344,6 @@ $effect.root(() => {
         persistHealth(health);
     });
     $effect(() => {
-        persistMetrics(metricsHistory);
-    });
-    $effect(() => {
         persistServerMetrics(serverMetrics);
     });
     $effect(() => {
@@ -370,12 +351,6 @@ $effect.root(() => {
     });
     $effect(() => {
         persistLastUpdated(lastUpdated);
-    });
-    $effect(() => {
-        persistSessionHistory(sessionHistory);
-    });
-    $effect(() => {
-        persistRfxHistory(remoteFxHistory);
     });
     $effect(() => {
         persistRfxAvailable(rfxAvailable);
