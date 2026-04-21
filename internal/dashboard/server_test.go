@@ -4209,3 +4209,279 @@ func TestFleetFixtureShapes(t *testing.T) {
 		t.Error("insertFleetSamples must register provided hosts")
 	}
 }
+
+// ── handleFleetMetrics ────────────────────────────────────────────────────────
+
+func TestFleetMetrics_InvalidRange(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		code  string
+	}{
+		{"missing from", "?to=2026-04-16T00:00:00Z", "invalid_range"},
+		{"missing to", "?from=2026-04-15T00:00:00Z", "invalid_range"},
+		{"missing both", "", "invalid_range"},
+		{"to before from", "?from=2026-04-16T00:00:00Z&to=2026-04-15T00:00:00Z", "invalid_range"},
+		{"bad resolution", "?from=2026-04-15T00:00:00Z&to=2026-04-16T00:00:00Z&resolution=yearly", "invalid_resolution"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds, _, closeDB := newTestServerWithStore(t)
+			defer closeDB()
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/_fleet"+tc.query, nil)
+			r.SetPathValue("host", "_fleet")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			var body map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body["error"] != tc.code {
+				t.Errorf("error = %q, want %q", body["error"], tc.code)
+			}
+		})
+	}
+}
+
+func TestFleetMetrics_StorageError(t *testing.T) {
+	ds := newTestServer(t) // no ms wired → ds.ms == nil
+
+	now := time.Now().UTC()
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	to := now.Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/_fleet?from="+from+"&to="+to, nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "storage_error" {
+		t.Errorf("error = %q, want storage_error", body["error"])
+	}
+}
+
+func TestFleetMetrics_EmptyFleetReturns200(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	// No hosts registered.
+
+	now := time.Now().UTC()
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	to := now.Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/_fleet?from="+from+"&to="+to+"&resolution=raw", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+	if resp.Host != "_fleet" {
+		t.Errorf("host = %q, want _fleet", resp.Host)
+	}
+	if len(resp.Series) != 0 {
+		t.Errorf("empty fleet should return empty series, got %d entries", len(resp.Series))
+	}
+}
+
+func TestFleetMetrics_AggregatesAcrossHosts(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"S01", "S02"}, base, map[string]float64{"cpu_pct": 50.0}, 3)
+
+	from := base.Add(-time.Minute).Format(time.RFC3339)
+	to := base.Add(5 * time.Minute).Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/_fleet?from="+from+"&to="+to+"&resolution=raw&counters=cpu_pct", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+	if resp.Host != "_fleet" {
+		t.Errorf("host = %q, want _fleet", resp.Host)
+	}
+	cpu, ok := resp.Series["cpu_pct"]
+	if !ok {
+		t.Fatal("response missing cpu_pct series")
+	}
+	if len(cpu.T) == 0 {
+		t.Error("cpu_pct series is empty; expected fleet-aggregated samples")
+	}
+	for i, avg := range cpu.Avg {
+		if avg != 50.0 {
+			t.Errorf("cpu_pct avg[%d] = %v, want 50.0 (avg of two hosts both at 50)", i, avg)
+		}
+	}
+}
+
+// ── handleSeedMetrics ─────────────────────────────────────────────────────────
+
+func TestSeedMetrics_StorageError(t *testing.T) {
+	ds := newTestServer(t) // no ms
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "storage_error" {
+		t.Errorf("error = %q, want storage_error", body["error"])
+	}
+}
+
+func TestSeedMetrics_InvalidResolution(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics?resolution=hourly", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "invalid_resolution" {
+		t.Errorf("error = %q, want invalid_resolution", body["error"])
+	}
+}
+
+func TestSeedMetrics_InvalidRange(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"to before from", "?from=2026-04-16T00:00:00Z&to=2026-04-15T00:00:00Z"},
+		{"unparseable from", "?from=nope&to=2026-04-16T00:00:00Z"},
+		{"unparseable to", "?from=2026-04-15T00:00:00Z&to=nope"},
+		{"range exceeds 90 days", "?from=2025-01-01T00:00:00Z&to=2025-07-01T00:00:00Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics"+tc.query, nil)
+			ds.handleSeedMetrics(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			var body map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body["error"] != "invalid_range" {
+				t.Errorf("error = %q, want invalid_range", body["error"])
+			}
+		})
+	}
+}
+
+func TestSeedMetrics_ReturnsPerHostHistory(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01", "SRV02"}, base, map[string]float64{
+		"cpu_pct":      42.0,
+		"mem_avail_mb": 8192.0,
+		"mem_total_mb": 16384.0,
+	}, 3)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	for _, host := range []string{"SRV01", "SRV02"} {
+		samples, ok := seed[host]
+		if !ok {
+			t.Errorf("response missing %s", host)
+			continue
+		}
+		if len(samples) == 0 {
+			t.Errorf("%s has no seed samples", host)
+			continue
+		}
+		if samples[0].CPU != 42.0 {
+			t.Errorf("%s cpu = %v, want 42.0", host, samples[0].CPU)
+		}
+		// mem = (1 - 8192/16384) * 100 = 50.0
+		if samples[0].Mem != 50.0 {
+			t.Errorf("%s mem = %v, want 50.0", host, samples[0].Mem)
+		}
+	}
+}
+
+func TestSeedMetrics_BoundedByLimit(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-30 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{"cpu_pct": 10.0}, 20)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics?limit=5", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	if n := len(seed["SRV01"]); n > 5 {
+		t.Errorf("SRV01 sample count = %d, want ≤ 5 (limit was 5)", n)
+	}
+}
+
+func TestSeedMetrics_EmptyWhenNoHosts(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	// No hosts registered.
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	ds.handleSeedMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	seed := decodeMetricsSeedResp(t, w)
+	if len(seed) != 0 {
+		t.Errorf("empty fleet should return empty map, got %d entries", len(seed))
+	}
+}
