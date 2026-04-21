@@ -47,13 +47,33 @@ load from SQLite-backed telemetry instead of browser-local warm-up state.
 
 ---
 
-## User Story 2 Validation — Shared Window Navigation (US2, not yet shipped)
+## User Story 2 Validation — Shared Window Navigation
 
-> These steps apply after Phase 4 (US2) is complete.
+### Pill selection
 
 1. On the Overview page, click each window pill: `5M`, `1H`, `1D`, `3D`, `5D`.
-2. Verify LOAD, HIC, SESSIONS, and REMOTE FX all move to the same shared window.
-3. Use wheel zoom and drag pan; confirm rapid gestures do not leave stale data on screen.
+2. Verify LOAD, HIC, SESSIONS, and REMOTE FX all update to the selected window.
+3. Confirm the active pill highlights in accent color after each click.
+4. Confirm that switching windows clears any pinned crosshair position.
+
+### Wheel-zoom
+
+1. Hover over the LOAD chart and scroll the mouse wheel up (zoom in) and down (zoom out).
+2. Confirm the active pill advances to the adjacent preset on each scroll step.
+3. Confirm the fleet data refreshes after each step without stale data from the previous window.
+
+### Drag-pan
+
+1. Click and drag left or right on the LOAD chart.
+2. Release the mouse button.
+3. Confirm the chart loads a historical window offset by the drag distance (amber `↺ LIVE` button appears).
+4. Click `↺ LIVE` and confirm the chart returns to the live (most recent) window.
+
+### Empty/error under navigation
+
+1. Switch to a window where no retained data exists.
+2. Confirm all chart families show the "No retained history for this window" placeholder.
+3. Confirm switching back to a populated window restores the chart data.
 
 ---
 
