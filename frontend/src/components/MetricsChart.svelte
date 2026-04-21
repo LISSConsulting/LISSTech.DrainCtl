@@ -287,7 +287,78 @@
     ]);
 
     // ── Session Metrics charts ────────────────────────────────────────────────
-    let sessionHistory = $derived(appState.sessionHistory);
+
+    /**
+     * Adapt fleet series to SessionSample[] for the SESSIONS sub-tab.
+     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
+     * @returns {import('../lib/state.svelte.js').SessionSample[]}
+     */
+    function adaptFleetToSessionSamples(series) {
+        const tot = series['sessions_total'];
+        if (!tot || tot.t.length === 0) return [];
+        const active = series['sessions_active']?.avg ?? [];
+        const disc = series['sessions_disconnected']?.avg ?? [];
+        const max = series['sessions_max']?.avg ?? [];
+        const scpu = series['session_cpu_p95_pct']?.max ?? [];
+        const smem = series['session_mem_p95_bytes']?.max ?? [];
+        return tot.t.map((ts, i) => {
+            const a = Math.round(active[i] ?? 0);
+            const d = Math.round(disc[i] ?? 0);
+            const t = Math.round(tot.avg[i] ?? 0);
+            const mx = Math.round(max[i] ?? 0);
+            return {
+                ts,
+                active: a,
+                disconnected: d,
+                total: t,
+                utilization: mx > 0 ? Math.round((t / mx) * 100) : 0,
+                sessionCpuP95: scpu[i] ?? 0,
+                sessionMemP95: smem[i] ?? 0,
+                sessionCpuP50: 0,
+                sessionMemP50: 0,
+            };
+        });
+    }
+
+    let sessionHistory = $derived(adaptFleetToSessionSamples(fleetResponse?.series ?? {}));
+
+    /**
+     * Adapt fleet series to RfxSample[] for the REMOTEFX sub-tab.
+     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
+     * @returns {import('../lib/state.svelte.js').RfxSample[]}
+     */
+    function adaptFleetToRfxSamples(series) {
+        const fps = series['rfx_fps_out'];
+        if (!fps || fps.t.length === 0) return [];
+        const fpsP50 = series['rfx_fps_out_p50']?.avg ?? [];
+        const enc = series['rfx_encode_ms']?.avg ?? [];
+        const qual = series['rfx_quality_pct']?.avg ?? [];
+        const skipSrv = series['rfx_skip_server_sec']?.avg ?? [];
+        const skipNet = series['rfx_skip_net_sec']?.avg ?? [];
+        const rtt = series['rfx_rtt_ms']?.avg ?? [];
+        const loss = series['rfx_loss_pct']?.avg ?? [];
+        return fps.t.map((ts, i) => ({
+            ts,
+            fpsOut: fps.avg[i] ?? 0,
+            fpsOutP50: fpsP50[i] ?? 0,
+            encodeMs: enc[i] ?? 0,
+            encodeMsP50: 0,
+            quality: qual[i] ?? 0,
+            qualityP50: 0,
+            skipServer: skipSrv[i] ?? 0,
+            skipServerP50: 0,
+            skipNet: skipNet[i] ?? 0,
+            skipNetP50: 0,
+            rtt: rtt[i] ?? 0,
+            rttP50: 0,
+            loss: loss[i] ?? 0,
+            lossP50: 0,
+        }));
+    }
+
+    // ── RemoteFX charts ───────────────────────────────────────────────────────
+    let rfxHistory = $derived(adaptFleetToRfxSamples(fleetResponse?.series ?? {}));
+    let rfxAvailable = $derived((fleetResponse?.series?.['rfx_fps_out']?.t?.length ?? 0) > 0);
 
     /** Stable identity transform — avoids allocating a new function on every render. */
     const IDENTITY = (/** @type {number} */ v) => v;
@@ -354,10 +425,6 @@
                 'Working set memory claimed by each session. P95 spots the memory-hungry outliers (think Chrome with 40 tabs); P50 is the typical user. If P50 creeps up over hours, applications may be leaking.',
         },
     ];
-
-    // ── RemoteFX charts ───────────────────────────────────────────────────────
-    let rfxHistory = $derived(appState.remoteFxHistory);
-    let rfxAvailable = $derived(appState.rfxAvailable);
 
     // Combine server + network frame skips into a single field (both P95 and P50).
     let rfxHistoryProcessed = $derived(
@@ -459,7 +526,7 @@
 
     // If RemoteFX becomes unavailable while on that tab, reset to performance.
     $effect(() => {
-        if (!appState.rfxAvailable && appState.overviewSubTab === 'remotefx') {
+        if (!rfxAvailable && appState.overviewSubTab === 'remotefx') {
             appState.overviewSubTab = 'performance';
         }
     });
