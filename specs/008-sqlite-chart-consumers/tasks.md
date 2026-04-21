@@ -70,7 +70,7 @@ description: "Task list for remaining persistent telemetry consumers"
 - [x] T013 [US1] Rewire LOAD and HIC Overview data preparation in `frontend/src/components/MetricsChart.svelte` to consume retained fleet series while preserving current aggregation semantics
 - [x] T014 [US1] Rewire SESSIONS and REMOTE FX Overview data preparation in `frontend/src/components/MetricsChart.svelte` to consume retained fleet series while preserving current aggregation semantics
 - [x] T015 [US1] Add explicit empty and query-error states for each Overview chart family in `frontend/src/components/MetricsChart.svelte`
-- [ ] T016 [US1] Update retained-history contract and operator validation notes for Overview loading in `specs/008-sqlite-chart-consumers/contracts/http-fleet-metrics.md` and `specs/008-sqlite-chart-consumers/quickstart.md`
+- [x] T016 [US1] Update retained-history contract and operator validation notes for Overview loading in `specs/008-sqlite-chart-consumers/contracts/http-fleet-metrics.md` and `specs/008-sqlite-chart-consumers/quickstart.md`
 
 **Checkpoint**: Overview charts load retained history on a fresh browser session and remain usable after service restart.
 
