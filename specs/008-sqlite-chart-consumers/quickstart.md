@@ -77,13 +77,30 @@ load from SQLite-backed telemetry instead of browser-local warm-up state.
 
 ---
 
-## User Story 3 Validation — Remaining Historical Consumers (US3, not yet shipped)
+## User Story 3 Validation — Remaining Historical Consumers
 
-> These steps apply after Phase 5 (US3) is complete.
+### Sparkline cold-start validation
 
-1. Clear browser-local storage and reload.
-2. Confirm that per-host sparklines in the server table show retained history cold.
-3. Confirm that the Server Detail view fallback history loads from retained telemetry.
+1. Clear browser-local storage (`localStorage.clear()` in DevTools console) and hard-reload
+   the dashboard.
+2. Navigate to the Servers view.
+3. Confirm that per-host CPU, Memory, Input Delay, and Sessions sparklines in the server
+   table render retained history immediately — no polling cycles needed.
+4. Confirm that the Server Detail sparklines (expand any row) also show retained data from
+   the seed without requiring a warm session.
+
+### Empty state
+
+1. Register a new host that has no retained telemetry yet.
+2. Confirm that its sparkline columns are blank (no sparkline shown) rather than showing
+   stale data from a different host.
+
+### Fallback semantics
+
+1. Clear `localStorage` and reload while the backend is temporarily unavailable.
+2. Confirm that sparklines remain blank rather than showing stale browser-local data or a
+   cross-host fallback.
+3. Once the backend is available again, confirm the seed fills in on the next load.
 
 ---
 
