@@ -310,7 +310,7 @@
     let series = $derived(response?.series?.[counter] ?? null);
     let isEmpty = $derived.by(() => {
         if (!response) return true;
-        const map = response.servers ?? response.series ?? {};
+        const map = response.series ?? {};
         if (Object.keys(map).length === 0) return true;
         return !series || !Array.isArray(series.t) || series.t.length === 0;
     });
