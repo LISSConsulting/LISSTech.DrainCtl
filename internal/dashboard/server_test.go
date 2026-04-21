@@ -26,7 +26,7 @@ import (
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
 	return &DashboardServer{
-		state:                NewServerState(t.TempDir()),
+		state:                newTestServerState(t),
 		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
 		broker:               NewBroker(),
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
@@ -141,9 +141,9 @@ func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	// Back-date LastSeen past the stale threshold.
-	ds.state.mu.Lock()
-	ds.state.servers["SRV01"].LastSeen = time.Now().Add(-15 * time.Minute)
-	ds.state.mu.Unlock()
+	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-15*time.Minute)); err != nil {
+		t.Fatalf("BackdateLastSeen: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -194,10 +194,12 @@ func TestHandleHealth_StaleAlertAndGraceCountedAsOffline(t *testing.T) {
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
 
-	ds.state.mu.Lock()
-	ds.state.servers["SRV01"].LastSeen = time.Now().Add(-20 * time.Minute)
-	ds.state.servers["SRV02"].LastSeen = time.Now().Add(-11 * time.Minute)
-	ds.state.mu.Unlock()
+	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-20*time.Minute)); err != nil {
+		t.Fatalf("BackdateLastSeen SRV01: %v", err)
+	}
+	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV02", time.Now().Add(-11*time.Minute)); err != nil {
+		t.Fatalf("BackdateLastSeen SRV02: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -2699,7 +2701,7 @@ func TestIsAuthorizedForHost(t *testing.T) {
 }
 
 func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
-	state := NewServerState(t.TempDir())
+	state := newTestServerState(t)
 	state.Register("SRV01")
 
 	// Wire OnUpdate to call state.Get() — the exact pattern that caused
@@ -2742,7 +2744,7 @@ func newTestServerWithStore(t *testing.T) (*DashboardServer, *telemetry.MetricsS
 	}
 	ms := telemetry.NewMetricsStore(db)
 	ds := &DashboardServer{
-		state:  NewServerState(t.TempDir()),
+		state:  newTestServerState(t),
 		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
 		broker: NewBroker(),
 		ms:     ms,
@@ -2937,7 +2939,7 @@ func newTestServerWithAggregator(t *testing.T) (*DashboardServer, *telemetry.Met
 	ms := telemetry.NewMetricsStore(db)
 	agg := telemetry.NewAggregator(db, 60)
 	ds := &DashboardServer{
-		state:  NewServerState(t.TempDir()),
+		state:  newTestServerState(t),
 		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
 		broker: NewBroker(),
 		ms:     ms,
@@ -2998,13 +3000,13 @@ func TestMetricsHandler_ResolutionAutoMatrix(t *testing.T) {
 		window time.Duration
 		tier   string
 	}{
-		{"30m → raw", 30 * time.Minute, "raw"},
-		{"1h (inclusive) → raw", time.Hour, "raw"},
+		{"15m → 1min", 15 * time.Minute, "1min"},
+		{"1h (inclusive) → 1min", time.Hour, "1min"},
 		{"1h+1m → 5min", time.Hour + time.Minute, "5min"},
 		{"12h → 5min", 12 * time.Hour, "5min"},
-		{"24h (inclusive) → 5min", 24 * time.Hour, "5min"},
-		{"24h+1m → hourly", 24*time.Hour + time.Minute, "hourly"},
-		{"48h → hourly", 48 * time.Hour, "hourly"},
+		{"36h (inclusive) → 5min", 36 * time.Hour, "5min"},
+		{"36h+1m → hourly", 36*time.Hour + time.Minute, "hourly"},
+		{"5d → hourly", 5 * 24 * time.Hour, "hourly"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3126,7 +3128,7 @@ func newTestServerWithAudit(t *testing.T) (*DashboardServer, *telemetry.AuditSto
 		t.Fatalf("NewAuditStore: %v", err)
 	}
 	ds := &DashboardServer{
-		state:  NewServerState(t.TempDir()),
+		state:  newTestServerState(t),
 		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
 		broker: NewBroker(),
 		as:     as,
@@ -3609,7 +3611,7 @@ func newTestServerWithMaintenance(t *testing.T) (*DashboardServer, *telemetry.Ma
 	}
 	mnt := telemetry.NewMaintenanceStore(db)
 	ds := &DashboardServer{
-		state:  NewServerState(t.TempDir()),
+		state:  newTestServerState(t),
 		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
 		broker: NewBroker(),
 		mnt:    mnt,

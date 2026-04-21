@@ -6,10 +6,12 @@
      * authoritative series in SQLite so the chart survives a service restart
      * without losing pre-restart samples.
      *
-     * Zoom/pan: wheel zooms around the cursor, drag pans horizontally,
-     * double-click resets to the default window. Handlers are debounced to
-     * 150 ms (research.md §9) and cancel in-flight fetches via AbortController
-     * so a rapid drag doesn't pile up stale responses on the wire.
+     * Pan: drag pans horizontally, double-click resets to the default window,
+     * and the preset pills jump to named windows. Wheel zoom is deliberately
+     * disabled because operators found accidental trackpad scrolls kept
+     * hijacking the chart. Handlers are debounced to 150 ms (research.md §9)
+     * and cancel in-flight fetches via AbortController so a rapid drag doesn't
+     * pile up stale responses on the wire.
      *
      * Props:
      *   host        — required hostname (must be registered)
@@ -33,7 +35,7 @@
      *   host: string,
      *   counter?: string,
      *   windowMs?: number,
-     *   resolution?: 'auto'|'raw'|'5min'|'hourly',
+     *   resolution?: 'auto'|'raw'|'1min'|'5min'|'hourly',
      *   color?: string,
      *   height?: number,
      *   refreshMs?: number,
@@ -82,8 +84,6 @@
     let viewFrom = $state(new Date(0));
     let viewTo = $state(new Date(0));
 
-    const MIN_SPAN_MS = 60_000; // 1 minute
-    const MAX_SPAN_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
     const DEBOUNCE_MS = 150;
 
     // Monotonic sequence so a slow-returning request can't overwrite a newer
@@ -190,31 +190,6 @@
         };
     });
 
-    /** @param {WheelEvent} e */
-    function onWheel(e) {
-        e.preventDefault();
-        const el = /** @type {HTMLElement} */ (e.currentTarget);
-        const rect = el.getBoundingClientRect();
-        if (rect.width <= 0) return;
-        const relX = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-
-        const fromT = viewFrom.getTime();
-        const toT = viewTo.getTime();
-        const span = toT - fromT;
-        if (span <= 0) return;
-
-        // deltaY > 0 (scroll down) → zoom out. 1.25 / 0.8 are reciprocals so
-        // a scroll-up-then-down returns to the original span.
-        const factor = e.deltaY > 0 ? 1.25 : 0.8;
-        const newSpan = Math.max(MIN_SPAN_MS, Math.min(MAX_SPAN_MS, span * factor));
-        if (newSpan === span) return;
-
-        const cursorT = fromT + span * relX;
-        viewFrom = new Date(cursorT - newSpan * relX);
-        viewTo = new Date(cursorT + newSpan * (1 - relX));
-        scheduleLoad();
-    }
-
     let isDragging = $state(false);
     let dragPointerId = -1;
     let dragStartX = 0;
@@ -275,7 +250,7 @@
     // windows as clickable affordances. Tolerance when matching current span
     // to a preset is 1 % to account for float drift from wheel zoom.
     const PRESETS = [
-        { label: '5M', ms: 5 * 60 * 1000 },
+        { label: '15M', ms: 15 * 60 * 1000 },
         { label: '1H', ms: 60 * 60 * 1000 },
         { label: '1D', ms: 24 * 60 * 60 * 1000 },
         { label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
@@ -376,7 +351,6 @@
     <div
         class="chart-canvas"
         class:dragging={isDragging}
-        onwheel={onWheel}
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
         onpointerup={onPointerUp}
@@ -411,7 +385,7 @@
                     <InteractiveTimeChart {points} {counter} {color} hideHover={isDragging} />
                 </Svg>
             </LayerCake>
-            <div class="chart-hint" aria-hidden="true">scroll · drag · dbl-click</div>
+            <div class="chart-hint" aria-hidden="true">drag · dbl-click</div>
             {#if retentionTruncated}
                 <div class="retention-badge" title="oldest_available={response?.oldest_available}">
                     Data beyond this range is not retained

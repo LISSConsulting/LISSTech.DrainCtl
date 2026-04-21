@@ -13,7 +13,48 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
+
+// newTestServerWithSpikes builds a DashboardServer whose ServerState and
+// EventSpikeStore share the same freshly-opened SQLite telemetry DB. Used by
+// /api/evtspike/* and /api/v1/spike contract tests.
+func newTestServerWithSpikes(t *testing.T) *DashboardServer {
+	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return &DashboardServer{
+		state:                NewServerState(telemetry.NewServerStore(db)),
+		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
+		broker:               NewBroker(),
+		spikes:               telemetry.NewEventSpikeStore(db),
+		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
+	}
+}
+
+// seedSpike persists a spike via the EventSpikeStore exactly the way the live
+// OnEvtSpikeIngest wiring does. Tests call this instead of the retired
+// in-memory SpikeStore.Append.
+func seedSpike(t *testing.T, ds *DashboardServer, spike dc.SpikePayload) {
+	t.Helper()
+	_, _, err := ds.spikes.Insert(context.Background(), telemetry.EventSpike{
+		Host:              spike.Host,
+		Channel:           spike.Channel,
+		WindowStart:       spike.WindowStart,
+		WindowEnd:         spike.WindowEnd,
+		Observed:          spike.Observed,
+		Expected:          spike.Expected,
+		TailProbability:   spike.TailProbability,
+		ConfirmationCount: spike.ConfirmationCount,
+		FirstSeenAt:       spike.FirstSeenAt,
+	})
+	if err != nil {
+		t.Fatalf("seedSpike: %v", err)
+	}
+}
 
 // TestAPI_EvtSpikeStatus_Healthy verifies the provider-backed status path:
 // given a provider that reports a fully-warm detector, the handler returns
@@ -100,7 +141,6 @@ func TestAPI_EvtSpikeStatus_Training(t *testing.T) {
 func TestAPI_EvtSpikeStatus_Disabled(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	// evtspikeStatus left nil — feature not wired.
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/status?host=SRV01", nil)
@@ -131,7 +171,6 @@ func TestAPI_EvtSpikeStatus_Disabled(t *testing.T) {
 // receives 404, consistent with the other host-scoped endpoints.
 func TestAPI_EvtSpikeStatus_UnknownHost_404(t *testing.T) {
 	ds := newTestServer(t)
-	// SRV01 intentionally not registered.
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/status?host=SRV01", nil)
@@ -185,8 +224,7 @@ func TestAPI_EvtSpikeStatus_NoSession_401(t *testing.T) {
 }
 
 // makeSpike returns a SpikePayload whose WindowEnd is t, for seeding the store
-// with recognisable entries. The other fields are irrelevant to these contract
-// tests — only ordering, host-scoping, and limit-clamping are verified here.
+// with recognisable entries.
 func makeSpike(host, channel string, end time.Time) dc.SpikePayload {
 	return dc.SpikePayload{
 		Host:              host,
@@ -206,9 +244,8 @@ func makeSpike(host, channel string, end time.Time) dc.SpikePayload {
 // contracts/dashboard-sse-events.md: "Empty array if no spikes recorded for
 // this host. Not a 404."
 func TestAPI_EvtSpikeSpikes_EmptyRegisteredHost(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01", nil)
@@ -226,23 +263,19 @@ func TestAPI_EvtSpikeSpikes_EmptyRegisteredHost(t *testing.T) {
 	}
 }
 
-// TestAPI_EvtSpikeSpikes_RingBufferOrdering verifies newest-first ordering
-// and per-host ring-buffer drop-oldest behaviour. Inserts more spikes than the
-// store's per-host capacity and asserts the returned list is (a) bounded by
-// capacity, (b) ordered newest-first by assigned ID.
-func TestAPI_EvtSpikeSpikes_RingBufferOrdering(t *testing.T) {
-	ds := newTestServer(t)
+// TestAPI_EvtSpikeSpikes_NewestFirstOrdering verifies that the recent list is
+// ordered newest-first by window_start.
+func TestAPI_EvtSpikeSpikes_NewestFirstOrdering(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
-	// Insert 25 > capacity(20) so the oldest 5 are evicted.
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
-	for i := 0; i < 25; i++ {
-		ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
+	for i := 0; i < 10; i++ {
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
 	}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01&limit=20", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01&limit=10", nil)
 	ds.handleEvtSpikeSpikes(w, r)
 
 	if w.Code != http.StatusOK {
@@ -252,41 +285,28 @@ func TestAPI_EvtSpikeSpikes_RingBufferOrdering(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != spikeStoreHostCapacity {
-		t.Fatalf("len = %d, want %d (capacity)", len(got), spikeStoreHostCapacity)
+	if len(got) != 10 {
+		t.Fatalf("len = %d, want 10", len(got))
 	}
-	// Newest-first: IDs strictly decreasing.
 	for i := 1; i < len(got); i++ {
 		if got[i-1].ID <= got[i].ID {
-			t.Fatalf("not newest-first at index %d: id[%d]=%d id[%d]=%d", i, i-1, got[i-1].ID, i, got[i].ID)
+			t.Fatalf("not newest-first at %d: id[%d]=%d id[%d]=%d", i, i-1, got[i-1].ID, i, got[i].ID)
 		}
-	}
-	// Newest-first: WindowEnd strictly decreasing (matches insertion order).
-	for i := 1; i < len(got); i++ {
 		if !got[i-1].WindowEnd.After(got[i].WindowEnd) {
-			t.Fatalf("window_end not strictly decreasing at index %d: %s vs %s",
-				i, got[i-1].WindowEnd, got[i].WindowEnd)
+			t.Fatalf("window_end not strictly decreasing at %d", i)
 		}
-	}
-	// First five (IDs 1..5) were evicted; smallest surviving ID is 6.
-	if smallest := got[len(got)-1].ID; smallest != 6 {
-		t.Errorf("oldest surviving ID = %d, want 6 (first 5 evicted)", smallest)
 	}
 }
 
 // TestAPI_EvtSpikeSpikes_LimitClamp verifies the handler clamps ?limit=500 to
-// the contract maximum of 50 per contracts/dashboard-sse-events.md (limit ∈
-// [1..50]). With a capacity-20 ring buffer the clamp is exercised by the
-// clamp-to-size logic but the handler MUST still accept limit=500 without
-// error and return up to the clamped maximum.
+// spikeListMaxLimit (50) in recent-list mode.
 func TestAPI_EvtSpikeSpikes_LimitClamp(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
-	for i := 0; i < 25; i++ {
-		ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
+	for i := 0; i < 75; i++ {
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
 	}
 
 	w := httptest.NewRecorder()
@@ -300,25 +320,20 @@ func TestAPI_EvtSpikeSpikes_LimitClamp(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	// Clamped to 50, but capped again by actual ring size (20).
-	if len(got) > spikeStoreMaxLimit {
-		t.Errorf("len = %d, exceeds clamp %d", len(got), spikeStoreMaxLimit)
-	}
-	if len(got) != spikeStoreHostCapacity {
-		t.Errorf("len = %d, want %d (ring capacity)", len(got), spikeStoreHostCapacity)
+	if len(got) != spikeListMaxLimit {
+		t.Errorf("len = %d, want %d (clamp)", len(got), spikeListMaxLimit)
 	}
 }
 
 // TestAPI_EvtSpikeSpikes_DefaultLimit verifies that omitting ?limit= uses the
 // default of 20 entries.
 func TestAPI_EvtSpikeSpikes_DefaultLimit(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
 	for i := 0; i < 25; i++ {
-		ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
 	}
 
 	w := httptest.NewRecorder()
@@ -332,21 +347,20 @@ func TestAPI_EvtSpikeSpikes_DefaultLimit(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != spikeStoreDefaultLimit {
-		t.Errorf("len = %d, want %d (default limit)", len(got), spikeStoreDefaultLimit)
+	if len(got) != spikeDefaultLimit {
+		t.Errorf("len = %d, want %d (default)", len(got), spikeDefaultLimit)
 	}
 }
 
 // TestAPI_EvtSpikeSpikes_SmallLimit verifies that a small ?limit=5 returns
 // exactly 5 entries, newest first.
 func TestAPI_EvtSpikeSpikes_SmallLimit(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
 	for i := 0; i < 10; i++ {
-		ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
 	}
 
 	w := httptest.NewRecorder()
@@ -363,7 +377,7 @@ func TestAPI_EvtSpikeSpikes_SmallLimit(t *testing.T) {
 	if len(got) != 5 {
 		t.Fatalf("len = %d, want 5", len(got))
 	}
-	// IDs 6..10 in decreasing order.
+	// IDs 6..10 in decreasing order (auto-increment starts at 1).
 	for i, want := range []int64{10, 9, 8, 7, 6} {
 		if got[i].ID != want {
 			t.Errorf("got[%d].ID = %d, want %d", i, got[i].ID, want)
@@ -374,15 +388,14 @@ func TestAPI_EvtSpikeSpikes_SmallLimit(t *testing.T) {
 // TestAPI_EvtSpikeSpikes_PerHostIsolation verifies that spikes recorded for
 // one host are NOT returned when querying another host.
 func TestAPI_EvtSpikeSpikes_PerHostIsolation(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
 	ds.state.Register("SRV02")
-	ds.spikestore = NewSpikeStore()
 
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
-	ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base))
-	ds.spikestore.Append("SRV01", makeSpike("SRV01", "Application", base.Add(time.Second)))
-	ds.spikestore.Append("SRV02", makeSpike("SRV02", "System", base.Add(2*time.Second)))
+	seedSpike(t, ds, makeSpike("SRV01", "Application", base))
+	seedSpike(t, ds, makeSpike("SRV01", "System", base.Add(time.Second)))
+	seedSpike(t, ds, makeSpike("SRV02", "System", base.Add(2*time.Second)))
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV02", nil)
@@ -400,11 +413,9 @@ func TestAPI_EvtSpikeSpikes_PerHostIsolation(t *testing.T) {
 	}
 }
 
-// TestAPI_EvtSpikeSpikes_UnknownHost_404 asserts 404 for unregistered hosts,
-// consistent with the status endpoint and other host-scoped routes.
+// TestAPI_EvtSpikeSpikes_UnknownHost_404 asserts 404 for unregistered hosts.
 func TestAPI_EvtSpikeSpikes_UnknownHost_404(t *testing.T) {
-	ds := newTestServer(t)
-	ds.spikestore = NewSpikeStore()
+	ds := newTestServerWithSpikes(t)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01", nil)
@@ -424,8 +435,7 @@ func TestAPI_EvtSpikeSpikes_UnknownHost_404(t *testing.T) {
 
 // TestAPI_EvtSpikeSpikes_MissingHost_404 covers absent host param.
 func TestAPI_EvtSpikeSpikes_MissingHost_404(t *testing.T) {
-	ds := newTestServer(t)
-	ds.spikestore = NewSpikeStore()
+	ds := newTestServerWithSpikes(t)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes", nil)
@@ -436,13 +446,10 @@ func TestAPI_EvtSpikeSpikes_MissingHost_404(t *testing.T) {
 	}
 }
 
-// TestAPI_EvtSpikeSpikes_NoSession_401 exercises the rs middleware chain in
-// production wiring. Requests without a session cookie are rejected before
-// reaching the handler.
+// TestAPI_EvtSpikeSpikes_NoSession_401 exercises the rs middleware chain.
 func TestAPI_EvtSpikeSpikes_NoSession_401(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 	storeCtx, storeCancel := context.WithCancel(context.Background())
 	t.Cleanup(storeCancel)
 	ds.sessionStore = NewSessionStore(storeCtx)
@@ -459,12 +466,11 @@ func TestAPI_EvtSpikeSpikes_NoSession_401(t *testing.T) {
 }
 
 // TestAPI_EvtSpikeSpikes_NilStore_EmptyArray verifies the feature-off wiring:
-// when the subsystem has not installed a SpikeStore, the handler returns 200
-// [] for a registered host rather than erroring.
+// when no EventSpikeStore is installed, the handler returns 200 [] for a
+// registered host rather than erroring.
 func TestAPI_EvtSpikeSpikes_NilStore_EmptyArray(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	// ds.spikestore left nil.
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01", nil)
@@ -482,15 +488,92 @@ func TestAPI_EvtSpikeSpikes_NilStore_EmptyArray(t *testing.T) {
 	}
 }
 
+// TestAPI_EvtSpikeSpikes_Range returns only rows whose window_start falls in
+// the supplied [from, to) window.
+func TestAPI_EvtSpikeSpikes_Range(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+
+	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
+	// Seed 10 spikes at 1-minute intervals — WindowStart = end - 10s.
+	for i := 0; i < 10; i++ {
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Minute)))
+	}
+
+	from := base.Add(3*time.Minute - 10*time.Second)
+	to := base.Add(7*time.Minute - 10*time.Second)
+	url := "/api/evtspike/spikes?host=SRV01&from=" + from.UTC().Format(time.RFC3339Nano) +
+		"&to=" + to.UTC().Format(time.RFC3339Nano)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	ds.handleEvtSpikeSpikes(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var got []evtspike.RecentSpikeEntry
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// window_start values 3min-10s, 4min-10s, 5min-10s, 6min-10s fall in [3min-10s, 7min-10s).
+	if len(got) != 4 {
+		t.Fatalf("len = %d, want 4", len(got))
+	}
+}
+
+// TestAPI_EvtSpikeSpikes_RangeMissingToOrFrom_400 verifies that supplying only
+// one side of the window is a client error.
+func TestAPI_EvtSpikeSpikes_RangeMissingToOrFrom_400(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+
+	for _, qs := range []string{"&from=2026-01-01T00:00:00Z", "&to=2026-01-01T00:00:00Z"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=SRV01"+qs, nil)
+		ds.handleEvtSpikeSpikes(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("qs=%q: status = %d, want 400", qs, w.Code)
+		}
+	}
+}
+
+// TestAPI_EvtSpikeSpikes_RangeInvalidFormat_400 rejects malformed timestamps.
+func TestAPI_EvtSpikeSpikes_RangeInvalidFormat_400(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/evtspike/spikes?host=SRV01&from=not-a-time&to=2026-01-01T00:00:00Z", nil)
+	ds.handleEvtSpikeSpikes(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestAPI_EvtSpikeSpikes_RangeInverted_400 rejects to<=from windows.
+func TestAPI_EvtSpikeSpikes_RangeInverted_400(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/evtspike/spikes?host=SRV01&from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z", nil)
+	ds.handleEvtSpikeSpikes(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
 // ── handleReportSpike ─────────────────────────────────────────────────────────
 
 // TestHandleReportSpike_ValidSpike_Inserted verifies the happy path: a
-// registered host POSTs a valid SpikePayload → 200 {"ok":true}, ring buffer
-// gains one entry retrievable via handleEvtSpikeSpikes.
+// registered host POSTs a valid SpikePayload → 200 {"ok":true}, store gains
+// one row retrievable via Recent.
 func TestHandleReportSpike_ValidSpike_Inserted(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
 	w := httptest.NewRecorder()
@@ -500,9 +583,12 @@ func TestHandleReportSpike_ValidSpike_Inserted(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	entries := ds.spikestore.Recent("SRV01", 10)
+	entries, err := ds.spikes.Recent(context.Background(), "SRV01", 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
 	if len(entries) != 1 {
-		t.Fatalf("ring size = %d, want 1", len(entries))
+		t.Fatalf("store rows = %d, want 1", len(entries))
 	}
 	if entries[0].Channel != "Application" {
 		t.Errorf("channel = %q, want Application", entries[0].Channel)
@@ -512,7 +598,7 @@ func TestHandleReportSpike_ValidSpike_Inserted(t *testing.T) {
 // TestHandleReportSpike_InvalidJSON_400 verifies that a malformed body
 // returns 400 without panicking.
 func TestHandleReportSpike_InvalidJSON_400(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
 
 	w := httptest.NewRecorder()
@@ -527,7 +613,7 @@ func TestHandleReportSpike_InvalidJSON_400(t *testing.T) {
 // TestHandleReportSpike_EmptyHost_400 verifies that a valid JSON body with a
 // missing host field is rejected with 400.
 func TestHandleReportSpike_EmptyHost_400(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
 
 	spike := makeSpike("SRV01", "Application", time.Now())
@@ -545,8 +631,7 @@ func TestHandleReportSpike_EmptyHost_400(t *testing.T) {
 // TestHandleReportSpike_UnregisteredHost_403 verifies that a spike for an
 // unregistered host is rejected with 403.
 func TestHandleReportSpike_UnregisteredHost_403(t *testing.T) {
-	ds := newTestServer(t)
-	// SRV01 intentionally not registered.
+	ds := newTestServerWithSpikes(t)
 
 	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
 	w := httptest.NewRecorder()
@@ -559,12 +644,11 @@ func TestHandleReportSpike_UnregisteredHost_403(t *testing.T) {
 }
 
 // TestHandleReportSpike_NilStore_200 verifies the feature-off path: when no
-// SpikeStore is wired (subsystem disabled), the endpoint still returns 200 so
-// the remote agent doesn't retry indefinitely.
+// store is wired (subsystem disabled), the endpoint still returns 200 so the
+// remote agent doesn't retry indefinitely.
 func TestHandleReportSpike_NilStore_200(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	// ds.spikestore intentionally left nil.
 
 	body, _ := json.Marshal(makeSpike("SRV01", "Application", time.Now()))
 	w := httptest.NewRecorder()
@@ -577,11 +661,10 @@ func TestHandleReportSpike_NilStore_200(t *testing.T) {
 }
 
 // TestHandleReportSpike_DedupIdenticalPosts verifies that posting the same
-// spike twice stores only one entry — guards against remote-agent retry loops.
+// spike twice stores only one row — guards against remote-agent retry loops.
 func TestHandleReportSpike_DedupIdenticalPosts(t *testing.T) {
-	ds := newTestServer(t)
+	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
-	ds.spikestore = NewSpikeStore()
 
 	spike := makeSpike("SRV01", "Application", time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC))
 	body, _ := json.Marshal(spike)
@@ -594,8 +677,11 @@ func TestHandleReportSpike_DedupIdenticalPosts(t *testing.T) {
 			t.Fatalf("POST %d: status = %d, want 200", i+1, w.Code)
 		}
 	}
-	entries := ds.spikestore.Recent("SRV01", 10)
+	entries, err := ds.spikes.Recent(context.Background(), "SRV01", 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
 	if len(entries) != 1 {
-		t.Fatalf("ring size = %d after 3 identical posts, want 1", len(entries))
+		t.Fatalf("store rows = %d after 3 identical posts, want 1", len(entries))
 	}
 }

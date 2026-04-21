@@ -78,6 +78,34 @@ CREATE TABLE IF NOT EXISTS maintenance_jobs (
     reason        TEXT    NOT NULL DEFAULT '',
     rows_affected INTEGER NOT NULL DEFAULT 0
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS event_spikes (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    host               TEXT    NOT NULL,
+    channel            TEXT    NOT NULL,
+    window_start_ms    INTEGER NOT NULL,
+    window_end_ms      INTEGER NOT NULL,
+    observed           INTEGER NOT NULL,
+    expected           REAL    NOT NULL,
+    tail_probability   REAL    NOT NULL,
+    confirmation_count INTEGER NOT NULL,
+    first_seen_at_ms   INTEGER NOT NULL,
+    created_at_ms      INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS event_spikes_identity
+    ON event_spikes(host, channel, window_start_ms);
+CREATE INDEX IF NOT EXISTS event_spikes_host_ts
+    ON event_spikes(host, window_start_ms DESC);
+CREATE INDEX IF NOT EXISTS event_spikes_ts
+    ON event_spikes(window_start_ms);
+
+CREATE TABLE IF NOT EXISTS servers (
+    hostname         TEXT    PRIMARY KEY,
+    registered_at_ms INTEGER NOT NULL,
+    last_seen_ms     INTEGER NOT NULL DEFAULT 0,
+    last_result_json TEXT
+) WITHOUT ROWID;
 `
 
 // applySchema runs the DDL block inside a transaction and stamps user_version = 1.
