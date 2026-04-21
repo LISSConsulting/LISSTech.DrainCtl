@@ -13,7 +13,7 @@
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.6';
+export const MOCK_VERSION = '3.7';
 
 // ---------------------------------------------------------------------------
 // Helpers
