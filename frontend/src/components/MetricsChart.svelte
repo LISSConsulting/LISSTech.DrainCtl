@@ -149,30 +149,87 @@
     let fleetLoading = $state(false);
     let fleetError = $state(false);
 
+    // Pan offset: milliseconds before "now" that the TO boundary is anchored.
+    // 0 = live (to = now); positive = panned into the past.
+    let panOffsetMs = $state(0);
+    // True while the user is actively drag-panning the LOAD chart.
+    let isDragging = $state(false);
+    let dragStartX = 0;
+    let dragStartOffset = 0;
+
     $effect(() => {
         const windowMs = appState.overviewWindowMs;
-        let cancelled = false;
+        const offset = panOffsetMs;
+        const ac = new AbortController();
         fleetLoading = true;
         fleetError = false;
         const now = new Date();
-        const from = new Date(now.getTime() - windowMs);
-        fetchFleetMetrics(from, now)
+        const to = new Date(now.getTime() - offset);
+        const from = new Date(to.getTime() - windowMs);
+        fetchFleetMetrics(from, to, 'auto', undefined, ac.signal)
             .then((data) => {
-                if (!cancelled) {
+                if (!ac.signal.aborted) {
                     fleetResponse = data;
                     fleetLoading = false;
                 }
             })
             .catch(() => {
-                if (!cancelled) {
+                if (!ac.signal.aborted) {
                     fleetError = true;
                     fleetLoading = false;
                 }
             });
         return () => {
-            cancelled = true;
+            ac.abort();
         };
     });
+
+    // ── Wheel-zoom: cycle between window presets ──────────────────────────────
+    /** @param {WheelEvent} e */
+    function onLoadChartWheel(e) {
+        e.preventDefault();
+        const presets = OVERVIEW_WINDOW_PRESETS;
+        const idx = presets.findIndex((p) => p.key === appState.overviewWindow);
+        if (e.deltaY < 0 && idx > 0) {
+            panOffsetMs = 0;
+            appState.overviewWindow = presets[idx - 1].key;
+            appState.overviewWindowSource = 'zoom';
+        } else if (e.deltaY > 0 && idx < presets.length - 1) {
+            panOffsetMs = 0;
+            appState.overviewWindow = presets[idx + 1].key;
+            appState.overviewWindowSource = 'zoom';
+        }
+    }
+
+    // ── Drag-pan: shift the time window into the past ─────────────────────────
+    /** @param {MouseEvent} e */
+    function onLoadChartMouseDown(e) {
+        if (e.button !== 0) return;
+        isDragging = true;
+        dragStartX = e.clientX;
+        dragStartOffset = panOffsetMs;
+        appState.hoveredChartIndex = null;
+        appState.pinnedChartIndex = null;
+    }
+
+    /** @param {MouseEvent} e */
+    function onLoadChartMouseMove(e) {
+        if (!isDragging) return;
+        const dx = e.clientX - dragStartX;
+        const dMs = (dx / Math.max(loadContainerW, 1)) * appState.overviewWindowMs;
+        // Dragging right = moving back in time (larger offset from now).
+        // Dragging left = moving forward in time (smaller offset, min 0 = live).
+        panOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+        appState.overviewWindowSource = 'pan';
+    }
+
+    function onLoadChartMouseUp() {
+        isDragging = false;
+    }
+
+    function onLoadChartMouseLeave() {
+        isDragging = false;
+    }
 
     /**
      * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
@@ -601,11 +658,12 @@
     {#each OVERVIEW_WINDOW_PRESETS as preset}
         <button
             class="window-pill"
-            class:active={appState.overviewWindow === preset.key}
+            class:active={appState.overviewWindow === preset.key && panOffsetMs === 0}
             onclick={() => {
+                panOffsetMs = 0;
                 appState.overviewWindow = preset.key;
             }}
-            aria-pressed={appState.overviewWindow === preset.key}
+            aria-pressed={appState.overviewWindow === preset.key && panOffsetMs === 0}
         >
             {preset.label}
         </button>
@@ -663,7 +721,17 @@
                     </div>
                     <div class="chart-panel">
                         <div class="load-chart-header">
-                            <div></div>
+                            <div>
+                                {#if panOffsetMs > 0}
+                                    <button
+                                        class="back-to-live"
+                                        onclick={() => { panOffsetMs = 0; }}
+                                        title="Return to live data"
+                                    >
+                                        ↺ LIVE
+                                    </button>
+                                {/if}
+                            </div>
                             <div class="load-currents" style="padding-right: {hasRight ? 64 : 16}px">
                                 {#each loadCurrents as lc}
                                     {#if lc.show()}
@@ -677,7 +745,17 @@
                                 {/each}
                             </div>
                         </div>
-                        <div class="chart-body upper-chart" bind:clientWidth={loadContainerW}>
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div
+                            class="chart-body upper-chart"
+                            class:dragging={isDragging}
+                            bind:clientWidth={loadContainerW}
+                            onwheel={onLoadChartWheel}
+                            onmousedown={onLoadChartMouseDown}
+                            onmousemove={onLoadChartMouseMove}
+                            onmouseup={onLoadChartMouseUp}
+                            onmouseleave={onLoadChartMouseLeave}
+                        >
                             {#if fleetLoading}
                                 <div class="chart-placeholder">Loading retained history…</div>
                             {:else if fleetError}
@@ -1245,6 +1323,44 @@
         .rfx-grid {
             grid-template-columns: 1fr;
         }
+    }
+
+    /* ── LOAD chart interaction ── */
+    .upper-chart {
+        cursor: ew-resize;
+    }
+
+    .upper-chart.dragging {
+        cursor: grabbing;
+        user-select: none;
+    }
+
+    .back-to-live {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.58rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border: var(--spacing-bw) solid var(--color-amber);
+        border-radius: var(--radius-default);
+        box-shadow: 1px 1px 0 var(--color-shadow);
+        background: var(--color-surface);
+        color: var(--color-amber);
+        cursor: pointer;
+        transition:
+            transform 0.08s linear,
+            box-shadow 0.08s linear;
+    }
+
+    .back-to-live:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 2px 2px 0 var(--color-shadow);
+    }
+
+    .back-to-live:active {
+        transform: translate(1px, 1px);
+        box-shadow: none;
     }
 
     /* ── Window preset pills ── */
