@@ -138,6 +138,28 @@ response shape rather than introducing a second storage stack or new dashboard s
 | Drain state transitions | `HistoryModal` / `fetchHistory()` | Already a production REST API (`GET /api/v1/history/{host}`); not localStorage-based. No migration required. |
 | ServerDetail durable CPU chart | `chart.svelte` tile (per-host) | Already uses the production `fetchMetrics(host, from, to, …)` SQLite-backed API. The 5M/1H/1D/3D/5D pill state is persisted to localStorage as UI preference, not as historical data. Already migrated; no action needed. |
 
+### Migration Status (as of Phase 5 / US3 completion)
+
+**Migrated surfaces** — no longer use browser-local accumulation:
+
+| Surface | Migrated In | Retained Source |
+|---------|-------------|-----------------|
+| Fleet LOAD + HIC charts | US1 | `GET /api/v1/metrics/_fleet` |
+| Fleet SESSIONS charts | US1 | `GET /api/v1/metrics/_fleet` |
+| Fleet REMOTE FX charts | US1 | `GET /api/v1/metrics/_fleet` |
+| Per-host sparklines (ServerTable) | US3 | `GET /api/v1/metrics` (seed) |
+| ServerDetail sparkline row | US3 | Same seed via `serverMetrics` ring buffer |
+| ServerDetail fleet fallback | US3 | Removed — empty array when no per-host data |
+
+**Deferred surfaces** — already server-authoritative, no migration required:
+
+| Surface | Why |
+|---------|-----|
+| Per-host anomaly spikes | Server-authoritative via `fetchRecentSpikes()` |
+| Per-host detector status | Transient + server-authoritative via SSE |
+| Drain history | Production REST `GET /api/v1/history/{host}` |
+| ServerDetail durable CPU chart | Uses `fetchMetrics(host, …)` directly |
+
 ### Implementation Gotchas Discovered During Review
 
 1. **`clearStaleState()` / `MOCK_VERSION = "3.6"`** (`state.svelte.js` lines 45–58): On module init, if the mock version sentinel mismatches it wipes **all** `drainctl:*` localStorage keys. When the mock endpoint is removed, bump `MOCK_VERSION` (or drop the sentinel entirely) so the first post-migration page load does not erase accumulated UI preferences for existing users.
