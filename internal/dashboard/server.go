@@ -1255,9 +1255,18 @@ func (ds *DashboardServer) resolveMetricsTier(
 }
 
 // handleMetrics serves GET /api/v1/metrics/{host} per contracts/http-metrics.md.
+// When host is "_fleet" the request is routed to handleFleetMetrics.
 func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	host := r.PathValue("host")
-	if host == "" || !ds.state.IsRegistered(host) {
+	if host == "" {
+		writeJSONError(w, "unknown_host", http.StatusNotFound)
+		return
+	}
+	if host == "_fleet" {
+		ds.handleFleetMetrics(w, r)
+		return
+	}
+	if !ds.state.IsRegistered(host) {
 		writeJSONError(w, "unknown_host", http.StatusNotFound)
 		return
 	}
@@ -1376,6 +1385,174 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// resolveFleetMetricsTier picks the concrete tier for a fleet query using the
+// same window-size heuristic as resolveMetricsTier, then degrades if the
+// fleet-wide oldest timestamp does not cover from.
+func (ds *DashboardServer) resolveFleetMetricsTier(
+	ctx context.Context,
+	hosts []string,
+	from, to time.Time,
+	resolution string,
+) (telemetry.Tier, error) {
+	switch resolution {
+	case "raw":
+		return telemetry.TierRaw, nil
+	case "5min":
+		return telemetry.TierFiveMin, nil
+	case "hourly":
+		return telemetry.TierHourly, nil
+	}
+	window := to.Sub(from)
+	var tier telemetry.Tier
+	switch {
+	case window <= time.Hour:
+		tier = telemetry.TierRaw
+	case window <= 24*time.Hour:
+		tier = telemetry.TierFiveMin
+	default:
+		tier = telemetry.TierHourly
+	}
+	for tier != telemetry.TierHourly {
+		oldest, _, err := ds.ms.BoundsForTierFleet(ctx, hosts, tier)
+		if err != nil {
+			return 0, err
+		}
+		if oldest != nil && !oldest.After(from) {
+			return tier, nil
+		}
+		switch tier {
+		case telemetry.TierRaw:
+			tier = telemetry.TierFiveMin
+		case telemetry.TierFiveMin:
+			tier = telemetry.TierHourly
+		}
+	}
+	return tier, nil
+}
+
+// handleFleetMetrics serves GET /api/v1/metrics/_fleet per
+// contracts/http-fleet-metrics.md, returning retained history aggregated
+// across all registered hosts.
+func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	if fromStr == "" || toStr == "" {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	from, err := time.Parse(time.RFC3339, fromStr)
+	if err != nil {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	to, err := time.Parse(time.RFC3339, toStr)
+	if err != nil {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	if !to.After(from) || to.Sub(from) > 90*24*time.Hour {
+		writeJSONError(w, "invalid_range", http.StatusBadRequest)
+		return
+	}
+	resStr := q.Get("resolution")
+	if resStr == "" {
+		resStr = "auto"
+	}
+	if resStr != "auto" && resStr != "raw" && resStr != "5min" && resStr != "hourly" {
+		writeJSONError(w, "invalid_resolution", http.StatusBadRequest)
+		return
+	}
+	var counters []string
+	if csv := q.Get("counters"); csv != "" {
+		for _, c := range strings.Split(csv, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				counters = append(counters, c)
+			}
+		}
+	}
+	if ds.ms == nil {
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	infos := ds.state.All()
+	hosts := make([]string, len(infos))
+	for i, info := range infos {
+		hosts[i] = info.Hostname
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	tier, err := ds.resolveFleetMetricsTier(ctx, hosts, from, to, resStr)
+	if err != nil {
+		slog.Error("fleet metrics: tier resolution failed", "error", err)
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters)
+	if err != nil {
+		slog.Error("fleet metrics: query failed", "error", err)
+		writeJSONError(w, "storage_error", http.StatusInternalServerError)
+		return
+	}
+
+	type counterJSON struct {
+		T   []int64   `json:"t"`
+		Avg []float64 `json:"avg"`
+		Min []float64 `json:"min"`
+		Max []float64 `json:"max"`
+	}
+	type metricsResp struct {
+		Host            string                  `json:"host"`
+		Tier            string                  `json:"tier"`
+		From            string                  `json:"from"`
+		To              string                  `json:"to"`
+		OldestAvailable *string                 `json:"oldest_available"`
+		NewestAvailable *string                 `json:"newest_available"`
+		Series          map[string]*counterJSON `json:"series"`
+	}
+	resp := metricsResp{
+		Host:   "_fleet",
+		Tier:   sr.Tier.TierName(),
+		From:   from.UTC().Format(time.RFC3339),
+		To:     to.UTC().Format(time.RFC3339),
+		Series: make(map[string]*counterJSON, len(sr.Data)),
+	}
+	if sr.OldestAvailable != nil {
+		s := sr.OldestAvailable.UTC().Format(time.RFC3339)
+		resp.OldestAvailable = &s
+	}
+	if sr.NewestAvailable != nil {
+		s := sr.NewestAvailable.UTC().Format(time.RFC3339)
+		resp.NewestAvailable = &s
+	}
+	for name, cs := range sr.Data {
+		t := cs.T
+		if t == nil {
+			t = []int64{}
+		}
+		avg := cs.Avg
+		if avg == nil {
+			avg = []float64{}
+		}
+		min := cs.Min
+		if min == nil {
+			min = []float64{}
+		}
+		max := cs.Max
+		if max == nil {
+			max = []float64{}
+		}
+		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }

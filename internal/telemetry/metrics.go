@@ -301,6 +301,193 @@ func buildAggQuery(table, host string, fromMs, toMs int64, counters []string) (s
 	return q, args
 }
 
+// Fleet query builders — aggregate across multiple hosts by time bucket.
+
+func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
+	args := make([]any, 0, len(hosts)+2+len(counters))
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	q := `SELECT ts, counter, AVG(value), MIN(value), MAX(value) FROM metrics_raw
+	      WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
+	if len(counters) > 0 {
+		q += " AND counter IN (" + placeholders(len(counters)) + ")"
+		for _, c := range counters {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY ts, counter ORDER BY counter, ts ASC"
+	return q, args
+}
+
+func buildAggQueryFleet(table string, hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
+	args := make([]any, 0, len(hosts)+2+len(counters))
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	// table is always an internal constant — not user input.
+	// Sample-count-weighted average matches rollHourly weighting so buckets with
+	// fewer raw samples (e.g. partial windows) don't skew the fleet aggregate.
+	q := fmt.Sprintf(`SELECT bucket_ts, counter,
+	      SUM(avg_value * sample_count) / NULLIF(SUM(sample_count), 0),
+	      MIN(min_value), MAX(max_value) FROM %s
+	      WHERE host IN (`+placeholders(len(hosts))+`) AND bucket_ts >= ? AND bucket_ts < ?`, table)
+	if len(counters) > 0 {
+		q += " AND counter IN (" + placeholders(len(counters)) + ")"
+		for _, c := range counters {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC"
+	return q, args
+}
+
+// BoundsForTierFleet returns the oldest and newest timestamp the tier holds
+// across any of the given hosts. Returns nil/nil when no rows exist.
+func (s *MetricsStore) BoundsForTierFleet(ctx context.Context, hosts []string, tier Tier) (*time.Time, *time.Time, error) {
+	if len(hosts) == 0 {
+		return nil, nil, nil
+	}
+	ph := placeholders(len(hosts))
+	var q string
+	switch tier {
+	case TierRaw:
+		q = `SELECT MIN(ts), MAX(ts) FROM metrics_raw WHERE host IN (` + ph + `)`
+	case TierFiveMin:
+		q = `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_5min WHERE host IN (` + ph + `)`
+	case TierHourly:
+		q = `SELECT MIN(bucket_ts), MAX(bucket_ts) FROM metrics_hourly WHERE host IN (` + ph + `)`
+	default:
+		return nil, nil, fmt.Errorf("telemetry: unknown tier %v for fleet bounds", tier)
+	}
+	args := make([]any, len(hosts))
+	for i, h := range hosts {
+		args[i] = h
+	}
+	var minMs, maxMs sql.NullInt64
+	if err := s.db.reader.QueryRowContext(ctx, q, args...).Scan(&minMs, &maxMs); err != nil {
+		return nil, nil, fmt.Errorf("telemetry: fleet bounds tier %v: %w", tier, err)
+	}
+	var oldest, newest *time.Time
+	if minMs.Valid {
+		t := time.UnixMilli(minMs.Int64).UTC()
+		oldest = &t
+	}
+	if maxMs.Valid {
+		t := time.UnixMilli(maxMs.Int64).UTC()
+		newest = &t
+	}
+	return oldest, newest, nil
+}
+
+// QueryRangeFleet reads the chosen tier for all given hosts, aggregating values
+// per time bucket across the fleet. Returns an empty Series when hosts is empty
+// or no data exists in the window — consistent with per-host QueryRange behaviour.
+func (s *MetricsStore) QueryRangeFleet(
+	ctx context.Context,
+	hosts []string,
+	from, to time.Time,
+	tier Tier,
+	counters []string,
+) (*Series, error) {
+	if len(hosts) == 0 {
+		return &Series{Host: "_fleet", Tier: tier, From: from, To: to, Data: map[string]*CounterSeries{}}, nil
+	}
+	oldest, newest, err := s.BoundsForTierFleet(ctx, hosts, tier)
+	if err != nil {
+		return nil, err
+	}
+	sr := &Series{
+		Host:            "_fleet",
+		Tier:            tier,
+		From:            from,
+		To:              to,
+		OldestAvailable: oldest,
+		NewestAvailable: newest,
+		Data:            map[string]*CounterSeries{},
+	}
+	fromMs := from.UTC().UnixMilli()
+	toMs := to.UTC().UnixMilli()
+	switch tier {
+	case TierRaw:
+		if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
+	case TierFiveMin:
+		if err := s.queryAggregatedFleet(ctx, sr, "metrics_5min", hosts, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
+	case TierHourly:
+		if err := s.queryAggregatedFleet(ctx, sr, "metrics_hourly", hosts, fromMs, toMs, counters); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("telemetry: tier %q not available in this version", tier.TierName())
+	}
+	return sr, nil
+}
+
+func (s *MetricsStore) queryRawFleet(
+	ctx context.Context,
+	sr *Series,
+	hosts []string,
+	fromMs, toMs int64,
+	counters []string,
+) error {
+	q, args := buildRawQueryFleet(hosts, fromMs, toMs, counters)
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet metrics_raw query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var tsMs int64
+		var counter string
+		var avg, min, max float64
+		if err := rows.Scan(&tsMs, &counter, &avg, &min, &max); err != nil {
+			return fmt.Errorf("telemetry: fleet metrics_raw scan: %w", err)
+		}
+		cs := getOrMakeCounter(sr, counter)
+		cs.T = append(cs.T, tsMs)
+		cs.Avg = append(cs.Avg, avg)
+		cs.Min = append(cs.Min, min)
+		cs.Max = append(cs.Max, max)
+	}
+	return rows.Err()
+}
+
+func (s *MetricsStore) queryAggregatedFleet(
+	ctx context.Context,
+	sr *Series,
+	table string,
+	hosts []string,
+	fromMs, toMs int64,
+	counters []string,
+) error {
+	q, args := buildAggQueryFleet(table, hosts, fromMs, toMs, counters)
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet %s query: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var bucketMs int64
+		var counter string
+		var avg, min, max float64
+		if err := rows.Scan(&bucketMs, &counter, &avg, &min, &max); err != nil {
+			return fmt.Errorf("telemetry: fleet %s scan: %w", table, err)
+		}
+		cs := getOrMakeCounter(sr, counter)
+		cs.T = append(cs.T, bucketMs)
+		cs.Avg = append(cs.Avg, avg)
+		cs.Min = append(cs.Min, min)
+		cs.Max = append(cs.Max, max)
+	}
+	return rows.Err()
+}
+
 // NearestCounters returns, for each named counter, the value of the
 // metrics_raw sample whose ts is closest to target within ±toleranceMs.
 // Counters with no sample inside the window are absent from the result.
