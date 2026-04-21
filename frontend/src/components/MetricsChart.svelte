@@ -662,8 +662,12 @@
                             </div>
                         </div>
                         <div class="chart-body upper-chart" bind:clientWidth={loadContainerW}>
-                            {#if history.length < 2}
-                                <div class="chart-placeholder">Collecting data… {history.length}/2</div>
+                            {#if fleetLoading}
+                                <div class="chart-placeholder">Loading retained history…</div>
+                            {:else if fleetError}
+                                <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
+                            {:else if history.length < 2}
+                                <div class="chart-placeholder">No retained history for this window</div>
                             {:else if loadContainerW > 0}
                                 <LayerCake
                                     data={lcData}
@@ -739,24 +743,32 @@
                         </p>
                     {/if}
 
-                    <div class="hic-grid {gridLayout ? '' : 'single-col'}">
-                        {#each HIC_CHARTS as mc, i}
-                            <HealthIndicatorChart
-                                {history}
-                                valueKey={mc.key}
-                                p50Key={mc.p50Key}
-                                label={mc.label}
-                                unit={mc.unit}
-                                thresholds={mc.key === 'inputDelay' ? inputDelayThresh : mc.thresholds}
-                                color={mc.color}
-                                fmt={mc.fmt}
-                                icon={mc.icon}
-                                axisRight={i % 2 === 1 && !isMobile && gridLayout}
-                                helpText={mc.helpText ?? ''}
-                                showHelp={showHicHelp}
-                            />
-                        {/each}
-                    </div>
+                    {#if fleetLoading}
+                        <div class="chart-placeholder">Loading retained history…</div>
+                    {:else if fleetError}
+                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
+                    {:else if history.length === 0}
+                        <div class="chart-placeholder">No retained history for this window</div>
+                    {:else}
+                        <div class="hic-grid {gridLayout ? '' : 'single-col'}">
+                            {#each HIC_CHARTS as mc, i}
+                                <HealthIndicatorChart
+                                    {history}
+                                    valueKey={mc.key}
+                                    p50Key={mc.p50Key}
+                                    label={mc.label}
+                                    unit={mc.unit}
+                                    thresholds={mc.key === 'inputDelay' ? inputDelayThresh : mc.thresholds}
+                                    color={mc.color}
+                                    fmt={mc.fmt}
+                                    icon={mc.icon}
+                                    axisRight={i % 2 === 1 && !isMobile && gridLayout}
+                                    helpText={mc.helpText ?? ''}
+                                    showHelp={showHicHelp}
+                                />
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
             </div>
         {/if}
@@ -786,32 +798,40 @@
                         </p>
                     {/if}
 
-                    <div class="hic-grid {gridLayout ? '' : 'single-col'}">
-                        {#each SESSION_CHARTS as mc, i}
-                            <HealthIndicatorChart
-                                history={sessionHistory}
-                                valueKey={mc.key}
-                                p50Key={mc.p50Key}
-                                label={mc.label}
-                                unit={mc.unit}
-                                thresholds={mc.thresholds}
-                                color={mc.color}
-                                fmt={mc.fmt}
-                                fmtYTick={mc.fmtYTick ?? null}
-                                icon={mc.icon}
-                                axisRight={i % 2 === 1 && !isMobile && gridLayout}
-                                timeKey={mc.timeKey ?? 'time'}
-                                valueLabel={mc.valueLabel ?? 'P95'}
-                                p50Label={mc.p50Label ?? 'P50'}
-                                noThresholdZones={mc.noThresholdZones ?? false}
-                                autoScale={mc.autoScale ?? false}
-                                transform={mc.transform ?? IDENTITY}
-                                invertThresholds={mc.invertThresholds ?? false}
-                                helpText={mc.helpText ?? ''}
-                                showHelp={showSessionHelp}
-                            />
-                        {/each}
-                    </div>
+                    {#if fleetLoading}
+                        <div class="chart-placeholder">Loading retained history…</div>
+                    {:else if fleetError}
+                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
+                    {:else if sessionHistory.length === 0}
+                        <div class="chart-placeholder">No retained history for this window</div>
+                    {:else}
+                        <div class="hic-grid {gridLayout ? '' : 'single-col'}">
+                            {#each SESSION_CHARTS as mc, i}
+                                <HealthIndicatorChart
+                                    history={sessionHistory}
+                                    valueKey={mc.key}
+                                    p50Key={mc.p50Key}
+                                    label={mc.label}
+                                    unit={mc.unit}
+                                    thresholds={mc.thresholds}
+                                    color={mc.color}
+                                    fmt={mc.fmt}
+                                    fmtYTick={mc.fmtYTick ?? null}
+                                    icon={mc.icon}
+                                    axisRight={i % 2 === 1 && !isMobile && gridLayout}
+                                    timeKey={mc.timeKey ?? 'time'}
+                                    valueLabel={mc.valueLabel ?? 'P95'}
+                                    p50Label={mc.p50Label ?? 'P50'}
+                                    noThresholdZones={mc.noThresholdZones ?? false}
+                                    autoScale={mc.autoScale ?? false}
+                                    transform={mc.transform ?? IDENTITY}
+                                    invertThresholds={mc.invertThresholds ?? false}
+                                    helpText={mc.helpText ?? ''}
+                                    showHelp={showSessionHelp}
+                                />
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
             </div>
         {/if}
@@ -841,26 +861,34 @@
                         </p>
                     {/if}
 
-                    <div class="rfx-grid {gridLayout ? '' : 'single-col'}">
-                        {#each RFX_CHARTS as mc, i}
-                            <HealthIndicatorChart
-                                history={rfxHistoryProcessed}
-                                valueKey={mc.key}
-                                p50Key={mc.p50Key}
-                                label={mc.label}
-                                unit={mc.unit}
-                                thresholds={mc.thresholds}
-                                color={mc.color}
-                                fmt={mc.fmt}
-                                icon={mc.icon}
-                                axisRight={i % 2 === 1 && !isMobile && gridLayout}
-                                timeKey={mc.timeKey ?? 'time'}
-                                invertThresholds={mc.invertThresholds ?? false}
-                                helpText={mc.helpText ?? ''}
-                                showHelp={showRfxHelp}
-                            />
-                        {/each}
-                    </div>
+                    {#if fleetLoading}
+                        <div class="chart-placeholder">Loading retained history…</div>
+                    {:else if fleetError}
+                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
+                    {:else if rfxHistoryProcessed.length === 0}
+                        <div class="chart-placeholder">No retained history for this window</div>
+                    {:else}
+                        <div class="rfx-grid {gridLayout ? '' : 'single-col'}">
+                            {#each RFX_CHARTS as mc, i}
+                                <HealthIndicatorChart
+                                    history={rfxHistoryProcessed}
+                                    valueKey={mc.key}
+                                    p50Key={mc.p50Key}
+                                    label={mc.label}
+                                    unit={mc.unit}
+                                    thresholds={mc.thresholds}
+                                    color={mc.color}
+                                    fmt={mc.fmt}
+                                    icon={mc.icon}
+                                    axisRight={i % 2 === 1 && !isMobile && gridLayout}
+                                    timeKey={mc.timeKey ?? 'time'}
+                                    invertThresholds={mc.invertThresholds ?? false}
+                                    helpText={mc.helpText ?? ''}
+                                    showHelp={showRfxHelp}
+                                />
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
             </div>
         {/if}
@@ -1157,9 +1185,14 @@
         align-items: center;
         justify-content: center;
         height: 100%;
+        min-height: 80px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem;
         color: var(--color-muted);
+    }
+
+    .chart-placeholder.chart-error {
+        color: var(--color-red);
     }
 
     /* ── Health Indicators section ── */
