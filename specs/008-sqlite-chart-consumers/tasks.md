@@ -113,8 +113,8 @@ description: "Task list for remaining persistent telemetry consumers"
 
 - [x] T025 [P] [US3] Replace dev-only metrics-seed assumptions in `frontend/src/lib/api.js` and `frontend/src/App.svelte` with the production retained-history seed route
 - [x] T026 [P] [US3] Migrate per-host sparkline cold-start behavior in `frontend/src/components/ServerTable.svelte` to retained `serverMetrics` seed data
-- [ ] T027 [US3] Migrate `frontend/src/components/ServerDetail.svelte` fallback history usage to retained `serverMetrics` seed data and preserve existing fallback semantics
-- [ ] T028 [US3] Remove obsolete local-retention persistence and stale comments for migrated historical surfaces in `frontend/src/lib/state.svelte.js`
+- [x] T027 [US3] Migrate `frontend/src/components/ServerDetail.svelte` fallback history usage to retained `serverMetrics` seed data and preserve existing fallback semantics
+- [x] T028 [US3] Remove obsolete local-retention persistence and stale comments for migrated historical surfaces in `frontend/src/lib/state.svelte.js`
 - [ ] T029 [US3] Document migrated vs deferred historical consumers in `specs/008-sqlite-chart-consumers/plan.md`, `specs/008-sqlite-chart-consumers/contracts/http-metrics-seed.md`, and `specs/008-sqlite-chart-consumers/quickstart.md`
 
 **Checkpoint**: In-scope non-Overview dashboard history consumers load from retained telemetry on cold start.

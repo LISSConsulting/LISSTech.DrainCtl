@@ -2,14 +2,14 @@
  * state.svelte.js — Global reactive state using Svelte 5 runes.
  *
  * Import `appState` anywhere in the component tree without prop drilling.
- * Mutation helpers `addEvent`, `appendMetricsSample`, and
- * `appendServerMetricsSample` keep array caps enforced.
+ * Mutation helpers `addEvent` and `appendServerMetricsSample` keep array caps
+ * enforced.
  *
- * servers, health, serverMetrics, events, and lastUpdated are persisted to
- * localStorage so they survive page reloads. Writes are debounced at 300 ms to
- * avoid thrashing. connected and config are intentionally transient.
- * metricsHistory, sessionHistory, and remoteFxHistory are NOT persisted —
- * the backend is authoritative for retained fleet history.
+ * servers, health, events, and lastUpdated are persisted to localStorage so
+ * they survive page reloads. Writes are debounced at 300 ms to avoid thrashing.
+ * connected and config are intentionally transient. serverMetrics is seeded
+ * from the backend on startup and accumulated via live polls; it is NOT
+ * persisted to localStorage — the backend is authoritative.
  */
 
 const MAX_EVENTS = 200;
@@ -30,11 +30,9 @@ const MOCK_VERSION = '3.6';
 
 const LS_SERVERS = 'drainctl:servers';
 const LS_HEALTH = 'drainctl:health';
-const LS_SERVER_METRICS = 'drainctl:server-metrics';
 const LS_EVENTS = 'drainctl:events';
 const LS_LAST_UPDATED = 'drainctl:last-updated';
 const LS_MOCK_VERSION = 'drainctl:mock-version';
-const LS_RFX_AVAILABLE = 'drainctl:rfx-available';
 
 // Non-authoritative UI-preference keys: persisted as operator convenience only.
 // These do NOT represent retained history; history authority belongs to the backend.
@@ -69,17 +67,6 @@ function lsGet(key, fallback) {
         return raw ? JSON.parse(raw) : fallback;
     } catch {
         return fallback;
-    }
-}
-
-/** Load serverMetrics from localStorage as a Map (stored as array-of-entries). */
-function lsGetServerMetrics() {
-    try {
-        const raw = localStorage.getItem(LS_SERVER_METRICS);
-        if (!raw) return new Map();
-        return new Map(JSON.parse(raw));
-    } catch {
-        return new Map();
     }
 }
 
@@ -134,11 +121,6 @@ const persistHealth = debounce((data) => {
         localStorage.setItem(LS_HEALTH, JSON.stringify(data));
     } catch {}
 }, 300);
-const persistServerMetrics = debounce((map) => {
-    try {
-        localStorage.setItem(LS_SERVER_METRICS, JSON.stringify([...map.entries()]));
-    } catch {}
-}, 300);
 const persistEvents = debounce((data) => {
     try {
         localStorage.setItem(LS_EVENTS, JSON.stringify(data));
@@ -147,11 +129,6 @@ const persistEvents = debounce((data) => {
 const persistLastUpdated = debounce((date) => {
     try {
         localStorage.setItem(LS_LAST_UPDATED, JSON.stringify(date ? date.getTime() : null));
-    } catch {}
-}, 300);
-const persistRfxAvailable = debounce((v) => {
-    try {
-        localStorage.setItem(LS_RFX_AVAILABLE, JSON.stringify(v));
     } catch {}
 }, 300);
 const persistOverviewWindow = debounce((v) => {
@@ -253,15 +230,13 @@ let config = $state(null);
 /** @type {(string|Record<string,unknown>)[]} */
 let events = $state(/** @type {(string|Record<string,unknown>)[]} */ (lsGet(LS_EVENTS, [])));
 
-/** @type {MetricsSample[]} */
-let metricsHistory = $state(/** @type {MetricsSample[]} */ ([]));
-
 /**
  * Per-server metric ring buffers (capped at MAX_METRICS each).
- * Key = hostname, value = MetricsSample[].
- * @type {Map<string, MetricsSample[]>}
+ * Seeded from retained SQLite history on startup; accumulated via live polls.
+ * Key = hostname, value = MetricsSeedSample[].
+ * @type {Map<string, import('./api.js').MetricsSeedSample[]>}
  */
-let serverMetrics = $state(lsGetServerMetrics());
+let serverMetrics = $state(new Map());
 
 /**
  * Per-host evtspike detector status. Populated by `fetchEvtSpikeStatus` and
@@ -296,15 +271,6 @@ let eventHostFilter = $state('');
 
 /** @type {Date|null} */
 let lastUpdated = $state(lsGetDate(LS_LAST_UPDATED));
-
-/** @type {SessionSample[]} */
-let sessionHistory = $state(/** @type {SessionSample[]} */ ([]));
-
-/** @type {RfxSample[]} */
-let remoteFxHistory = $state(/** @type {RfxSample[]} */ ([]));
-
-/** True when at least one server reports RemoteFX data. */
-let rfxAvailable = $state(/** @type {boolean} */ (lsGet(LS_RFX_AVAILABLE, false)));
 
 /** @type {'performance'|'sessions'|'remotefx'} */
 let overviewSubTab = $state('performance');
@@ -352,16 +318,10 @@ $effect.root(() => {
         persistHealth(health);
     });
     $effect(() => {
-        persistServerMetrics(serverMetrics);
-    });
-    $effect(() => {
         persistEvents(events);
     });
     $effect(() => {
         persistLastUpdated(lastUpdated);
-    });
-    $effect(() => {
-        persistRfxAvailable(rfxAvailable);
     });
     $effect(() => {
         persistOverviewWindow(overviewWindow);
@@ -450,9 +410,8 @@ export function deriveP50(vals) {
  * All properties are reactive via Svelte 5 runes. Derived fields are read-only;
  * write to raw fields (`servers`, `health`, `config`, `events`, `connected`,
  * `lastUpdated`) directly, or use the mutation helpers.
- * `metricsHistory`, `sessionHistory`, and `remoteFxHistory` are read-only from
- * outside state.svelte.js — populate via append helpers only.
- * `serverMetrics` is a Map and must be updated via `appendServerMetricsSample`.
+ * `serverMetrics` is a Map; seed via `seedServerMetrics`, accumulate via
+ * `appendServerMetricsSample`.
  */
 export const appState = {
     // Raw data — assign directly: appState.servers = newList
@@ -484,11 +443,7 @@ export const appState = {
         events = v;
     },
 
-    get metricsHistory() {
-        return metricsHistory;
-    },
-
-    // Per-server ring buffers — read-only; mutate via appendServerMetricsSample
+    // Per-server ring buffers — seed via seedServerMetrics, then appendServerMetricsSample
     get serverMetrics() {
         return serverMetrics;
     },
@@ -563,21 +518,6 @@ export const appState = {
     },
     set pinnedChartIndex(v) {
         pinnedChartIndex = v;
-    },
-
-    get sessionHistory() {
-        return sessionHistory;
-    },
-
-    get remoteFxHistory() {
-        return remoteFxHistory;
-    },
-
-    get rfxAvailable() {
-        return rfxAvailable;
-    },
-    set rfxAvailable(v) {
-        rfxAvailable = v;
     },
 
     get overviewSubTab() {
@@ -664,14 +604,6 @@ export function addEvent(msg) {
 }
 
 /**
- * Append a metrics sample, capping the array at MAX_METRICS.
- * @param {MetricsSample} sample
- */
-export function appendMetricsSample(sample) {
-    metricsHistory = [...metricsHistory, sample].slice(-MAX_METRICS);
-}
-
-/**
  * Append a per-server metrics sample, capping each host's ring buffer at MAX_METRICS.
  * Creates a new Map to preserve Svelte 5 deep reactivity.
  * @param {string} host
@@ -694,22 +626,6 @@ export function removeServerMetrics(host) {
     const next = new Map(serverMetrics);
     next.delete(host);
     serverMetrics = next;
-}
-
-/**
- * Append a session aggregate sample, capping the array at MAX_METRICS.
- * @param {SessionSample} sample
- */
-export function appendSessionSample(sample) {
-    sessionHistory = [...sessionHistory, sample].slice(-MAX_METRICS);
-}
-
-/**
- * Append a RemoteFX aggregate sample, capping the array at MAX_METRICS.
- * @param {RfxSample} sample
- */
-export function appendRfxSample(sample) {
-    remoteFxHistory = [...remoteFxHistory, sample].slice(-MAX_METRICS);
 }
 
 /**
