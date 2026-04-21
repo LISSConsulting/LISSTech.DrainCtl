@@ -72,7 +72,7 @@
         if (span < 14 * 24 * 60 * 60 * 1000) {
             return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
         }
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
     }
 
     /** @param {number} ms */
