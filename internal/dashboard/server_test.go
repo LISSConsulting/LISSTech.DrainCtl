@@ -4485,3 +4485,113 @@ func TestSeedMetrics_EmptyWhenNoHosts(t *testing.T) {
 		t.Errorf("empty fleet should return empty map, got %d entries", len(seed))
 	}
 }
+
+// ── US1: retained Overview fleet history (T010) ───────────────────────────────
+
+// TestFleetMetrics_US1_RetainedCoverageBounds confirms that oldest_available and
+// newest_available are populated from real DB rows and surfaced in the fleet
+// response, enabling Overview chart consumers to detect whether retained data
+// covers the requested window.
+func TestFleetMetrics_US1_RetainedCoverageBounds(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Hour)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{"cpu_pct": 30.0}, 4)
+
+	// Query a window that includes the inserted samples.
+	from := base.Add(-time.Minute).Format(time.RFC3339)
+	to := base.Add(5 * time.Minute).Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/_fleet?from="+from+"&to="+to+"&resolution=raw", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+	if resp.OldestAvailable == nil {
+		t.Error("oldest_available should be non-null when data exists in DB")
+	}
+	if resp.NewestAvailable == nil {
+		t.Error("newest_available should be non-null when data exists in DB")
+	}
+}
+
+// TestFleetMetrics_US1_EmptySeriesOnNoData confirms that a fleet query with no
+// matching rows returns 200 with an empty series map and null coverage bounds.
+// This is the FR-019a "Collecting data…" trigger for Overview charts.
+func TestFleetMetrics_US1_EmptySeriesOnNoData(t *testing.T) {
+	ds, _, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+	ds.state.Register("SRV01") // registered but no telemetry rows
+
+	now := time.Now().UTC()
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	to := now.Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/_fleet?from="+from+"&to="+to+"&resolution=raw", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+	if len(resp.Series) != 0 {
+		t.Errorf("no-data fleet should return empty series, got %d series", len(resp.Series))
+	}
+	if resp.OldestAvailable != nil {
+		t.Errorf("oldest_available should be null when no rows exist, got %q", *resp.OldestAvailable)
+	}
+	if resp.NewestAvailable != nil {
+		t.Errorf("newest_available should be null when no rows exist, got %q", *resp.NewestAvailable)
+	}
+}
+
+// TestFleetMetrics_US1_OverviewCounterFamilies confirms that LOAD (cpu_pct),
+// HIC (input_delay_p95_ms), SESSIONS (sessions_total), and REMOTE FX
+// (rfx_fps_out) series are returned when those counters are present in the DB.
+// These are the four counter families the Overview charts consume.
+func TestFleetMetrics_US1_OverviewCounterFamilies(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"SRV01"}, base, map[string]float64{
+		"cpu_pct":            55.0,
+		"input_delay_p95_ms": 18.0,
+		"sessions_total":     12.0,
+		"rfx_fps_out":        24.0,
+	}, 2)
+
+	from := base.Add(-time.Minute).Format(time.RFC3339)
+	to := base.Add(5 * time.Minute).Format(time.RFC3339)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/_fleet?from="+from+"&to="+to+"&resolution=raw", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp := decodeMetricsResp(t, w)
+
+	for _, want := range []string{"cpu_pct", "input_delay_p95_ms", "sessions_total", "rfx_fps_out"} {
+		cs, ok := resp.Series[want]
+		if !ok {
+			t.Errorf("missing series %q in fleet response", want)
+			continue
+		}
+		if len(cs.T) == 0 {
+			t.Errorf("series %q is empty", want)
+		}
+	}
+}
