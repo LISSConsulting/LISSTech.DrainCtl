@@ -440,8 +440,10 @@ export function deriveP50(vals) {
  * Global application state.
  *
  * All properties are reactive via Svelte 5 runes. Derived fields are read-only;
- * write to raw fields (`servers`, `health`, `config`, `events`, `metricsHistory`,
- * `connected`, `lastUpdated`) directly, or use the mutation helpers.
+ * write to raw fields (`servers`, `health`, `config`, `events`, `connected`,
+ * `lastUpdated`) directly, or use the mutation helpers.
+ * `metricsHistory`, `sessionHistory`, and `remoteFxHistory` are read-only from
+ * outside state.svelte.js — populate via append helpers only.
  * `serverMetrics` is a Map and must be updated via `appendServerMetricsSample`.
  */
 export const appState = {
@@ -476,9 +478,6 @@ export const appState = {
 
     get metricsHistory() {
         return metricsHistory;
-    },
-    set metricsHistory(v) {
-        metricsHistory = v;
     },
 
     // Per-server ring buffers — read-only; mutate via appendServerMetricsSample
@@ -561,15 +560,9 @@ export const appState = {
     get sessionHistory() {
         return sessionHistory;
     },
-    set sessionHistory(v) {
-        sessionHistory = v;
-    },
 
     get remoteFxHistory() {
         return remoteFxHistory;
-    },
-    set remoteFxHistory(v) {
-        remoteFxHistory = v;
     },
 
     get rfxAvailable() {
