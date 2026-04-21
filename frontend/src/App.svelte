@@ -192,8 +192,6 @@
             const needsConfig = appState.config === null;
             const needsMetricSeed = appState.serverMetrics.size === 0;
             if (needsConfig) calls.push(fetchSettings());
-            // Fetch seed history in parallel; silently ignore failures (non-mock envs
-            // won't have this endpoint and should fall back to natural poll accumulation).
             const metricSeedPromise = needsMetricSeed
                 ? fetchAllServerMetrics().catch(() => null)
                 : Promise.resolve(null);
@@ -218,7 +216,7 @@
             appState.connected = true;
             appState.lastUpdated = new Date();
 
-            // Seed per-server metric history from the mock endpoint (cold start only).
+            // Seed per-server metric history from GET /api/v1/metrics (cold start only).
             // seedServerMetrics skips hosts that already have live data so this is safe
             // to call even when some samples have arrived via earlier poll cycles.
             // Also synthesize fleet-wide metricsHistory so LOAD and HIC charts are
