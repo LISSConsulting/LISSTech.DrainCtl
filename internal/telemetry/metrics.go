@@ -362,6 +362,30 @@ func buildAggQuery(table, host string, fromMs, toMs int64, counters []string) (s
 }
 
 // Fleet query builders — aggregate across multiple hosts by time bucket.
+//
+// Most counters (cpu_pct, input_delay_p95_ms, mem_*, rfx_*) represent rates or
+// ratios per host, so fleet aggregation averages across hosts. A handful of
+// counters are per-host counts — the fleet value must be the sum, not the
+// average, so the chart's Sessions line matches the CounterGrid's Sessions
+// tile. summableFleetCounters is the allow-list used by every fleet query
+// builder to pick SUM over AVG.
+var summableFleetCounters = []string{
+	"sessions_total",
+	"sessions_active",
+	"sessions_disconnected",
+	"sessions_max",
+}
+
+// summableCase returns a SQLite CASE expression that evaluates sumExpr when
+// the `counter` column matches one of summableFleetCounters, otherwise avgExpr.
+// Counter names are compile-time constants — safe to inline as string literals.
+func summableCase(sumExpr, avgExpr string) string {
+	quoted := make([]string, len(summableFleetCounters))
+	for i, c := range summableFleetCounters {
+		quoted[i] = "'" + c + "'"
+	}
+	return "CASE WHEN counter IN (" + strings.Join(quoted, ",") + ") THEN " + sumExpr + " ELSE " + avgExpr + " END"
+}
 
 func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
 	args := make([]any, 0, len(hosts)+2+len(counters))
@@ -369,7 +393,14 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (
 		args = append(args, h)
 	}
 	args = append(args, fromMs, toMs)
-	q := `SELECT ts, counter, AVG(value), MIN(value), MAX(value) FROM metrics_raw
+	// At raw tier each host contributes a single sample per ts, so SUM across
+	// hosts is the fleet total for summable counters while AVG gives the fleet
+	// mean for the rest. MIN/MAX collapse to the summed value for counts —
+	// there's no meaningful spread across hosts when the value is the sum.
+	q := `SELECT ts, counter, ` +
+		summableCase("SUM(value)", "AVG(value)") + `, ` +
+		summableCase("SUM(value)", "MIN(value)") + `, ` +
+		summableCase("SUM(value)", "MAX(value)") + ` FROM metrics_raw
 	      WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
 	if len(counters) > 0 {
 		q += " AND counter IN (" + placeholders(len(counters)) + ")"
@@ -382,24 +413,34 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (
 }
 
 // buildOneMinQueryFleet groups metrics_raw into 1-minute buckets across all
-// requested hosts, then averages across hosts within each bucket.
+// requested hosts. Two-step aggregation: first average each host's samples
+// within the minute (inner subquery), then combine across hosts — SUM for
+// session counts, AVG for rates.
 func buildOneMinQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
 	args := make([]any, 0, len(hosts)+2+len(counters))
 	for _, h := range hosts {
 		args = append(args, h)
 	}
 	args = append(args, fromMs, toMs)
-	q := `SELECT (ts / 60000) * 60000 AS bucket_ts, counter,
-	             AVG(value), MIN(value), MAX(value)
-	      FROM metrics_raw
-	      WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
+	q := `SELECT bucket_ts, counter, ` +
+		summableCase("SUM(v_avg)", "AVG(v_avg)") + `, ` +
+		summableCase("SUM(v_avg)", "MIN(v_min)") + `, ` +
+		summableCase("SUM(v_avg)", "MAX(v_max)") + `
+	      FROM (
+	          SELECT (ts / 60000) * 60000 AS bucket_ts, counter, host,
+	                 AVG(value) AS v_avg, MIN(value) AS v_min, MAX(value) AS v_max
+	          FROM metrics_raw
+	          WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
 	if len(counters) > 0 {
 		q += " AND counter IN (" + placeholders(len(counters)) + ")"
 		for _, c := range counters {
 			args = append(args, c)
 		}
 	}
-	q += " GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC"
+	q += `
+	          GROUP BY bucket_ts, counter, host
+	      )
+	      GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC`
 	return q, args
 }
 
@@ -410,11 +451,13 @@ func buildAggQueryFleet(table string, hosts []string, fromMs, toMs int64, counte
 	}
 	args = append(args, fromMs, toMs)
 	// table is always an internal constant — not user input.
-	// Sample-count-weighted average matches rollHourly weighting so buckets with
-	// fewer raw samples (e.g. partial windows) don't skew the fleet aggregate.
-	q := fmt.Sprintf(`SELECT bucket_ts, counter,
-	      SUM(avg_value * sample_count) / NULLIF(SUM(sample_count), 0),
-	      MIN(min_value), MAX(max_value) FROM %s
+	// Summable counters: SUM each host's per-bucket avg_value to get fleet
+	// totals. Other counters: sample-count-weighted average matches rollHourly
+	// weighting so buckets with fewer raw samples don't skew the fleet mean.
+	q := fmt.Sprintf(`SELECT bucket_ts, counter, `+
+		summableCase("SUM(avg_value)", "SUM(avg_value * sample_count) / NULLIF(SUM(sample_count), 0)")+`, `+
+		summableCase("SUM(min_value)", "MIN(min_value)")+`, `+
+		summableCase("SUM(max_value)", "MAX(max_value)")+` FROM %s
 	      WHERE host IN (`+placeholders(len(hosts))+`) AND bucket_ts >= ? AND bucket_ts < ?`, table)
 	if len(counters) > 0 {
 		q += " AND counter IN (" + placeholders(len(counters)) + ")"

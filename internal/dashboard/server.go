@@ -1221,14 +1221,13 @@ func writeJSONError(w http.ResponseWriter, code string, status int) {
 
 // resolveMetricsTier maps a request's resolution parameter to a concrete tier.
 // Explicit "raw"/"1min"/"5min"/"hourly" pass through. "auto" picks by window
-// size (≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to the next
-// coarser tier if the chosen tier's oldest row does not cover `from`.
+// size (≤15m → raw, ≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to
+// the next coarser tier if the chosen tier's oldest row does not cover `from`.
 // Hourly is never degraded (it is the coarsest tier).
 //
-// The 1-minute tier is a virtual GROUP BY on metrics_raw — the 15M/1H
-// dashboard pills map directly to it (15 and 60 buckets respectively). A 1H
-// window at the old raw tier returned 3600 per-second samples per host,
-// which turned the area chart into a solid noise block.
+// The 1-minute tier is a virtual GROUP BY on metrics_raw — the 1H dashboard
+// pill maps to 60 buckets. Short windows (15M pill) render raw so the chart
+// shows per-second detail before the minute aggregation kicks in.
 func (ds *DashboardServer) resolveMetricsTier(
 	ctx context.Context,
 	host string,
@@ -1249,6 +1248,8 @@ func (ds *DashboardServer) resolveMetricsTier(
 	window := to.Sub(from)
 	var tier telemetry.Tier
 	switch {
+	case window <= 15*time.Minute:
+		tier = telemetry.TierRaw
 	case window <= time.Hour:
 		tier = telemetry.TierOneMin
 	case window <= 36*time.Hour:
@@ -1433,6 +1434,8 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 	window := to.Sub(from)
 	var tier telemetry.Tier
 	switch {
+	case window <= 15*time.Minute:
+		tier = telemetry.TierRaw
 	case window <= time.Hour:
 		tier = telemetry.TierOneMin
 	case window <= 36*time.Hour:
