@@ -384,7 +384,7 @@ func applyRemoteConfig(
 		remote.Performance.ForceDisabled = cfg.Performance.ForceDisabled // preserve local flag
 		cfg.Performance = *remote.Performance
 	}
-	if evtSpike != nil && remote.EvtSpikeEnabled != nil {
-		evtSpike.Enabled = *remote.EvtSpikeEnabled
+	if evtSpike != nil && remote.EvtSpike != nil {
+		evtSpike.Enabled = remote.EvtSpike.Enabled
 	}
 }

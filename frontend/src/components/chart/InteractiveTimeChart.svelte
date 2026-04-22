@@ -145,6 +145,12 @@
     const TIP_W = 180;
     const TIP_H = 48;
     const TIP_PAD = 8;
+
+    // Unique clip-path id so multiple chart instances on the same page don't
+    // collide. Without clipping, raw-tier percent counters whose values briefly
+    // dip below 0 (perf-counter jitter) extrapolate to y-pixel > $height and
+    // spill the area fill into the x-tick label band underneath.
+    const clipId = 'chart-clip-' + Math.random().toString(36).slice(2, 10);
 </script>
 
 <!-- ── Y-axis labels + faint gridlines ── -->
@@ -174,17 +180,26 @@
     opacity="0.7"
 />
 
+<!-- ── Clip rect for the plot region ── -->
+<defs>
+    <clipPath id={clipId}>
+        <rect x="0" y="0" width={Math.max(0, $width)} height={Math.max(0, $height)} />
+    </clipPath>
+</defs>
+
 <!-- ── Area fill + line stroke ── -->
 {#if paths.line}
-    <path d={paths.area} fill={color} fill-opacity="0.2" stroke="none" />
-    <path
-        d={paths.line}
-        fill="none"
-        stroke={color}
-        stroke-width="1.5"
-        stroke-linejoin="round"
-        stroke-linecap="round"
-    />
+    <g clip-path="url(#{clipId})">
+        <path d={paths.area} fill={color} fill-opacity="0.2" stroke="none" />
+        <path
+            d={paths.line}
+            fill="none"
+            stroke={color}
+            stroke-width="1.5"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+        />
+    </g>
 {/if}
 
 <!-- ── X-axis labels ── -->

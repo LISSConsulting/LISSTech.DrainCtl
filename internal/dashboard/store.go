@@ -201,14 +201,13 @@ func GetSettings() (*RemoteSettings, error) {
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
-	evtEnabled := cfg.EvtSpike.Enabled
 	return &RemoteSettings{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
 		Performance:             &cfg.Performance,
-		EvtSpikeEnabled:         &evtEnabled,
+		EvtSpike:                &RemoteEvtSpike{Enabled: cfg.EvtSpike.Enabled},
 	}, nil
 }
 
