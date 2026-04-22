@@ -206,7 +206,7 @@ msi: psmodule msica
     Write-Host "`n📦 Building MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $appVer = & "{{justfile_directory()}}/scripts/version.ps1"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $msiVer = & "{{justfile_directory()}}/scripts/msi-version.ps1"
+    $msiVer = & "{{justfile_directory()}}/scripts/msi-version.ps1" -Increment
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & dotnet build "{{installer_dir}}/LISSTech.DrainCtl.wixproj" -c Release -p:Platform=x64 "-p:ProductVersion=$msiVer" "-p:AppVersion=$appVer" -nologo -v:q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

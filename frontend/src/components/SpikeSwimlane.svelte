@@ -142,6 +142,36 @@
         return Array.from(order);
     });
 
+    // Per-channel latest spike for the lane label suffix. mergedSpikes is sorted
+    // ascending by _t, so walking forward and overwriting leaves the newest
+    // entry per channel.
+    let lastByChannel = $derived.by(() => {
+        const m = new Map();
+        for (const s of mergedSpikes) m.set(s.channel, s);
+        return m;
+    });
+    // Overall latest spike across every channel in the visible window — drives
+    // the card-header "LAST SPIKE" summary.
+    let lastOverall = $derived(mergedSpikes.length > 0 ? mergedSpikes[mergedSpikes.length - 1] : null);
+
+    /** Compact timestamp suitable for inline label suffixes. */
+    function fmtShortTs(ms) {
+        const d = new Date(ms);
+        const now = Date.now();
+        const sameDay = new Date(now).toDateString() === d.toDateString();
+        if (sameDay) {
+            return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        }
+        const mmdd = d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
+        const hhmm = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        return `${mmdd} ${hhmm}`;
+    }
+    function fmtVolume(n) {
+        if (!Number.isFinite(n)) return '—';
+        if (n >= 10_000) return (n / 1000).toFixed(n >= 100_000 ? 0 : 1) + 'k';
+        return Math.round(n).toLocaleString();
+    }
+
     // Channel labels render the raw channel name as supplied by the backend.
     // Overflow is handled by CSS ellipsis on the label strip; the full path
     // is always available via the label's `title` attribute on hover.
@@ -359,6 +389,16 @@
                     aria-label="Event-log detector: {EVT_LABEL[detectorStatus.state] ?? detectorStatus.state}"
                 >EVT {EVT_LABEL[detectorStatus.state] ?? detectorStatus.state}</span>
             {/if}
+            {#if lastOverall}
+                <span
+                    class="sw-last-spike"
+                    title="Last spike in this window: {formatTs(lastOverall.window_end)} · {lastOverall.observed.toLocaleString()} events on {lastOverall.channel}"
+                >
+                    <span class="sw-last-label">LAST SPIKE</span>
+                    <span class="sw-last-time mono">{fmtShortTs(lastOverall._t)}</span>
+                    <span class="sw-last-vol mono">{fmtVolume(lastOverall.observed)}</span>
+                </span>
+            {/if}
             {#if loading}
                 <span class="sw-loading" aria-label="Loading">…</span>
             {/if}
@@ -451,14 +491,26 @@
 
             <!-- Lane labels overlay — HTML so CSS ellipsis + native
                  title-attribute tooltip handle long channel paths. Labels sit
-                 at the top of each lane so they get the full chart width. -->
+                 at the top of each lane so they get the full chart width. The
+                 right side carries the lane's last-spike timestamp + volume so
+                 operators can read "when did this channel last fire" without
+                 hovering a dot. -->
             {#each channels as ch, i}
+                {@const last = lastByChannel.get(ch)}
                 <div
                     class="sw-lane-label"
                     style="top:{labelTopY(i)}px; left:{MARGIN.left}px; width:{innerWidth}px; height:{LABEL_STRIP}px"
-                    title={ch}
+                    title={last
+                        ? `${ch}\nLast spike: ${formatTs(last.window_end)} · ${last.observed.toLocaleString()} events`
+                        : ch}
                 >
-                    {ch}
+                    <span class="sw-lane-name">{ch}</span>
+                    {#if last}
+                        <span class="sw-lane-meta mono">
+                            <span class="sw-lane-time">{fmtShortTs(last._t)}</span>
+                            <span class="sw-lane-vol">{fmtVolume(last.observed)}</span>
+                        </span>
+                    {/if}
                 </div>
             {/each}
 
@@ -516,6 +568,33 @@
     .sw-loading {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.6rem;
+        color: var(--color-accent);
+    }
+    /* LAST SPIKE summary — sits next to the detector chip so operators get a
+       glanceable "when did anything last fire, and how big" without having to
+       pan the chart or read a tooltip. */
+    .sw-last-spike {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        padding-left: 4px;
+    }
+    .sw-last-label {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+    .sw-last-time {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--color-fg);
+    }
+    .sw-last-vol {
+        font-size: 0.65rem;
+        font-weight: 700;
         color: var(--color-accent);
     }
     /* Detector-state chip — moved out of the status column in feature 009 so
@@ -600,17 +679,40 @@
         position: absolute;
         display: flex;
         align-items: center;
+        gap: 10px;
         padding: 0 10px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
         color: var(--color-muted);
         text-transform: uppercase;
         letter-spacing: 0.06em;
+        pointer-events: auto;
+        box-sizing: border-box;
+    }
+    .sw-lane-name {
+        flex: 1 1 auto;
+        min-width: 0;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
-        pointer-events: auto;
-        box-sizing: border-box;
+    }
+    .sw-lane-meta {
+        flex: 0 0 auto;
+        display: inline-flex;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 10.5px;
+        color: var(--color-subtle);
+        text-transform: none;
+        letter-spacing: 0;
+    }
+    .sw-lane-time {
+        color: var(--color-fg);
+        font-weight: 700;
+    }
+    .sw-lane-vol {
+        color: var(--color-accent);
+        font-weight: 700;
     }
 
     .sw-gridline {

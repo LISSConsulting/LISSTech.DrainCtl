@@ -3000,7 +3000,9 @@ func TestMetricsHandler_ResolutionAutoMatrix(t *testing.T) {
 		window time.Duration
 		tier   string
 	}{
-		{"15m → 1min", 15 * time.Minute, "1min"},
+		{"5m → raw", 5 * time.Minute, "raw"},
+		{"15m (inclusive) → raw", 15 * time.Minute, "raw"},
+		{"15m+1m → 1min", 15*time.Minute + time.Minute, "1min"},
 		{"1h (inclusive) → 1min", time.Hour, "1min"},
 		{"1h+1m → 5min", time.Hour + time.Minute, "5min"},
 		{"12h → 5min", 12 * time.Hour, "5min"},
@@ -4334,6 +4336,70 @@ func TestFleetMetrics_AggregatesAcrossHosts(t *testing.T) {
 		if avg != 50.0 {
 			t.Errorf("cpu_pct avg[%d] = %v, want 50.0 (avg of two hosts both at 50)", i, avg)
 		}
+	}
+}
+
+// TestFleetMetrics_SumsSessionCountersAcrossHosts pins the fix for the Overview
+// Sessions metric reading half the counter tile's value: session counters must
+// SUM across hosts at fleet aggregation, not AVG. Exercises all three tier
+// paths (raw, 1min via auto, 5min) so a regression in any fleet query builder
+// surfaces here.
+func TestFleetMetrics_SumsSessionCountersAcrossHosts(t *testing.T) {
+	tiers := []struct {
+		name       string
+		resolution string
+		wantTier   string
+	}{
+		{"raw tier", "raw", "raw"},
+		{"1min tier", "1min", "1min"},
+	}
+	for _, tier := range tiers {
+		t.Run(tier.name, func(t *testing.T) {
+			ds, ms, closeDB := newTestServerWithStore(t)
+			defer closeDB()
+
+			base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+			// Two hosts, each reporting 1 session — fleet total must be 2.
+			insertFleetSamples(t, ds, ms, []string{"S01", "S02"}, base,
+				map[string]float64{"sessions_total": 1.0, "cpu_pct": 50.0}, 3)
+
+			from := base.Add(-time.Minute).Format(time.RFC3339)
+			to := base.Add(5 * time.Minute).Format(time.RFC3339)
+
+			url := "/api/v1/metrics/_fleet?from=" + from + "&to=" + to +
+				"&resolution=" + tier.resolution + "&counters=sessions_total,cpu_pct"
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, url, nil)
+			r.SetPathValue("host", "_fleet")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+			resp := decodeMetricsResp(t, w)
+			if resp.Tier != tier.wantTier {
+				t.Errorf("tier = %q, want %q", resp.Tier, tier.wantTier)
+			}
+			sess, ok := resp.Series["sessions_total"]
+			if !ok || len(sess.Avg) == 0 {
+				t.Fatal("response missing sessions_total series")
+			}
+			for i, v := range sess.Avg {
+				if v != 2.0 {
+					t.Errorf("sessions_total avg[%d] = %v, want 2.0 (sum of two hosts at 1)", i, v)
+				}
+			}
+			// cpu_pct is not summable — must still average to 50.
+			cpu, ok := resp.Series["cpu_pct"]
+			if !ok || len(cpu.Avg) == 0 {
+				t.Fatal("response missing cpu_pct series")
+			}
+			for i, v := range cpu.Avg {
+				if v != 50.0 {
+					t.Errorf("cpu_pct avg[%d] = %v, want 50.0 (avg of two hosts at 50)", i, v)
+				}
+			}
+		})
 	}
 }
 

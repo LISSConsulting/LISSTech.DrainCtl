@@ -98,6 +98,14 @@
      * @param {Date} from
      * @param {Date} to
      */
+    // mem_used_pct is a virtual counter — the service stores mem_avail_mb and
+    // mem_total_mb separately, so the chart fetches both and derives the %
+    // used client-side. Matches the derivation in MetricsChart's fleet adapter.
+    const VIRTUAL_MEM_USED_PCT = 'mem_used_pct';
+    let requestedCounters = $derived(
+        counter === VIRTUAL_MEM_USED_PCT ? ['mem_avail_mb', 'mem_total_mb'] : [counter],
+    );
+
     async function load(from, to) {
         if (!host) return;
         const mySeq = ++fetchSeq;
@@ -109,7 +117,7 @@
         loading = true;
         error = '';
         try {
-            const r = await fetchMetrics(host, from, to, resolution, [counter], signal);
+            const r = await fetchMetrics(host, from, to, resolution, requestedCounters, signal);
             if (mySeq !== fetchSeq) return;
             response = r;
         } catch (e) {
@@ -282,7 +290,12 @@
         return null;
     });
 
-    let series = $derived(response?.series?.[counter] ?? null);
+    // For mem_used_pct the returned series map has no `mem_used_pct` entry; we
+    // compute points below by joining mem_avail_mb and mem_total_mb. The
+    // regular isEmpty / series accessors still fire for real counters.
+    let series = $derived(
+        counter === VIRTUAL_MEM_USED_PCT ? (response?.series?.['mem_total_mb'] ?? null) : (response?.series?.[counter] ?? null),
+    );
     let isEmpty = $derived.by(() => {
         if (!response) return true;
         const map = response.series ?? {};
@@ -291,6 +304,23 @@
     });
 
     let points = $derived.by(() => {
+        if (counter === VIRTUAL_MEM_USED_PCT) {
+            const avail = response?.series?.['mem_avail_mb'];
+            const total = response?.series?.['mem_total_mb'];
+            if (!avail || !total) return [];
+            const ts = total.t ?? [];
+            const availAvg = avail.avg ?? [];
+            const totalAvg = total.avg ?? [];
+            /** @type {{t:number,v:number}[]} */
+            const out = [];
+            for (let i = 0; i < ts.length; i++) {
+                const a = availAvg[i];
+                const m = totalAvg[i];
+                if (a == null || m == null || !Number.isFinite(a) || !Number.isFinite(m) || m <= 0) continue;
+                out.push({ t: ts[i], v: (1 - a / m) * 100 });
+            }
+            return out;
+        }
         if (!series) return [];
         const ts = series.t ?? [];
         const avg = series.avg ?? [];
