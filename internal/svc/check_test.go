@@ -3,6 +3,7 @@
 package svc
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -120,25 +121,47 @@ func TestApplyRemoteConfig_EvtSpikeEnabledTogglesSubsystemCfg(t *testing.T) {
 	cfg := &dc.ServiceConfig{}
 	targets := []dc.NotificationTarget{}
 	evt := &dc.EvtSpikeConfig{Enabled: false}
-	trueVal := true
-	remote := &dashboard.RemoteSettings{EvtSpikeEnabled: &trueVal}
+	remote := &dashboard.RemoteSettings{EvtSpike: &dashboard.RemoteEvtSpike{Enabled: true}}
 	applyRemoteConfig(remote, cfg, &targets, evt)
 	if !evt.Enabled {
-		t.Error("EvtSpikeEnabled not propagated: evt.Enabled still false")
+		t.Error("EvtSpike.Enabled=true not propagated: evt.Enabled still false")
 	}
-	// Flip back to false via explicit pointer.
-	falseVal := false
-	remote = &dashboard.RemoteSettings{EvtSpikeEnabled: &falseVal}
+	// Flip back to false via explicit value.
+	remote = &dashboard.RemoteSettings{EvtSpike: &dashboard.RemoteEvtSpike{Enabled: false}}
 	applyRemoteConfig(remote, cfg, &targets, evt)
 	if evt.Enabled {
-		t.Error("EvtSpikeEnabled=false not applied: evt.Enabled still true")
+		t.Error("EvtSpike.Enabled=false not applied: evt.Enabled still true")
 	}
-	// Nil pointer → do not change.
+	// Nil EvtSpike → do not change.
 	evt.Enabled = true
-	remote = &dashboard.RemoteSettings{EvtSpikeEnabled: nil}
+	remote = &dashboard.RemoteSettings{EvtSpike: nil}
 	applyRemoteConfig(remote, cfg, &targets, evt)
 	if !evt.Enabled {
-		t.Error("nil EvtSpikeEnabled should preserve existing value (true)")
+		t.Error("nil EvtSpike should preserve existing value (true)")
+	}
+}
+
+// TestApplyRemoteConfig_EvtSpikePropagation_WireFormat pins the wire contract
+// between the dashboard's GET /api/v1/config handler and the agent's
+// FetchSettings decoder. The previous regression was caused by the JSON shape
+// drifting (server emitted "evtspike":{"enabled":...}, client expected a flat
+// "evtspike_enabled"), so the agent silently ignored the dashboard toggle.
+// Decoding the on-wire shape the server actually emits must surface the flag.
+func TestApplyRemoteConfig_EvtSpikePropagation_WireFormat(t *testing.T) {
+	wire := []byte(`{"evtspike":{"enabled":true}}`)
+	var remote dashboard.RemoteSettings
+	if err := json.Unmarshal(wire, &remote); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if remote.EvtSpike == nil || !remote.EvtSpike.Enabled {
+		t.Fatalf("EvtSpike not decoded: %+v", remote.EvtSpike)
+	}
+	cfg := &dc.ServiceConfig{}
+	targets := []dc.NotificationTarget{}
+	evt := &dc.EvtSpikeConfig{Enabled: false}
+	applyRemoteConfig(&remote, cfg, &targets, evt)
+	if !evt.Enabled {
+		t.Error("wire-decoded EvtSpike.Enabled=true did not propagate to subsystem")
 	}
 }
 
