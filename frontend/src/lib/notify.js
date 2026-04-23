@@ -19,6 +19,7 @@ export const ALL_TRIGGERS = [
     'memory_critical',
     'input_delay_warning',
     'input_delay_critical',
+    'event_spike',
 ];
 
 /** Human-readable labels for each trigger key. */
@@ -35,6 +36,7 @@ export const TRIGGER_LABELS = {
     memory_critical: 'Mem Crit',
     input_delay_warning: 'Delay Warn',
     input_delay_critical: 'Delay Crit',
+    event_spike: 'Event Spike',
 };
 
 /** Repeat interval options (minutes). */

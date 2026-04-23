@@ -22,7 +22,7 @@ const PipeName = `\\.\pipe\drainctl`
 
 // PipeRequest is the JSON request sent by clients.
 type PipeRequest struct {
-	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server", "register"
+	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server", "register", "baseline-reset"
 	Limit       int    `json:"limit,omitempty"`        // for history
 	ChangesOnly bool   `json:"changes_only,omitempty"` // for history
 	Hostname    string `json:"hostname,omitempty"`     // for remove-server
@@ -43,6 +43,7 @@ type PipeHandler interface {
 	HandleServers() json.RawMessage                              // nil if dashboard not enabled
 	HandleRemoveServer(hostname string) error                    // ErrNotFound or nil
 	HandleRegister(dashboardURL string) (json.RawMessage, error) // SSPI call made under service identity
+	HandleBaselineReset() error                                  // wipes evtspike baselines; nil if evtspike not running
 }
 
 // registerDeadline is the per-connection deadline applied when handling a
@@ -170,6 +171,13 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 			resp = PipeResponse{OK: true, Data: raw}
 		}
 
+	case "baseline-reset":
+		if err := handler.HandleBaselineReset(); err != nil {
+			resp = PipeResponse{OK: false, Error: err.Error()}
+		} else {
+			resp = PipeResponse{OK: true}
+		}
+
 	default:
 		resp = PipeResponse{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Cmd)}
 	}
@@ -233,6 +241,16 @@ func RegisterViaPipe(dashboardURL string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return resp.Data, nil
+}
+
+// BaselineResetViaPipe asks the running service to wipe its evtspike
+// baseline — both the in-memory per-channel detectors and the persisted
+// baseline.json file. On-disk deletion alone achieves nothing because the
+// service rewrites the file from memory on its next 15-minute persistence
+// tick; this RPC synchronises the in-memory wipe with the on-disk remove.
+func BaselineResetViaPipe() error {
+	_, err := pipeRPC(PipeRequest{Cmd: "baseline-reset"})
+	return err
 }
 
 // pipeRPC connects to the service pipe, sends a request, and reads the response.

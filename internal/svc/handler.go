@@ -112,6 +112,7 @@ type serviceHandler struct {
 	dashState    *dashboard.ServerState // nil if dashboard not enabled
 	lastPerf     atomic.Pointer[dc.PerfSnapshot]
 	lastSessions atomic.Pointer[dc.SessionSummary]
+	evtSpikeSub  atomic.Pointer[evtspike.Subsystem] // nil while evtspike subsystem has not been constructed
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -330,6 +331,14 @@ func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, e
 		return nil, fmt.Errorf("marshal register result: %w", err)
 	}
 	return raw, nil
+}
+
+func (h *serviceHandler) HandleBaselineReset() error {
+	sub := h.evtSpikeSub.Load()
+	if sub == nil {
+		return fmt.Errorf("evtspike subsystem not running")
+	}
+	return sub.ResetBaseline()
 }
 
 // Execute is the Windows service main loop.
@@ -646,6 +655,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	} else if fullCfg.EvtSpike.Enabled {
 		slog.Info("evtspike=enabled", "host", host)
 	}
+	// Expose the subsystem to the pipe handler so `drainctl baseline reset`
+	// can reach it. Stored as an atomic.Pointer because the pipe server
+	// runs on its own goroutine; Execute mutates this slot once at startup
+	// and the pipe handler reads it on demand.
+	handler.evtSpikeSub.Store(evtSpikeSub)
 
 	// Timers.
 	pollTicker := time.NewTicker(cfg.PollInterval)
@@ -824,12 +838,38 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			newCfg := newFullCfg.ToServiceConfig()
 			effectiveEvtSpike := newFullCfg.EvtSpike
-			// Merge the cached dashboard-authoritative values on top of the
-			// freshly-loaded local config so a local config.json edit doesn't
-			// briefly revert to local defaults for settings the dashboard owns
-			// (PollInterval, GracePeriod, SessionWarningThreshold, Performance,
-			// Notifications, EvtSpike.Enabled) during the up-to-FetchInterval
-			// window before the next remote fetch re-applies them.
+			// Synchronously refresh the dashboard-authoritative snapshot before
+			// merging. The cached `lastRemote` is populated on the next poll
+			// tick (up to one PollInterval away), so without this refresh the
+			// newly-loaded local config runs with stale (or missing) remote
+			// overrides — a server currently in ALERT on CPU thresholds would
+			// report HEALTHY for one poll because the local config file
+			// has no thresholds of its own. Dashboard URL unchanged from the
+			// live config is a precondition: a URL change is handled below and
+			// will re-initialize the client + re-register before the next
+			// pollTicker fires its own fetchRemoteConfig.
+			if newFullCfg.Dashboard.URL != "" && newFullCfg.Dashboard.URL == dashCfg.URL {
+				var fresh *dashboard.RemoteSettings
+				var ferr error
+				if dashState != nil {
+					fresh, ferr = dashboard.GetSettings()
+				} else {
+					fresh, ferr = dashboard.FetchSettings(newFullCfg.Dashboard.URL)
+				}
+				if ferr == nil {
+					lastRemote = fresh
+					useRemoteConfig = true
+					dashConfigFailures = 0
+					lastConfigFetch = time.Now()
+				} else {
+					slog.Warn("dashboard: reload-time fetch failed, using cached", "error", ferr)
+				}
+			}
+			// Merge the dashboard-authoritative values on top of the freshly-
+			// loaded local config. If the inline fetch above succeeded,
+			// `lastRemote` is fresh; otherwise we fall back to the cached
+			// snapshot (bounded by the existing up-to-FetchInterval staleness
+			// window — no worse than the previous behavior).
 			if useRemoteConfig && lastRemote != nil && newFullCfg.Dashboard.URL != "" {
 				applyRemoteConfig(lastRemote, &newCfg, &notifyTargets, &effectiveEvtSpike)
 			}
