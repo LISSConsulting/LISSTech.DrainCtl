@@ -387,28 +387,69 @@ func summableCase(sumExpr, avgExpr string) string {
 	return "CASE WHEN counter IN (" + strings.Join(quoted, ",") + ") THEN " + sumExpr + " ELSE " + avgExpr + " END"
 }
 
-func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
+// MinRawFleetBucketMs is the lower bound for raw-fleet bucketing. Matches
+// the PUT /api/v1/settings validator's sample_interval_sec floor (10 s).
+// Any computed bucket smaller than this gets clamped up — bucketing to 1 s
+// would reintroduce the staggered-timestamp collapse the bucketing was
+// added to fix.
+const MinRawFleetBucketMs = 10_000
+
+// DefaultRawFleetBucketMs is used when a caller doesn't have — or can't
+// pass — the live sample_interval_sec from config. Matches the default
+// sample_interval_sec (30 s). Handlers that own config should pass the
+// configured value; the constant is the safe fallback for tests and
+// bootstrap paths that run before config is loaded.
+const DefaultRawFleetBucketMs = 30_000
+
+// buildRawQueryFleet groups metrics_raw samples into cross-host buckets
+// sized to match the agent sample interval. Host agents poll every
+// sample_interval_sec (default 30, range 10–300) but clocks drift and
+// pipelines stagger, so per-host samples for the same logical observation
+// land at different ts values. Grouping by raw ts produces one row per host
+// per instant, collapsing the fleet aggregate to a single host's value —
+// Sessions tile showed "1" when two servers each had one session, memory
+// zig-zagged between per-host values, etc.
+//
+// bucketMs should be the current sample_interval_sec × 1000 so every host's
+// samples for a given poll cycle fall into the same bucket. Passing the
+// configured interval (rather than a fixed default) means raising the
+// interval to 60s widens the bucket in lock-step; a fixed 30s bucket would
+// reintroduce per-host collapse at 60s intervals. Values below
+// MinRawFleetBucketMs are clamped up.
+func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string, bucketMs int64) (string, []any) {
+	if bucketMs < MinRawFleetBucketMs {
+		bucketMs = MinRawFleetBucketMs
+	}
 	args := make([]any, 0, len(hosts)+2+len(counters))
 	for _, h := range hosts {
 		args = append(args, h)
 	}
 	args = append(args, fromMs, toMs)
-	// At raw tier each host contributes a single sample per ts, so SUM across
-	// hosts is the fleet total for summable counters while AVG gives the fleet
-	// mean for the rest. MIN/MAX collapse to the summed value for counts —
-	// there's no meaningful spread across hosts when the value is the sum.
-	q := `SELECT ts, counter, ` +
-		summableCase("SUM(value)", "AVG(value)") + `, ` +
-		summableCase("SUM(value)", "MIN(value)") + `, ` +
-		summableCase("SUM(value)", "MAX(value)") + ` FROM metrics_raw
-	      WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
+	// Two-step aggregation mirrors buildOneMinQueryFleet: inner query averages
+	// each host's samples within a bucketMs window; outer combines across
+	// hosts — SUM for session counts, AVG for rates. min/max fall out of the
+	// per-host inner aggregates so the fleet spread reflects real inter-host
+	// variance rather than single-sample noise.
+	bucket := fmt.Sprintf("%d", bucketMs)
+	q := `SELECT bucket_ts, counter, ` +
+		summableCase("SUM(v_avg)", "AVG(v_avg)") + `, ` +
+		summableCase("SUM(v_avg)", "MIN(v_min)") + `, ` +
+		summableCase("SUM(v_avg)", "MAX(v_max)") + `
+	      FROM (
+	          SELECT (ts / ` + bucket + `) * ` + bucket + ` AS bucket_ts, counter, host,
+	                 AVG(value) AS v_avg, MIN(value) AS v_min, MAX(value) AS v_max
+	          FROM metrics_raw
+	          WHERE host IN (` + placeholders(len(hosts)) + `) AND ts >= ? AND ts < ?`
 	if len(counters) > 0 {
 		q += " AND counter IN (" + placeholders(len(counters)) + ")"
 		for _, c := range counters {
 			args = append(args, c)
 		}
 	}
-	q += " GROUP BY ts, counter ORDER BY counter, ts ASC"
+	q += `
+	          GROUP BY bucket_ts, counter, host
+	      )
+	      GROUP BY bucket_ts, counter ORDER BY counter, bucket_ts ASC`
 	return q, args
 }
 
@@ -511,12 +552,20 @@ func (s *MetricsStore) BoundsForTierFleet(ctx context.Context, hosts []string, t
 // QueryRangeFleet reads the chosen tier for all given hosts, aggregating values
 // per time bucket across the fleet. Returns an empty Series when hosts is empty
 // or no data exists in the window — consistent with per-host QueryRange behaviour.
+//
+// rawBucketMs sizes the cross-host grouping window at the raw tier. Pass the
+// current sample_interval_sec × 1000 so per-host samples from the same poll
+// cycle co-locate. Zero or sub-minimum values are clamped up to
+// MinRawFleetBucketMs by the underlying query builder. Ignored for non-raw
+// tiers (those use their own fixed bucketing: 1-min virtual groups on
+// metrics_raw, or the precomputed bucket_ts from metrics_5min/metrics_hourly).
 func (s *MetricsStore) QueryRangeFleet(
 	ctx context.Context,
 	hosts []string,
 	from, to time.Time,
 	tier Tier,
 	counters []string,
+	rawBucketMs int64,
 ) (*Series, error) {
 	if len(hosts) == 0 {
 		return &Series{Host: "_fleet", Tier: tier, From: from, To: to, Data: map[string]*CounterSeries{}}, nil
@@ -538,7 +587,7 @@ func (s *MetricsStore) QueryRangeFleet(
 	toMs := to.UTC().UnixMilli()
 	switch tier {
 	case TierRaw:
-		if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, counters); err != nil {
+		if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, counters, rawBucketMs); err != nil {
 			return nil, err
 		}
 	case TierOneMin:
@@ -597,8 +646,9 @@ func (s *MetricsStore) queryRawFleet(
 	hosts []string,
 	fromMs, toMs int64,
 	counters []string,
+	bucketMs int64,
 ) error {
-	q, args := buildRawQueryFleet(hosts, fromMs, toMs, counters)
+	q, args := buildRawQueryFleet(hosts, fromMs, toMs, counters, bucketMs)
 	rows, err := s.db.reader.QueryContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("telemetry: fleet metrics_raw query: %w", err)
