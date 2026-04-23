@@ -55,6 +55,7 @@ func main() {
 	root.AddCommand(registerCmd())
 	root.AddCommand(dashboardCmd())
 	root.AddCommand(configureCmd())
+	root.AddCommand(baselineCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "drainctl: %v\n", err)

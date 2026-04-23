@@ -444,7 +444,7 @@ The `evtspike` subsystem watches a curated set of 54 Windows event log channels 
 - Subscribes to 54 curated channels by default (RDSH/Citrix-relevant: Winlogon, Kerberos, NTLM, LSA, SMB, FSLogix, TerminalServices, PrintService, User Profile Service, DNS, TCP/IP, Windows Defender, and more).
 - Maintains a per-channel Bayesian baseline sliced into 96 time-of-day slots (15 min each). A robust update cap prevents a single flood from poisoning the baseline; a subsequent smaller anomaly still flags.
 - Requires 2 of 3 consecutive 10-second scoring windows to confirm, so single-bucket transients (log rotations, one-shot admin actions) do not page operators.
-- Persists baseline state to `evtspike-baseline.json` every 15 minutes and on shutdown — service restarts do not re-enter warm-up on channels already mature.
+- Persists baseline state to `baseline.json` every 15 minutes and on shutdown — service restarts do not re-enter warm-up on channels already mature.
 - Delivers through the existing multi-target notification pipeline (webhook, ntfy, email). Spike severity is assigned by notification-target wiring, not the detector.
 - Surfaces a status pill and a recent-spikes list in the dashboard server detail view.
 

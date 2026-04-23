@@ -1524,7 +1524,22 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters)
+	// Raw-tier bucketing aligns with the configured agent poll cadence so
+	// staggered per-host timestamps co-locate. Fall back to the store's
+	// default when config isn't available (test harness, hot-swap gap).
+	rawBucketMs := int64(telemetry.DefaultRawFleetBucketMs)
+	var cfg *dc.Config
+	var cerr error
+	if ds.testLoadConfigFunc != nil {
+		cfg, cerr = ds.testLoadConfigFunc()
+	} else {
+		cfg, cerr = dc.LoadConfig()
+	}
+	if cerr == nil && cfg.Performance.SampleIntervalSec > 0 {
+		rawBucketMs = int64(cfg.Performance.SampleIntervalSec) * 1000
+	}
+
+	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters, rawBucketMs)
 	if err != nil {
 		slog.Error("fleet metrics: query failed", "error", err)
 		writeJSONError(w, "storage_error", http.StatusInternalServerError)

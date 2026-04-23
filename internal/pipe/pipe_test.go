@@ -50,6 +50,10 @@ func (m *mockHandler) HandleRegister(url string) (json.RawMessage, error) {
 	return m.registerResult, nil
 }
 
+func (m *mockHandler) HandleBaselineReset() error {
+	return fmt.Errorf("not implemented")
+}
+
 // pipeCall writes req to handlePipeConn via an in-memory net.Pipe and returns
 // the decoded PipeResponse.
 func pipeCall(t *testing.T, req PipeRequest, handler PipeHandler) PipeResponse {
@@ -392,6 +396,10 @@ func (c *captureHandler) HandleRemoveServer(_ string) error {
 
 func (c *captureHandler) HandleRegister(_ string) (json.RawMessage, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (c *captureHandler) HandleBaselineReset() error {
+	return fmt.Errorf("not implemented")
 }
 
 // TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable guards the

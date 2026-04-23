@@ -91,7 +91,7 @@ func glob(t *testing.T, baselinePath, suffixPattern string) []string {
 }
 
 func TestWriteLoadBaseline_RoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "evtspike-baseline.json")
+	path := filepath.Join(t.TempDir(), "baseline.json")
 
 	want := makeSampleBaseline()
 	if err := WriteBaseline(path, want); err != nil {
