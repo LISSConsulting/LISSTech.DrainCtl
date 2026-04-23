@@ -177,12 +177,18 @@ let mockSettings = {
  * Seed a perf-metrics ring buffer with MAX_PERF_HISTORY plausible past samples.
  * Each sample is generated independently with genPerf so the sparkline shows
  * natural variation rather than a flat line.
+ *
+ * `now` is taken as a parameter (rather than `Date.now()`) so every host seeded
+ * during a single ensureState() pass shares the same timestamp axis. Without
+ * this, each host's samples are ~ms-staggered and fleet aggregation produces
+ * one-host-per-timestamp rows instead of cross-host aggregates.
+ *
  * @param {string} host
  * @param {string} status  - 'ok' | 'grace' | 'alert'
  * @param {number} initSessions
+ * @param {number} now     - anchor timestamp shared across the fleet seed pass
  */
-function seedPerfHistory(host, status, initSessions) {
-  const now = Date.now();
+function seedPerfHistory(host, status, initSessions, now) {
   const def = SERVERS.find(d => d.host === host);
   const maxSessions = def?.maxSessions ?? 100;
   const samples = [];
@@ -232,6 +238,7 @@ function seedPerfHistory(host, status, initSessions) {
 /** Initialise server state on first access. */
 function ensureState() {
   if (state.size > 0) return;
+  const seedNow = Date.now();
   for (const def of SERVERS) {
     const status = def.initStatus;
     const sessions = def.initSessions;
@@ -247,10 +254,12 @@ function ensureState() {
     });
     // Seed state-transition history
     history.set(def.host, seedHistory(def.host, status));
-    // Seed perf-metrics history (offline servers get an empty buffer)
+    // Seed perf-metrics history (offline servers get an empty buffer).
+    // Share seedNow across hosts so fleet aggregation sees one row per tick
+    // with all hosts contributing, not one per (host, tick) pair.
     perfHistory.set(
       def.host,
-      status === 'off' ? [] : seedPerfHistory(def.host, status, sessions),
+      status === 'off' ? [] : seedPerfHistory(def.host, status, sessions, seedNow),
     );
   }
 }
@@ -691,10 +700,13 @@ function handleRequest(method, pathname, body, query = {}) {
   // GET /api/v1/metrics/:host — durable per-host time-series for chart.svelte
   // (spec 007 / FR-019). Maps counter names to the perfHistory ring buffer
   // fields so the new chart renders during dev without a real SQLite store.
+  // Also handles host="_fleet" (spec 008) by aggregating across all hosts at
+  // each shared timestamp — avg = mean, min/max = fleet extrema per counter.
   const metricsMatch = matchRoute('/api/v1/metrics/:host', pathname);
   if (method === 'GET' && metricsMatch) {
     const host = metricsMatch.host;
-    if (!state.has(host)) {
+    const isFleet = host === '_fleet';
+    if (!isFleet && !state.has(host)) {
       return { status: 404, body: { error: 'unknown_host' } };
     }
     const from = query.from ? Date.parse(query.from) : NaN;
@@ -708,40 +720,115 @@ function handleRequest(method, pathname, body, query = {}) {
     }
     const counters = (query.counters || '').split(',').map(s => s.trim()).filter(Boolean);
     const wanted = counters.length > 0 ? counters : null;
-    // perfHistory keys → counter names per contract/checkResultSamples().
+    // Counter name → function extracting the numeric value from a perfHistory sample.
+    // Keys match the backend metrics contract consumed by MetricsChart.svelte.
+    const MEM_TOTAL_MB = 16384;
     const counterMap = {
-      cpu_pct:            'cpu',
-      cpu_p95_pct:        'cpuP95',
-      mem_avail_mb:       null, // derived below
-      pages_sec:          'pagesPerSec',
-      disk_queue:         'diskQueue',
-      tcp_retrans_sec:    'tcpRetrans',
-      input_delay_p95_ms: 'inputDelay',
-      sessions_active:    'sessionsActive',
+      cpu_pct:                 (s) => s.cpu,
+      cpu_p95_pct:             (s) => s.cpuP95,
+      mem_avail_mb:            (s) => MEM_TOTAL_MB * (1 - (s.mem ?? 0) / 100),
+      mem_total_mb:            () => MEM_TOTAL_MB,
+      pages_sec:               (s) => s.pagesPerSec,
+      disk_queue:              (s) => s.diskQueue,
+      tcp_retrans_sec:         (s) => s.tcpRetrans,
+      input_delay_p95_ms:      (s) => s.inputDelay,
+      sessions_active:         (s) => s.sessionsActive,
+      sessions_total:          (s) => s.sessions,
+      sessions_disconnected:   (s) => s.sessionsDisconnected,
+      sessions_max:            (s) => s.maxSessions,
+      session_cpu_p95_pct:     (s) => s.sessionCpuP95,
+      session_cpu_p50_pct:     (s) => s.sessionCpuP50,
+      session_mem_p95_bytes:   (s) => s.sessionMemP95,
+      session_mem_p50_bytes:   (s) => s.sessionMemP50,
+      rfx_fps_out:             (s) => s.rfxFpsOut,
+      rfx_fps_out_p50:         (s) => s.rfxFpsOutP50,
+      rfx_encode_ms:           (s) => s.rfxEncodeMs,
+      rfx_encode_ms_p50:       (s) => s.rfxEncodeMsP50,
+      rfx_quality_pct:         (s) => s.rfxQuality,
+      rfx_quality_pct_p50:     (s) => s.rfxQualityP50,
+      rfx_rtt_ms:              (s) => s.rfxRtt,
+      rfx_rtt_ms_p50:          (s) => s.rfxRttP50,
+      rfx_loss_pct:            (s) => s.rfxLoss,
+      rfx_loss_pct_p50:        (s) => s.rfxLossP50,
+      rfx_skip_server_sec:     (s) => s.rfxSkipServer,
+      rfx_skip_server_sec_p50: (s) => s.rfxSkipServerP50,
+      rfx_skip_net_sec:        (s) => s.rfxSkipNet,
+      rfx_skip_net_sec_p50:    (s) => s.rfxSkipNetP50,
     };
-    const hist = perfHistory.get(host) ?? [];
-    const windowed = hist.filter(s => s.time >= from && s.time < to);
+    // Counters that are per-host counts — fleet value is the SUM across hosts,
+    // not the mean. Mirrors summableFleetCounters in internal/telemetry/metrics.go.
+    const summableCounters = new Set(['sessions_total', 'sessions_active', 'sessions_disconnected', 'sessions_max']);
+
+    // Build the sample set we'll read from. For a single host it's that host's
+    // ring buffer; for _fleet it's groups of per-host samples keyed by timestamp
+    // (all hosts share the same tick cadence in the mock).
+    let windowed; // Array<{ time: number, samples: Sample[] }>
+    let oldestTime = null;
+    let newestTime = null;
+    if (isFleet) {
+      /** @type {Map<number, any[]>} */
+      const byTime = new Map();
+      for (const hist of perfHistory.values()) {
+        for (const s of hist) {
+          if (s.time < from || s.time >= to) continue;
+          const bucket = byTime.get(s.time);
+          if (bucket) bucket.push(s); else byTime.set(s.time, [s]);
+          if (oldestTime === null || s.time < oldestTime) oldestTime = s.time;
+          if (newestTime === null || s.time > newestTime) newestTime = s.time;
+        }
+      }
+      windowed = [...byTime.entries()].sort((a, b) => a[0] - b[0]).map(([time, samples]) => ({ time, samples }));
+    } else {
+      const hist = perfHistory.get(host) ?? [];
+      windowed = hist.filter(s => s.time >= from && s.time < to).map(s => ({ time: s.time, samples: [s] }));
+      if (hist.length > 0) {
+        oldestTime = hist[0].time;
+        newestTime = hist[hist.length - 1].time;
+      }
+    }
+
     const series = {};
-    for (const [counter, field] of Object.entries(counterMap)) {
+    for (const [counter, extract] of Object.entries(counterMap)) {
       if (wanted && !wanted.includes(counter)) continue;
+      const isSummable = isFleet && summableCounters.has(counter);
       const t = [];
       const avg = [];
-      for (const s of windowed) {
-        let v;
-        if (counter === 'mem_avail_mb') {
-          v = 16384 * (1 - (s.mem ?? 0) / 100);
-        } else {
-          v = s[field];
+      const min = [];
+      const max = [];
+      for (const { time, samples } of windowed) {
+        const vals = [];
+        for (const s of samples) {
+          const v = extract(s);
+          if (v == null || !Number.isFinite(v)) continue;
+          vals.push(v);
         }
-        if (v == null || !Number.isFinite(v)) continue;
-        t.push(s.time);
-        avg.push(Math.round(v * 10) / 10);
+        if (vals.length === 0) continue;
+        let sum = 0, lo = Infinity, hi = -Infinity;
+        for (const v of vals) {
+          sum += v;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        t.push(time);
+        if (isSummable) {
+          // Sessions-family counters: fleet row is the SUM; min/max collapse
+          // to the sum since per-host spread is not meaningful for a count.
+          const total = Math.round(sum * 10) / 10;
+          avg.push(total);
+          min.push(total);
+          max.push(total);
+        } else {
+          const mean = sum / vals.length;
+          avg.push(Math.round(mean * 10) / 10);
+          min.push(Math.round(lo * 10) / 10);
+          max.push(Math.round(hi * 10) / 10);
+        }
       }
       if (t.length === 0) continue;
-      series[counter] = { t, avg, min: avg.slice(), max: avg.slice() };
+      series[counter] = { t, avg, min, max };
     }
-    const oldest = hist.length > 0 ? new Date(hist[0].time).toISOString() : null;
-    const newest = hist.length > 0 ? new Date(hist[hist.length - 1].time).toISOString() : null;
+    const oldest = oldestTime !== null ? new Date(oldestTime).toISOString() : null;
+    const newest = newestTime !== null ? new Date(newestTime).toISOString() : null;
     const tier = reqRes === 'auto' ? 'raw' : reqRes;
     return {
       status: 200,

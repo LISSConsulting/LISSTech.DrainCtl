@@ -231,42 +231,51 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 		result.EvtSpikeStatus = &status
 	}
 
-	// Determine triggers and send notifications.
+	// Build the trigger set from the current sample. Triggers drive two
+	// independent outcomes: (a) outbound notifications to configured targets
+	// and (b) the Status field the dashboard displays. Previously this whole
+	// block was gated on `len(targets) > 0` — which meant a dashboard with
+	// zero notification targets also disabled perf-threshold evaluation and
+	// the Status promotion, so a server actively over its CPU/memory/input
+	// limits kept reporting "Healthy". Evaluate unconditionally; only gate
+	// the dispatch loop on target presence.
 	slog.Debug("diag: check=notifications", "targets", len(targets))
+	var triggers []dc.Trigger
+
+	if transition {
+		if state.Mode != dc.AllowAll {
+			triggers = append(triggers, dc.TriggerDrainOn)
+		} else {
+			triggers = append(triggers, dc.TriggerDrainOff)
+		}
+	}
+	if status == "Grace" && transition {
+		triggers = append(triggers, dc.TriggerGraceEntered)
+	}
+	if status == "Alert" {
+		triggers = append(triggers, dc.TriggerAlert)
+	}
+	if status == "Healthy" && transition {
+		triggers = append(triggers, dc.TriggerHealthy)
+	}
+
+	// Session utilization warning.
+	if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 && sess.UtilizationPct >= cfg.SessionWarningThreshold {
+		triggers = append(triggers, dc.TriggerSessionWarning)
+	}
+
+	// Performance threshold evaluation. Also updates perfTriggerState's
+	// edge-detection bookkeeping — must run every tick or the next "enter"
+	// edge is lost after a targetless period.
+	if perfSnap != nil && perfTriggerState != nil {
+		perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
+		triggers = append(triggers, perfTriggers...)
+	}
+
+	// Dispatch notifications. For perf triggers, set the message to the
+	// trigger-specific detail so each notification carries its own context
+	// (not the last trigger's message).
 	if len(targets) > 0 {
-		var triggers []dc.Trigger
-
-		if transition {
-			if state.Mode != dc.AllowAll {
-				triggers = append(triggers, dc.TriggerDrainOn)
-			} else {
-				triggers = append(triggers, dc.TriggerDrainOff)
-			}
-		}
-		if status == "Grace" && transition {
-			triggers = append(triggers, dc.TriggerGraceEntered)
-		}
-		if status == "Alert" {
-			triggers = append(triggers, dc.TriggerAlert)
-		}
-		if status == "Healthy" && transition {
-			triggers = append(triggers, dc.TriggerHealthy)
-		}
-
-		// Session utilization warning.
-		if sess != nil && cfg.SessionWarningThreshold > 0 && sess.MaxSessions > 0 && sess.UtilizationPct >= cfg.SessionWarningThreshold {
-			triggers = append(triggers, dc.TriggerSessionWarning)
-		}
-
-		// Performance threshold evaluation.
-		if perfSnap != nil && perfTriggerState != nil {
-			perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
-			triggers = append(triggers, perfTriggers...)
-		}
-
-		// Dispatch notifications. For perf triggers, set the message to the
-		// trigger-specific detail so each notification carries its own context
-		// (not the last trigger's message).
 		savedMessage := result.Message
 		for _, trigger := range triggers {
 			if perfmon.IsPerfTrigger(trigger) {
@@ -277,19 +286,19 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 			dc.SendNotification(targets, notifyState, result, trigger, changedBy)
 		}
 		result.Message = savedMessage
+	}
 
-		// Promote status based on active perf triggers so the dashboard
-		// reflects overall health, not just drain mode. Done after
-		// notification dispatch to avoid firing TriggerAlert for perf issues
-		// (perf triggers already have their own specific notifications).
-		for _, trigger := range triggers {
-			switch trigger {
-			case dc.TriggerCPUCritical, dc.TriggerMemoryCritical, dc.TriggerInputDelayCritical:
-				result.Status = "Alert"
-			case dc.TriggerCPUWarning, dc.TriggerMemoryWarning, dc.TriggerInputDelayWarning:
-				if result.Status == "Healthy" {
-					result.Status = "Warning"
-				}
+	// Promote status based on active perf triggers so the dashboard reflects
+	// overall health, not just drain mode. Runs regardless of notification
+	// configuration — Status is authoritative output, notifications are the
+	// optional side channel.
+	for _, trigger := range triggers {
+		switch trigger {
+		case dc.TriggerCPUCritical, dc.TriggerMemoryCritical, dc.TriggerInputDelayCritical:
+			result.Status = "Alert"
+		case dc.TriggerCPUWarning, dc.TriggerMemoryWarning, dc.TriggerInputDelayWarning:
+			if result.Status == "Healthy" {
+				result.Status = "Warning"
 			}
 		}
 	}

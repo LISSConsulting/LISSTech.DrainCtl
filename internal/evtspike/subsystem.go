@@ -20,7 +20,7 @@ import (
 
 const (
 	scoringIntervalSeconds  = 10
-	defaultBaselineFilename = "evtspike-baseline.json"
+	defaultBaselineFilename = "baseline.json"
 	defaultChannelQuery     = `*[System[(Level<=4)]]`
 )
 
@@ -304,6 +304,40 @@ func (s *Subsystem) retryOnce(ctx context.Context) {
 func (s *Subsystem) Stop() {
 	s.quiesce()
 	slog.Info("", "evtspike", "stop", "host", s.host)
+}
+
+// ResetBaseline wipes in-memory detector state for every subscribed channel
+// and deletes the baseline file on disk. The subsystem keeps running —
+// subscriptions, scoring loop, and persistence loop are untouched — so a
+// fresh baseline begins accumulating from the next 10-second scoring tick.
+// Use this after confirming a channel's learned baseline is poisoned (e.g.,
+// a spike fired during training) rather than deleting baseline.json from
+// under the running service (the file is rewritten on the next persistence
+// tick, so on-disk deletes without an in-memory wipe achieve nothing).
+func (s *Subsystem) ResetBaseline() error {
+	s.mu.Lock()
+	for channel, old := range s.detectors {
+		// Preserve the detector config (thresholds, cooldown, maturity
+		// threshold) — the reset only wipes sufficient statistics.
+		cfg := old.Cfg
+		s.detectors[channel] = NewDetector(s.cfg.MeanPerBucketPrior, s.cfg.PriorStrength, float64(s.cfg.HalfLifeBuckets), cfg)
+	}
+	path := s.baselinePath
+	s.mu.Unlock()
+
+	// Delete the persisted baseline so a crash-before-next-write doesn't
+	// resurrect the wiped state. Missing file is benign — the file is
+	// recreated on the next persistence tick regardless.
+	if path != "" {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("evtspike: remove baseline %q: %w", path, err)
+		}
+	}
+	slog.Info("", "evtspike", "baseline_reset", "host", s.host, "path", path)
+	if s.OnStatusChange != nil {
+		s.OnStatusChange(s.Status())
+	}
+	return nil
 }
 
 // quiesce cancels the run context, waits for scoring + persistence +

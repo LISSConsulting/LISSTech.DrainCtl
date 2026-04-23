@@ -23,9 +23,18 @@ const (
 	// When pmf falls below this the geometric-decaying remainder is
 	// negligible for any alert-threshold comparison (thresholds are at
 	// least 1e-12 in production).
-	negBinUnderflow                 = 1e-300
-	robustCapProb                   = 0.99
-	defaultSlotMaturityObservations = 7
+	negBinUnderflow = 1e-300
+	robustCapProb   = 0.99
+	// defaultSlotMaturityObservations sets the N threshold used by the
+	// dashboard badge (via detectorMature) and by ObserveBucket's
+	// slot-vs-global scoring fallback. ObserveBucket runs every 10 s, so
+	// one 15-minute visit to a slot contributes up to 90 observations;
+	// 90 means "this slot has been populated for at least one full
+	// time-of-day visit" before the UI claims the detector is HEALTHY
+	// and before scoring stops leaning on the global posterior. The
+	// previous value of 7 declared maturity after ~70 s of runtime —
+	// far too permissive for an anomaly baseline.
+	defaultSlotMaturityObservations = 90
 )
 
 // GammaState holds the sufficient statistics of a Gamma(alpha, beta) posterior.

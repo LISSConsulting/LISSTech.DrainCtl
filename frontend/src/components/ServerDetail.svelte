@@ -1,7 +1,7 @@
 <script>
     import RingGauge from './RingGauge.svelte';
     import Sparkline from './Sparkline.svelte';
-    import Chart from '../lib/chart.svelte';
+    import HostLoadChart from './HostLoadChart.svelte';
     import SpikeSwimlane from './SpikeSwimlane.svelte';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
@@ -420,23 +420,13 @@
         </div>
     </div>
 
-    <!-- Tile 4: Durable host load history — CPU, Memory, Sessions stacked.
-         Each chart owns its own zoom pill (5M/1H/1D/3D/5D), persisted in
-         localStorage; default is 1 day. -->
+    <!-- Tile 4: Durable host load history — CPU, CPU P95, Memory, and
+         Sessions on one dual-axis chart. Mirrors the Overview LOAD chart
+         scoped to this host, with its own window preset persisted in
+         localStorage. -->
     <div class="d-tile d-tile-chart">
         <div class="d-tile-label">Host Load</div>
-        <div class="d-subchart">
-            <div class="d-subchart-label">CPU %</div>
-            <Chart host={server.host} counter="cpu_pct" height={130} refreshMs={30_000} color="var(--color-accent)" />
-        </div>
-        <div class="d-subchart">
-            <div class="d-subchart-label">Memory %</div>
-            <Chart host={server.host} counter="mem_used_pct" height={130} refreshMs={30_000} color="var(--color-green)" />
-        </div>
-        <div class="d-subchart">
-            <div class="d-subchart-label">Sessions</div>
-            <Chart host={server.host} counter="sessions_total" height={130} refreshMs={30_000} color="var(--color-red)" />
-        </div>
+        <HostLoadChart host={server.host} />
     </div>
 
     <!-- Tile 5: Event-spike swimlane — always present so the detector-state
@@ -500,23 +490,6 @@
         flex: 1 0 100%;
         min-width: 0;
     }
-    .d-subchart {
-        margin-top: 8px;
-    }
-    .d-subchart:first-of-type {
-        margin-top: 0;
-    }
-    .d-subchart-label {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--color-muted);
-        margin: 0 0 2px 4px;
-        opacity: 0.7;
-    }
-
     /* Ring row */
     .d-ring-row {
         display: flex;
