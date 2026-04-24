@@ -1,12 +1,13 @@
 <script>
-    import { fetchSettings, saveSettings, sendNotifyTest } from '../lib/api.js';
+    import { fetchSettings, saveSettings, sendNotifyTest, fetchMaintenance } from '../lib/api.js';
     import { appState } from '../lib/state.svelte.js';
     import { toast } from '../lib/toast.svelte.js';
+    import { rel } from '../lib/utils.js';
     import NotificationTargets from './NotificationTargets.svelte';
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren } from 'lucide-svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor } from 'lucide-svelte';
 
     let { onclose } = $props();
 
@@ -51,6 +52,101 @@
         if (!config || !original) return false;
         return JSON.stringify(config) !== JSON.stringify(original);
     });
+
+    // ---------------------------------------------------------------------------
+    // Maintenance job widget — moved here from the global Footer. The Config
+    // modal is the natural operator landing place for day-two ops info, and
+    // keeping the widget out of the footer removes one always-on polling
+    // loop from the idle UI. Polling only runs while the modal is open.
+    // ---------------------------------------------------------------------------
+    /** @typedef {import('../lib/api.js').MaintenanceJob} MaintenanceJob */
+    /** @type {MaintenanceJob[]} */
+    let maintenanceJobs = $state([]);
+    /** @type {string|null} */
+    let maintenanceServerTime = $state(null);
+    let maintenanceLoading = $state(false);
+    let maintenanceError = $state('');
+    let maintenanceFetching = false;
+
+    async function refreshMaintenance() {
+        if (maintenanceFetching) return;
+        maintenanceFetching = true;
+        if (maintenanceJobs.length === 0) maintenanceLoading = true;
+        try {
+            const data = await fetchMaintenance();
+            maintenanceJobs = Array.isArray(data?.jobs) ? data.jobs : [];
+            maintenanceServerTime = data?.server_time ?? null;
+            maintenanceError = '';
+        } catch (e) {
+            maintenanceError = `Maintenance fetch failed: ${e?.message ?? e}`;
+        } finally {
+            maintenanceLoading = false;
+            maintenanceFetching = false;
+        }
+    }
+
+    $effect(() => {
+        // Modal mounted → kick off polling. 15-second cadence matches the
+        // old footer widget and contracts/http-maintenance.md. Cleanup on
+        // unmount stops the interval — no orphan fetches.
+        refreshMaintenance();
+        const id = setInterval(refreshMaintenance, 15_000);
+        return () => clearInterval(id);
+    });
+
+    const JOB_LONG = {
+        aggregator_5min: 'Aggregator 5m',
+        aggregator_hourly: 'Aggregator 1h',
+        retention: 'Retention',
+        jsonl_migration: 'JSONL Migration',
+        drift_reconciliation: 'Drift Reconciliation',
+    };
+    // Stable display order; jobs not listed fall to the tail alphabetically.
+    const JOB_ORDER = ['aggregator_5min', 'aggregator_hourly', 'retention', 'drift_reconciliation', 'jsonl_migration'];
+    // JSONL migration is a one-shot boot job; rendered for completeness here
+    // (unlike in the footer we have the room) — operators have asked what
+    // "JSONL = skipped" means at least once.
+    const maintNowMs = $derived.by(() => {
+        if (!maintenanceServerTime) return Date.now();
+        const t = new Date(maintenanceServerTime).getTime();
+        return Number.isFinite(t) && t > 0 ? t : Date.now();
+    });
+    const orderedMaintJobs = $derived.by(() => {
+        const idx = (name) => {
+            const p = JOB_ORDER.indexOf(name);
+            return p === -1 ? JOB_ORDER.length : p;
+        };
+        return [...maintenanceJobs].sort((a, b) => {
+            const ai = idx(a.name);
+            const bi = idx(b.name);
+            if (ai !== bi) return ai - bi;
+            return a.name.localeCompare(b.name);
+        });
+    });
+
+    /** @param {MaintenanceJob} job */
+    function jobGlyph(job) {
+        if (job.outcome === 'failure') return '✕';
+        if (job.overdue) return '!';
+        if (job.outcome === 'skipped') return '—';
+        return '✓';
+    }
+    /** @param {MaintenanceJob} job */
+    function jobStateClass(job) {
+        if (job.outcome === 'failure') return 'fail';
+        if (job.overdue) return 'warn';
+        if (job.outcome === 'skipped') return 'skip';
+        return 'ok';
+    }
+    /** @param {MaintenanceJob} job */
+    function jobLabel(name) {
+        return JOB_LONG[name] ?? name;
+    }
+
+    // Maintenance section is collapsed by default — the ops info is useful
+    // but it's not what operators open Config for, so don't let it steal
+    // viewport at the bottom of the modal unless explicitly asked for.
+    let showMaintenance = $state(false);
 
     $effect(() => {
         loadConfig();
@@ -739,8 +835,88 @@
                     </div>
                 {/if}
 
+                <!-- Display preferences -->
+                <div class="modal-section">
+                    <div class="section-header"><Monitor size={14} strokeWidth={2.5} /> Display</div>
+                    <label class="display-toggle">
+                        <input
+                            type="checkbox"
+                            checked={appState.reduceMotion}
+                            onchange={(e) => (appState.reduceMotion = e.currentTarget.checked)}
+                        />
+                        <span class="display-toggle-label">
+                            <span class="display-toggle-title">Reduce motion</span>
+                            <span class="display-toggle-desc">
+                                Disables UI animations, chart-overlay backdrop blur, and modal transitions. Flip this on
+                                when running the dashboard over RDP to cut the compositor cost; local desktop sessions
+                                should leave it off. Remembered per browser; initial value respects
+                                <code>prefers-reduced-motion</code>.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+
                 <!-- Notification Targets -->
                 <NotificationTargets bind:targets={config.notifications} bind:editTarget bind:editIdx bind:deleteIdx />
+
+                <!-- Maintenance jobs — background housekeeping (aggregators,
+                     retention, drift reconciliation). Formerly lived in the
+                     footer; moved here so the idle dashboard stays quiet.
+                     Collapsed by default — not what operators open Config for. -->
+                <div class="modal-section maint-section">
+                    <button
+                        type="button"
+                        class="maint-toggle"
+                        onclick={() => (showMaintenance = !showMaintenance)}
+                        aria-expanded={showMaintenance}
+                    >
+                        {#if showMaintenance}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+                        <Wrench size={14} strokeWidth={2.5} />
+                        <span>Maintenance</span>
+                    </button>
+                    {#if showMaintenance}
+                        <p class="section-hint">
+                            Background jobs the service runs against the SQLite telemetry store. Fetched live while
+                            this modal is open.
+                        </p>
+                        {#if maintenanceError}
+                            <div class="maint-row maint-error">{maintenanceError}</div>
+                        {:else if maintenanceLoading && orderedMaintJobs.length === 0}
+                            <div class="maint-row maint-loading">Loading maintenance status…</div>
+                        {:else if orderedMaintJobs.length === 0}
+                            <div class="maint-row maint-loading">No jobs reported.</div>
+                        {:else}
+                            <ul class="maint-list">
+                                {#each orderedMaintJobs as job (job.name)}
+                                    <li class="maint-row">
+                                        <span class="maint-glyph maint-{jobStateClass(job)}" aria-hidden="true"
+                                            >{jobGlyph(job)}</span
+                                        >
+                                        <span class="maint-label">{jobLabel(job.name)}</span>
+                                        <span class="maint-outcome maint-{jobStateClass(job)}">{job.outcome}</span>
+                                        <span class="maint-meta">
+                                            {#if job.finished}
+                                                <span>{rel(job.finished, maintNowMs)}</span>
+                                            {/if}
+                                            {#if job.duration_ms != null}
+                                                <span>· {job.duration_ms} ms</span>
+                                            {/if}
+                                            {#if job.rows_affected != null}
+                                                <span>· {job.rows_affected.toLocaleString()} rows</span>
+                                            {/if}
+                                            {#if job.overdue}
+                                                <span class="maint-warn">· overdue</span>
+                                            {/if}
+                                        </span>
+                                        {#if job.outcome === 'failure' && job.reason}
+                                            <div class="maint-reason">{job.reason}</div>
+                                        {/if}
+                                    </li>
+                                {/each}
+                            </ul>
+                        {/if}
+                    {/if}
+                </div>
 
                 <!-- Actions bar -->
                 <div class="settings-actions-wrap">
@@ -899,6 +1075,176 @@
         color: var(--color-accent);
         margin-bottom: 0;
         padding: 6px 0 2px;
+    }
+    .modal-section {
+        margin-top: 26px;
+    }
+    .section-hint {
+        font-size: 0.75rem;
+        color: var(--color-muted);
+        margin: 4px 0 10px;
+        line-height: 1.5;
+    }
+
+    /* Display preferences — reduce-motion toggle. */
+    .display-toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-default);
+        background: var(--color-surface);
+        cursor: pointer;
+    }
+    .display-toggle input[type='checkbox'] {
+        margin-top: 3px;
+        cursor: pointer;
+        /* Make the native checkbox honour the theme — the browser UA
+           otherwise paints it light-on-light (invisible check) or
+           light-on-dark (bright white square floating in dark mode). */
+        accent-color: var(--color-accent);
+        width: 14px;
+        height: 14px;
+    }
+    .display-toggle-label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .display-toggle-title {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--color-fg);
+    }
+    .display-toggle-desc {
+        font-size: 0.75rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+    }
+    .display-toggle-desc code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+        padding: 1px 5px;
+        border-radius: 3px;
+    }
+
+    /* Maintenance section — collapsed by default. Toggle mirrors the
+       "Customize settings manually" pattern so operators recognise the
+       chevron + label affordance. */
+    .maint-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0 2px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--color-accent);
+        font-family: inherit;
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+    .maint-toggle:hover {
+        color: var(--color-fg);
+    }
+
+    /* Maintenance job list — same vocabulary as the old footer widget, but
+       laid out as rows so there's room for timing + row counts. */
+    .maint-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .maint-row {
+        display: grid;
+        grid-template-columns: 22px 1fr auto;
+        grid-template-rows: auto auto;
+        column-gap: 10px;
+        align-items: baseline;
+        padding: 8px 12px;
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-default);
+        background: var(--color-surface);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.78rem;
+    }
+    .maint-row.maint-error,
+    .maint-row.maint-loading {
+        grid-template-columns: 1fr;
+        color: var(--color-muted);
+    }
+    .maint-row.maint-error {
+        color: var(--color-red);
+    }
+    .maint-glyph {
+        grid-row: 1;
+        grid-column: 1;
+        font-weight: 800;
+        text-align: center;
+    }
+    .maint-glyph.maint-ok {
+        color: var(--color-green);
+    }
+    .maint-glyph.maint-warn {
+        color: var(--color-amber);
+    }
+    .maint-glyph.maint-fail {
+        color: var(--color-red);
+    }
+    .maint-glyph.maint-skip {
+        color: var(--color-subtle);
+    }
+    .maint-label {
+        grid-row: 1;
+        grid-column: 2;
+        font-weight: 700;
+        color: var(--color-fg);
+    }
+    .maint-outcome {
+        grid-row: 1;
+        grid-column: 3;
+        text-transform: uppercase;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+    }
+    .maint-outcome.maint-ok {
+        color: var(--color-green);
+    }
+    .maint-outcome.maint-warn {
+        color: var(--color-amber);
+    }
+    .maint-outcome.maint-fail {
+        color: var(--color-red);
+    }
+    .maint-outcome.maint-skip {
+        color: var(--color-subtle);
+    }
+    .maint-meta {
+        grid-row: 2;
+        grid-column: 2 / span 2;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        color: var(--color-muted);
+        font-size: 0.72rem;
+    }
+    .maint-meta .maint-warn {
+        color: var(--color-amber);
+    }
+    .maint-reason {
+        grid-row: 3;
+        grid-column: 2 / span 2;
+        margin-top: 6px;
+        color: var(--color-red);
+        font-size: 0.72rem;
     }
     .subsection {
         border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);

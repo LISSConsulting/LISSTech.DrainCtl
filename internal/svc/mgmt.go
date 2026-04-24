@@ -9,6 +9,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
@@ -195,7 +196,7 @@ func RestartService() error {
 // local group so the service can subscribe to Security log events.
 func GrantEventLogAccess() error {
 	account := `NT SERVICE\` + dc.ServiceName
-	out, err := exec.Command("net", "localgroup", "Event Log Readers", account, "/add").CombinedOutput()
+	out, err := winexec.Command("net", "localgroup", "Event Log Readers", account, "/add").CombinedOutput()
 	if err != nil {
 		// Error 1378 = "already a member" — not a real failure.
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {

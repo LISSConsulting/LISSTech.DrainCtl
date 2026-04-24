@@ -6,7 +6,7 @@
 
 <p align="center"><strong>Real-time Remote Desktop Session Host drain mode monitoring for Windows Server.</strong></p>
 
-![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue)
 [![Version](https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?label=Version&color=green)](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest)
@@ -199,6 +199,11 @@ drainctl notify add         Add a notification target
 drainctl notify remove      Remove a notification target
 drainctl notify list        List configured notification targets
 drainctl notify test        Send a test notification to all targets
+drainctl register           Register this host with the dashboard
+drainctl dashboard          Dashboard-related helpers (cert info, etc.)
+drainctl configure          Interactive/flag-driven config editor
+drainctl sessions           Show live RDSH session enumeration
+drainctl baseline reset     Wipe the evtspike anomaly-detector baseline
 ```
 
 ### Global Flags
@@ -207,7 +212,7 @@ drainctl notify test        Send a test notification to all targets
 |------|---------|-------------|
 | `--db` | `%ProgramData%\...\audit.jsonl` | Legacy audit-path flag kept for backwards compatibility; the CLI uses the file's **parent directory** as the telemetry data dir and always opens `drainctl.db` inside it (read-only — the service owns the writer) |
 | `--format` | `plain` (check) / `table` (history) | Output: `plain`, `table`, `csv`, `json` |
-| `--quiet` | `false` | Suppress intermediate log lines |
+| `--log-level` | `info` | CLI log verbosity: `debug`, `info`, `warn`, `error` |
 
 ### Check Flags
 
@@ -233,6 +238,12 @@ drainctl notify test        Send a test notification to all targets
 | `drainctl notify test` | Send a test notification to all configured targets |
 | `drainctl notify set-webhook <url>` | Convenience: add/update a single webhook target |
 | `drainctl notify set-ntfy <url>` | Convenience: add/update a single ntfy target |
+
+### Baseline Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `drainctl baseline reset` | Ask the running service (via named pipe) to wipe all in-memory evtspike detectors and delete `baseline.json`. Useful when a flood has poisoned the baseline and you want scoring to restart from the prior without restarting the service. The service must be running — the file on disk is rewritten from memory on every persistence tick, so `del baseline.json` on its own has no durable effect. |
 
 ### Exit Codes
 
@@ -314,6 +325,19 @@ Events are written to `Application` log under source `DrainCtl`:
 | 2000 | Warning | Check: drain mode in grace period |
 | 3000 | Error | Check: drain mode alert (grace exceeded) |
 | 3001 | Error | Registry read failure |
+
+### Logging sinks
+
+DrainCtl emits structured (`slog`) logs to two sinks in parallel:
+
+- **File** — `%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.log`. Rotates at local midnight: the active file is renamed to `drainctl-YYYY-MM-DD.log` and a fresh `drainctl.log` is opened; archives older than 7 days are pruned automatically. File-sink level is controlled by `log_file_level` in `config.json`.
+- **ETW** — manifest provider `LISS Technologies-DrainCtl` with Operational (INF+) and Debug (DBG) channels. Disabled by default; enable via `wevtutil` to stream to an ETL consumer. ETW-sink level is controlled by `log_event_level`.
+
+Both levels accept `debug`, `info`, `warn`, `error`. The CLI's own verbosity is controlled separately by `--log-level`.
+
+### Dashboard-authoritative configuration
+
+When an agent is registered with a dashboard, the dashboard is the source of truth for: grace period, session/performance thresholds, `performance.*`, `evtspike.enabled`, and the notification target list. Agents pull the effective config on every poll cycle and also synchronously on local `config.json` reload, so edits made to the dashboard propagate within one poll interval and local edits do not diverge silently.
 
 ---
 
@@ -537,7 +561,7 @@ ntfy messages use priority 3 for `status: "warning"` and priority 4 for `status:
 | `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability below which a bucket counts as anomalous |
 | `evtspike.min_count` | int | `10` | Lower observed-event floor; buckets below this never flag regardless of tail probability |
 | `evtspike.cooldown_minutes` | int | `15` | Minimum time between `event_spike` notifications for the same (host, channel) |
-| `evtspike.slot_maturity_observations` | int | `7` | Observations before a per-slot baseline is considered mature (~1 week at 1 visit/day/slot) |
+| `evtspike.slot_maturity_observations` | int | `90` | Observations before a per-slot baseline is considered mature. Scoring runs every 10 s, so one 15-minute visit to a time-of-day slot contributes up to 90 observations — 90 means "this slot has been populated for at least one full visit" before the detector is declared HEALTHY and scoring stops leaning on the global posterior |
 | `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence |
 | `evtspike.half_life_buckets` | int | `8640` | EWMA half-life in 10 s buckets (~1 day) for baseline adaptation |
 | `evtspike.prior_strength` | float | `1.0` | Gamma prior α/β strength; higher = more resistant to early outliers |
@@ -676,11 +700,20 @@ The service exposes an authenticated (Kerberos SSO via `Negotiate`) HTTP API on 
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/v1/metrics/{host}` | Per-host time-series of counters (`cpu_pct`, `mem_avail_mb`, …) at raw / 5-min / hourly resolution; `resolution=auto` picks a tier from the requested window |
+| `GET /api/v1/metrics/{host}` | Per-host time-series of counters (`cpu_pct`, `mem_avail_mb`, …) at raw / 1-min / 5-min / hourly resolution; `resolution=auto` picks a tier from the requested window |
+| `GET /api/v1/metrics/_fleet` | Same shape as per-host, but with the `_fleet` sentinel the server aggregates across every known host — used by the Overview charts (LOAD, Health Indicators, Sessions, RemoteFX) |
 | `GET /api/v1/audit` | Time-range query over drain-mode audit events with `host` / `actor` / `changes_only` filters and cursor pagination |
 | `GET /api/v1/maintenance/status` | Last-run timestamp, duration, outcome, and `overdue` flag for every background job (aggregator tiers, retention, jsonl_migration, drift_reconciliation) |
 
 The legacy `GET /api/v1/history/{host}` endpoint was removed in the 007 release and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`. Consumers should split their calls: metrics to `/api/v1/metrics/{host}`, audit events to `/api/v1/audit`.
+
+### Dashboard charts
+
+The bundled dashboard frontend (LayerCake + Svelte 5) consumes the endpoints above:
+
+- **Overview** — four fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / disk queue), **Health Indicators** (input-delay p95, session utilization), **Sessions** (active / disconnected / total across the fleet), and **RemoteFX** (graphics + network counters when `performance.collect_remotefx` is enabled on any host). Fleet bucketing: raw samples are aligned into 10-second buckets across hosts before averaging; rolled-up tiers average each host's pre-computed bucket.
+- **Server Detail → HostLoadChart** — a single-host, multi-counter view of the same LOAD panel, stacked against drain-mode audit events on the same time axis. Uses `/api/v1/metrics/{host}` directly.
+- **Event Spikes** — status pill and recent-spikes list on Server Detail, fed from `/api/v1/evtspike/spikes` and the per-host detector status.
 
 ---
 
@@ -707,8 +740,8 @@ This configures:
 
 ### Prerequisites
 
-- Go 1.22+
-- MinGW (for CGo / DLL build): `scoop install mingw`
+- Go 1.26+
+- MinGW (for DLL build): `scoop install mingw`
 - WiX Toolset 5.x: `dotnet tool install -g wix`
 - .NET SDK 8.0+
 

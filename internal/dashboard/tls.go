@@ -17,9 +17,10 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 )
 
 // loadOrGenerateTLS returns a tls.Config for the dashboard.
@@ -182,7 +183,7 @@ func writeRestrictedFile(path string, data []byte) error {
 		{"icacls", path, "/grant", "*S-1-5-6:(R)"},      // SERVICE group (virtual service accounts) — read only
 	}
 	for _, args := range cmds {
-		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+		if out, err := winexec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
 			return fmt.Errorf("%s: %w (%s)", args[0], err, string(out))
 		}
 	}

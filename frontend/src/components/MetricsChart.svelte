@@ -160,6 +160,24 @@
     let dragStartX = 0;
     let dragStartOffset = 0;
     let dragPendingOffsetMs = 0;
+    // didDrag separates "click to pin/unpin" from "drag to pan". Flips to
+    // true once the pointer passes DRAG_THRESHOLD_PX during a mousedown
+    // cycle; a capture-phase click listener on the chart body consumes it
+    // so the post-drag click never reaches DualAxisChart's pin toggle.
+    // Threshold is generous — trackpad clicks routinely drift 5–8 px and
+    // getting swallowed as a "drag" would eat every pin attempt.
+    //
+    // $state so the class:dragging binding on .pan-wrap flips in lock-
+    // step: dragging activates only once we've committed to a real pan,
+    // which keeps the child SVG's pointer-events interactive during
+    // simple clicks. If dragging engaged on mousedown the child's click
+    // target would be hidden behind pointer-events:none by the time
+    // mouseup fires → click lands on .pan-wrap, never on the rect, pin
+    // never triggers.
+    let didDrag = $state(false);
+    const DRAG_THRESHOLD_PX = 12;
+    /** @type {HTMLDivElement|null} */
+    let loadChartBodyEl = $state(null);
 
     $effect(() => {
         const windowMs = appState.overviewWindowMs;
@@ -188,90 +206,135 @@
         };
     });
 
-    // ── Wheel-zoom: cycle between window presets ──────────────────────────────
-    /** @param {WheelEvent} e */
-    function onLoadChartWheel(e) {
-        e.preventDefault();
-        const presets = OVERVIEW_WINDOW_PRESETS;
-        const idx = presets.findIndex((p) => p.key === appState.overviewWindow);
-        if (e.deltaY < 0 && idx > 0) {
-            panOffsetMs = 0;
-            appState.overviewWindow = presets[idx - 1].key;
-            appState.overviewWindowSource = 'zoom';
-        } else if (e.deltaY > 0 && idx < presets.length - 1) {
-            panOffsetMs = 0;
-            appState.overviewWindow = presets[idx + 1].key;
-            appState.overviewWindowSource = 'zoom';
-        }
-    }
+    // Wheel zoom intentionally disabled — operators reported accidental
+    // trackpad scrolls hijacking the chart. Zoom is driven by the preset
+    // pills (15M/1H/1D/3D/5D) only. lib/chart.svelte applies the same
+    // policy for per-host charts.
 
     // ── Drag-pan: shift the time window into the past ─────────────────────────
+    // Outer-wrapper drag: attached to the sub-tab container so any drag
+    // anywhere on the Overview page body pans the shared time window.
+    // dragStartWidth is captured on mousedown from event.currentTarget so
+    // the pixel→time conversion scales to whatever container the gesture
+    // actually started in (LOAD card, HIC grid, Sessions grid, RFX grid).
+    let dragStartWidth = 0;
+
     /** @param {MouseEvent} e */
     function onLoadChartMouseDown(e) {
         if (e.button !== 0) return;
+        // Ignore drags that start on real interactive controls so clicks
+        // still register on them. Deliberately NOT including
+        // [role="button"] — DualAxisChart's tooltip-capture overlay rect
+        // carries role="button" for accessibility and a blanket filter
+        // there kills panning on every chart overlay.
+        const target = /** @type {Element} */ (e.target);
+        if (target.closest && target.closest('button, input, a, select, textarea')) return;
         isDragging = true;
+        didDrag = false;
         dragStartX = e.clientX;
         dragStartOffset = panOffsetMs;
         dragPendingOffsetMs = panOffsetMs;
-        appState.hoveredChartIndex = null;
-        appState.pinnedChartIndex = null;
+        dragStartWidth = /** @type {HTMLElement} */ (e.currentTarget).clientWidth;
+        // Don't touch pinnedChartIndex here — the second-click-to-unpin
+        // path in DualAxisChart owns pin toggling. Tooltip hover is
+        // cleared below only once the gesture commits to a drag.
     }
 
     /** @param {MouseEvent} e */
     function onLoadChartMouseMove(e) {
         if (!isDragging) return;
         const dx = e.clientX - dragStartX;
-        const dMs = (dx / Math.max(loadContainerW, 1)) * appState.overviewWindowMs;
-        // Dragging right = moving back in time (larger offset from now).
-        // Dragging left = moving forward in time (smaller offset, min 0 = live).
-        dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+        if (!didDrag && Math.abs(dx) > DRAG_THRESHOLD_PX) {
+            didDrag = true;
+            appState.hoveredChartIndex = null;
+        }
+        if (didDrag) {
+            const dMs = (dx / Math.max(dragStartWidth, 1)) * appState.overviewWindowMs;
+            // Dragging right = moving back in time (larger offset from now).
+            // Dragging left = moving forward in time (smaller offset, min 0 = live).
+            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+        }
     }
 
     function onLoadChartMouseUp() {
-        if (isDragging && dragPendingOffsetMs !== panOffsetMs) {
+        if (isDragging && didDrag && dragPendingOffsetMs !== panOffsetMs) {
             panOffsetMs = dragPendingOffsetMs;
             appState.overviewWindowSource = 'pan';
         }
         isDragging = false;
+        // didDrag is consumed by the capture-phase click handler below.
     }
 
     function onLoadChartMouseLeave() {
-        if (isDragging && dragPendingOffsetMs !== panOffsetMs) {
+        if (isDragging && didDrag && dragPendingOffsetMs !== panOffsetMs) {
             panOffsetMs = dragPendingOffsetMs;
             appState.overviewWindowSource = 'pan';
         }
         isDragging = false;
     }
 
+    // Swallow the synthetic click that follows a real drag so it can't
+    // reach DualAxisChart's pin toggle. Capture phase fires before the
+    // target so stopPropagation wins the race.
+    $effect(() => {
+        const el = loadChartBodyEl;
+        if (!el) return;
+        const handler = (/** @type {MouseEvent} */ e) => {
+            if (didDrag) {
+                e.stopPropagation();
+                e.preventDefault();
+                didDrag = false;
+            }
+        };
+        el.addEventListener('click', handler, { capture: true });
+        return () => el.removeEventListener('click', handler, { capture: true });
+    });
+
     /**
      * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
-     * Uses cpu_pct timestamps as the canonical index; other counters fill in by position.
+     * Joins counters on timestamp rather than array index — different counters
+     * may have different lengths when individual samples are missing, and
+     * positional indexing mispairs them (e.g. cpu_pct[i] paired with a
+     * cpu_p95_pct[i] from a different ts → P95 reads as 0 against a real CPU).
      * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
      * @returns {import('../lib/state.svelte.js').MetricsSample[]}
      */
     function adaptFleetToMetricsSamples(series) {
         const cpu = series['cpu_pct'];
         if (!cpu || cpu.t.length === 0) return [];
-        const avail = series['mem_avail_mb']?.avg ?? [];
-        const total = series['mem_total_mb']?.avg ?? [];
-        const sess = series['sessions_total']?.avg ?? [];
-        const id = series['input_delay_p95_ms']?.avg ?? [];
-        const ps = series['pages_sec']?.avg ?? [];
-        const tr = series['tcp_retrans_sec']?.avg ?? [];
-        const dq = series['disk_queue']?.avg ?? [];
-        return cpu.t.map((ts, i) => {
-            const a = avail[i] ?? 0;
-            const m = total[i] ?? 0;
+        const tsMap = (s, field = 'avg') => {
+            const m = new Map();
+            if (!s) return m;
+            const t = s.t || [];
+            const v = s[field] || [];
+            for (let i = 0; i < t.length; i++) m.set(t[i], v[i]);
+            return m;
+        };
+        const cpuAvg = tsMap(cpu, 'avg');
+        const cpuMax = tsMap(cpu, 'max');
+        const availMap = tsMap(series['mem_avail_mb']);
+        const totalMap = tsMap(series['mem_total_mb']);
+        const sessMap = tsMap(series['sessions_total']);
+        const idMap = tsMap(series['input_delay_p95_ms']);
+        const psMap = tsMap(series['pages_sec']);
+        const trMap = tsMap(series['tcp_retrans_sec']);
+        const dqMap = tsMap(series['disk_queue']);
+        return cpu.t.map((ts) => {
+            const cpuV = cpuAvg.get(ts) ?? 0;
+            const cpuP95V = cpuMax.get(ts);
+            const a = availMap.get(ts) ?? 0;
+            const m = totalMap.get(ts) ?? 0;
+            const sV = sessMap.get(ts);
             return {
                 time: ts,
-                cpu: cpu.avg[i] ?? 0,
-                cpuP95: cpu.max[i] ?? cpu.avg[i] ?? 0,
+                cpu: cpuV,
+                cpuP95: cpuP95V != null && cpuP95V > 0 ? cpuP95V : cpuV,
                 mem: m > 0 ? (1 - a / m) * 100 : 0,
-                sessions: Math.round(sess[i] ?? 0),
-                inputDelay: id[i] ?? 0,
-                pagesPerSec: ps[i] ?? 0,
-                tcpRetrans: tr[i] ?? 0,
-                diskQueue: dq[i] ?? 0,
+                sessions: sV != null ? Math.round(sV) : 0,
+                inputDelay: idMap.get(ts) ?? 0,
+                pagesPerSec: psMap.get(ts) ?? 0,
+                tcpRetrans: trMap.get(ts) ?? 0,
+                diskQueue: dqMap.get(ts) ?? 0,
                 p50InputDelay: 0,
                 p50PagesPerSec: 0,
                 p50TcpRetrans: 0,
@@ -427,7 +490,18 @@
 
     // ── RemoteFX charts ───────────────────────────────────────────────────────
     let rfxHistory = $derived(adaptFleetToRfxSamples(fleetResponse?.series ?? {}));
-    let rfxAvailable = $derived((fleetResponse?.series?.['rfx_fps_out']?.t?.length ?? 0) > 0);
+    // Sticky flag: once we've seen RemoteFX data in this session we keep the
+    // tab visible even when the user pans into a window with no RFX samples.
+    // Without this, panning past the covered range flips rfxAvailable false,
+    // the auto-switch effect kicks the user back to Performance, and the
+    // RemoteFX tab button disappears — with no way to get back.
+    let rfxEverSeen = $state(false);
+    $effect(() => {
+        if ((fleetResponse?.series?.['rfx_fps_out']?.t?.length ?? 0) > 0) {
+            rfxEverSeen = true;
+        }
+    });
+    let rfxAvailable = $derived(rfxEverSeen);
 
     /** Stable identity transform — avoids allocating a new function on every render. */
     const IDENTITY = (/** @type {number} */ v) => v;
@@ -683,7 +757,18 @@
 </div>
 
 {#key activeTab}
-    <div in:fly={{ y: 12, duration: 120, delay: 60 }} out:fly={{ y: -6, duration: 80 }}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        class="pan-wrap"
+        class:dragging={isDragging && didDrag}
+        in:fly={{ y: 12, duration: 120, delay: 60 }}
+        out:fly={{ y: -6, duration: 80 }}
+        bind:this={loadChartBodyEl}
+        onmousedown={onLoadChartMouseDown}
+        onmousemove={onLoadChartMouseMove}
+        onmouseup={onLoadChartMouseUp}
+        onmouseleave={onLoadChartMouseLeave}
+    >
         <!-- ── LOAD chart card ── -->
         {#if activeTab === 'performance'}
             <div class="chart-wrap">
@@ -733,17 +818,7 @@
                     </div>
                     <div class="chart-panel">
                         <div class="load-chart-header">
-                            <div>
-                                {#if panOffsetMs > 0}
-                                    <button
-                                        class="back-to-live"
-                                        onclick={() => { panOffsetMs = 0; }}
-                                        title="Return to live data"
-                                    >
-                                        ↺ LIVE
-                                    </button>
-                                {/if}
-                            </div>
+                            <div></div>
                             <div class="load-currents" style="padding-right: {hasRight ? 64 : 16}px">
                                 {#each loadCurrents as lc}
                                     {#if lc.show()}
@@ -757,24 +832,11 @@
                                 {/each}
                             </div>
                         </div>
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
                         <div
                             class="chart-body upper-chart"
-                            class:dragging={isDragging}
                             bind:clientWidth={loadContainerW}
-                            onwheel={onLoadChartWheel}
-                            onmousedown={onLoadChartMouseDown}
-                            onmousemove={onLoadChartMouseMove}
-                            onmouseup={onLoadChartMouseUp}
-                            onmouseleave={onLoadChartMouseLeave}
                         >
-                            {#if fleetLoading}
-                                <div class="chart-placeholder">Loading retained history…</div>
-                            {:else if fleetError}
-                                <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
-                            {:else if history.length < 2}
-                                <div class="chart-placeholder">No retained history for this window</div>
-                            {:else if loadContainerW > 0}
+                            {#if loadContainerW > 0}
                                 <LayerCake
                                     data={lcData}
                                     x="x"
@@ -820,6 +882,25 @@
                                     </Svg>
                                 </LayerCake>
                             {/if}
+                            <!-- Status messages are overlaid on the chart frame
+                                 rather than replacing it — operator keeps the
+                                 axes, threshold lines, and cursor context while
+                                 dragging back into covered history. When the
+                                 empty window is the result of panning past
+                                 coverage, surface a LIVE button so the way
+                                 back is one click, not a guessing game. -->
+                            {#if fleetLoading}
+                                <div class="chart-overlay">Loading retained history…</div>
+                            {:else if fleetError}
+                                <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+                            {:else if history.length < 2}
+                                <div class="chart-overlay">
+                                    {#if panOffsetMs > 0}
+                                        <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                    {/if}
+                                    <span>No retained history for this window</span>
+                                </div>
+                            {/if}
                         </div>
                     </div>
                 </div>
@@ -849,13 +930,13 @@
                         </p>
                     {/if}
 
-                    {#if fleetLoading}
-                        <div class="chart-placeholder">Loading retained history…</div>
-                    {:else if fleetError}
-                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
-                    {:else if history.length === 0}
-                        <div class="chart-placeholder">No retained history for this window</div>
-                    {:else}
+                    <!-- Always render the grid so the chart frames stay
+                         visible while panning into empty history. Each
+                         MiniHealthChart carries its own empty-state
+                         placeholder; the section-level overlay below
+                         surfaces the fleet-wide error or loading state
+                         without hiding the grid underneath. -->
+                    <div class="hic-section-body">
                         <div class="hic-grid {gridLayout ? '' : 'single-col'}">
                             {#each HIC_CHARTS as mc, i}
                                 <HealthIndicatorChart
@@ -874,7 +955,17 @@
                                 />
                             {/each}
                         </div>
-                    {/if}
+                        {#if fleetLoading}
+                            <div class="chart-overlay">Loading retained history…</div>
+                        {:else if fleetError}
+                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+                        {:else if history.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay">
+                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <span>No retained history for this window</span>
+                            </div>
+                        {/if}
+                    </div>
                 </div>
             </div>
         {/if}
@@ -904,13 +995,7 @@
                         </p>
                     {/if}
 
-                    {#if fleetLoading}
-                        <div class="chart-placeholder">Loading retained history…</div>
-                    {:else if fleetError}
-                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
-                    {:else if sessionHistory.length === 0}
-                        <div class="chart-placeholder">No retained history for this window</div>
-                    {:else}
+                    <div class="hic-section-body">
                         <div class="hic-grid {gridLayout ? '' : 'single-col'}">
                             {#each SESSION_CHARTS as mc, i}
                                 <HealthIndicatorChart
@@ -937,7 +1022,17 @@
                                 />
                             {/each}
                         </div>
-                    {/if}
+                        {#if fleetLoading}
+                            <div class="chart-overlay">Loading retained history…</div>
+                        {:else if fleetError}
+                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+                        {:else if sessionHistory.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay">
+                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <span>No retained history for this window</span>
+                            </div>
+                        {/if}
+                    </div>
                 </div>
             </div>
         {/if}
@@ -967,13 +1062,7 @@
                         </p>
                     {/if}
 
-                    {#if fleetLoading}
-                        <div class="chart-placeholder">Loading retained history…</div>
-                    {:else if fleetError}
-                        <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
-                    {:else if rfxHistoryProcessed.length === 0}
-                        <div class="chart-placeholder">No retained history for this window</div>
-                    {:else}
+                    <div class="hic-section-body">
                         <div class="rfx-grid {gridLayout ? '' : 'single-col'}">
                             {#each RFX_CHARTS as mc, i}
                                 <HealthIndicatorChart
@@ -994,7 +1083,17 @@
                                 />
                             {/each}
                         </div>
-                    {/if}
+                        {#if fleetLoading}
+                            <div class="chart-overlay">Loading retained history…</div>
+                        {:else if fleetError}
+                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+                        {:else if rfxHistoryProcessed.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay">
+                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <span>No retained history for this window</span>
+                            </div>
+                        {/if}
+                    </div>
                 </div>
             </div>
         {/if}
@@ -1286,19 +1385,44 @@
         height: 240px;
     }
 
-    .chart-placeholder {
+    /* Overlay that sits on top of the chart frame without removing it.
+       pointer-events:none so drag-pan under the overlay still works —
+       the whole point is to keep the chart grab-draggable while we show
+       "No retained history for this window" or a loading/error banner.
+       When a LIVE button is present it opts back into pointer events so
+       the click still registers. */
+    .chart-overlay {
+        position: absolute;
+        inset: 0;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 100%;
-        min-height: 80px;
+        gap: 10px;
+        padding: 8px 16px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem;
         color: var(--color-muted);
+        background: color-mix(in srgb, var(--color-bg) 72%, transparent);
+        backdrop-filter: blur(1px);
+        pointer-events: none;
+        z-index: 2;
     }
 
-    .chart-placeholder.chart-error {
+    .chart-overlay.chart-error {
         color: var(--color-red);
+    }
+
+    /* Re-enable click handling just for the LIVE button inside the
+       otherwise-pan-through overlay. */
+    .overlay-live {
+        pointer-events: auto;
+    }
+
+    /* Positioning context for per-section overlays (HIC / Session / RFX
+       grids). The grid renders normally; the overlay sits flush above it. */
+    .hic-section-body {
+        position: relative;
     }
 
     /* ── Health Indicators section ── */
@@ -1337,14 +1461,23 @@
         }
     }
 
-    /* ── LOAD chart interaction ── */
-    .upper-chart {
-        cursor: ew-resize;
+    /* ── Pan interaction — spans the whole sub-tab body ── */
+    .pan-wrap {
+        cursor: grab;
     }
 
-    .upper-chart.dragging {
+    .pan-wrap.dragging {
         cursor: grabbing;
         user-select: none;
+    }
+
+    /* During an active pan, stop every inner SVG from receiving mouse
+       events. Without this, DualAxisChart / MiniHealthChart keep updating
+       their own hover crosshairs / tooltips, making it look like the
+       tooltip is fighting the pan. The outer div still sees the events
+       for gesture tracking. */
+    .pan-wrap.dragging :global(svg) {
+        pointer-events: none;
     }
 
     .back-to-live {

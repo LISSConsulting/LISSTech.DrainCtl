@@ -37,6 +37,7 @@
 /* ─── Dark theme (system preference) ─────────────────────────────────────── */
 @media (prefers-color-scheme: dark) {
     :root {
+        color-scheme: dark;
         --color-bg: #110a0a;
         --color-fg: #f5e8e8;
         --color-card: #1f1414;
@@ -51,6 +52,10 @@
 
 /* ─── Dark theme (manual override) ───────────────────────────────────────── */
 html[data-theme='dark'] {
+    /* color-scheme tells the UA to render native form controls (checkbox,
+       select, scrollbar) with dark defaults. Without it, the native
+       checkbox in ConfigModal paints light-on-dark and looks wrong. */
+    color-scheme: dark;
     --color-bg: #110a0a;
     --color-fg: #f5e8e8;
     --color-card: #1f1414;
@@ -64,6 +69,7 @@ html[data-theme='dark'] {
 
 /* ─── Light theme (manual override) ──────────────────────────────────────── */
 html[data-theme='light'] {
+    color-scheme: light;
     --color-bg: #fdf8f6;
     --color-fg: #2d1a1a;
     --color-accent: #a3475b;
@@ -318,4 +324,28 @@ input[type='checkbox']:focus-visible {
         opacity: 1;
         transform: none;
     }
+}
+
+/* ─── Reduce-motion escape hatch ─────────────────────────────────────────────
+   Set by App.svelte when appState.reduceMotion is true (toggled in the
+   Config modal, initial value derived from the OS prefers-reduced-motion
+   signal). Neutralises every keyframe animation, transition, and
+   backdrop blur in the whole tree.
+
+   RDP sessions cannot composite backdrop-filter / continuous animations
+   without real CPU cost on the remote endpoint — opting out there turns
+   the dashboard from "laggy over the wire" into "flat but instant". The
+   dashboard is an operator tool, not a marketing site; holding on to the
+   motion polish isn't worth the responsiveness tax.
+   ────────────────────────────────────────────────────────────────────────── */
+body[data-reduce-motion='true'] *,
+body[data-reduce-motion='true'] *::before,
+body[data-reduce-motion='true'] *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }

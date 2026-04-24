@@ -12,7 +12,7 @@
         appendRecentSpike,
         removeEvtSpikeState,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, fetchMaintenance } from './lib/api.js';
+    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
 
@@ -39,36 +39,6 @@
     let configOpen = $state(false);
     /** @type {string|null} */
     let historyHost = $state(null);
-
-    // ---------------------------------------------------------------------------
-    // Maintenance status widget state (FR-030)
-    // The widget itself is pure presentation; this component owns the fetch
-    // and the 15-second refresh cadence matching contracts/http-maintenance.md.
-    // ---------------------------------------------------------------------------
-    /** @type {import('./lib/api.js').MaintenanceJob[]} */
-    let maintenanceJobs = $state([]);
-    /** @type {string|null} */
-    let maintenanceServerTime = $state(null);
-    let maintenanceLoading = $state(false);
-    let maintenanceError = $state('');
-
-    let maintenanceFetching = false;
-    async function refreshMaintenance() {
-        if (maintenanceFetching) return;
-        maintenanceFetching = true;
-        if (maintenanceJobs.length === 0) maintenanceLoading = true;
-        try {
-            const data = await fetchMaintenance();
-            maintenanceJobs = Array.isArray(data?.jobs) ? data.jobs : [];
-            maintenanceServerTime = data?.server_time ?? null;
-            maintenanceError = '';
-        } catch (e) {
-            maintenanceError = `Maintenance fetch failed: ${e?.message ?? e}`;
-        } finally {
-            maintenanceLoading = false;
-            maintenanceFetching = false;
-        }
-    }
 
     // ---------------------------------------------------------------------------
     // State transition tracking — detect status changes between refresh cycles
@@ -356,6 +326,20 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
+    // Reduce-motion toggle: stamp the preference on <body> so the global CSS
+    // in app.css can neutralise animations, transitions, and backdrop blurs
+    // without every component having to opt in individually. This is the
+    // single escape hatch for RDP sessions where compositor-heavy effects
+    // cost real CPU on the thin-client endpoint.
+    $effect(() => {
+        const on = appState.reduceMotion;
+        if (on) {
+            document.body.setAttribute('data-reduce-motion', 'true');
+        } else {
+            document.body.removeAttribute('data-reduce-motion');
+        }
+    });
+
     // On mount, check for an existing valid session. If the cookie is still live
     // the user goes straight to the dashboard; otherwise the login page shows
     // immediately — no Negotiate handshake, no Windows popup.
@@ -381,22 +365,6 @@
             // status hasn't changed since the last session.
             prevStates.clear();
             prevAlerts.clear();
-        };
-    });
-
-    // Maintenance status poll — 15-second cadence per contracts/http-maintenance.md.
-    // Kept separate from the 30-second dashboard refresh so the widget reflects
-    // aggregator/retention progress at the tighter cadence operators expect.
-    $effect(() => {
-        if (!authState.username) return;
-        untrack(() => refreshMaintenance());
-        const interval = setInterval(() => untrack(() => refreshMaintenance()), 15_000);
-        return () => {
-            clearInterval(interval);
-            maintenanceJobs = [];
-            maintenanceServerTime = null;
-            maintenanceError = '';
-            maintenanceLoading = false;
         };
     });
 
@@ -561,14 +529,7 @@
         {/key}
     </main>
 
-    <Footer
-        onrefresh={refresh}
-        {refreshing}
-        {maintenanceJobs}
-        {maintenanceServerTime}
-        {maintenanceLoading}
-        {maintenanceError}
-    />
+    <Footer onrefresh={refresh} {refreshing} />
 
     {#if configOpen}
         <ConfigModal onclose={() => (configOpen = false)} />

@@ -318,7 +318,7 @@
     <!-- ── Chart area ── -->
     <div class="hic-chart" bind:clientWidth={containerW}>
         {#if history.length < 2}
-            <div class="hic-placeholder">Collecting data… {history.length}/2</div>
+            <div class="hic-placeholder">No retained history for this window</div>
         {:else}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <svg
