@@ -85,13 +85,13 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] (Step 3) Update `restrictConfigACL` in `config.go:768-772`: remove `icacls /grant *S-1-5-6:(M)` line; add explicit `icacls /remove *S-1-5-6` before grants to clean up older ACLs on repeat installs
-- [ ] T021 [P] [US2] (Step 3) Add manual-verification checklist item to the release checklist (`docs/install.ps1` or `CHRONICLE.md`): "Post-install `icacls` check — confirm no `NT AUTHORITY\SERVICE` ACE on config.json"
-- [ ] T022 [P] [US2] (Step 4) Add unexported `var dpapiEntropy = []byte("LISSTech.DrainCtl/v1/notify-secret")` in `dpapi.go`
-- [ ] T023 [US2] (Step 4) Update `DPAPIEncrypt` in `dpapi.go` to pass `dpapiEntropy` as the `pOptionalEntropy` arg to `CryptProtectData` (replacing the current `0`/`nil`)
-- [ ] T024 [US2] (Step 4) Update `DPAPIDecrypt` in `dpapi.go` to pass `dpapiEntropy` as the same arg to `CryptUnprotectData`
-- [ ] T025 [P] [US2] (Step 4) Add positive round-trip test in `dpapi_test.go`: encrypt a plaintext, decrypt the result, assert equality
-- [ ] T026 [P] [US2] (Step 4) Add negative test in `dpapi_test.go`: craft ciphertext with a different entropy constant, attempt `DPAPIDecrypt`, assert error
+- [x] T020 [P] [US2] (Step 3) Update `restrictConfigACL` in `config.go:768-772`: remove `icacls /grant *S-1-5-6:(M)` line; add explicit `icacls /remove *S-1-5-6` before grants to clean up older ACLs on repeat installs
+- [x] T021 [P] [US2] (Step 3) Add manual-verification checklist item to the release checklist (`docs/install.ps1` or `CHRONICLE.md`): "Post-install `icacls` check — confirm no `NT AUTHORITY\SERVICE` ACE on config.json"
+- [x] T022 [P] [US2] (Step 4) Add unexported `var dpapiEntropy = []byte("LISSTech.DrainCtl/v1/notify-secret")` in `dpapi.go`
+- [x] T023 [US2] (Step 4) Update `DPAPIEncrypt` in `dpapi.go` to pass `dpapiEntropy` as the `pOptionalEntropy` arg to `CryptProtectData` (replacing the current `0`/`nil`)
+- [x] T024 [US2] (Step 4) Update `DPAPIDecrypt` in `dpapi.go` to pass `dpapiEntropy` as the same arg to `CryptUnprotectData`
+- [x] T025 [P] [US2] (Step 4) Add positive round-trip test in `dpapi_test.go`: encrypt a plaintext, decrypt the result, assert equality
+- [x] T026 [P] [US2] (Step 4) Add negative test in `dpapi_test.go`: craft ciphertext with a different entropy constant, attempt `DPAPIDecrypt`, assert error
 - [ ] T027 [US2] Manual verification (documented, not automated): reinstall on a fresh dev VM, run `icacls "%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json"`, confirm only SYSTEM and Administrators are granted
 
 **Checkpoint**: Run `go test ./dpapi_test.go` (or package-scoped), `just lint`. Execute quickstart.md §User Story 2 manual icacls check. Ship as one PR.

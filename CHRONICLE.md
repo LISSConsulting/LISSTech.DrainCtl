@@ -6,6 +6,8 @@ Operators must manually clear `Dashboard.TLSFingerprint` in `config.json` before
 
 Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465); plain-port-25 AUTH is rejected.
 
+Post-install `icacls` check — confirm no `NT AUTHORITY\SERVICE` ACE on `config.json`.
+
 ## 008 extension — event_spikes + servers SQLite migration + swimlane (2026-04-21)
 
 Folded the last two in-memory stores into `drainctl.db`. `internal/dashboard/spikestore.go` (the bounded per-host ring buffer for confirmed event-log spikes) and the `servers.json` atomic-rename roster are both retired; replaced by `telemetry.EventSpikeStore` (event_spikes table, `UNIQUE(host,channel,window_start_ms)` so dedup is now forever rather than only-vs-newest) and `telemetry.ServerStore` (servers table, CheckResult serialized as a JSON blob in `last_result_json`). Retention for event_spikes piggybacks on `RetentionSettings.AuditDays` — same TTL as the drain-mode audit trail, per the operator's request. A one-shot boot helper `MigrateLegacyServersJSON` imports any pre-009 `servers.json` and renames it to `servers.json.migrated.<ts>`; corrupt files are moved aside (`.migration-failed.<ts>`) so a malformed leftover never blocks bringup.
