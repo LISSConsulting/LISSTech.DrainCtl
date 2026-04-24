@@ -60,16 +60,16 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] (Step 1) Factor testable helper `shouldRefuseFingerprintUpdate(saved, offered string) (bool, error)` in `internal/svc/handler.go` that returns `true` + error when both non-empty and differ
-- [ ] T011 [P] [US1] (Step 1) Add fingerprint-mismatch refusal branch in `cmd/drainctl/register_cmd.go:68-82` — compare `fileCfg.Dashboard.TLSFingerprint` vs `regResult.TLSFingerprint`, return error matching shape in `specs/009-security-hardening/contracts/register-fingerprint-refusal.md` §Error shape
-- [ ] T012 [P] [US1] (Step 1) Mirror refusal in `internal/svc/handler.go:1031-1042` `registerWithDashboard`: use helper from T010, emit `slog.Error("dashboard=fingerprint-mismatch", "saved", …, "offered", …)`, do NOT overwrite `dashCfg.TLSFingerprint`, do NOT re-init dashboard client, return `false`
-- [ ] T013 [P] [US1] (Step 1) Add mismatch subtest in `cmd/drainctl/register_cmd_test.go`: stub Register returning `TLSFingerprint: "B"` with stored `"A"`; assert error contains `fingerprint mismatch`, on-disk unchanged
-- [ ] T014 [P] [US1] (Step 1) Add unit test for `shouldRefuseFingerprintUpdate` in `internal/svc/handler_test.go` covering all six rows of the decision matrix in `specs/009-security-hardening/contracts/register-fingerprint-refusal.md`
-- [ ] T015 [US1] (Step 2) Update `sendSMTPStartTLS` in `email.go` (around line 326-332): after `c.Hello`, call `c.Extension("STARTTLS")`. When `target.Secret != ""` AND STARTTLS is not advertised OR `c.StartTLS` fails, return `fmt.Errorf("smtp: refusing cleartext AUTH on %s; use smtps:// or a server that supports STARTTLS", host)`
-- [ ] T016 [US1] (Step 2) Preserve opportunistic-cleartext path for empty `Secret` in `sendSMTPStartTLS`: when STARTTLS is unavailable, emit `slog.Warn("smtp: no STARTTLS available, sending without encryption", "host", host)` and continue
-- [ ] T017 [P] [US1] (Step 2) Add `TestSMTPStartTLS_RefusesCleartextAuth` in `email_test.go` using `net.Pipe`-driven in-process SMTP server that omits STARTTLS with `Secret: "x"`; assert error contains `refusing cleartext AUTH`
-- [ ] T018 [US1] Document cert-rotation operator procedure in `CHRONICLE.md`: "Operators must manually clear `Dashboard.TLSFingerprint` in `config.json` before re-registering after cert rotation."
-- [ ] T019 [US1] Document SMTP transport requirement in `CHRONICLE.md`: "Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465); plain-port-25 AUTH is rejected."
+- [x] T010 [US1] (Step 1) Factor testable helper `shouldRefuseFingerprintUpdate(saved, offered string) (bool, error)` in `internal/svc/handler.go` that returns `true` + error when both non-empty and differ
+- [x] T011 [P] [US1] (Step 1) Add fingerprint-mismatch refusal branch in `cmd/drainctl/register_cmd.go:68-82` — compare `fileCfg.Dashboard.TLSFingerprint` vs `regResult.TLSFingerprint`, return error matching shape in `specs/009-security-hardening/contracts/register-fingerprint-refusal.md` §Error shape
+- [x] T012 [P] [US1] (Step 1) Mirror refusal in `internal/svc/handler.go:1031-1042` `registerWithDashboard`: use helper from T010, emit `slog.Error("dashboard=fingerprint-mismatch", "saved", …, "offered", …)`, do NOT overwrite `dashCfg.TLSFingerprint`, do NOT re-init dashboard client, return `false`
+- [x] T013 [P] [US1] (Step 1) Add mismatch subtest in `cmd/drainctl/register_cmd_test.go`: stub Register returning `TLSFingerprint: "B"` with stored `"A"`; assert error contains `fingerprint mismatch`, on-disk unchanged
+- [x] T014 [P] [US1] (Step 1) Add unit test for `shouldRefuseFingerprintUpdate` in `internal/svc/handler_test.go` covering all six rows of the decision matrix in `specs/009-security-hardening/contracts/register-fingerprint-refusal.md`
+- [x] T015 [US1] (Step 2) Update `sendSMTPStartTLS` in `email.go` (around line 326-332): after `c.Hello`, call `c.Extension("STARTTLS")`. When `target.Secret != ""` AND STARTTLS is not advertised OR `c.StartTLS` fails, return `fmt.Errorf("smtp: refusing cleartext AUTH on %s; use smtps:// or a server that supports STARTTLS", host)`
+- [x] T016 [US1] (Step 2) Preserve opportunistic-cleartext path for empty `Secret` in `sendSMTPStartTLS`: when STARTTLS is unavailable, emit `slog.Warn("smtp: no STARTTLS available, sending without encryption", "host", host)` and continue
+- [x] T017 [P] [US1] (Step 2) Add `TestSMTPStartTLS_RefusesCleartextAuth` in `email_test.go` using `net.Pipe`-driven in-process SMTP server that omits STARTTLS with `Secret: "x"`; assert error contains `refusing cleartext AUTH`
+- [x] T018 [US1] Document cert-rotation operator procedure in `CHRONICLE.md`: "Operators must manually clear `Dashboard.TLSFingerprint` in `config.json` before re-registering after cert rotation."
+- [x] T019 [US1] Document SMTP transport requirement in `CHRONICLE.md`: "Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465); plain-port-25 AUTH is rejected."
 
 **Checkpoint**: Run `go test ./... && just lint`. Execute quickstart.md §User Story 1 manual walkthrough (cert rotation + SMTP refusal). Ship as one bundled PR or split by step; either way, both steps must land together to close the credential-leak blockers before external release.
 

@@ -407,6 +407,56 @@ func TestSMTPStartTLS_SilentGreetingHitsOverallDeadline(t *testing.T) {
 	<-acceptDone
 }
 
+func TestSMTPStartTLS_RefusesCleartextAuth(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	origDial := smtpDial
+	smtpDial = func(addr string, timeout time.Duration) (net.Conn, error) {
+		return clientConn, nil
+	}
+	t.Cleanup(func() { smtpDial = origDial })
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		defer func() { _ = serverConn.Close() }()
+
+		reader := bufio.NewReader(serverConn)
+		_, _ = fmt.Fprintf(serverConn, "220 test SMTP\r\n")
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			cmd := strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(cmd, "EHLO "), strings.HasPrefix(cmd, "HELO "):
+				_, _ = fmt.Fprintf(serverConn, "250-test.example\r\n250 AUTH PLAIN\r\n")
+			case cmd == "QUIT":
+				_, _ = fmt.Fprintf(serverConn, "221 bye\r\n")
+				return
+			default:
+				_, _ = fmt.Fprintf(serverConn, "250 ok\r\n")
+			}
+		}
+	}()
+
+	target := NotificationTarget{
+		URL:    "smtp://test.example:25",
+		From:   "drainctl@example.test",
+		To:     []string{"rcpt@example.test"},
+		Secret: "x",
+	}
+
+	err := sendSMTPStartTLS("ignored", "test.example", target, []byte("Subject: x\r\n\r\nbody"))
+	if err == nil {
+		t.Fatal("sendSMTPStartTLS returned nil, want refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing cleartext AUTH") {
+		t.Fatalf("err = %q, want substring %q", err.Error(), "refusing cleartext AUTH")
+	}
+	<-serverDone
+}
+
 // testSelfSignedTLS builds an in-memory self-signed certificate suitable for a
 // tls.Server in deadline tests. Separate from internal/dashboard's equivalent
 // so this package stays self-contained.
