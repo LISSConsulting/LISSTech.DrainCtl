@@ -14,6 +14,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var registerWithDashboardFunc = registerThroughServiceOrDirect
+
+func dashboardFingerprintMismatchError(saved, offered string) error {
+	return errors.New(
+		fmt.Sprintf("dashboard fingerprint mismatch: saved=%s  offered=%s", saved, offered) +
+			"\nrefusing to overwrite. Clear Dashboard.TLSFingerprint in config.json before re-registering.",
+	)
+}
+
 func registerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register [dashboard-url]",
@@ -65,10 +74,18 @@ DNS SRV record (_drainctl._tcp.<domain>).`,
 			// when the service pipe is unavailable — e.g. the bootstrap case
 			// where DrainCtl has just been installed and the service hasn't
 			// started yet, or the caller is running as SYSTEM.
-			regResult, regErr := registerThroughServiceOrDirect(dashURL)
+			regResult, regErr := registerWithDashboardFunc(dashURL)
 			if regErr != nil {
 				slog.Warn("registration failed (service will retry on next check)", "error", regErr)
 				return nil
+			}
+
+			if fileCfg.Dashboard.TLSFingerprint != "" && regResult.TLSFingerprint != "" &&
+				fileCfg.Dashboard.TLSFingerprint != regResult.TLSFingerprint {
+				return dashboardFingerprintMismatchError(
+					fileCfg.Dashboard.TLSFingerprint,
+					regResult.TLSFingerprint,
+				)
 			}
 
 			// Auto-pin: save the dashboard's TLS fingerprint (unless --pin=false).

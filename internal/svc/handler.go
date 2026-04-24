@@ -1027,6 +1027,10 @@ func registerWithDashboard(dashCfg *dc.DashboardConfig) bool {
 		return false
 	}
 	slog.Info("dashboard=registered")
+	if refuse, _ := shouldRefuseFingerprintUpdate(dashCfg.TLSFingerprint, regResult.TLSFingerprint); refuse {
+		slog.Error("dashboard=fingerprint-mismatch", "saved", dashCfg.TLSFingerprint, "offered", regResult.TLSFingerprint)
+		return false
+	}
 	// Auto-pin: save the dashboard's TLS fingerprint if enabled and we don't have one yet.
 	if dashCfg.AutoPin && dashCfg.TLSFingerprint == "" && regResult.TLSFingerprint != "" {
 		dashCfg.TLSFingerprint = regResult.TLSFingerprint
@@ -1041,6 +1045,13 @@ func registerWithDashboard(dashCfg *dc.DashboardConfig) bool {
 		}
 	}
 	return true
+}
+
+func shouldRefuseFingerprintUpdate(saved, offered string) (bool, error) {
+	if saved != "" && offered != "" && saved != offered {
+		return true, fmt.Errorf("dashboard fingerprint mismatch: saved=%s  offered=%s", saved, offered)
+	}
+	return false, nil
 }
 
 // RunService starts the Windows service. Called by the CLI's hidden

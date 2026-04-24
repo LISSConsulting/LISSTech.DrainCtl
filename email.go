@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"net/url"
@@ -34,6 +35,11 @@ var (
 // against an in-process listener with a self-signed cert.
 var smtpsTLSConfig = func(host string) *tls.Config {
 	return &tls.Config{ServerName: host}
+}
+
+var smtpDial = func(addr string, timeout time.Duration) (net.Conn, error) {
+	d := net.Dialer{Timeout: timeout}
+	return d.Dial("tcp", addr)
 }
 
 type emailData struct {
@@ -301,8 +307,7 @@ func sendEmail(target NotificationTarget, result *CheckResult, trigger Trigger, 
 }
 
 func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) error {
-	d := net.Dialer{Timeout: smtpDialTimeout}
-	conn, err := d.Dial("tcp", addr)
+	conn, err := smtpDial(addr, smtpDialTimeout)
 	if err != nil {
 		return fmt.Errorf("smtp dial: %w", err)
 	}
@@ -323,17 +328,26 @@ func sendSMTPStartTLS(addr, host string, target NotificationTarget, msg []byte) 
 		return fmt.Errorf("smtp hello: %w", err)
 	}
 
-	if ok, _ := c.Extension("STARTTLS"); ok {
+	startTLSAdvertised, _ := c.Extension("STARTTLS")
+	if startTLSAdvertised {
 		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			if target.Secret != "" {
+				return fmt.Errorf("smtp: refusing cleartext AUTH on %s; use smtps:// or a server that supports STARTTLS", host)
+			}
 			return fmt.Errorf("smtp starttls: %w", err)
 		}
 	}
 
 	if target.Secret != "" {
+		if !startTLSAdvertised {
+			return fmt.Errorf("smtp: refusing cleartext AUTH on %s; use smtps:// or a server that supports STARTTLS", host)
+		}
 		auth := smtp.PlainAuth("", target.From, target.Secret, host)
 		if err := c.Auth(auth); err != nil {
 			return fmt.Errorf("smtp auth: %w", err)
 		}
+	} else if !startTLSAdvertised {
+		slog.Warn("smtp: no STARTTLS available, sending without encryption", "host", host)
 	}
 
 	return smtpSend(c, target.From, target.To, msg)
