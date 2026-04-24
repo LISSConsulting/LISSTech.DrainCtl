@@ -5,9 +5,10 @@ package drainctl
 import (
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 )
 
 // RunAuditSetup configures registry auditing (auditpol + SACL) so that
@@ -29,7 +30,7 @@ func RunAuditSetup() error {
 
 	// ── Step 1: Enable registry audit policy ───────────────────────────
 	slog.Info("", "step", "1/2", "action", "enable_audit_policy", "subcategory", "Registry")
-	out, err := exec.Command("auditpol", "/set",
+	out, err := winexec.Command("auditpol", "/set",
 		"/subcategory:Registry",
 		"/success:enable",
 		"/failure:enable",
@@ -64,7 +65,7 @@ Set-Acl $key $acl
 Write-Output 'SACL configured successfully'
 `, RegPath)
 
-	out, err = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
+	out, err = winexec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput()
 	if err != nil {
 		slog.Error("SACL configuration failed", "error", err, "output", strings.TrimSpace(string(out)))
 		return fmt.Errorf("set SACL: %w", err)
@@ -76,7 +77,7 @@ Write-Output 'SACL configured successfully'
 }
 
 func isDomainJoined() bool {
-	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+	out, err := winexec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
 		"(Get-CimInstance Win32_ComputerSystem).PartOfDomain",
 	).Output()
 	if err != nil {
@@ -86,7 +87,7 @@ func isDomainJoined() bool {
 }
 
 func checkSubcategoryOverride() {
-	out, err := exec.Command("reg", "query",
+	out, err := winexec.Command("reg", "query",
 		`HKLM\System\CurrentControlSet\Control\Lsa`,
 		"/v", "SCENoApplyLegacyAuditPolicy",
 	).Output()
@@ -104,7 +105,7 @@ func checkSubcategoryOverride() {
 }
 
 func checkSecurityLogSize() {
-	out, err := exec.Command("wevtutil", "gl", "Security").Output()
+	out, err := winexec.Command("wevtutil", "gl", "Security").Output()
 	if err != nil {
 		slog.Warn("Could not query Security Event Log size", "error", err)
 		return

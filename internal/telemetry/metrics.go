@@ -387,19 +387,22 @@ func summableCase(sumExpr, avgExpr string) string {
 	return "CASE WHEN counter IN (" + strings.Join(quoted, ",") + ") THEN " + sumExpr + " ELSE " + avgExpr + " END"
 }
 
-// MinRawFleetBucketMs is the lower bound for raw-fleet bucketing. Matches
-// the PUT /api/v1/settings validator's sample_interval_sec floor (10 s).
-// Any computed bucket smaller than this gets clamped up — bucketing to 1 s
-// would reintroduce the staggered-timestamp collapse the bucketing was
-// added to fix.
-const MinRawFleetBucketMs = 10_000
+// MinRawFleetBucketMs is the lower bound for raw-fleet bucketing. Set to
+// 30 s — well above the PUT /api/v1/settings validator's 10 s floor for
+// sample_interval — because a per-host phase difference of one full poll
+// cycle can otherwise put adjacent hosts in adjacent buckets, producing
+// the alternating-host zigzag that bucketing exists to prevent. 30 s is
+// twice the smallest validator-allowed sample_interval and matches the
+// default cadence.
+const MinRawFleetBucketMs = 30_000
 
 // DefaultRawFleetBucketMs is used when a caller doesn't have — or can't
 // pass — the live sample_interval_sec from config. Matches the default
-// sample_interval_sec (30 s). Handlers that own config should pass the
-// configured value; the constant is the safe fallback for tests and
+// sample_interval_sec doubled (60 s). Handlers that own config should pass
+// 2 × sample_interval × 1000 directly so the bucket scales with operator
+// configuration; this constant is the safe fallback for tests and
 // bootstrap paths that run before config is loaded.
-const DefaultRawFleetBucketMs = 30_000
+const DefaultRawFleetBucketMs = 60_000
 
 // buildRawQueryFleet groups metrics_raw samples into cross-host buckets
 // sized to match the agent sample interval. Host agents poll every

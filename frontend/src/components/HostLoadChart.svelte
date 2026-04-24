@@ -78,6 +78,24 @@
     let dragStartOffset = 0;
     let dragPendingOffsetMs = 0;
     let containerW = $state(0);
+    // didDrag distinguishes "click to pin/unpin" from "drag to pan". Set true
+    // once the pointer moves past DRAG_THRESHOLD_PX during a mousedown cycle;
+    // consumed by a capture-phase click listener on the chart body so the
+    // post-drag click never reaches DualAxisChart's pin toggle. Threshold
+    // intentionally generous — trackpad clicks routinely drift 5–8 px; anything
+    // tighter makes "click to pin" unreliable because the post-click event
+    // gets suppressed as a drag.
+    //
+    // $state so the class:dragging binding on .chart-body flips in lock-
+    // step: dragging activates only once a real pan starts, which keeps
+    // child SVG pointer-events alive during simple clicks. If dragging
+    // engaged on mousedown the child's click target would sit behind
+    // pointer-events:none by the time mouseup fires → click lands on
+    // .chart-body, never on the rect, pin never triggers.
+    let didDrag = $state(false);
+    const DRAG_THRESHOLD_PX = 12;
+    /** @type {HTMLDivElement|null} */
+    let chartBodyEl = $state(null);
 
     // Counters needed: CPU (avg + P95), memory (derive from avail/total), sessions.
     const COUNTERS = ['cpu_pct', 'cpu_p95_pct', 'mem_avail_mb', 'mem_total_mb', 'sessions_total'];
@@ -113,64 +131,109 @@
     });
 
     // ── Interactions ──────────────────────────────────────────────────────
-    /** @param {WheelEvent} e */
-    function onWheel(e) {
-        e.preventDefault();
-        const idx = OVERVIEW_WINDOW_PRESETS.findIndex((p) => p.key === windowKey);
-        if (e.deltaY < 0 && idx > 0) {
-            panOffsetMs = 0;
-            windowKey = OVERVIEW_WINDOW_PRESETS[idx - 1].key;
-        } else if (e.deltaY > 0 && idx < OVERVIEW_WINDOW_PRESETS.length - 1) {
-            panOffsetMs = 0;
-            windowKey = OVERVIEW_WINDOW_PRESETS[idx + 1].key;
-        }
-    }
+    // Wheel zoom intentionally omitted — same policy as Overview LOAD and
+    // lib/chart.svelte: operators dislike trackpad scrolls hijacking the
+    // chart. Window preset pills are the only zoom path.
 
     /** @param {MouseEvent} e */
     function onMouseDown(e) {
         if (e.button !== 0) return;
         isDragging = true;
+        didDrag = false;
         dragStartX = e.clientX;
         dragStartOffset = panOffsetMs;
         dragPendingOffsetMs = panOffsetMs;
-        appState.hoveredChartIndex = null;
-        appState.pinnedChartIndex = null;
+        // Don't clear pinnedChartIndex here — that would defeat the
+        // second-click-to-unpin path owned by DualAxisChart. Tooltip hover
+        // gets cleared below only once the move passes the drag threshold.
     }
 
     /** @param {MouseEvent} e */
     function onMouseMove(e) {
         if (!isDragging) return;
         const dx = e.clientX - dragStartX;
-        const dMs = (dx / Math.max(containerW, 1)) * windowMs;
-        dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+        if (!didDrag && Math.abs(dx) > DRAG_THRESHOLD_PX) {
+            didDrag = true;
+            // Hide the hover tooltip the moment the user commits to a pan.
+            appState.hoveredChartIndex = null;
+        }
+        if (didDrag) {
+            const dMs = (dx / Math.max(containerW, 1)) * windowMs;
+            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+        }
     }
 
     function commitPan() {
-        if (isDragging && dragPendingOffsetMs !== panOffsetMs) {
+        if (isDragging && didDrag && dragPendingOffsetMs !== panOffsetMs) {
             panOffsetMs = dragPendingOffsetMs;
         }
         isDragging = false;
+        // didDrag stays true until the capture-phase click listener below
+        // consumes it. Browsers dispatch `click` after mouseup on the same
+        // logical gesture — without this gate the post-drag click would hit
+        // DualAxisChart and toggle the pin state the user didn't ask for.
     }
+
+    // Capture-phase click suppression: if the mouseup ended a real drag,
+    // stop the synthetic click from reaching DualAxisChart's pin toggle.
+    // Runs before target-phase handlers so stopPropagation actually wins.
+    $effect(() => {
+        const el = chartBodyEl;
+        if (!el) return;
+        const handler = (/** @type {MouseEvent} */ e) => {
+            if (didDrag) {
+                e.stopPropagation();
+                e.preventDefault();
+                didDrag = false;
+            }
+        };
+        el.addEventListener('click', handler, { capture: true });
+        return () => el.removeEventListener('click', handler, { capture: true });
+    });
 
     // ── Adapt response.series → MetricsSample[] ───────────────────────────
     /** @typedef {{ time: number, cpu: number, cpuP95: number, mem: number, sessions: number }} Sample */
+    //
+    // Each counter is a parallel-arrays Series (t[], avg[]). Counters are
+    // collected from the same PerfSnapshot but the storage path can drop
+    // individual values (warmup, transient unavailability), so different
+    // counters may return different lengths or skip timestamps. Indexing by
+    // position would mis-pair (cpu_pct[5], cpu_p95_pct[5]) when cpu_p95_pct
+    // dropped a sample earlier — that's how we hit "CPU=27.7% / P95=0%" on
+    // the same point. Build a per-counter ts→value map and join on the
+    // canonical cpu_pct timeline.
+    function asTsMap(/** @type {{t:number[], avg:number[]}|undefined} */ s) {
+        const m = new Map();
+        if (!s) return m;
+        const t = s.t || [];
+        const a = s.avg || [];
+        for (let i = 0; i < t.length; i++) m.set(t[i], a[i]);
+        return m;
+    }
     let history = $derived.by(() => {
         const series = response?.series ?? {};
         const cpu = series['cpu_pct'];
         if (!cpu || cpu.t.length === 0) return /** @type {Sample[]} */ ([]);
-        const p95 = series['cpu_p95_pct']?.avg ?? [];
-        const avail = series['mem_avail_mb']?.avg ?? [];
-        const total = series['mem_total_mb']?.avg ?? [];
-        const sess = series['sessions_total']?.avg ?? [];
-        return cpu.t.map((ts, i) => {
-            const a = avail[i] ?? 0;
-            const m = total[i] ?? 0;
+        const cpuMap = asTsMap(cpu);
+        const p95Map = asTsMap(series['cpu_p95_pct']);
+        const availMap = asTsMap(series['mem_avail_mb']);
+        const totalMap = asTsMap(series['mem_total_mb']);
+        const sessMap = asTsMap(series['sessions_total']);
+        return cpu.t.map((ts) => {
+            const cpuV = cpuMap.get(ts) ?? 0;
+            const p95V = p95Map.get(ts);
+            const a = availMap.get(ts) ?? 0;
+            const m = totalMap.get(ts) ?? 0;
+            const sV = sessMap.get(ts);
             return {
                 time: ts,
-                cpu: cpu.avg[i] ?? 0,
-                cpuP95: p95[i] ?? cpu.avg[i] ?? 0,
+                cpu: cpuV,
+                // Fall back to current CPU when P95 is missing for this ts
+                // (warmup or skipped storage). 0 is treated as missing too —
+                // the agent emits 0 when its rolling window has no samples.
+                cpuP95: p95V != null && p95V > 0 ? p95V : cpuV,
                 mem: m > 0 ? (1 - a / m) * 100 : 0,
-                sessions: Math.round(sess[i] ?? 0),
+                sessions: sV != null ? Math.round(sV) : 0,
             };
         });
     });
@@ -268,13 +331,7 @@
 
     <div class="chart-panel">
         <div class="load-chart-header">
-            <div>
-                {#if panOffsetMs > 0}
-                    <button class="back-to-live" onclick={() => { panOffsetMs = 0; }} title="Return to live data">
-                        ↺ LIVE
-                    </button>
-                {/if}
-            </div>
+            <div></div>
             <div class="load-currents" style="padding-right: {hasRight ? 64 : 16}px">
                 {#each loadCurrents as lc}
                     {#if lc.show()}
@@ -291,21 +348,15 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
             class="chart-body"
-            class:dragging={isDragging}
+            class:dragging={isDragging && didDrag}
             bind:clientWidth={containerW}
-            onwheel={onWheel}
+            bind:this={chartBodyEl}
             onmousedown={onMouseDown}
             onmousemove={onMouseMove}
             onmouseup={commitPan}
             onmouseleave={commitPan}
         >
-            {#if loading}
-                <div class="chart-placeholder">Loading retained history…</div>
-            {:else if error}
-                <div class="chart-placeholder chart-error">Unable to reach the metrics endpoint</div>
-            {:else if history.length < 2}
-                <div class="chart-placeholder">No retained history for this window</div>
-            {:else if containerW > 0}
+            {#if containerW > 0}
                 <LayerCake
                     data={lcData}
                     x="x"
@@ -330,6 +381,24 @@
                         />
                     </Svg>
                 </LayerCake>
+            {/if}
+            <!-- Status messages overlay the chart frame instead of replacing
+                 it — the operator keeps axes, thresholds, and cursor context
+                 while panning back into covered history. pointer-events:none
+                 on .chart-overlay lets the underlying chart-body still
+                 receive pan mouse events; .overlay-live opts the button back
+                 in so the LIVE click still registers. -->
+            {#if loading}
+                <div class="chart-overlay">Loading retained history…</div>
+            {:else if error}
+                <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+            {:else if history.length < 2}
+                <div class="chart-overlay">
+                    {#if panOffsetMs > 0}
+                        <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                    {/if}
+                    <span>No retained history for this window</span>
+                </div>
             {/if}
         </div>
     </div>
@@ -529,7 +598,7 @@
     .chart-body {
         position: relative;
         height: 220px;
-        cursor: ew-resize;
+        cursor: grab;
     }
 
     .chart-body.dragging {
@@ -537,19 +606,46 @@
         user-select: none;
     }
 
-    .chart-placeholder {
+    /* While actively panning, stop the inner SVG from receiving mouse
+       events — DualAxisChart's own onmousemove would otherwise keep
+       updating the tooltip crosshair, making it look like the tooltip is
+       fighting the pan. Events still reach the parent div for drag
+       tracking. */
+    .chart-body.dragging :global(svg) {
+        pointer-events: none;
+    }
+
+    /* Overlay sits on top of the chart frame without replacing it. The
+       chart axes, thresholds, and grab cursor stay visible — and
+       pointer-events:none lets the drag-pan gesture still reach the
+       chart body underneath so the operator can drag back into
+       covered history without hunting for a pan target. The LIVE
+       button inside (.overlay-live) opts pointer-events back in so it
+       remains clickable. */
+    .chart-overlay {
+        position: absolute;
+        inset: 0;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 100%;
-        min-height: 80px;
+        gap: 10px;
+        padding: 8px 16px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem;
         color: var(--color-muted);
+        background: color-mix(in srgb, var(--color-bg) 72%, transparent);
+        backdrop-filter: blur(1px);
+        pointer-events: none;
+        z-index: 2;
     }
 
-    .chart-placeholder.chart-error {
+    .chart-overlay.chart-error {
         color: var(--color-red);
+    }
+
+    .overlay-live {
+        pointer-events: auto;
     }
 
     .back-to-live {

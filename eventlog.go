@@ -6,9 +6,10 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 )
 
 // wevtutil XML response structures for Event ID 4657
@@ -62,7 +63,7 @@ func QueryRegistryChangeUser(since time.Time) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "wevtutil", "qe", "Security",
+	cmd := winexec.CommandContext(ctx, "wevtutil", "qe", "Security",
 		"/q:"+xpath,
 		"/c:20",
 		"/f:xml",

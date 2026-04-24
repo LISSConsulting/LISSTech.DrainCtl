@@ -12,11 +12,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 	"golang.org/x/sys/windows"
 	sqlite "modernc.org/sqlite"
 )
@@ -510,7 +510,7 @@ func restrictFileACL(path string) {
 		{"icacls", path, "/grant", "*S-1-5-6:(M)"},
 	}
 	for _, args := range cmds {
-		_ = exec.Command(args[0], args[1:]...).Run()
+		_ = winexec.Command(args[0], args[1:]...).Run()
 	}
 }
 

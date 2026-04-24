@@ -39,6 +39,7 @@ const LS_MOCK_VERSION = 'drainctl:mock-version';
 // Non-authoritative UI-preference keys: persisted as operator convenience only.
 // These do NOT represent retained history; history authority belongs to the backend.
 const LS_OVERVIEW_WINDOW = 'drainctl:overview-window';
+const LS_REDUCE_MOTION = 'drainctl:reduce-motion';
 
 /**
  * If the stored mock-data version doesn't match the current MOCK_VERSION,
@@ -97,6 +98,17 @@ export const OVERVIEW_WINDOW_PRESETS = [
     { key: '5day', label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
 ];
 
+function lsGetReduceMotion() {
+    const raw = lsGet(LS_REDUCE_MOTION, null);
+    if (typeof raw === 'boolean') return raw;
+    // No explicit opt-in/out yet — fall back to the OS accessibility signal.
+    try {
+        return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
+    } catch {
+        return false;
+    }
+}
+
 function lsGetOverviewWindow() {
     const raw = lsGet(LS_OVERVIEW_WINDOW, null);
     return OVERVIEW_WINDOW_PRESETS.some((p) => p.key === raw)
@@ -138,6 +150,13 @@ const persistOverviewWindow = debounce((v) => {
         localStorage.setItem(LS_OVERVIEW_WINDOW, JSON.stringify(v));
     } catch {}
 }, 300);
+const persistReduceMotion = (v) => {
+    // Non-debounced — toggling in the Config modal should reflect on the next
+    // paint without a 300 ms lag. Writes are cheap; no throttle needed.
+    try {
+        localStorage.setItem(LS_REDUCE_MOTION, JSON.stringify(!!v));
+    } catch {}
+};
 
 /**
  * @typedef {import('./api.js').Server} Server
@@ -308,6 +327,18 @@ let hoveredChartIndex = $state(/** @type {number|null} */ (null));
  */
 let pinnedChartIndex = $state(/** @type {number|null} */ (null));
 
+/**
+ * Reduce-motion preference. When true, a global `data-reduce-motion`
+ * attribute on the document body neutralises every keyframe animation,
+ * transition, and backdrop-filter via CSS (see app.css). Exists because
+ * RDP sessions can't composite backdrop blur / continuous animations
+ * without heavy CPU cost on the remote endpoint. Persists per-browser.
+ * Initial value honours the OS `prefers-reduced-motion: reduce` signal
+ * when the operator has not explicitly set a preference.
+ * @type {boolean}
+ */
+let reduceMotion = $state(lsGetReduceMotion());
+
 // ---------------------------------------------------------------------------
 // localStorage persistence effects (module-level, outside any component)
 // ---------------------------------------------------------------------------
@@ -327,6 +358,9 @@ $effect.root(() => {
     });
     $effect(() => {
         persistOverviewWindow(overviewWindow);
+    });
+    $effect(() => {
+        persistReduceMotion(reduceMotion);
     });
 });
 
@@ -520,6 +554,13 @@ export const appState = {
     },
     set pinnedChartIndex(v) {
         pinnedChartIndex = v;
+    },
+
+    get reduceMotion() {
+        return reduceMotion;
+    },
+    set reduceMotion(v) {
+        reduceMotion = !!v;
     },
 
     get overviewSubTab() {
