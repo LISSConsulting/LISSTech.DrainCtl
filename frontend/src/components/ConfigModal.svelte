@@ -1,4 +1,5 @@
 <script>
+    import { untrack } from 'svelte';
     import { fetchSettings, saveSettings, sendNotifyTest, fetchMaintenance } from '../lib/api.js';
     import { appState } from '../lib/state.svelte.js';
     import { toast } from '../lib/toast.svelte.js';
@@ -89,8 +90,15 @@
         // Modal mounted → kick off polling. 15-second cadence matches the
         // old footer widget and contracts/http-maintenance.md. Cleanup on
         // unmount stops the interval — no orphan fetches.
-        refreshMaintenance();
-        const id = setInterval(refreshMaintenance, 15_000);
+        //
+        // IMPORTANT: untrack() is load-bearing. refreshMaintenance reads and
+        // writes maintenanceFetching/maintenanceJobs/etc ($state). Without
+        // untrack, Svelte 5 would add those vars as dependencies of this
+        // $effect; each subsequent write re-fires the $effect body, which
+        // fires a new HTTP fetch, which writes state again → runaway spiral
+        // that spams /api/v1/maintenance/status until rate-limited (429).
+        untrack(() => refreshMaintenance());
+        const id = setInterval(() => untrack(() => refreshMaintenance()), 15_000);
         return () => clearInterval(id);
     });
 
