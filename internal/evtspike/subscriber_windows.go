@@ -17,6 +17,13 @@ var (
 	procEvtSubscribe = wevtapi.NewProc("EvtSubscribe")
 	procEvtNext      = wevtapi.NewProc("EvtNext")
 	procEvtClose     = wevtapi.NewProc("EvtClose")
+
+	createEvent         = windows.CreateEvent
+	closeHandle         = windows.CloseHandle
+	waitForSingleObject = windows.WaitForSingleObject
+	evtSubscribeCall    = procEvtSubscribe.Call
+	evtNextCall         = procEvtNext.Call
+	evtCloseCall        = procEvtClose.Call
 )
 
 const evtSubscribeToFutureEvents = 1
@@ -33,17 +40,18 @@ const evtSubscribeToFutureEvents = 1
 // loss (may be nil) is invoked from the drain goroutine if EvtNext reports
 // an error that signals the subscription has gone bad mid-run — the Windows
 // runtime never recovers a bad handle, so the goroutine closes handles,
-// calls loss, and exits so the supervisor can drive a re-subscribe.
+// calls loss, and exits so the supervisor can drive a re-subscribe. Subscribe
+// never retries a dead handle itself; the caller owns the terminal-error path.
 func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, counter *atomic.Int64, loss func(error)) error {
 	chPtr, _ := windows.UTF16PtrFromString(channel)
 	qPtr, _ := windows.UTF16PtrFromString(query)
 
-	sigEvent, err := windows.CreateEvent(nil, 0, 0, nil)
+	sigEvent, err := createEvent(nil, 0, 0, nil)
 	if err != nil {
 		return fmt.Errorf("CreateEvent: %w", err)
 	}
 
-	r, _, e := procEvtSubscribe.Call(
+	r, _, e := evtSubscribeCall(
 		0, uintptr(sigEvent),
 		uintptr(unsafe.Pointer(chPtr)),
 		uintptr(unsafe.Pointer(qPtr)),
@@ -51,7 +59,7 @@ func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, c
 		evtSubscribeToFutureEvents,
 	)
 	if r == 0 {
-		_ = windows.CloseHandle(sigEvent)
+		_ = closeHandle(sigEvent)
 		return fmt.Errorf("EvtSubscribe %s: %w", channel, e)
 	}
 	sub := r
@@ -60,15 +68,15 @@ func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, c
 	go func() {
 		defer wg.Done()
 		defer func() {
-			_, _, _ = procEvtClose.Call(sub)
-			_ = windows.CloseHandle(sigEvent)
+			_, _, _ = evtCloseCall(sub)
+			_ = closeHandle(sigEvent)
 		}()
 
 		var evts [64]uintptr
 		var returned uint32
 
 		for {
-			_, _ = windows.WaitForSingleObject(sigEvent, 1000)
+			_, _ = waitForSingleObject(sigEvent, 1000)
 
 			select {
 			case <-ctx.Done():
@@ -77,18 +85,31 @@ func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, c
 			}
 
 			for {
-				r, _, _ := procEvtNext.Call(
+				r, _, rawErr := evtNextCall(
 					sub, 64,
 					uintptr(unsafe.Pointer(&evts[0])),
 					0, 0,
 					uintptr(unsafe.Pointer(&returned)),
 				)
-				if r == 0 || returned == 0 {
+				var e windows.Errno
+				if errno, ok := rawErr.(windows.Errno); ok {
+					e = errno
+				}
+				if r == 0 {
+					if e != 0 && e != windows.ERROR_NO_MORE_ITEMS && e != windows.ERROR_TIMEOUT {
+						if loss != nil {
+							loss(fmt.Errorf("EvtNext %s: %w", channel, e))
+						}
+						return
+					}
+					break
+				}
+				if returned == 0 {
 					break
 				}
 				counter.Add(int64(returned))
 				for j := range returned {
-					_, _, _ = procEvtClose.Call(evts[j])
+					_, _, _ = evtCloseCall(evts[j])
 				}
 			}
 		}

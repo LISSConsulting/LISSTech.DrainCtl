@@ -342,6 +342,43 @@ func TestReadPipeResponse_ContinuesOnMoreData(t *testing.T) {
 	}
 }
 
+func TestReadPipeMessage_HandlesServerSideMoreData(t *testing.T) {
+	r := &scriptedReader{steps: []readStep{
+		{data: []byte(`{"cmd":"register","url":"https://`), err: windows.ERROR_MORE_DATA},
+		{data: []byte(`dash.example:8443/api/v1/register`), err: windows.ERROR_MORE_DATA},
+		{data: []byte(`"}`), err: io.EOF},
+	}}
+
+	got, err := readPipeMessage(r, 8)
+	if err != nil {
+		t.Fatalf("readPipeMessage: %v", err)
+	}
+	if string(got) != `{"cmd":"register","url":"https://dash.example:8443/api/v1/register"}` {
+		t.Fatalf("message = %q", string(got))
+	}
+}
+
+func TestReadPipeMessage_EnforcesOneMiBCap(t *testing.T) {
+	chunk := make([]byte, 300*1024)
+	for i := range chunk {
+		chunk[i] = 'a'
+	}
+	r := &scriptedReader{steps: []readStep{
+		{data: chunk, err: windows.ERROR_MORE_DATA},
+		{data: chunk, err: windows.ERROR_MORE_DATA},
+		{data: chunk, err: windows.ERROR_MORE_DATA},
+		{data: chunk, err: windows.ERROR_MORE_DATA},
+	}}
+
+	_, err := readPipeMessage(r, 4096)
+	if err == nil {
+		t.Fatal("expected cap error, got nil")
+	}
+	if err.Error() != "pipe: message exceeds 1 MiB cap" {
+		t.Fatalf("err = %q, want exact cap error", err.Error())
+	}
+}
+
 func TestReadPipeResponse_PropagatesUnexpectedError(t *testing.T) {
 	want := errors.New("boom")
 	r := &scriptedReader{steps: []readStep{{data: []byte("oops"), err: want}}}
@@ -365,6 +402,7 @@ type readStep struct {
 type scriptedReader struct {
 	steps []readStep
 	idx   int
+	off   int
 }
 
 func (r *scriptedReader) Read(p []byte) (int, error) {
@@ -372,9 +410,17 @@ func (r *scriptedReader) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 	step := r.steps[r.idx]
-	r.idx++
-	n := copy(p, step.data)
-	return n, step.err
+	n := copy(p, step.data[r.off:])
+	r.off += n
+	if r.off >= len(step.data) {
+		r.idx++
+		r.off = 0
+		return n, step.err
+	}
+	if errors.Is(step.err, windows.ERROR_MORE_DATA) {
+		return n, windows.ERROR_MORE_DATA
+	}
+	return n, nil
 }
 
 func (c *captureHandler) HandleStatus() *dc.CheckResult {

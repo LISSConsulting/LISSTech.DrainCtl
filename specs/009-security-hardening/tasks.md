@@ -108,23 +108,23 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 3
 
-- [ ] T030 [P] [US3] (Step 5) In `internal/evtspike/subscriber_windows.go:80`, capture the `e` return from `procEvtNext.Call(...)` into a `windows.Errno`. When `r == 0` AND errno is non-zero AND errno is not `ERROR_NO_MORE_ITEMS`/`ERROR_TIMEOUT`, call `loss(fmt.Errorf("EvtNext %s: %w", channel, e))` then `return` from the goroutine
-- [ ] T031 [P] [US3] (Step 5) Add comment in `internal/evtspike/subscriber_windows.go` documenting the terminal-error contract between `Subscribe` and its caller
-- [ ] T032 [P] [US3] (Step 5) Add `TestSubscribe_FiresLossOnTerminalError` in `internal/evtspike/subscriber_test.go` (or appropriate test file): invoke `Subscribe` against a deliberately closed subscription handle; assert `loss` fires within 2 s with non-nil error
-- [ ] T033 [US3] (Step 6) Split `LoadConfig` in `config.go` into exported `LoadConfig()` (takes the mutex) and unexported `loadConfigLocked()` (assumes mutex held)
-- [ ] T034 [US3] (Step 6) Split `saveConfigToFile` similarly into locked + unlocked variants, hoisting the named-mutex acquisition up to the new helper
-- [ ] T035 [US3] (Step 6) Introduce unexported `readModifyWrite(f func(*Config) error) error` in `config.go` that acquires the mutex, calls `loadConfigLocked()`, invokes `f(cfg)`, and calls `saveConfigFileLocked(cfg)`
-- [ ] T036 [US3] (Step 6) Rewrite `UpdateNotifySettings` in `config.go:858` to use `readModifyWrite`
-- [ ] T037 [US3] (Step 6) Rewrite `UpdateEvtSpikeEnabled` to use `readModifyWrite`
-- [ ] T038 [US3] (Step 6) Rewrite `InstallCertificate` to use `readModifyWrite`
-- [ ] T039 [US3] (Step 6) Rewrite `UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig` in `config.go:806-844` onto `readModifyWrite` — these are deleted in US5 but must still compile and participate in RMW until then
-- [ ] T040 [P] [US3] (Step 6) Add `TestConfigRMW_NoInterleave` in `config_test.go`: spawn 20 goroutines hammering `UpdateSessionThreshold` with distinct values; assert final on-disk JSON parses and matches exactly one written value
-- [ ] T041 [P] [US3] (Step 6) Add regression test in `config_test.go` verifying two concurrent updaters (notifications + grace) both land in the final file
-- [ ] T042 [P] [US3] (Step 7) Extract `readPipeMessage(r io.Reader, initialBufSize int) ([]byte, error)` helper in `internal/pipe/pipe.go` that loops on `errors.Is(err, windows.ERROR_MORE_DATA)`, growing the buffer up to a 1 MiB cap; return concatenated bytes
-- [ ] T043 [US3] (Step 7) Replace the single 4 KB `conn.Read(buf)` in `handlePipeConn` at `internal/pipe/pipe.go:100-103` with a call to `readPipeMessage`
-- [ ] T044 [US3] (Step 7) Refactor `readPipeResponse` to delegate its existing `ERROR_MORE_DATA` loop to `readPipeMessage`; remove the now-duplicated code
-- [ ] T045 [P] [US3] (Step 7) Add `TestReadPipeMessage_HandlesServerSideMoreData` in `internal/pipe/pipe_test.go` using the existing `scriptedReader` pattern from `TestReadPipeResponse_ContinuesOnMoreData`; exercise multi-chunk `ERROR_MORE_DATA` concatenation
-- [ ] T046 [P] [US3] (Step 7) Add cap test: scripted reader returning `ERROR_MORE_DATA` past 1 MiB; assert specific cap error
+- [x] T030 [P] [US3] (Step 5) In `internal/evtspike/subscriber_windows.go:80`, capture the `e` return from `procEvtNext.Call(...)` into a `windows.Errno`. When `r == 0` AND errno is non-zero AND errno is not `ERROR_NO_MORE_ITEMS`/`ERROR_TIMEOUT`, call `loss(fmt.Errorf("EvtNext %s: %w", channel, e))` then `return` from the goroutine
+- [x] T031 [P] [US3] (Step 5) Add comment in `internal/evtspike/subscriber_windows.go` documenting the terminal-error contract between `Subscribe` and its caller
+- [x] T032 [P] [US3] (Step 5) Add `TestSubscribe_FiresLossOnTerminalError` in `internal/evtspike/subscriber_test.go` (or appropriate test file): invoke `Subscribe` against a deliberately closed subscription handle; assert `loss` fires within 2 s with non-nil error
+- [x] T033 [US3] (Step 6) Split `LoadConfig` in `config.go` into exported `LoadConfig()` (takes the mutex) and unexported `loadConfigLocked()` (assumes mutex held)
+- [x] T034 [US3] (Step 6) Split `saveConfigToFile` similarly into locked + unlocked variants, hoisting the named-mutex acquisition up to the new helper
+- [x] T035 [US3] (Step 6) Introduce unexported `readModifyWrite(f func(*Config) error) error` in `config.go` that acquires the mutex, calls `loadConfigLocked()`, invokes `f(cfg)`, and calls `saveConfigFileLocked(cfg)`
+- [x] T036 [US3] (Step 6) Rewrite `UpdateNotifySettings` in `config.go:858` to use `readModifyWrite`
+- [x] T037 [US3] (Step 6) Rewrite `UpdateEvtSpikeEnabled` to use `readModifyWrite`
+- [x] T038 [US3] (Step 6) Rewrite `InstallCertificate` to use `readModifyWrite`
+- [x] T039 [US3] (Step 6) Rewrite `UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig` in `config.go:806-844` onto `readModifyWrite` — these are deleted in US5 but must still compile and participate in RMW until then
+- [x] T040 [P] [US3] (Step 6) Add `TestConfigRMW_NoInterleave` in `config_test.go`: spawn 20 goroutines hammering `UpdateSessionThreshold` with distinct values; assert final on-disk JSON parses and matches exactly one written value
+- [x] T041 [P] [US3] (Step 6) Add regression test in `config_test.go` verifying two concurrent updaters (notifications + grace) both land in the final file
+- [x] T042 [P] [US3] (Step 7) Extract `readPipeMessage(r io.Reader, initialBufSize int) ([]byte, error)` helper in `internal/pipe/pipe.go` that loops on `errors.Is(err, windows.ERROR_MORE_DATA)`, growing the buffer up to a 1 MiB cap; return concatenated bytes
+- [x] T043 [US3] (Step 7) Replace the single 4 KB `conn.Read(buf)` in `handlePipeConn` at `internal/pipe/pipe.go:100-103` with a call to `readPipeMessage`
+- [x] T044 [US3] (Step 7) Refactor `readPipeResponse` to delegate its existing `ERROR_MORE_DATA` loop to `readPipeMessage`; remove the now-duplicated code
+- [x] T045 [P] [US3] (Step 7) Add `TestReadPipeMessage_HandlesServerSideMoreData` in `internal/pipe/pipe_test.go` using the existing `scriptedReader` pattern from `TestReadPipeResponse_ContinuesOnMoreData`; exercise multi-chunk `ERROR_MORE_DATA` concatenation
+- [x] T046 [P] [US3] (Step 7) Add cap test: scripted reader returning `ERROR_MORE_DATA` past 1 MiB; assert specific cap error
 
 **Checkpoint**: Run `go test ./...`, `just lint`. Execute quickstart.md §User Story 3 (closed-handle loss, 20-goroutine RMW stress, pipe large-message test). Ship as one PR — internal RMW refactor spans many callers; splitting would create merge churn.
 
