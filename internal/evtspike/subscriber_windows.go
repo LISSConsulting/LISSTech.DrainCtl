@@ -91,14 +91,18 @@ func Subscribe(ctx context.Context, wg *sync.WaitGroup, channel, query string, c
 					0, 0,
 					uintptr(unsafe.Pointer(&returned)),
 				)
-				var e windows.Errno
-				if errno, ok := rawErr.(windows.Errno); ok {
-					e = errno
-				}
 				if r == 0 {
-					if e != 0 && e != windows.ERROR_NO_MORE_ITEMS && e != windows.ERROR_TIMEOUT {
+					// Only treat explicit handle-invalidation as terminal.
+					// Go's syscall machinery populates lastErr from
+					// GetLastError() regardless of whether the call actually
+					// failed — so on benign "no events" returns we commonly
+					// see stale errnos like ERROR_INVALID_OPERATION (4317)
+					// left over from earlier Win32 calls. Widening the set
+					// of "terminal" errnos past ERROR_INVALID_HANDLE tears
+					// down live subscriptions on every idle poll.
+					if errno, ok := rawErr.(windows.Errno); ok && errno == windows.ERROR_INVALID_HANDLE {
 						if loss != nil {
-							loss(fmt.Errorf("EvtNext %s: %w", channel, e))
+							loss(fmt.Errorf("EvtNext %s: %w", channel, errno))
 						}
 						return
 					}
