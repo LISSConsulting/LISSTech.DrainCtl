@@ -78,8 +78,9 @@ cmd/drainctl/
 
 internal/svc/
 └── handler.go                                # (Phase 1) Mirror fingerprint-mismatch refusal at registerWithDashboard;
-                                              # (Phase 4) split into handler_pipe.go / handler_dashboard.go / handler_perf.go /
-                                              #           handler_evtspike.go / handler_lifecycle.go
+                                              # (Phase 4) rename to service.go (Service struct + RunService + control-handler);
+                                              #           split sibling files: piperpc.go / dashsync.go / perfsupervisor.go /
+                                              #           spikesupervisor.go. Subpackage promotion deferred to a later PR.
 
 email.go                                      # Require STARTTLS for authenticated SMTP; warn on cleartext unauth
 email_test.go                                 # STARTTLS refusal subtest + HTML-escape subtest

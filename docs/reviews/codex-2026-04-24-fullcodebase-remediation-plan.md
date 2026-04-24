@@ -226,7 +226,7 @@ PR theme: *"Tidy public surface and split god-files."*
 ### Step 15 — Split `internal/svc/handler.go`
 
 - **Addresses:** C-C3
-- **Files:** `internal/svc/handler.go` split into `handler.go` (core Run loop), `handler_pipe.go`, `handler_dashboard.go`, `handler_perf.go`, `handler_evtspike.go`, `handler_lifecycle.go`. Test file may split into matching `*_test.go` files or stay single.
+- **Files:** `internal/svc/handler.go` split into subsystem-named siblings: `service.go` (Service struct + RunService + Windows service control-handler shim; absorbs what the first plan revision called "handler_lifecycle.go"), `piperpc.go` (pipe RPC dispatch + per-verb handlers), `dashsync.go` (dashboard registration + periodic config pull), `perfsupervisor.go` (perf collector lifecycle), `spikesupervisor.go` (evtspike reload loop). Subpackage promotion (`internal/svc/piperpc/` etc.) is deferred to a later feature branch. Test file may split into matching `*_test.go` files or stay single.
 - **Change:** Pure cut-and-paste: move related functions together without changing signatures or types. Each new file keeps the `//go:build windows` tag and `package svc` declaration. Any unexported helpers used across files stay in their origin file.
 - **Verification:** `go build ./... && go test ./internal/svc/...` must pass unchanged. `git diff --stat` should show near-zero net line delta (pure moves).
 - **Effort:** L

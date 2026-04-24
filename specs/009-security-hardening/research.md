@@ -157,17 +157,29 @@ alternatives without re-reading the review transcript.
 
 - **Decision**: Move ETW event-ID constants out of root `drainctl` into
   `internal/etwids/`. Split `internal/svc/handler.go` (1138 lines) into topically
-  coherent files: `handler.go` (Run loop), `handler_pipe.go`, `handler_dashboard.go`,
-  `handler_perf.go`, `handler_evtspike.go`, `handler_lifecycle.go`. No new packages
-  beyond `internal/etwids/`; no signature changes.
+  coherent subsystem-named files: `service.go` (Service struct + RunService + Windows
+  service control-handler shim), `piperpc.go` (pipe request dispatch + per-verb
+  handlers), `dashsync.go` (dashboard registration + periodic config pull),
+  `perfsupervisor.go` (perf collector start/stop supervisor), `spikesupervisor.go`
+  (evtspike config-reload loop). No new packages beyond `internal/etwids/`; no
+  signature changes.
 - **Rationale**: Root package was drifting into a shared-helpers namespace (codex C-C1);
   `handler.go` mixes pipe RPC, dashboard sync, perf collection, evtspike reloads, and
   service startup in one file where the next bug fix in any one subsystem will touch
   three others unrelated to it. Both are pure hygiene with no behavior impact.
+- **Naming discipline**: the original plan proposed `handler_<subsystem>.go` filenames.
+  Rejected during implementation: the `handler_` prefix is dead weight (every file in
+  `package svc` is a "handler"), and `handler_lifecycle.go` would have fought with
+  `handler.go` over the same subject (Windows service startup *is* the service run loop).
+  Final names use subsystem nouns directly and collapse the lifecycle file into
+  `service.go`.
 - **Alternatives considered**:
-  - Promote split handler pieces to new subpackages (`internal/svc/pipe/`, etc.):
-    rejected — widens surface and forces signature changes; not worth it at this
-    pass.
+  - Promote split handler pieces to new subpackages (`internal/svc/piperpc/`,
+    `internal/svc/dashsync/`, etc.): **deferred to a later feature branch.** Would
+    force promoting unexported symbols across a new package boundary, significantly
+    widening the 009 diff and blending two distinct refactors. Revisit once the
+    in-package split has settled.
   - Keep ETW IDs in root: rejected — they're only consumed by two internal packages
     and the comment at `drainctl.go:17` already concedes this is a layout smell.
   - Leave `handler.go` monolithic: rejected — cumulative tax on every future fix.
+  - Use `handler_*.go` prefix: rejected — see Naming discipline note above.
