@@ -1,12 +1,33 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
-## 009 security hardening — US1 remediation notes (2026-04-24)
+## 009 security + correctness hardening — shipped (2026-04-24)
 
-Operators must manually clear `Dashboard.TLSFingerprint` in `config.json` before re-registering after cert rotation.
+Remediates 16 confirmed items from the 2026-04-24 codex full-codebase review (scope-pruned; plan at `docs/reviews/codex-2026-04-24-fullcodebase-remediation-plan.md`). Five user stories landed; one task deferred.
 
-Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465); plain-port-25 AUTH is rejected.
+**Credential paths (US1/US2)**:
+- Dashboard fingerprint mismatch refusal: once pinned, `Dashboard.TLSFingerprint` is immutable via the automatic register path. Legitimate cert rotation now requires manually clearing the field in `config.json` before re-registering. CLI returns a non-zero exit with `fingerprint mismatch` in the error; service logs `slog.Error("dashboard=fingerprint-mismatch", ...)` on every retry.
+- Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465). Drainctl refuses to send `AUTH` on a cleartext session. Plain-port-25 AUTH is rejected with a host-naming error; unauthenticated relays keep opportunistic behavior with a `slog.Warn`.
+- `config.json` ACL: SERVICE (S-1-5-6) ACE dropped. Only SYSTEM and Administrators. Post-install `icacls` check confirms no stray SERVICE grant.
+- DPAPI entropy constant (`LISSTech.DrainCtl/v1/notify-secret`) added. Greenfield — no migration path; any secret encrypted under the zero-entropy scheme will blank on load.
 
-Post-install `icacls` check — confirm no `NT AUTHORITY\SERVICE` ACE on `config.json`.
+**Pipeline correctness (US3)**:
+- Evtspike `Subscribe` now fires its `loss` callback on terminal `EvtNext` errors (previously discarded). Function-pointer test seams (`createEvent`, `evtNextCall`, etc.) let tests inject a closed-handle scenario.
+- Atomic config read-modify-write via `readModifyWrite(f)` under the existing named mutex. Every scoped updater (`UpdateNotifySettings`, `UpdateEvtSpikeEnabled`, `InstallCertificate`) brackets Load → mutate → Save under one lock. 20-goroutine stress test verifies no lost updates.
+- Named-pipe server shares `readPipeMessage` with the response path; 1 MiB cap; `ERROR_MORE_DATA` loop. Requests >4 KB no longer silently truncate.
+
+**Defense in depth (US4)**:
+- Webhook/ntfy URLs with hostname exactly `169.254.169.254` (cloud-metadata IP) are rejected at send-time and at dashboard persist/test paths. RFC1918 LAN webhooks remain allowed — on-prem deployment model keeps internal bridges legitimate.
+- Pipe caller-SID check for privileged verbs (`register`, `remove-server`, `baseline-reset`): `GetNamedPipeClientProcessId` + `OpenProcessToken` + `Token.IsMember(adminSID)`. Denied calls get `access denied`, a `slog.Warn("pipe=access_denied", ...)`, and an `EvtAccessDenied` audit event. Read-only verbs (`status`, `history`, `servers`) still accessible to any OS-permitted caller.
+- Email rendering swapped from `text/template` to `html/template`. Crafted event-log fields can no longer inject HTML into admin inboxes.
+- Registry-change attribution uses the event's own `SystemTime` (RFC3339Nano), not wall-clock `time.Now()`. Buffered audit-log deliveries no longer stamp the wrong transition.
+
+**Surface drift cleanup (US5)**:
+- Deleted four dead `Update*` exports (`UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig`). `UpdateNotifySettings` is the sole write path now.
+- ETW event-ID constants moved from root `drainctl` to `internal/etwids/`.
+- `DefaultAuditPath` deprecated in favor of `DefaultDBPath`; `GetHistory` accepts either a file or directory path (`os.Stat` branches).
+- Shared Svelte helpers `logStatusTransition` and `appendPerfToRingBuffer` replace four duplicated blocks in `App.svelte`. Orphan `deriveP95`/`deriveP50` removed from `state.svelte.js`.
+
+**Deferred**: T084-T086, splitting `internal/svc/handler.go` (1138 lines) into subsystem-named siblings (`service.go`, `piperpc.go`, `dashsync.go`, `perfsupervisor.go`, `spikesupervisor.go`). First pass produced tangled duplicate declarations. Split needs its own follow-up branch with function-by-function surgery — non-blocking since handler.go remains behavior-correct. Subpackage promotion (`internal/svc/piperpc/` etc.) was explicitly scoped out regardless; revisit once the in-package split lands.
 
 ## 008 extension — event_spikes + servers SQLite migration + swimlane (2026-04-21)
 

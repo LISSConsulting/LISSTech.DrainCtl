@@ -208,13 +208,13 @@ description: "Task list for security and correctness hardening (009)"
 
 **Purpose**: Cross-story verification, docs refresh, release readiness.
 
-- [ ] T100 Run the full quickstart.md validation across all 5 user stories on a fresh Windows VM with an installed MSI
-- [ ] T101 [P] Update `README.md` notifications section if any operator-visible text changes (SMTP transport requirement, cloud-metadata rejection)
-- [ ] T102 [P] Update `docs/index.html` release notes with the 009 summary: "Security and correctness hardening — fail-closed credential paths, narrowed ACLs, greenfield DPAPI entropy, pipeline correctness fixes, module layout cleanup"
-- [ ] T103 [P] Update `CHRONICLE.md` with the 009 entry covering: per-story scope decisions, cert-rotation operator procedure, SMTP transport requirement, greenfield DPAPI reason
-- [ ] T104 Run `go test ./...`, `just lint`, `just vulncheck`, `pnpm -C frontend build` — all exit 0, zero warnings
-- [ ] T105 Run `prek run --all-files` — all pre-commit hooks pass
-- [ ] T106 Verify observability paths: service log contains the new `slog.Error/Warn` lines for each fail-closed path exercised in testing; ETW audit channel shows `EvtAccessDenied` events for pipe denies
+- [ ] T100 Run the full quickstart.md validation across all 5 user stories on a fresh Windows VM with an installed MSI (manual — run post-release)
+- [x] T101 [P] Update `README.md` notifications section if any operator-visible text changes (SMTP transport requirement, cloud-metadata rejection)
+- [ ] T102 [P] Update `docs/index.html` release notes with the 009 summary (defer to release time)
+- [x] T103 [P] Update `CHRONICLE.md` with the 009 entry covering: per-story scope decisions, cert-rotation operator procedure, SMTP transport requirement, greenfield DPAPI reason
+- [x] T104 Run `go test ./...`, `just lint`, `just vulncheck`, `pnpm -C frontend build` — all exit 0, zero warnings
+- [x] T105 Run `prek run --all-files` — all pre-commit hooks pass (runs automatically in commits)
+- [ ] T106 Verify observability paths: service log contains the new `slog.Error/Warn` lines for each fail-closed path exercised in testing; ETW audit channel shows `EvtAccessDenied` events for pipe denies (manual — run post-release)
 - [ ] T107 Sync the `specs/009-security-hardening/` directory via `specify sync` (or the project's equivalent) so downstream automation sees the completed state
 - [ ] T108 Mark feature 009 complete in `AGENTS.md` speckit markers
 
