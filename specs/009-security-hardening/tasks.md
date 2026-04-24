@@ -176,28 +176,28 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 5
 
-- [ ] T070 [US5] (Step 12) Delete `UpdateNotifications` (`config.go:806`), `UpdateSessionThreshold` (`config.go:818`), `UpdateGracePeriod` (`config.go:831`), `UpdatePerformanceConfig` (`config.go:844`)
-- [ ] T071 [P] [US5] (Step 12) Delete the companion tests for the four helpers from `config_test.go`
-- [ ] T072 [P] [US5] (Step 12) Grep to confirm no external consumer: `grep -r "UpdateNotifications\|UpdateSessionThreshold\|UpdateGracePeriod\|UpdatePerformanceConfig"` returns no hits outside release notes
-- [ ] T073 [P] [US5] (Step 13) Create `internal/etwids/etwids.go` with `//go:build windows`, package `etwids`, exporting `EvtDashboardAccess`, `EvtDashboardConfigChange`, `EvtServerRegistered`, `EvtServerRemoved`, `EvtAccessDenied`, `EvtGenericAudit` with the same numeric values they have in `drainctl.go`
-- [ ] T074 [US5] (Step 13) Delete the six ETW event-ID constants from `drainctl.go:17`
-- [ ] T075 [US5] (Step 13) Update imports in `internal/svc/` and `internal/dashboard/` files that referenced the old root-package constants to use `internal/etwids/` instead
-- [ ] T076 [P] [US5] (Step 13) Add doc comment to `MigrateFromRegistry` and `WriteDefaultParameters` in `config.go`: `// Installer-only; do not call from runtime code.`
-- [ ] T077 [P] [US5] (Step 14) Add `DefaultDBPath() string` in `drainctl.go` returning `DefaultDataDir() + "\\drainctl.db"`; add `DefaultDBDir() string` returning `DefaultDataDir()`
-- [ ] T078 [US5] (Step 14) Reimplement `DefaultAuditPath()` as a thin wrapper calling `DefaultDBPath()`; add `// Deprecated: use DefaultDBPath.` doc comment
-- [ ] T079 [US5] (Step 14) Widen `GetHistory` in `history.go:35-39`: call `os.Stat(opts.DBPath)`; if dir, use as-is; if file, use `filepath.Dir`; if empty, use `DefaultDBDir()`
-- [ ] T080 [P] [US5] (Step 14) Switch default in `cmd/drainctl/main.go:45` from `dc.DefaultAuditPath()` to `dc.DefaultDBPath()`; update flag help text to "SQLite audit DB"
-- [ ] T081 [P] [US5] (Step 14) Switch default in `cmd/cshared/exports.go:81` similarly
-- [ ] T082 [P] [US5] (Step 14) Switch default-setting call sites in `config.go:283, 389, 1073` to `DefaultDBPath()`
-- [ ] T083 [P] [US5] (Step 14) Add `TestGetHistory_AcceptsFilePath` and `TestGetHistory_AcceptsDirPath` in `history_test.go` (or equivalent) covering both widened-input shapes
-- [ ] T084 [US5] (Step 15) Split `internal/svc/handler.go` (1138 lines) via pure cut-and-paste into subsystem-named siblings: pipe RPC handlers → `piperpc.go`, dashboard registration + config pull → `dashsync.go`, perf collector lifecycle → `perfsupervisor.go`, evtspike reload loop → `spikesupervisor.go`. The remaining `Service` struct + `RunService` + Windows service control-handler shim rename from `handler.go` to `service.go`. Every new file carries `//go:build windows` and `package svc`. Subpackage promotion (`internal/svc/piperpc/` etc.) is explicitly deferred to a later feature branch
-- [ ] T085 [US5] (Step 15) Run `go build ./... && go test ./internal/svc/...` after each file split; fix any cross-file reference that needs an import update
-- [ ] T086 [US5] (Step 15) Verify `git diff --stat` on the split commit shows near-zero net line delta (pure moves, no behavior changes); each new file under 400 lines
-- [ ] T087 [P] [US5] (Step 16) Export `logStatusTransition(prev, next, host, timestamp)` in `frontend/src/lib/state.svelte.js` — pushes to the shared transitions ring buffer
-- [ ] T088 [P] [US5] (Step 16) Export `appendPerfToRingBuffer(sample)` in `frontend/src/lib/state.svelte.js` — pushes to shared sparkline ring with existing cap
-- [ ] T089 [US5] (Step 16) Replace duplicated blocks at `frontend/src/App.svelte:192-216, 284-302, 386-411, 414-431` with calls to the new helpers — keep all `$state` subscriptions in `App.svelte`, keep helpers side-effect-only on shared buffers
-- [ ] T090 [P] [US5] (Step 17) Delete `deriveP95` and `deriveP50` exports from `frontend/src/lib/state.svelte.js:425, 432`
-- [ ] T091 [P] [US5] (Step 17) Run `pnpm -C frontend build` to confirm no consumer; grep the rest of `frontend/src` for the names
+- [x] T070 [US5] (Step 12) Delete `UpdateNotifications` (`config.go:806`), `UpdateSessionThreshold` (`config.go:818`), `UpdateGracePeriod` (`config.go:831`), `UpdatePerformanceConfig` (`config.go:844`)
+- [x] T071 [P] [US5] (Step 12) Delete the companion tests for the four helpers from `config_test.go`
+- [x] T072 [P] [US5] (Step 12) Grep to confirm no external consumer: `grep -r "UpdateNotifications\|UpdateSessionThreshold\|UpdateGracePeriod\|UpdatePerformanceConfig"` returns no hits outside release notes
+- [x] T073 [P] [US5] (Step 13) Create `internal/etwids/etwids.go` with `//go:build windows`, package `etwids`, exporting `EvtDashboardAccess`, `EvtDashboardConfigChange`, `EvtServerRegistered`, `EvtServerRemoved`, `EvtAccessDenied`, `EvtGenericAudit` with the same numeric values they have in `drainctl.go`
+- [x] T074 [US5] (Step 13) Delete the six ETW event-ID constants from `drainctl.go:17`
+- [x] T075 [US5] (Step 13) Update imports in `internal/svc/` and `internal/dashboard/` files that referenced the old root-package constants to use `internal/etwids/` instead
+- [x] T076 [P] [US5] (Step 13) Add doc comment to `MigrateFromRegistry` and `WriteDefaultParameters` in `config.go`: `// Installer-only; do not call from runtime code.`
+- [x] T077 [P] [US5] (Step 14) Add `DefaultDBPath() string` in `drainctl.go` returning `DefaultDataDir() + "\\drainctl.db"`; add `DefaultDBDir() string` returning `DefaultDataDir()`
+- [x] T078 [US5] (Step 14) Reimplement `DefaultAuditPath()` as a thin wrapper calling `DefaultDBPath()`; add `// Deprecated: use DefaultDBPath.` doc comment
+- [x] T079 [US5] (Step 14) Widen `GetHistory` in `history.go:35-39`: call `os.Stat(opts.DBPath)`; if dir, use as-is; if file, use `filepath.Dir`; if empty, use `DefaultDBDir()`
+- [x] T080 [P] [US5] (Step 14) Switch default in `cmd/drainctl/main.go:45` from `dc.DefaultAuditPath()` to `dc.DefaultDBPath()`; update flag help text to "SQLite audit DB"
+- [x] T081 [P] [US5] (Step 14) Switch default in `cmd/cshared/exports.go:81` similarly
+- [x] T082 [P] [US5] (Step 14) Switch default-setting call sites in `config.go:283, 389, 1073` to `DefaultDBPath()`
+- [x] T083 [P] [US5] (Step 14) Add `TestGetHistory_AcceptsFilePath` and `TestGetHistory_AcceptsDirPath` in `history_test.go` (or equivalent) covering both widened-input shapes
+- [ ] T084 [US5] (Step 15) **DEFERRED to a follow-up branch.** First pass at the split produced tangled duplicate declarations (codex extracted into siblings without removing from `service.go`). Needs a clean pass with more careful function-by-function surgery. Non-blocking: US1-US4 and the other US5 cleanups have all landed; handler.go remains at 1138 lines but is behavior-correct
+- [ ] T085 [US5] (Step 15) DEFERRED with T084
+- [ ] T086 [US5] (Step 15) DEFERRED with T084
+- [x] T087 [P] [US5] (Step 16) Export `logStatusTransition(prev, next, host, timestamp)` in `frontend/src/lib/state.svelte.js` — pushes to the shared transitions ring buffer
+- [x] T088 [P] [US5] (Step 16) Export `appendPerfToRingBuffer(sample)` in `frontend/src/lib/state.svelte.js` — pushes to shared sparkline ring with existing cap
+- [x] T089 [US5] (Step 16) Replace duplicated blocks at `frontend/src/App.svelte:192-216, 284-302, 386-411, 414-431` with calls to the new helpers — keep all `$state` subscriptions in `App.svelte`, keep helpers side-effect-only on shared buffers
+- [x] T090 [P] [US5] (Step 17) Delete `deriveP95` and `deriveP50` exports from `frontend/src/lib/state.svelte.js:425, 432`
+- [x] T091 [P] [US5] (Step 17) Run `pnpm -C frontend build` to confirm no consumer; grep the rest of `frontend/src` for the names
 - [ ] T092 [US5] Manual dashboard validation per quickstart.md §User Story 5: force a drain-mode transition, confirm the transition list updates once (not twice) and sparkline ring length caps correctly
 
 **Checkpoint**: Run `go test ./... && just lint && pnpm -C frontend build`. Execute quickstart.md §User Story 5 checks. Ship as multiple PRs grouped by step, or one bundled "cleanup" PR — each step is independently testable.
