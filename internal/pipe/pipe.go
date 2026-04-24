@@ -52,6 +52,8 @@ const registerDeadline = 30 * time.Second
 
 const pipeMessageCap = 1024 * 1024
 
+var callerIsPrivilegedFunc = callerIsPrivileged
+
 // ErrPipeUnavailable signals that the pipe could not be dialled at all — the
 // service is not installed, not running, or the pipe is otherwise unreachable.
 // Callers use this to distinguish bootstrap / service-down conditions (where a
@@ -109,6 +111,25 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 		data, _ := json.Marshal(resp)
 		_, _ = conn.Write(data)
 		return
+	}
+
+	if requiresPrivilege(req.Cmd) {
+		allowed, sidStr, err := callerIsPrivilegedFunc(conn)
+		if err != nil || !allowed {
+			args := []any{
+				"cmd", req.Cmd,
+				"sid", sidStr,
+				slog.Int("event_id", dc.EvtAccessDenied),
+			}
+			if err != nil {
+				args = append(args, "error", err)
+			}
+			slog.Warn("pipe=access_denied", args...)
+			resp := PipeResponse{OK: false, Error: "access denied"}
+			data, _ := json.Marshal(resp)
+			_, _ = conn.Write(data)
+			return
+		}
 	}
 
 	var resp PipeResponse
@@ -184,6 +205,15 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 
 	data, _ := json.Marshal(resp)
 	_, _ = conn.Write(data)
+}
+
+func requiresPrivilege(cmd string) bool {
+	switch cmd {
+	case "register", "remove-server", "baseline-reset":
+		return true
+	default:
+		return false
+	}
 }
 
 // CheckViaPipe sends a status request to the service and returns the result.

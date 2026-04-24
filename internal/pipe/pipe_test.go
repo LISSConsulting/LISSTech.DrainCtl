@@ -275,6 +275,10 @@ func TestHandlePipeConn_StatusMarshalError(t *testing.T) {
 }
 
 func TestHandlePipeConn_RegisterOK(t *testing.T) {
+	oldCheck := callerIsPrivilegedFunc
+	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) { return true, "S-1-5-32-544", nil }
+	t.Cleanup(func() { callerIsPrivilegedFunc = oldCheck })
+
 	handler := &mockHandler{
 		registerResult: json.RawMessage(`{"tls_fingerprint":"abc123"}`),
 	}
@@ -299,6 +303,10 @@ func TestHandlePipeConn_RegisterOK(t *testing.T) {
 }
 
 func TestHandlePipeConn_RegisterMissingURL(t *testing.T) {
+	oldCheck := callerIsPrivilegedFunc
+	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) { return true, "S-1-5-32-544", nil }
+	t.Cleanup(func() { callerIsPrivilegedFunc = oldCheck })
+
 	handler := &mockHandler{}
 
 	resp := pipeCall(t, PipeRequest{Cmd: "register"}, handler)
@@ -315,6 +323,10 @@ func TestHandlePipeConn_RegisterMissingURL(t *testing.T) {
 }
 
 func TestHandlePipeConn_RegisterHandlerError(t *testing.T) {
+	oldCheck := callerIsPrivilegedFunc
+	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) { return true, "S-1-5-32-544", nil }
+	t.Cleanup(func() { callerIsPrivilegedFunc = oldCheck })
+
 	handler := &mockHandler{registerErr: fmt.Errorf("register: status 401")}
 
 	resp := pipeCall(t, PipeRequest{Cmd: "register", URL: "https://dash.example:8443"}, handler)
