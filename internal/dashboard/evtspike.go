@@ -12,6 +12,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
@@ -184,7 +185,7 @@ func (ds *DashboardServer) handleReportSpike(w http.ResponseWriter, r *http.Requ
 	auth := GetAuthInfo(r)
 	if auth != nil && !isAuthorizedForHost(auth, spike.Host, ds.cfg.Group) {
 		slog.Warn("dashboard: spike rejected: identity mismatch",
-			slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "claimed_host", spike.Host)
+			slog.Int("event_id", etwids.EvtAccessDenied), "user", auth.Username, "claimed_host", spike.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
 	}

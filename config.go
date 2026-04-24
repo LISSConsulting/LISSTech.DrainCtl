@@ -280,7 +280,7 @@ func DefaultConfig() *Config {
 		GracePeriod:             DefaultGracePeriod,
 		RetentionDays:           DefaultRetentionDays,
 		PollInterval:            DefaultPollInterval,
-		AuditPath:               DefaultAuditPath(),
+		AuditPath:               DefaultDBPath(),
 		Notifications:           []NotificationTarget{},
 		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup, FetchInterval: DefaultDashboardFetchInterval},
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
@@ -386,7 +386,7 @@ func (c *Config) Validate() {
 		c.PollInterval = DefaultPollInterval
 	}
 	if c.AuditPath == "" {
-		c.AuditPath = DefaultAuditPath()
+		c.AuditPath = DefaultDBPath()
 	}
 	if c.Dashboard.Port < 1 || c.Dashboard.Port > 65535 {
 		c.Dashboard.Port = DefaultDashboardPort
@@ -840,48 +840,6 @@ func isElevated() bool {
 	return member
 }
 
-// ── Scoped updaters (dashboard API) ─────────────────────────────────────
-
-// UpdateNotifications replaces the notification targets in config.json.
-// This is the only way the dashboard API should modify notifications.
-func UpdateNotifications(targets []NotificationTarget) error {
-	return readModifyWrite(func(cfg *Config) error {
-		cfg.Notifications = targets
-		return nil
-	})
-}
-
-// UpdateSessionThreshold sets the session warning threshold in config.json.
-// This is the only way the dashboard API should modify the threshold.
-func UpdateSessionThreshold(pct int) error {
-	if pct < 0 || pct > 100 {
-		return fmt.Errorf("threshold must be 0-100, got %d", pct)
-	}
-	return readModifyWrite(func(cfg *Config) error {
-		cfg.SessionWarningThreshold = pct
-		return nil
-	})
-}
-
-// UpdateGracePeriod sets the grace period (minutes) in config.json.
-func UpdateGracePeriod(minutes int) error {
-	if minutes < 1 || minutes > 1440 {
-		return fmt.Errorf("grace period must be 1-1440 minutes, got %d", minutes)
-	}
-	return readModifyWrite(func(cfg *Config) error {
-		cfg.GracePeriod = minutes
-		return nil
-	})
-}
-
-// UpdatePerformanceConfig replaces the performance monitoring settings in config.json.
-func UpdatePerformanceConfig(perf PerformanceConfig) error {
-	return readModifyWrite(func(cfg *Config) error {
-		cfg.Performance = perf
-		return nil
-	})
-}
-
 // UpdateNotifySettings atomically updates notification targets, session warning
 // threshold, grace period, poll interval, and/or performance config in a single
 // config load+save cycle. Any nil argument is left unchanged. This is the
@@ -974,6 +932,8 @@ func InstallCertificate(certPath, keyPath string) error {
 
 // ── Registry migration ──────────────────────────────────────────────────
 
+// Installer-only; do not call from runtime code.
+//
 // MigrateFromRegistry reads the old registry-based config and writes it to
 // config.json. Returns the migrated config. Called automatically by
 // LoadConfig when config.json does not exist.
@@ -1073,6 +1033,8 @@ func MigrateFromRegistry() (*Config, error) {
 
 // ── Legacy compat (keep WriteDefaultParameters for installer transition) ─
 
+// Installer-only; do not call from runtime code.
+//
 // WriteDefaultParameters creates the Parameters registry key with default
 // values if it doesn't already exist. Kept for backwards compatibility
 // during the transition period — new installs use config.json instead.
@@ -1093,7 +1055,7 @@ func WriteDefaultParameters() error {
 		_ = key.SetDWordValue("PollInterval", DefaultPollInterval)
 	}
 	if _, _, err := key.GetStringValue("AuditPath"); err != nil {
-		_ = key.SetStringValue("AuditPath", DefaultAuditPath())
+		_ = key.SetStringValue("AuditPath", DefaultDBPath())
 	}
 
 	if _, _, err := key.GetStringValue("WebhookURL"); err != nil {

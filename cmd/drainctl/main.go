@@ -42,7 +42,7 @@ func main() {
 	}
 
 	pf := root.PersistentFlags()
-	pf.StringVar(&cfg.DB, "db", dc.DefaultAuditPath(), "Path to audit trail file")
+	pf.StringVar(&cfg.DB, "db", dc.DefaultDBPath(), "SQLite audit DB")
 	pf.StringVar(&cfg.Format, "format", "", "Output format: plain, table, csv, json")
 	pf.StringVar(&cfg.LogLevel, "log-level", "info", "Log verbosity: debug, info, warn, error")
 

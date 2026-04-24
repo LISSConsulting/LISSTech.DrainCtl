@@ -1059,102 +1059,6 @@ func TestLoadConfig_ReadError(t *testing.T) {
 	}
 }
 
-// ── UpdateSessionThreshold ────────────────────────────────────────────────────
-
-// TestUpdateSessionThreshold_UpdatesConfig verifies that a valid percentage is
-// written to config.json and reads back correctly.
-func TestUpdateSessionThreshold_UpdatesConfig(t *testing.T) {
-	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig()); err != nil {
-		t.Fatalf("SaveConfig: %v", err)
-	}
-
-	if err := UpdateSessionThreshold(75); err != nil {
-		t.Fatalf("UpdateSessionThreshold: %v", err)
-	}
-
-	got, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	if got.SessionWarningThreshold != 75 {
-		t.Errorf("SessionWarningThreshold = %d, want 75", got.SessionWarningThreshold)
-	}
-}
-
-// TestUpdateSessionThreshold_InvalidRange verifies that out-of-range values
-// return an error without touching the config file.
-func TestUpdateSessionThreshold_InvalidRange(t *testing.T) {
-	for _, pct := range []int{-1, 101, 999} {
-		if err := UpdateSessionThreshold(pct); err == nil {
-			t.Errorf("UpdateSessionThreshold(%d): expected error, got nil", pct)
-		}
-	}
-}
-
-// ── UpdateGracePeriod ─────────────────────────────────────────────────────────
-
-// TestUpdateGracePeriod_UpdatesConfig verifies that a valid minute value is
-// written to config.json and reads back correctly.
-func TestUpdateGracePeriod_UpdatesConfig(t *testing.T) {
-	t.Setenv("ProgramData", t.TempDir())
-	if err := SaveConfig(DefaultConfig()); err != nil {
-		t.Fatalf("SaveConfig: %v", err)
-	}
-
-	if err := UpdateGracePeriod(120); err != nil {
-		t.Fatalf("UpdateGracePeriod: %v", err)
-	}
-
-	got, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	if got.GracePeriod != 120 {
-		t.Errorf("GracePeriod = %d, want 120", got.GracePeriod)
-	}
-}
-
-// TestUpdateGracePeriod_InvalidRange verifies that out-of-range values return
-// an error without touching the config file.
-func TestUpdateGracePeriod_InvalidRange(t *testing.T) {
-	for _, m := range []int{0, -1, 1441, 9999} {
-		if err := UpdateGracePeriod(m); err == nil {
-			t.Errorf("UpdateGracePeriod(%d): expected error, got nil", m)
-		}
-	}
-}
-
-// ── UpdateNotifications ───────────────────────────────────────────────────────
-
-// TestUpdateNotifications_ReplacesTargets verifies that notification targets in
-// config.json are fully replaced by the provided slice.
-func TestUpdateNotifications_ReplacesTargets(t *testing.T) {
-	t.Setenv("ProgramData", t.TempDir())
-	cfg := DefaultConfig()
-	cfg.Notifications = []NotificationTarget{
-		{Type: "webhook", URL: "https://old.example.com/hook"},
-	}
-	if err := SaveConfig(cfg); err != nil {
-		t.Fatalf("SaveConfig: %v", err)
-	}
-
-	newTargets := []NotificationTarget{
-		{Type: "ntfy", URL: "https://ntfy.sh/new-topic"},
-	}
-	if err := UpdateNotifications(newTargets); err != nil {
-		t.Fatalf("UpdateNotifications: %v", err)
-	}
-
-	got, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	if len(got.Notifications) != 1 || got.Notifications[0].URL != "https://ntfy.sh/new-topic" {
-		t.Errorf("Notifications = %v, want single ntfy target", got.Notifications)
-	}
-}
-
 // ── UpdateNotifySettings ──────────────────────────────────────────────────────
 
 // TestUpdateNotifySettings_AllNilIsNoOp verifies that passing all nil
@@ -1236,7 +1140,7 @@ func TestConfigRMW_NoInterleave(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for i := 0; i < 10; i++ {
-				if err := UpdateSessionThreshold(pct); err != nil {
+				if err := UpdateNotifySettings(nil, &pct, nil, nil, nil); err != nil {
 					errCh <- err
 					return
 				}
@@ -1249,7 +1153,7 @@ func TestConfigRMW_NoInterleave(t *testing.T) {
 	close(errCh)
 	for err := range errCh {
 		if err != nil {
-			t.Fatalf("UpdateSessionThreshold: %v", err)
+			t.Fatalf("UpdateNotifySettings: %v", err)
 		}
 	}
 
@@ -1295,7 +1199,7 @@ func TestConfigRMW_ConcurrentNotificationsAndGraceBothPersist(t *testing.T) {
 		defer wg.Done()
 		<-start
 		for i := 0; i < 25; i++ {
-			if err := UpdateNotifications(wantTargets); err != nil {
+			if err := UpdateNotifySettings(&wantTargets, nil, nil, nil, nil); err != nil {
 				errCh <- err
 				return
 			}
@@ -1306,7 +1210,7 @@ func TestConfigRMW_ConcurrentNotificationsAndGraceBothPersist(t *testing.T) {
 		defer wg.Done()
 		<-start
 		for i := 0; i < 25; i++ {
-			if err := UpdateGracePeriod(wantGrace); err != nil {
+			if err := UpdateNotifySettings(nil, nil, &wantGrace, nil, nil); err != nil {
 				errCh <- err
 				return
 			}
@@ -1374,7 +1278,7 @@ func TestUpdateNotifySettings_InvalidGracePeriod(t *testing.T) {
 	}
 }
 
-// ── UpdateX_LoadError ─────────────────────────────────────────────────────────
+// ── UpdateNotifySettings_LoadError ────────────────────────────────────────────
 
 // blockConfigRead sets up a temp ProgramData and places a directory at the
 // config.json path so that os.ReadFile returns a non-IsNotExist error.
@@ -1385,33 +1289,6 @@ func blockConfigRead(t *testing.T) {
 	path := DefaultConfigPath()
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("blockConfigRead: MkdirAll: %v", err)
-	}
-}
-
-// TestUpdateNotifications_LoadError verifies that UpdateNotifications propagates
-// a LoadConfig error (config path is a directory, not a file).
-func TestUpdateNotifications_LoadError(t *testing.T) {
-	blockConfigRead(t)
-	if err := UpdateNotifications(nil); err == nil {
-		t.Fatal("expected error from UpdateNotifications when LoadConfig fails, got nil")
-	}
-}
-
-// TestUpdateSessionThreshold_LoadError verifies that UpdateSessionThreshold
-// propagates a LoadConfig error.
-func TestUpdateSessionThreshold_LoadError(t *testing.T) {
-	blockConfigRead(t)
-	if err := UpdateSessionThreshold(75); err == nil {
-		t.Fatal("expected error from UpdateSessionThreshold when LoadConfig fails, got nil")
-	}
-}
-
-// TestUpdateGracePeriod_LoadError verifies that UpdateGracePeriod propagates
-// a LoadConfig error.
-func TestUpdateGracePeriod_LoadError(t *testing.T) {
-	blockConfigRead(t)
-	if err := UpdateGracePeriod(30); err == nil {
-		t.Fatal("expected error from UpdateGracePeriod when LoadConfig fails, got nil")
 	}
 }
 

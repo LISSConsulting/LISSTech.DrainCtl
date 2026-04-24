@@ -78,7 +78,7 @@ func DrainCtl_History(dbPath *C.char, limit C.int, changesOnly C.int) *C.char {
 	// Fallback: direct file read.
 	db := C.GoString(dbPath)
 	if db == "" {
-		db = dc.DefaultAuditPath()
+		db = dc.DefaultDBPath()
 	}
 
 	records, err := dc.GetHistory(dc.HistoryOptions{

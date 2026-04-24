@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 )
 
 // wrapAuth returns SSPI Negotiate middleware for production builds.
@@ -39,7 +39,7 @@ func requireMachineAccount(next http.Handler) http.Handler {
 				return
 			}
 			slog.Warn("sspi: agent route rejected non-machine account",
-				slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username)
+				slog.Int("event_id", etwids.EvtAccessDenied), "user", auth.Username)
 			msg, _ := json.Marshal(map[string]string{
 				"error": "machine account required: this endpoint accepts only COMPUTERNAME$ principals; " + auth.Username + " is a human user account",
 			})

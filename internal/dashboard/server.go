@@ -27,6 +27,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
@@ -530,14 +531,14 @@ func (ds *DashboardServer) handleRegister(w http.ResponseWriter, r *http.Request
 		user = auth.Username
 		if !isAuthorizedForHost(auth, req.Hostname, ds.cfg.Group) && !isLocalSystemForHost(r, auth, req.Hostname) {
 			slog.Warn("dashboard: register rejected: identity mismatch",
-				slog.Int("event_id", dc.EvtAccessDenied), "user", user, "claimed_host", req.Hostname)
+				slog.Int("event_id", etwids.EvtAccessDenied), "user", user, "claimed_host", req.Hostname)
 			http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 			return
 		}
 	}
 
 	ds.state.Register(req.Hostname)
-	slog.Info("dashboard=register", slog.Int("event_id", dc.EvtServerRegistered), "host", req.Hostname, "user", user)
+	slog.Info("dashboard=register", slog.Int("event_id", etwids.EvtServerRegistered), "host", req.Hostname, "user", user)
 	ds.broadcastServerUpdate(req.Hostname)
 
 	resp := struct {
@@ -578,7 +579,7 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	auth := GetAuthInfo(r)
 	if auth != nil && !isAuthorizedForHost(auth, result.Host, ds.cfg.Group) && !isLocalSystemForHost(r, auth, result.Host) {
 		slog.Warn("dashboard: report rejected: identity mismatch",
-			slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "claimed_host", result.Host)
+			slog.Int("event_id", etwids.EvtAccessDenied), "user", auth.Username, "claimed_host", result.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
 	}
@@ -664,7 +665,7 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	if auth != nil {
 		user = auth.Username
 	}
-	slog.Info("dashboard=removed", slog.Int("event_id", dc.EvtServerRemoved), "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
+	slog.Info("dashboard=removed", slog.Int("event_id", etwids.EvtServerRemoved), "host", host, "user", user) //nolint:gosec // host is validated by the router pattern
 	ds.broadcastServerDeleted(host, user)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -923,7 +924,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	if auth != nil {
 		user = auth.Username
 	}
-	slog.Info("dashboard=settings-updated", slog.Int("event_id", dc.EvtDashboardConfigChange), "user", user)
+	slog.Info("dashboard=settings-updated", slog.Int("event_id", etwids.EvtDashboardConfigChange), "user", user)
 
 	// Broadcast settings change to connected browsers.
 	ds.broadcastSettingsUpdate()
