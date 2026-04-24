@@ -319,3 +319,35 @@ func TestSyncPerfCollector_ThresholdChangeClearsLastPerf(t *testing.T) {
 		t.Error("lastPerf not cleared after threshold change")
 	}
 }
+
+func TestShouldRefuseFingerprintUpdate(t *testing.T) {
+	tests := []struct {
+		name    string
+		saved   string
+		offered string
+		refuse  bool
+		wantErr bool
+	}{
+		{name: "empty saved empty offered", saved: "", offered: "", refuse: false, wantErr: false},
+		{name: "empty saved non-empty offered autopin true", saved: "", offered: "B", refuse: false, wantErr: false},
+		{name: "empty saved non-empty offered autopin false", saved: "", offered: "B", refuse: false, wantErr: false},
+		{name: "non-empty saved empty offered", saved: "A", offered: "", refuse: false, wantErr: false},
+		{name: "matching non-empty", saved: "A", offered: "A", refuse: false, wantErr: false},
+		{name: "mismatched non-empty", saved: "A", offered: "B", refuse: true, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			refuse, err := shouldRefuseFingerprintUpdate(tc.saved, tc.offered)
+			if refuse != tc.refuse {
+				t.Fatalf("refuse = %v, want %v", refuse, tc.refuse)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err presence = %v, wantErr %v", err != nil, tc.wantErr)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "fingerprint mismatch") {
+				t.Fatalf("err = %q, want substring %q", err.Error(), "fingerprint mismatch")
+			}
+		})
+	}
+}
