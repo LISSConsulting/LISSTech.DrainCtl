@@ -1068,7 +1068,7 @@ func RunService() error {
 	// provider is registered and the service is restarted.
 	etwH := logging.NewETWHandler(etwLevel)
 
-	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 10<<20, 7) // 10 MB, 7 old files
+	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 7) // daily rotation, 7 days kept
 	if err != nil {
 		// File log unavailable — fall back to ETW only.
 		slog.Warn("file log unavailable, using ETW only", "error", err)

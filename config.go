@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -772,7 +772,7 @@ func restrictConfigACL(path string) {
 		{"icacls", path, "/grant", "*S-1-5-6:(M)"},      // SERVICE — modify (read+write)
 	}
 	for _, args := range cmds {
-		_ = exec.Command(args[0], args[1:]...).Run()
+		_ = winexec.Command(args[0], args[1:]...).Run()
 	}
 }
 

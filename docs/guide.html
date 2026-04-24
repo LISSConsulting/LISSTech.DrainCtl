@@ -372,6 +372,7 @@
                     <li><a href="#sessions">Session Tracking</a></li>
                     <li><a href="#dashboard">Multi-Server Dashboard</a></li>
                     <li><a href="#performance">Performance Monitoring</a></li>
+                    <li><a href="#evtspike">Event-Log Anomaly Detection</a></li>
                     <li><a href="#rmm">RMM Integration</a></li>
                     <li><a href="#service">Service Management</a></li>
                     <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -602,6 +603,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
   "session_warning_threshold": 80,
   "performance": {
     "enabled": true,
+    "sample_interval_sec": 30,
     "cpu_warn_pct": 70,
     "cpu_crit_pct": 85,
     "mem_warn_pct": 20,
@@ -609,12 +611,23 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "input_delay_warn_ms": 50,
     "input_delay_crit_ms": 100,
     "input_delay_percentile": "p95",
-    "load_consecutive_polls": 2,
-    "input_delay_consecutive_polls": 3,
+    "load_alert_delay_sec": 60,
+    "input_delay_alert_delay_sec": 90,
     "collect_remotefx": false,
     "collect_per_session": true
+  },
+  "evtspike": {
+    "enabled": false
   }
 }</code></pre>
+
+            <div class="callout">
+                <strong>&#x1F4A1; Dashboard-authoritative.</strong>
+                On servers joined to a dashboard, most of these fields are <strong>pulled from the dashboard</strong>
+                every few minutes and overwrite the local file. Edit them in the dashboard Configuration modal, not
+                here. This table is the reference; the modal is the steering wheel. See
+                <a href="#dashboard">Dashboard-authoritative config</a> for the details.
+            </div>
 
             <table>
                 <thead>
@@ -650,7 +663,11 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     <tr>
                         <td><code>audit_path</code></td>
                         <td><em>ProgramData path</em></td>
-                        <td>Full path to the JSONL audit trail file.</td>
+                        <td>
+                            Legacy JSONL audit file path. Retained for one-time migration on first run of the 007+
+                            release &mdash; the live audit trail now lives in <code>drainctl.db</code> (SQLite,
+                            WAL). You do not need to set this on fresh installs.
+                        </td>
                     </tr>
                     <tr>
                         <td><code>notifications</code></td>
@@ -674,14 +691,16 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td><em>see above</em></td>
                         <td>
                             Performance monitoring settings. Set <code>enabled: true</code> to collect CPU, memory, disk
-                            I/O, input delay, and RemoteFX metrics every poll cycle. Thresholds default to industry
+                            I/O, input delay, and RemoteFX metrics on each sample tick. Thresholds default to industry
                             baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to
                             <code>-1</code> to disable it. Additional fields:
+                            <code>sample_interval_sec</code> (collection interval, default 30, range 10&ndash;300),
                             <code>input_delay_percentile</code> (<code>"p50"</code> or <code>"p95"</code>, default
                             <code>"p95"</code>),
-                            <code>load_consecutive_polls</code> (CPU/memory consecutive breaches, default 2),
-                            <code>input_delay_consecutive_polls</code> (input delay consecutive breaches, default 10),
-                            <code>sample_interval_sec</code> (collection interval, default 30, range 10&ndash;300).
+                            <code>load_alert_delay_sec</code> (seconds CPU/memory must breach before firing, default
+                            60),
+                            <code>input_delay_alert_delay_sec</code> (seconds input-delay must breach before firing,
+                            default 90).
                         </td>
                     </tr>
                 </tbody>
@@ -693,16 +712,20 @@ Get-RDSHDrainMode | Format-List</code></pre>
 
             <p>
                 The service picks up changes within seconds (it watches config.json with a file system watcher). No
-                restart needed.
+                restart needed. On dashboard-joined agents, <strong>edit through the dashboard Configuration modal
+                instead</strong> &mdash; runtime fields you change locally will be overwritten on the next pull. The
+                local file still owns bootstrap settings like <code>dashboard.url</code>,
+                <code>dashboard.tls_fingerprint</code>, <code>log_file_level</code>, and
+                <code>memory_limit_mb</code>.
             </p>
 
             <div class="callout">
                 <strong>&#x1F504; Config normalization</strong>
                 On every service start, DrainCtl validates <code>config.json</code> and writes it back with all
-                fields populated at their effective defaults. New fields (like <code>input_delay_percentile</code>,
-                <code>load_consecutive_polls</code>) appear automatically after upgrading &mdash; no manual editing
-                required. If migrating from a registry-based version, settings are imported from
-                <code>HKLM\...\DrainCtl\Parameters</code> on first run; the old values are left in place but no
+                fields populated at their effective defaults. New fields (like <code>sample_interval_sec</code>,
+                <code>load_alert_delay_sec</code>, or <code>evtspike</code>) appear automatically after upgrading
+                &mdash; no manual editing required. If migrating from a registry-based version, settings are imported
+                from <code>HKLM\...\DrainCtl\Parameters</code> on first run; the old values are left in place but no
                 longer read.
             </div>
 
@@ -792,6 +815,17 @@ drainctl configure show</code></pre>
                 <code>config.json</code> or running the interactive wizard.
             </p>
 
+            <h3>Reset the event-spike baseline</h3>
+            <pre><code># Wipe in-memory evtspike detectors + baseline.json, in sync with the running service
+drainctl baseline reset</code></pre>
+            <p>
+                Use after confirming the event-log anomaly baseline is poisoned (e.g., a real incident fired during
+                training and got absorbed as "normal"). The command routes through the service, wipes every
+                subscribed channel's detector state, and deletes <code>baseline.json</code>. Scoring resumes from the
+                prior on the next 10-second tick &mdash; subscriptions stay alive. See
+                <a href="#evtspike">Event-Log Anomaly Detection</a> for background.
+            </p>
+
             <h3>Exit codes</h3>
             <table>
                 <thead>
@@ -866,7 +900,8 @@ drainctl notify test</code></pre>
                 overwrite only that field. Valid trigger names: <code>drain_on</code>, <code>drain_off</code>,
                 <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>,
                 <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>,
-                <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>.
+                <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>,
+                <code>event_spike</code>.
             </div>
 
             <h3>Interactive configuration wizard</h3>
@@ -1051,7 +1086,8 @@ drainctl notify test</code></pre>
                     existing value; valid names: <code>drain_on</code>, <code>drain_off</code>,
                     <code>grace_entered</code>, <code>alert</code>, <code>healthy</code>, <code>session_warning</code>,
                     <code>cpu_warning</code>, <code>cpu_critical</code>, <code>memory_warning</code>,
-                    <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>
+                    <code>memory_critical</code>, <code>input_delay_warning</code>, <code>input_delay_critical</code>,
+                    <code>event_spike</code>
                 </li>
                 <li>
                     <code>--repeat-minutes N</code> &mdash; minimum minutes between repeated <code>alert</code> /
@@ -1150,6 +1186,13 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                     <tr>
                         <td><code>input_delay_critical</code></td>
                         <td>Input delay P95 at or above critical threshold (default 100ms)</td>
+                    </tr>
+                    <tr>
+                        <td><code>event_spike</code></td>
+                        <td>
+                            Event-log anomaly detector (<a href="#evtspike">evtspike</a>) confirmed a rate spike on a
+                            subscribed channel. Requires <code>evtspike.enabled</code>.
+                        </td>
                     </tr>
                 </tbody>
             </table>
@@ -1481,14 +1524,28 @@ https://dashboard-server:49470</code></pre>
                 The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who
                 last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for
                 alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current
-                utilization, and the dashboard features <strong>uPlot charts</strong> for historical state and session
-                trends.
+                utilization, plus an <strong>Overview LOAD chart</strong> that overlays CPU, CPU P95, Memory, and
+                Sessions for the entire fleet on one dual-axis uPlot canvas.
             </p>
 
             <p>
-                The <strong>notification settings drawer</strong> supports multi-target editing &mdash; add and remove
-                individual notification targets, each with its own triggers and repeat interval, directly from the
-                dashboard UI.
+                Clicking a server opens the <strong>Server Detail</strong> panel. The Host Load tile on that panel is a
+                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host with its
+                own 5M/1H/1D/3D/5D window pill (replacing the earlier layout of three separate small charts). A
+                <strong>swimlane tile</strong> below it plots confirmed event-log spikes per channel, with a
+                <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> / <code>ERROR</code> state chip in the
+                header sourced from the host's evtspike detector. See
+                <a href="#evtspike">Event-Log Anomaly Detection</a> for how those states are derived.
+            </p>
+
+            <p>
+                The <strong>Configuration modal</strong> (gear icon) is the single place operators edit runtime
+                settings. It exposes: CPU warn/critical and memory warn/critical thresholds, input-delay warn/critical
+                thresholds and percentile (P50/P95), the grace period, session warning threshold, agent poll interval,
+                sample interval, performance-monitoring toggle (including RemoteFX and per-session CPU sub-toggles), the
+                evtspike detector toggle, and every notification target (each with its own triggers &mdash; including
+                <code>event_spike</code> &mdash; and repeat interval). The Alert Sensitivity row (Chill / Anxious /
+                Twitchy presets) sets thresholds, percentile, and sustain windows in one click.
             </p>
 
             <h3>Manage servers</h3>
@@ -1683,35 +1740,54 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 </tbody>
             </table>
 
-            <h3>Centralized notification config</h3>
+            <h3>Dashboard-authoritative config (the pull model)</h3>
             <p>
-                When an agent has a <code>dashboard.url</code> configured, it automatically pulls notification targets,
-                grace period, and session warning threshold from the dashboard server. This means you only need to
-                configure notifications once &mdash; on the dashboard &mdash; and all agents inherit the settings.
+                The dashboard is the <strong>single source of truth</strong> for runtime settings. When an agent has a
+                <code>dashboard.url</code> configured, it pulls notification targets, thresholds, the grace period, the
+                session warning threshold, the performance block, and the evtspike enabled flag from the dashboard
+                server. Edit settings once in the Configuration modal and every agent picks up the change on its next
+                poll &mdash; and immediately on its local <code>config.json</code> write.
             </p>
 
             <p><strong>How it works:</strong></p>
             <ul>
-                <li>On startup, the agent fetches <code>GET /api/v1/notify-config</code> from the dashboard</li>
                 <li>
-                    The fetched targets, grace period, and session threshold <strong>replace</strong> local config.json
-                    values
+                    On startup, the agent fetches <code>GET /api/v1/config</code> from the dashboard using its machine
+                    Kerberos ticket
                 </li>
-                <li>The agent re-fetches every ~5 minutes to pick up changes made in the dashboard UI</li>
-                <li>If the dashboard is unreachable, the agent uses the last successfully fetched config</li>
-                <li>If no fetch ever succeeds, the agent falls back to local config.json targets</li>
+                <li>
+                    The fetched settings <strong>replace</strong> the corresponding fields in local <code>config.json</code>
+                    (an atomic write); the service's config-file watcher sees the change and hot-reloads live
+                </li>
+                <li>
+                    The agent re-polls on a short cadence, so edits made in the dashboard UI roll out to every farm
+                    member within minutes without any per-agent action
+                </li>
+                <li>If the dashboard is unreachable, the agent keeps using the last successfully pulled config</li>
+                <li>
+                    If no pull has ever succeeded, the agent falls back to whatever is already in its local
+                    <code>config.json</code>
+                </li>
             </ul>
 
             <p>
-                <strong>No dashboard URL?</strong> Agents without <code>dashboard.url</code> use their local
-                <code>config.json</code> notification targets as before &mdash; nothing changes for standalone
-                deployments.
+                <strong>No dashboard URL?</strong> Standalone agents (no <code>dashboard.url</code>) keep using their
+                local <code>config.json</code> &mdash; nothing changes for single-server deployments.
             </p>
 
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; Do not hand-edit per-agent <code>config.json</code>.</strong>
+                Once an agent is joined to a dashboard, any runtime field you change locally will be overwritten on the
+                next pull. Use the dashboard Configuration modal instead. The local file is useful for bootstrap
+                settings (<code>dashboard.url</code>, <code>dashboard.tls_fingerprint</code>, log levels,
+                <code>memory_limit_mb</code>) and for admin-only evtspike knobs (channel lists, thresholds, baseline
+                path) that the dashboard modal intentionally does not expose.
+            </div>
+
             <div class="callout">
-                <strong>Tip:</strong> For farms with dozens of servers, configure notifications entirely in the
-                dashboard UI and leave <code>notifications</code> empty in each agent's config.json. The dashboard
-                becomes the single source of truth.
+                <strong>Tip:</strong> For farms with dozens of servers, configure notifications and thresholds entirely
+                in the dashboard UI. Leave <code>notifications</code> empty in each agent's config.json &mdash; the
+                dashboard owns them.
             </div>
 
             <div class="callout warn">
@@ -1746,44 +1822,43 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td><code>cpu_warning</code></td>
                         <td>70%</td>
-                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
                     </tr>
                     <tr>
                         <td><code>cpu_critical</code></td>
                         <td>85%</td>
-                        <td>CPU &ge; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
                     </tr>
                     <tr>
                         <td><code>memory_warning</code></td>
                         <td>20% free</td>
-                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
                     </tr>
                     <tr>
                         <td><code>memory_critical</code></td>
                         <td>10% free</td>
-                        <td>Available memory &le; threshold for <code>load_consecutive_polls</code> consecutive polls (default 2)</td>
+                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_warning</code></td>
                         <td>50ms</td>
-                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
+                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 90s)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_critical</code></td>
                         <td>100ms</td>
-                        <td>Input delay &ge; threshold for <code>input_delay_consecutive_polls</code> consecutive polls (default 3)</td>
+                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 90s)</td>
                     </tr>
                 </tbody>
             </table>
             <p>
-                All performance triggers require consecutive breaches before firing, eliminating flap noise from
-                transient spikes. CPU and memory default to 2 consecutive polls (<code>load_consecutive_polls</code>);
-                input delay defaults to 3 (<code>input_delay_consecutive_polls</code>) because it is inherently volatile.
-                At the default 60-second poll interval, 2 polls = 2 minutes for CPU/memory and 3 polls = 3 minutes
-                for input delay.
-                Both values are configurable in the <code>performance</code> section of <code>config.json</code>.
-                Input delay is evaluated against the P95 percentile by default; set
-                <code>"input_delay_percentile": "p50"</code> for median-based thresholds.
+                All performance triggers require a <em>sustained</em> breach before firing, eliminating flap noise from
+                transient spikes. CPU and memory default to a 60-second sustain window
+                (<code>load_alert_delay_sec</code>); input delay defaults to 90 seconds
+                (<code>input_delay_alert_delay_sec</code>) because it is inherently volatile. Both windows are expressed
+                in seconds and translate to a whole number of polls internally based on
+                <code>sample_interval_sec</code> (default 30). Input delay is evaluated against the P95 percentile by
+                default; set <code>"input_delay_percentile": "p50"</code> for median-based thresholds.
             </p>
             <p>Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.</p>
 
@@ -1796,13 +1871,15 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
 
             <h3>Dashboard Display</h3>
             <p>
-                Each server card gains a collapsible Performance section showing CPU and memory gauges, input delay
-                values, disk queue, and RemoteFX metrics (when available). Values are color-coded: green for healthy,
-                amber at warning, red at critical.
+                Each server card in the Overview grid shows live CPU/Memory/Sessions values color-coded by severity
+                (green/amber/red). The fleet-wide <strong>LOAD chart</strong> overlays CPU, CPU P95, Memory, and
+                Sessions on one dual-axis canvas; a P95 toggle surfaces spikes the average smooths over.
             </p>
             <p>
-                The state history chart gains toggle-able CPU% and Input Delay overlay lines via checkboxes in the
-                legend.
+                Opening a server reveals the Server Detail panel &mdash; a single dual-axis
+                <strong>Host Load chart</strong> scoped to that host plots CPU, CPU P95, Memory, and Sessions together,
+                with its own 5M/1H/1D/3D/5D window pill. Input delay, disk queue, and RemoteFX counters (when the role
+                is installed) are surfaced in the metrics tiles alongside.
             </p>
 
             <h3>Server Status Levels</h3>
@@ -1894,8 +1971,115 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 including the SSE event stream.
             </p>
 
+            <!-- ── Event-Log Anomaly Detection ──────────────────────────────────── -->
+            <h2 id="evtspike">11. Event-Log Anomaly Detection</h2>
+
+            <p>
+                DrainCtl includes an opt-in event-log anomaly detector (<strong>evtspike</strong>). It subscribes to a
+                configured set of Windows event-log channels, learns a per-channel, time-of-day rate baseline with a
+                robust-cap Bayesian model, and fires a notification on the <code>event_spike</code> trigger when a
+                confirmed rate anomaly is detected. It is designed to flag things like authentication-failure floods,
+                application-crash storms, or a misbehaving service that starts spewing warnings &mdash; without needing
+                a SIEM.
+            </p>
+
+            <h3>Enable the detector</h3>
+            <p>
+                Open the dashboard, click the <strong>gear icon</strong>, scroll to the
+                <em>Event Log Anomaly Detection</em> group, and tick <strong>Enable detector</strong>. The change
+                propagates to every connected agent on the next pull and takes effect without a service restart.
+            </p>
+            <p>
+                Subscribed channels default to <code>Application</code>, <code>System</code>, and
+                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Channel lists,
+                thresholds, cooldowns, and the optional <code>Security</code>-channel opt-in are admin-only knobs and
+                live under <code>"evtspike"</code> in <code>config.json</code> on the dashboard server.
+            </p>
+
+            <h3>Dashboard display</h3>
+            <p>
+                Each Server Detail panel carries an <strong>Event Spikes</strong> swimlane tile: one row per active
+                channel, with confirmed spikes plotted as markers on a time axis (5M / 1H / 1D / 3D / 5D window pill).
+                The tile header carries a state chip:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>State</th>
+                        <th>Meaning</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>HEALTHY</code></td>
+                        <td>
+                            Detector enabled; at least half of the subscribed channels have accumulated enough per-slot
+                            observations to score reliably.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>TRAINING</code></td>
+                        <td>
+                            Detector enabled and subscribed, but fewer than half of the channels are mature yet. Spikes
+                            can still fire for channels that have matured; the chip stays amber until the majority are
+                            in a usable state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>DISABLED</code></td>
+                        <td><code>evtspike.enabled</code> is false on this host.</td>
+                    </tr>
+                    <tr>
+                        <td><code>ERROR</code></td>
+                        <td>
+                            Zero channels subscribed successfully, or a startup error surfaced. Check the DrainCtl file
+                            log for <code>evtspike</code> WARN lines &mdash; typically a missing channel,
+                            access-denied, or the Security channel enabled without
+                            <code>SeSecurityPrivilege</code> on the service token.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Baseline persistence</h3>
+            <p>
+                The detector stores its per-channel sufficient statistics (Gamma-Poisson posteriors, robust-cap state,
+                last-alert timestamps) to a single file:
+            </p>
+            <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\baseline.json</code></pre>
+            <p>
+                The service rewrites this file on a fixed persistence cadence and once more on clean shutdown, so a
+                restart resumes scoring from the same learned distribution instead of starting over.
+            </p>
+
+            <h3>Resetting a poisoned baseline</h3>
+            <p>
+                If a real operational incident fired <em>during</em> the training window &mdash; e.g., a patch Tuesday
+                burst got learned as normal &mdash; the baseline can become desensitised. Reset it via the CLI:
+            </p>
+            <pre><code>drainctl baseline reset</code></pre>
+            <p>
+                This routes through the running service so both halves stay in sync: the in-memory detectors for every
+                subscribed channel are wiped, and <code>baseline.json</code> is deleted. Subscriptions and the scoring
+                loop keep running; a fresh baseline starts accumulating from the next 10-second scoring tick.
+            </p>
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; Do not delete <code>baseline.json</code> by hand while the service runs.</strong>
+                The file is rewritten from in-memory state on the next persistence tick, so a manual delete without the
+                in-memory wipe achieves nothing. Always use <code>drainctl baseline reset</code>.
+            </div>
+
+            <h3>Routing spikes to a notification target</h3>
+            <p>
+                In the Configuration modal's notification target editor, add <code>event_spike</code> to any target's
+                trigger list. The same target can combine drain events and event spikes (e.g., PagerDuty gets
+                <code>alert</code> and <code>event_spike</code>; Slack gets everything). The target's
+                <code>repeat_minutes</code> cooldown applies per trigger type, so an event_spike cooldown is independent
+                of the drain-mode alert cooldown.
+            </p>
+
             <!-- ── RMM Integration ────────────────────────────────────────────────── -->
-            <h2 id="rmm">11. RMM Integration</h2>
+            <h2 id="rmm">12. RMM Integration</h2>
 
             <p>DrainCtl is designed to integrate with any RMM platform that can run a script and check an exit code.</p>
 
@@ -1931,7 +2115,7 @@ if ($result.exit_code -ne 0) {
 }</code></pre>
 
             <!-- ── Service Management ─────────────────────────────────────────────── -->
-            <h2 id="service">12. Service Management</h2>
+            <h2 id="service">13. Service Management</h2>
 
             <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
@@ -1964,8 +2148,12 @@ drainctl service uninstall</code></pre>
                     <strong>Subscribes</strong> to Security Event ID 4657 via <code>EvtSubscribe</code> &mdash; knows
                     who made the change
                 </li>
-                <li><strong>Polls</strong> every 5 minutes as a safety net</li>
-                <li><strong>Maintains</strong> an in-memory audit store (flushed to JSONL every 30 seconds)</li>
+                <li><strong>Polls</strong> every poll interval (default 60 seconds) as a safety net</li>
+                <li>
+                    <strong>Persists</strong> drain-mode transitions and performance metrics to a single SQLite database
+                    (<code>drainctl.db</code>, WAL mode) under the DrainCtl data directory &mdash; the audit trail,
+                    metrics tiers, server registry, and event-spike history all live here
+                </li>
                 <li>
                     <strong>Serves</strong> queries over a named pipe (<code>\\.\pipe\drainctl</code>) for instant
                     CLI/PS responses
@@ -2026,8 +2214,22 @@ drainctl service uninstall</code></pre>
                 </tbody>
             </table>
 
+            <h3>File log</h3>
+            <p>
+                Alongside the Event Log sink, the service writes a slog-formatted text log to:
+            </p>
+            <pre><code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.log</code></pre>
+            <p>
+                The file <strong>rotates at local midnight</strong>: the previous day's file is renamed to
+                <code>drainctl-YYYY-MM-DD.log</code> in the same directory, and a fresh <code>drainctl.log</code> is
+                opened. Archives older than <strong>7 days</strong> are pruned automatically at rotation time. The
+                per-sink level is controlled by <code>log_file_level</code> (file) and <code>log_event_level</code>
+                (Windows Event Log) in <code>config.json</code>; both default to <code>info</code>. The CLI is
+                independent &mdash; pass <code>--log-level debug</code> for one-shot verbosity.
+            </p>
+
             <!-- ── Troubleshooting ────────────────────────────────────────────────── -->
-            <h2 id="troubleshooting">13. Troubleshooting</h2>
+            <h2 id="troubleshooting">14. Troubleshooting</h2>
 
             <h3>"changed_by" is empty</h3>
             <p>
