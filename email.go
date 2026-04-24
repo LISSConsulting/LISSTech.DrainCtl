@@ -7,12 +7,12 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"net"
 	"net/smtp"
 	"net/url"
 	"strings"
-	"text/template"
 	"time"
 )
 

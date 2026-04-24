@@ -142,23 +142,23 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 4
 
-- [ ] T050 [P] [US4] (Step 8) Add `rejectCloudMetadata(rawURL string) error` helper in `notify.go` per `specs/009-security-hardening/contracts/notify-url-validation.md` §Helper function contract
-- [ ] T051 [P] [US4] (Step 8) Call `rejectCloudMetadata` at the top of `sendWebhook` (`notify.go:390`) and `sendNtfy` (`notify.go:580`); return error before any network activity
-- [ ] T052 [US4] (Step 8) Call `rejectCloudMetadata` per-target in `internal/dashboard/server.go:748` `handlePutSettings` (iterate webhook/ntfy targets; fail whole PUT with 400 on any rejection)
-- [ ] T053 [US4] (Step 8) Call `rejectCloudMetadata` in `internal/dashboard/server.go:930` `handleNotifyTest` before dispatching; return 400 on rejection
-- [ ] T054 [P] [US4] (Step 8) Add rejection subtests in `notify_test.go` covering all cases in `specs/009-security-hardening/contracts/notify-url-validation.md` §Testing contract (metadata IP variants, LAN allowed, loopback allowed, parse failure delegated)
-- [ ] T055 [P] [US4] (Step 9) Create `internal/pipe/sid_windows.go` implementing `callerIsPrivileged(conn net.Conn) (bool, string, error)` per `specs/009-security-hardening/contracts/pipe-access-control.md` §Authorization algorithm; respect handle-lifetime invariants in §Handle-lifetime invariants
-- [ ] T056 [US4] (Step 9) Integrate `callerIsPrivileged` into `handlePipeConn` in `internal/pipe/pipe.go`: for verbs `register`, `remove-server`, `baseline-reset`, check before dispatch; on deny return `PipeResponse{OK: false, Error: "access denied"}` and emit `slog.Warn("pipe=access_denied", "cmd", req.Cmd, "sid", sidStr)` plus `EvtAccessDenied` ETW audit event
-- [ ] T057 [P] [US4] (Step 9) Create `internal/pipe/sid_test.go` with stub-injectable token reader; table-test SID classes: SYSTEM, admin, non-admin, filtered-admin (UAC), unknown SID, token-open error, process-open error
-- [ ] T058 [US4] (Step 9) Add integration test in `internal/pipe/pipe_caller_test.go`: open pipe, dial as current process (admin on dev), call `register` against stub `HandleRegister`, assert success; separately simulate deny branch via scripted reader, assert response shape
-- [ ] T059 [P] [US4] (Step 10) Replace `import "text/template"` with `"html/template"` in `email.go:14`; update `emailTmpl` initializer at `email.go:21` accordingly
-- [ ] T060 [P] [US4] (Step 10) Add `TestEmailTemplate_EscapesHTML` in `email_test.go`: render with `Message: "<script>alert(1)</script>"`; assert body contains `&lt;script&gt;`, not raw tag
-- [ ] T061 [US4] (Step 10) Audit `email_template.html` for any intentional raw-HTML insertions; if any field genuinely needs raw HTML, wrap as `template.HTML` only after confirming source is trusted (none of `.Subject/.Message/.Host/.ChangedBy/.SpikeChannel` qualify)
-- [ ] T062 [US4] (Step 11) Factor `processEvent` in `internal/watcher/evtsubscribe.go:230-272` so the XML string is a parameter (separate from `renderEventXML`) for testability
-- [ ] T063 [US4] (Step 11) In `processEvent`, after `xml.Unmarshal`, parse `evt.System.TimeCreated.SystemTime` via `time.Parse(time.RFC3339Nano, …)`; on success use parsed time for `RegistryChangeAttribution.Timestamp` at line 263; on parse error fallback to `time.Now()` and `slog.Warn("evtspike: unparseable SystemTime", "raw", raw)`
-- [ ] T064 [P] [US4] (Step 11) Add `TestProcessEvent_UsesSystemTime` in `internal/watcher/evtsubscribe_test.go`: feed synthetic 4657 XML with `TimeCreated SystemTime="2026-04-24T10:00:00Z"`; assert `LatestAttribution().Timestamp.Equal(parsed)`
-- [ ] T065 [P] [US4] (Step 11) Add `TestWaitAttribution_IgnoresOlderEvents` regression: push attribution with SystemTime=T0, call `WaitAttribution(after=T0+5s, timeout=100ms)`, assert return is `""`
-- [ ] T066 [P] [US4] (Step 11) Add `TestProcessEvent_FallbackOnUnparseableSystemTime`: feed malformed SystemTime, assert `Timestamp` equals `time.Now()` (within tolerance) and warn log captured
+- [x] T050 [P] [US4] (Step 8) Add `rejectCloudMetadata(rawURL string) error` helper in `notify.go` per `specs/009-security-hardening/contracts/notify-url-validation.md` §Helper function contract
+- [x] T051 [P] [US4] (Step 8) Call `rejectCloudMetadata` at the top of `sendWebhook` (`notify.go:390`) and `sendNtfy` (`notify.go:580`); return error before any network activity
+- [x] T052 [US4] (Step 8) Call `rejectCloudMetadata` per-target in `internal/dashboard/server.go:748` `handlePutSettings` (iterate webhook/ntfy targets; fail whole PUT with 400 on any rejection)
+- [x] T053 [US4] (Step 8) Call `rejectCloudMetadata` in `internal/dashboard/server.go:930` `handleNotifyTest` before dispatching; return 400 on rejection
+- [x] T054 [P] [US4] (Step 8) Add rejection subtests in `notify_test.go` covering all cases in `specs/009-security-hardening/contracts/notify-url-validation.md` §Testing contract (metadata IP variants, LAN allowed, loopback allowed, parse failure delegated)
+- [x] T055 [P] [US4] (Step 9) Create `internal/pipe/sid_windows.go` implementing `callerIsPrivileged(conn net.Conn) (bool, string, error)` per `specs/009-security-hardening/contracts/pipe-access-control.md` §Authorization algorithm; respect handle-lifetime invariants in §Handle-lifetime invariants
+- [x] T056 [US4] (Step 9) Integrate `callerIsPrivileged` into `handlePipeConn` in `internal/pipe/pipe.go`: for verbs `register`, `remove-server`, `baseline-reset`, check before dispatch; on deny return `PipeResponse{OK: false, Error: "access denied"}` and emit `slog.Warn("pipe=access_denied", "cmd", req.Cmd, "sid", sidStr)` plus `EvtAccessDenied` ETW audit event
+- [x] T057 [P] [US4] (Step 9) Create `internal/pipe/sid_test.go` with stub-injectable token reader; table-test SID classes: SYSTEM, admin, non-admin, filtered-admin (UAC), unknown SID, token-open error, process-open error
+- [x] T058 [US4] (Step 9) Add integration test in `internal/pipe/pipe_caller_test.go`: open pipe, dial as current process (admin on dev), call `register` against stub `HandleRegister`, assert success; separately simulate deny branch via scripted reader, assert response shape
+- [x] T059 [P] [US4] (Step 10) Replace `import "text/template"` with `"html/template"` in `email.go:14`; update `emailTmpl` initializer at `email.go:21` accordingly
+- [x] T060 [P] [US4] (Step 10) Add `TestEmailTemplate_EscapesHTML` in `email_test.go`: render with `Message: "<script>alert(1)</script>"`; assert body contains `&lt;script&gt;`, not raw tag
+- [x] T061 [US4] (Step 10) Audit `email_template.html` for any intentional raw-HTML insertions; if any field genuinely needs raw HTML, wrap as `template.HTML` only after confirming source is trusted (none of `.Subject/.Message/.Host/.ChangedBy/.SpikeChannel` qualify)
+- [x] T062 [US4] (Step 11) Factor `processEvent` in `internal/watcher/evtsubscribe.go:230-272` so the XML string is a parameter (separate from `renderEventXML`) for testability
+- [x] T063 [US4] (Step 11) In `processEvent`, after `xml.Unmarshal`, parse `evt.System.TimeCreated.SystemTime` via `time.Parse(time.RFC3339Nano, …)`; on success use parsed time for `RegistryChangeAttribution.Timestamp` at line 263; on parse error fallback to `time.Now()` and `slog.Warn("evtspike: unparseable SystemTime", "raw", raw)`
+- [x] T064 [P] [US4] (Step 11) Add `TestProcessEvent_UsesSystemTime` in `internal/watcher/evtsubscribe_test.go`: feed synthetic 4657 XML with `TimeCreated SystemTime="2026-04-24T10:00:00Z"`; assert `LatestAttribution().Timestamp.Equal(parsed)`
+- [x] T065 [P] [US4] (Step 11) Add `TestWaitAttribution_IgnoresOlderEvents` regression: push attribution with SystemTime=T0, call `WaitAttribution(after=T0+5s, timeout=100ms)`, assert return is `""`
+- [x] T066 [P] [US4] (Step 11) Add `TestProcessEvent_FallbackOnUnparseableSystemTime`: feed malformed SystemTime, assert `Timestamp` equals `time.Now()` (within tolerance) and warn log captured
 
 **Checkpoint**: Run `go test ./... && just lint`. Execute quickstart.md §User Story 4 manual walkthroughs. Ship as four small PRs (one per step) or one bundled PR — all four are disjoint file sets.
 
