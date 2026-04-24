@@ -1524,8 +1524,14 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Raw-tier bucketing aligns with the configured agent poll cadence so
-	// staggered per-host timestamps co-locate. Fall back to the store's
+	// Raw-tier bucketing must be wide enough to absorb every agent's poll
+	// jitter — clocks drift, perfmon collection takes variable time, and
+	// pull-config propagation lag means hosts may briefly run different
+	// sample_interval_sec values. A bucket equal to sample_interval still
+	// puts hosts on opposite sides of a 30-s boundary when their phases
+	// differ by ~T, producing the alternating-host zigzag we already fixed
+	// once. 2× sample_interval guarantees every host has at least one
+	// sample per bucket regardless of phase. Falls back to the store's
 	// default when config isn't available (test harness, hot-swap gap).
 	rawBucketMs := int64(telemetry.DefaultRawFleetBucketMs)
 	var cfg *dc.Config
@@ -1536,7 +1542,7 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		cfg, cerr = dc.LoadConfig()
 	}
 	if cerr == nil && cfg.Performance.SampleIntervalSec > 0 {
-		rawBucketMs = int64(cfg.Performance.SampleIntervalSec) * 1000
+		rawBucketMs = int64(cfg.Performance.SampleIntervalSec) * 2 * 1000
 	}
 
 	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters, rawBucketMs)

@@ -627,8 +627,15 @@
         font-size: 0.6rem;
         font-weight: 700;
         padding: 3px 8px;
+        /* Explicit theme-aware background — without it .btn-brutal left the
+           pill transparent, which rendered unreadable against the dark
+           server-detail card background. Matches .window-pill on Overview. */
+        background: var(--color-surface);
         color: var(--color-muted);
         letter-spacing: 0.06em;
+    }
+    .sw-pill:hover {
+        color: var(--color-fg);
     }
     .sw-pill.active {
         background: var(--color-accent);

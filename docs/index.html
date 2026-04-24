@@ -1435,6 +1435,14 @@
                         </div>
                     </div>
                     <div class="compact-card">
+                        <div class="compact-card-icon">&#127919;</div>
+                        <div class="compact-card-title">Anomaly Detection</div>
+                        <div class="compact-card-desc">
+                            Opt-in <code>evtspike</code> learns a per-channel baseline across 54 Windows event logs.
+                            Catches what fixed thresholds miss &mdash; without false-positive noise.
+                        </div>
+                    </div>
+                    <div class="compact-card">
                         <div class="compact-card-icon">&#128203;</div>
                         <div class="compact-card-title">90-Day Audit Trail</div>
                         <div class="compact-card-desc">
@@ -1443,20 +1451,35 @@
                         </div>
                     </div>
                     <div class="compact-card">
-                        <div class="compact-card-icon">&#128274;</div>
-                        <div class="compact-card-title">Enterprise Ready</div>
+                        <div class="compact-card-icon">&#128190;</div>
+                        <div class="compact-card-title">Tiered SQLite Telemetry</div>
                         <div class="compact-card-desc">
-                            DNS SRV discovery, EV code-signed, Kerberos SSO, virtual service account, 12 PowerShell
-                            cmdlets + CLI.
+                            Raw samples roll up to 5-minute and hourly tiers with per-tier retention. Per-host and
+                            fleet-wide queries &mdash; same store powers every chart.
                         </div>
                     </div>
                     <div class="compact-card">
-                        <div class="compact-card-icon">&#127919;</div>
-                        <div class="compact-card-title">Event Log Anomaly Detection</div>
+                        <div class="compact-card-icon">&#128200;</div>
+                        <div class="compact-card-title">Fleet &amp; Host Charts</div>
                         <div class="compact-card-desc">
-                            Opt-in subsystem learns a per-channel baseline across 54 Windows event logs and fires
-                            <code>event_spike</code> alerts on confirmed deviations &mdash; catches what fixed thresholds
-                            miss without drowning operators in false positives.
+                            Dual-axis LOAD, Health Indicators, Sessions, and RemoteFX panels on Overview &mdash; plus
+                            a per-host LOAD chart on every Server Detail with shared zoom presets.
+                        </div>
+                    </div>
+                    <div class="compact-card">
+                        <div class="compact-card-icon">&#9881;&#65039;</div>
+                        <div class="compact-card-title">Dashboard-Authoritative Config</div>
+                        <div class="compact-card-desc">
+                            Configure thresholds and notifications once. Every agent pulls the same config &mdash; 50
+                            servers, one source of truth.
+                        </div>
+                    </div>
+                    <div class="compact-card">
+                        <div class="compact-card-icon">&#128274;</div>
+                        <div class="compact-card-title">Enterprise Ready</div>
+                        <div class="compact-card-desc">
+                            DNS SRV discovery, EV code-signed, Kerberos SSO, daily log rotation, 12 PowerShell
+                            cmdlets + CLI.
                         </div>
                     </div>
                 </div>
@@ -1490,7 +1513,7 @@
                         <div class="qs-num" style="grid-row: 1;">03</div>
                         <div class="qs-info">
                             <h3>Done.</h3>
-                            <p>Agents self-register. The dashboard shows every server. Drain changes alert in under a second. Configure notifications and thresholds from the UI &mdash; all agents inherit them.</p>
+                            <p>Agents self-register. The dashboard shows every server. Drain changes alert in under a second. Edit thresholds and notifications once in the UI &mdash; the dashboard is authoritative, every agent pulls the same config on reload.</p>
                         </div>
                     </div>
                 </div>
@@ -1588,16 +1611,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.109.24</h2>
+                <h2 class="section-title">v26.113</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Event log anomaly detection</strong> &mdash; opt-in <code>evtspike</code> subsystem watches 54 curated Windows event log channels, learns a per-slot Bayesian baseline, and fires <code>event_spike</code> notifications on confirmed deviations</li>
-                            <li><strong>False-positive resistance by construction</strong> &mdash; 2-of-3 confirmation suppresses single-bucket transients; a robust update cap prevents a single flood from poisoning the baseline, so subsequent anomalies still flag</li>
-                            <li><strong>Warm restart, no alert storms</strong> &mdash; baselines persist to <code>baseline.json</code> every 15 minutes; service restarts resume scoring without re-entering warm-up on mature channels</li>
-                            <li><strong>Security channel opt-in</strong> &mdash; single config flag enables <code>SeSecurityPrivilege</code> on the LocalSystem service token at Start via <code>AdjustTokenPrivileges</code>; no installer-time LSA operation, no MSI feature gate</li>
-                            <li><strong>Live config reload</strong> &mdash; thresholds, cooldowns, and slot maturity hot-apply on the next scoring window; channel-list changes trigger a clean subsystem restart with no service bounce</li>
-                            <li><strong>Dashboard surface</strong> &mdash; detector status pill on every server card, recent-spikes list in the server detail view with live updates</li>
+                            <li><strong>Tiered SQLite telemetry</strong> &mdash; raw samples roll up to 5-minute and hourly tiers via a watermarked aggregator, with per-tier retention. One store (<code>drainctl.db</code>, WAL) backs audit, metrics, and charts</li>
+                            <li><strong>Overview dashboard charts</strong> &mdash; LOAD (CPU, CPU&nbsp;P95, memory, sessions), Health Indicators (input delay, pages/sec, TCP retrans, disk queue with fleet P95), Session metrics, and RemoteFX when collected</li>
+                            <li><strong>Per-host Server Detail chart</strong> &mdash; same dual-axis LOAD presentation scoped to one host, with shared zoom presets and live updates</li>
+                            <li><strong>Dashboard-authoritative pull-config</strong> &mdash; edit once on the dashboard, every agent inherits on the next reload; local config changes propagate synchronously</li>
+                            <li><strong>Daily log rotation</strong> &mdash; <code>drainctl-YYYY-MM-DD.log</code>, 7 days retained &mdash; replaces the previous size-based scheme</li>
+                            <li><strong>Event log anomaly detection</strong> &mdash; opt-in <code>evtspike</code> watches 54 curated Windows event channels, learns a per-slot Bayesian baseline, and fires <code>event_spike</code> alerts on confirmed deviations. New <code>drainctl baseline reset</code> wipes learned baselines when the environment changes</li>
                         </ul>
                     </div>
                 </div>
@@ -1661,16 +1684,17 @@
                         <div class="icon">&#128200;</div>
                         <h3>Live Monitoring</h3>
                         <p>
-                            Real-time updates via Server-Sent Events. State charts, session gauges, CPU P95 overlay,
-                            event log, and notification editor &mdash; all in one page.
+                            Real-time updates via Server-Sent Events. LOAD, Health Indicators, Session, and RemoteFX
+                            panels on Overview; dual-axis LOAD chart on every Server Detail &mdash; with shared zoom
+                            presets.
                         </p>
                     </div>
                     <div class="feature card">
                         <div class="icon">&#9881;&#65039;</div>
-                        <h3>Centralized Config</h3>
+                        <h3>Edit Config in the UI</h3>
                         <p>
-                            Set notification targets, grace periods, and session thresholds once in the dashboard. Every
-                            agent pulls them automatically &mdash; 50 servers, one config.
+                            Notification targets, grace periods, session thresholds, detector tuning &mdash; all edited
+                            from the dashboard. Changes propagate synchronously; agents pull on the next reload.
                         </p>
                     </div>
                 </div>
