@@ -5,7 +5,8 @@
     import {
         appState,
         addEvent,
-        appendServerMetricsSample,
+        appendPerfToRingBuffer,
+        logStatusTransition,
         removeServerMetrics,
         seedServerMetrics,
         setDetectorStatus,
@@ -203,16 +204,9 @@
             for (const sv of servers || []) {
                 const prev = prevStates.get(sv.host);
                 if (prev === undefined) {
-                    addEvent(serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, statusSev(sv.status)));
+                    logStatusTransition(null, sv.status, sv.host, evtTime);
                 } else if (prev !== sv.status) {
-                    addEvent(
-                        serverEvent(
-                            evtTime,
-                            sv,
-                            `${statusLabel(prev)} → ${statusLabel(sv.status)}`,
-                            statusSev(sv.status),
-                        ),
-                    );
+                    logStatusTransition(prev, sv.status, sv.host, evtTime);
                 }
             }
             for (const host of prevStates.keys()) {
@@ -286,12 +280,11 @@
             const ts = Date.now();
             for (const sv of s) {
                 if (sv.perf) {
-                    const svMemPct =
-                        sv.perf.mem_total_mb > 0 ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100 : 0;
-                    appendServerMetricsSample(sv.host, {
+                    appendPerfToRingBuffer({
+                        host: sv.host,
                         time: ts,
                         cpu: sv.perf.cpu_pct,
-                        mem: svMemPct,
+                        mem: sv.perf.mem_total_mb > 0 ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100 : 0,
                         inputDelay: sv.perf.input_delay_p95_ms,
                         sessions: sv.sessions ?? 0,
                         diskQueue: sv.perf.disk_queue ?? 0,
@@ -401,27 +394,23 @@
                         // event log captures the first appearance instead of being silent.
                         // Without this, prevStates would be pre-set before the poll cycle
                         // runs, so the poll would also skip the "registered" log entry.
-                        addEvent(
-                            serverEvent(evtTime, sv, `registered (${statusLabel(sv.status)})`, statusSev(sv.status)),
-                        );
+                        logStatusTransition(null, sv.status, sv.host, evtTime);
                     } else if (prevStatus !== sv.status) {
-                        addEvent(
-                            serverEvent(evtTime, sv, `${statusLabel(prevStatus)} → ${statusLabel(sv.status)}`, statusSev(sv.status)),
-                        );
+                        logStatusTransition(prevStatus, sv.status, sv.host, evtTime);
                     }
                     if (sv.status) prevStates.set(event.host, sv.status);
                     appState.handleSSEServerUpdate(event.host, sv);
                     // Feed per-server sparkline ring buffer so ServerDetail charts
                     // update in real-time instead of waiting for the next 30-second poll.
                     if (sv.perf) {
-                        const svMemPct =
-                            sv.perf.mem_total_mb > 0
-                                ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
-                                : 0;
-                        appendServerMetricsSample(sv.host, {
+                        appendPerfToRingBuffer({
+                            host: sv.host,
                             time: Date.now(),
                             cpu: sv.perf.cpu_pct,
-                            mem: svMemPct,
+                            mem:
+                                sv.perf.mem_total_mb > 0
+                                    ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
+                                    : 0,
                             inputDelay: sv.perf.input_delay_p95_ms,
                             sessions: sv.sessions ?? 0,
                             diskQueue: sv.perf.disk_queue ?? 0,

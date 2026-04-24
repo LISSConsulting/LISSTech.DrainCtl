@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"golang.org/x/sys/windows"
 )
 
@@ -119,7 +120,7 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 			args := []any{
 				"cmd", req.Cmd,
 				"sid", sidStr,
-				slog.Int("event_id", dc.EvtAccessDenied),
+				slog.Int("event_id", etwids.EvtAccessDenied),
 			}
 			if err != nil {
 				args = append(args, "error", err)

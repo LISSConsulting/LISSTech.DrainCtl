@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unsafe"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"golang.org/x/sys/windows"
 )
 
@@ -144,7 +144,7 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 			return
 		}
 		if !isMemberOf(info.Groups, group) {
-			slog.Warn("negotiate: access denied", slog.Int("event_id", dc.EvtAccessDenied),
+			slog.Warn("negotiate: access denied", slog.Int("event_id", etwids.EvtAccessDenied),
 				"user", info.Username, "group", group)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -157,7 +157,7 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		slog.Info("negotiate: session created", slog.Int("event_id", dc.EvtDashboardAccess),
+		slog.Info("negotiate: session created", slog.Int("event_id", etwids.EvtDashboardAccess),
 			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
 		w.Header().Set("Content-Type", "application/json")
@@ -198,7 +198,7 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 		}
 
 		if !isMemberOf(info.Groups, group) {
-			slog.Warn("login: access denied", slog.Int("event_id", dc.EvtAccessDenied),
+			slog.Warn("login: access denied", slog.Int("event_id", etwids.EvtAccessDenied),
 				"user", info.Username, "group", group)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -215,7 +215,7 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 			return
 		}
 
-		slog.Info("login: session created", slog.Int("event_id", dc.EvtDashboardAccess),
+		slog.Info("login: session created", slog.Int("event_id", etwids.EvtDashboardAccess),
 			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
 		w.Header().Set("Content-Type", "application/json")

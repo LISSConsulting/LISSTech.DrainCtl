@@ -12,6 +12,8 @@
  * persisted to localStorage — the backend is authoritative.
  */
 
+import { getThresholdColor, resolveThresholds } from './thresholds.js';
+
 const MAX_EVENTS = 200;
 const MAX_METRICS = 60;
 // Live SSE-append cap for the per-host spike buffer. The swimlane chart fetches
@@ -421,19 +423,69 @@ const stateBarSegments = $derived.by(() => {
     ]);
 });
 
-/** Return the P95 value from a numeric array. @param {number[]} vals */
-export function deriveP95(vals) {
-    if (vals.length === 0) return 0;
-    const sorted = [...vals].sort((a, b) => a - b);
-    return sorted[Math.max(0, Math.ceil(vals.length * 0.95) - 1)];
+function statusLabel(s) {
+    return { ok: 'Healthy', warning: 'Warning', grace: 'Grace', alert: 'Alert', off: 'Offline' }[s] ?? s;
 }
 
-/** Return the P50 (median) value from a numeric array. @param {number[]} vals */
-export function deriveP50(vals) {
-    if (vals.length === 0) return 0;
-    const sorted = [...vals].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+function statusSev(s) {
+    if (s === 'alert' || s === 'off') return 'alert';
+    if (s === 'grace' || s === 'warning') return 'grace';
+    return 'ok';
+}
+
+function buildTransitionEvent(prev, next, host, timestamp) {
+    const sv = servers.find((server) => server.host === host);
+    if (!sv) {
+        return {
+            time: timestamp,
+            host: host.split('.')[0],
+            text: prev == null ? `registered (${statusLabel(next)})` : `${statusLabel(prev)} → ${statusLabel(next)}`,
+            sev: statusSev(next),
+            transition: true,
+        };
+    }
+
+    let sev = statusSev(next);
+    const memUsedPct =
+        sv.perf && sv.perf.mem_total_mb > 0
+            ? Math.round(((sv.perf.mem_total_mb - sv.perf.mem_avail_mb) / sv.perf.mem_total_mb) * 100)
+            : null;
+
+    if (sv.perf) {
+        const perfCfg = config?.performance ?? null;
+        const checks = [
+            [sv.perf.cpu_pct, 'cpu'],
+            [memUsedPct, 'mem'],
+            [sv.perf.input_delay_p95_ms, 'inputDelay'],
+        ];
+        for (const [val, key] of checks) {
+            const t = resolveThresholds(key, perfCfg);
+            const color = getThresholdColor(val, t.warn, t.crit);
+            if (color === 'red') sev = 'alert';
+            else if (color === 'amber' && sev !== 'alert') sev = 'grace';
+        }
+    }
+
+    return {
+        time: timestamp,
+        host: sv.host.split('.')[0],
+        text: prev == null ? `registered (${statusLabel(next)})` : `${statusLabel(prev)} → ${statusLabel(next)}`,
+        sev,
+        transition: true,
+        drain_state: sv.status,
+        drain_mode: sv.drain_mode ?? null,
+        state_duration_seconds: sv.state_duration_seconds ?? null,
+        changed_by: sv.changed_by ?? '',
+        sessions_active: sv.sessions_active ?? sv.sessions,
+        sessions_disconnected: sv.sessions_disconnected ?? 0,
+        sessions_max: sv.max_sessions,
+        cpu_pct: sv.perf?.cpu_pct ?? null,
+        mem_used_pct: memUsedPct,
+        input_delay_p95_ms: sv.perf?.input_delay_p95_ms ?? null,
+        pages_sec: sv.perf?.pages_sec ?? null,
+        tcp_retrans_sec: sv.perf?.tcp_retrans_sec ?? null,
+        disk_queue: sv.perf?.disk_queue ?? null,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +699,19 @@ export function addEvent(msg) {
 }
 
 /**
+ * Push a status-transition event into the shared event ring buffer and return
+ * a compact tuple describing the transition that was logged.
+ * @param {string|null|undefined} prev
+ * @param {string} next
+ * @param {string} host
+ * @param {string} timestamp
+ */
+export function logStatusTransition(prev, next, host, timestamp) {
+    addEvent(buildTransitionEvent(prev, next, host, timestamp));
+    return { from: prev ?? null, to: next, host, timestamp };
+}
+
+/**
  * Append a per-server metrics sample, capping each host's ring buffer at MAX_METRICS.
  * Creates a new Map to preserve Svelte 5 deep reactivity.
  * @param {string} host
@@ -657,6 +722,23 @@ export function appendServerMetricsSample(host, sample) {
     const prev = next.get(host) ?? [];
     next.set(host, [...prev, sample].slice(-MAX_METRICS));
     serverMetrics = next;
+}
+
+/**
+ * Append one per-host perf sample to the shared sparkline ring buffer.
+ * @param {MetricsSample & { host: string }} sample
+ */
+export function appendPerfToRingBuffer(sample) {
+    appendServerMetricsSample(sample.host, {
+        time: sample.time,
+        cpu: sample.cpu,
+        mem: sample.mem,
+        inputDelay: sample.inputDelay,
+        sessions: sample.sessions,
+        diskQueue: sample.diskQueue,
+        tcpRetrans: sample.tcpRetrans,
+        pagesPerSec: sample.pagesPerSec,
+    });
 }
 
 /**
