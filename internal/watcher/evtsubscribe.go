@@ -220,15 +220,14 @@ func (s *EventSubscriber) run(ctx context.Context) {
 			}
 
 			for i := range returned {
-				s.processEvent(evtHandle(evtHandles[i]))
+				s.processEvent(s.renderEventXML(evtHandle(evtHandles[i])))
 				_, _, _ = procEvtClose.Call(evtHandles[i])
 			}
 		}
 	}
 }
 
-func (s *EventSubscriber) processEvent(h evtHandle) {
-	xmlStr := s.renderEventXML(h)
+func (s *EventSubscriber) processEvent(xmlStr string) {
 	if xmlStr == "" {
 		return
 	}
@@ -259,8 +258,20 @@ func (s *EventSubscriber) processEvent(h evtHandle) {
 		user = subjectDomain + `\` + subjectUser
 	}
 
+	ts := time.Now()
+	if raw := evt.System.TimeCreated.SystemTime; raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			slog.Warn("evtspike: unparseable SystemTime", "raw", raw)
+		} else {
+			ts = parsed
+		}
+	} else {
+		slog.Warn("evtspike: unparseable SystemTime", "raw", "")
+	}
+
 	attr := &RegistryChangeAttribution{
-		Timestamp: time.Now(),
+		Timestamp: ts,
 		User:      user,
 	}
 

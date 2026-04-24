@@ -47,6 +47,30 @@ func TestEmailTemplateRenders(t *testing.T) {
 	}
 }
 
+func TestEmailTemplate_EscapesHTML(t *testing.T) {
+	dur := 60.0
+	result := &CheckResult{
+		Host:                 "RDS01",
+		Status:               "Alert",
+		DrainModeLabel:       "Drain Active",
+		GracePeriodSeconds:   300,
+		StateDurationSeconds: &dur,
+		Timestamp:            time.Now(),
+		Message:              "<script>alert(1)</script>",
+	}
+
+	html, err := renderEmailHTML(result, "subject", TriggerAlert, `DOMAIN\admin`)
+	if err != nil {
+		t.Fatalf("renderEmailHTML: %v", err)
+	}
+	if !strings.Contains(html, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatalf("escaped script tag missing from HTML: %s", html)
+	}
+	if strings.Contains(html, "<script>alert(1)</script>") {
+		t.Fatalf("raw script tag present in HTML: %s", html)
+	}
+}
+
 func TestEmailWriteEML(t *testing.T) {
 	if os.Getenv("WRITE_EML") == "" {
 		t.Skip("set WRITE_EML=1 to generate test .eml file")

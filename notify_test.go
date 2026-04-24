@@ -129,6 +129,45 @@ func TestSendWebhook_NonSuccessStatus(t *testing.T) {
 	}
 }
 
+func TestRejectCloudMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		rawURL  string
+		wantErr bool
+	}{
+		{name: "metadata ip", rawURL: "http://169.254.169.254/latest/meta-data/", wantErr: true},
+		{name: "metadata ip with port", rawURL: "http://169.254.169.254:8080/x", wantErr: true},
+		{name: "metadata ip https", rawURL: "https://169.254.169.254/", wantErr: true},
+		{name: "lan allowed", rawURL: "http://192.168.1.10/hook"},
+		{name: "hostname allowed", rawURL: "https://slack.com/hook"},
+		{name: "loopback allowed", rawURL: "http://127.0.0.1:8080/x"},
+		{name: "parse failure delegated", rawURL: "not a url"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := rejectCloudMetadata(tc.rawURL)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("rejectCloudMetadata(%q) returned nil, want error", tc.rawURL)
+				}
+				const want = "notify: cloud metadata IP 169.254.169.254 is not a valid notification target"
+				if err.Error() != want {
+					t.Fatalf("error = %q, want %q", err.Error(), want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("rejectCloudMetadata(%q) = %v, want nil", tc.rawURL, err)
+			}
+		})
+	}
+}
+
 // ── SendNotification ──────────────────────────────────────────────────────────
 
 func newTestResult(host, status string) *CheckResult {
