@@ -22,6 +22,7 @@ var (
 	crypt32                = windows.NewLazySystemDLL("crypt32.dll")
 	procCryptProtectData   = crypt32.NewProc("CryptProtectData")
 	procCryptUnprotectData = crypt32.NewProc("CryptUnprotectData")
+	dpapiEntropy           = []byte("LISSTech.DrainCtl/v1/notify-secret")
 )
 
 // DPAPIEncrypt encrypts plaintext using DPAPI with machine-scope protection.
@@ -35,12 +36,16 @@ func DPAPIEncrypt(plaintext []byte) ([]byte, error) {
 		cbData: uint32(len(plaintext)),
 		pbData: &plaintext[0],
 	}
+	entropy := dataBlob{
+		cbData: uint32(len(dpapiEntropy)),
+		pbData: &dpapiEntropy[0],
+	}
 	var out dataBlob
 
 	r, _, err := procCryptProtectData.Call(
 		uintptr(unsafe.Pointer(&in)),
 		0, // szDataDescr
-		0, // pOptionalEntropy
+		uintptr(unsafe.Pointer(&entropy)),
 		0, // pvReserved
 		0, // pPromptStruct
 		cryptprotectLocalMachine,
@@ -66,12 +71,16 @@ func DPAPIDecrypt(ciphertext []byte) ([]byte, error) {
 		cbData: uint32(len(ciphertext)),
 		pbData: &ciphertext[0],
 	}
+	entropy := dataBlob{
+		cbData: uint32(len(dpapiEntropy)),
+		pbData: &dpapiEntropy[0],
+	}
 	var out dataBlob
 
 	r, _, err := procCryptUnprotectData.Call(
 		uintptr(unsafe.Pointer(&in)),
 		0, // ppszDataDescr
-		0, // pOptionalEntropy
+		uintptr(unsafe.Pointer(&entropy)),
 		0, // pvReserved
 		0, // pPromptStruct
 		cryptprotectLocalMachine,
