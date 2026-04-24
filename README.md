@@ -675,6 +675,10 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 | `triggers` | string[] | no | Event types to notify on (omit for all) |
 | `repeat_minutes` | int | no | Re-alert interval while condition persists (0 = notify once) |
 
+**Notes on notification transport**:
+- Authenticated SMTP (`secret` set) requires STARTTLS or implicit TLS (`smtps://`). DrainCtl refuses to transmit `AUTH` on a cleartext connection — the error message names the offending host.
+- Webhook and ntfy URLs with hostname `169.254.169.254` (cloud metadata IP) are rejected at both send-time and at dashboard save/test time.
+
 ### Retention & Storage
 
 Telemetry lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\drainctl.db` (SQLite, WAL mode). The service is the single writer; the CLI opens the file read-only. Retention is split per record class:
