@@ -841,11 +841,29 @@ func TestValidate_SetsDefaultAuditPath(t *testing.T) {
 }
 
 func TestValidate_PreservesExistingAuditPath(t *testing.T) {
-	const custom = `C:\custom\audit.jsonl`
+	// Non-legacy custom paths (e.g. an operator-configured SQLite DB location)
+	// are preserved as-is by Validate.
+	const custom = `C:\custom\drainctl.db`
 	cfg := &Config{AuditPath: custom}
 	cfg.Validate()
 	if cfg.AuditPath != custom {
 		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, custom)
+	}
+}
+
+func TestValidate_RewritesLegacyJSONLAuditPath(t *testing.T) {
+	// Pre-007 installs wrote audit.jsonl as the default AuditPath; that file
+	// was retired when audit moved to SQLite in feature 007. Validate rewrites
+	// any lingering audit.jsonl tail to the canonical DefaultDBPath so
+	// operators don't see stale references to a file that no longer exists.
+	const legacy = `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\audit.jsonl`
+	cfg := &Config{AuditPath: legacy}
+	cfg.Validate()
+	if cfg.AuditPath == legacy {
+		t.Errorf("AuditPath = %q, want legacy path to be rewritten", cfg.AuditPath)
+	}
+	if cfg.AuditPath != DefaultDBPath() {
+		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, DefaultDBPath())
 	}
 }
 
