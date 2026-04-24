@@ -836,23 +836,20 @@
                 {/if}
 
                 <!-- Display preferences -->
-                <div class="modal-section">
+                <div class="settings-group">
                     <div class="section-header"><Monitor size={14} strokeWidth={2.5} /> Display</div>
-                    <label class="display-toggle">
+                    <div class="settings-hint">
+                        Flip on over RDP to cut compositor cost — disables UI animations, chart-overlay backdrop
+                        blur, and modal transitions. Remembered per browser; initial value respects
+                        <code>prefers-reduced-motion</code>.
+                    </div>
+                    <label class="settings-check">
                         <input
                             type="checkbox"
                             checked={appState.reduceMotion}
                             onchange={(e) => (appState.reduceMotion = e.currentTarget.checked)}
                         />
-                        <span class="display-toggle-label">
-                            <span class="display-toggle-title">Reduce motion</span>
-                            <span class="display-toggle-desc">
-                                Disables UI animations, chart-overlay backdrop blur, and modal transitions. Flip this on
-                                when running the dashboard over RDP to cut the compositor cost; local desktop sessions
-                                should leave it off. Remembered per browser; initial value respects
-                                <code>prefers-reduced-motion</code>.
-                            </span>
-                        </span>
+                        Reduce motion
                     </label>
                 </div>
 
@@ -1086,48 +1083,19 @@
         line-height: 1.5;
     }
 
-    /* Display preferences — reduce-motion toggle. */
-    .display-toggle {
-        display: flex;
-        align-items: flex-start;
-        gap: 12px;
-        padding: 10px 12px;
-        border: 2px solid var(--color-border);
-        border-radius: var(--radius-default);
-        background: var(--color-surface);
-        cursor: pointer;
-    }
-    .display-toggle input[type='checkbox'] {
-        margin-top: 3px;
-        cursor: pointer;
-        /* Make the native checkbox honour the theme — the browser UA
-           otherwise paints it light-on-light (invisible check) or
-           light-on-dark (bright white square floating in dark mode). */
-        accent-color: var(--color-accent);
-        width: 14px;
-        height: 14px;
-    }
-    .display-toggle-label {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .display-toggle-title {
-        font-size: 0.85rem;
-        font-weight: 700;
-        color: var(--color-fg);
-    }
-    .display-toggle-desc {
-        font-size: 0.75rem;
-        color: var(--color-muted);
-        line-height: 1.5;
-    }
-    .display-toggle-desc code {
+    /* Accent the native checkbox inside Display → Reduce motion so the
+       check glyph honours the theme instead of the UA default. Scoped
+       narrowly via the section-header sibling-selector so we don't
+       change the other settings-check checkboxes. */
+    .settings-hint code {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.72rem;
         background: color-mix(in srgb, var(--color-accent) 10%, transparent);
         padding: 1px 5px;
         border-radius: 3px;
+    }
+    .settings-check input[type='checkbox'] {
+        accent-color: var(--color-accent);
     }
 
     /* Maintenance section — collapsed by default. Toggle mirrors the
