@@ -4,7 +4,11 @@ package drainctl
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestDPAPIEncryptDecrypt_RoundTrip(t *testing.T) {
@@ -26,6 +30,19 @@ func TestDPAPIEncryptDecrypt_RoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(pt, plaintext) {
 		t.Errorf("DPAPIDecrypt = %q, want %q", pt, plaintext)
+	}
+}
+
+func TestDPAPIDecrypt_WrongEntropyFails(t *testing.T) {
+	plaintext := []byte("s3cr3t-webhook-key")
+	ct, err := encryptWithEntropy(plaintext, []byte("LISSTech.DrainCtl/v1/wrong-secret"))
+	if err != nil {
+		t.Fatalf("encryptWithEntropy: %v", err)
+	}
+
+	_, err = DPAPIDecrypt(ct)
+	if err == nil {
+		t.Fatal("DPAPIDecrypt with wrong entropy ciphertext should fail")
 	}
 }
 
@@ -62,4 +79,34 @@ func TestDPAPIDecrypt_InvalidCiphertext(t *testing.T) {
 	if err == nil {
 		t.Error("DPAPIDecrypt(garbage) should fail")
 	}
+}
+
+func encryptWithEntropy(plaintext []byte, entropyBytes []byte) ([]byte, error) {
+	in := dataBlob{
+		cbData: uint32(len(plaintext)),
+		pbData: &plaintext[0],
+	}
+	entropy := dataBlob{
+		cbData: uint32(len(entropyBytes)),
+		pbData: &entropyBytes[0],
+	}
+	var out dataBlob
+
+	r, _, err := procCryptProtectData.Call(
+		uintptr(unsafe.Pointer(&in)),
+		0,
+		uintptr(unsafe.Pointer(&entropy)),
+		0,
+		0,
+		cryptprotectLocalMachine,
+		uintptr(unsafe.Pointer(&out)),
+	)
+	if r == 0 {
+		return nil, fmt.Errorf("CryptProtectData: %w", err)
+	}
+	defer func() { _, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(out.pbData))) }()
+
+	result := make([]byte, out.cbData)
+	copy(result, unsafe.Slice(out.pbData, out.cbData))
+	return result, nil
 }
