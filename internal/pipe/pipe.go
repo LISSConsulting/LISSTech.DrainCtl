@@ -3,7 +3,6 @@
 package pipe
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,6 +50,8 @@ type PipeHandler interface {
 // SSPI Negotiate, so the default 5s pipe deadline is too tight.
 const registerDeadline = 30 * time.Second
 
+const pipeMessageCap = 1024 * 1024
+
 // ErrPipeUnavailable signals that the pipe could not be dialled at all — the
 // service is not installed, not running, or the pipe is otherwise unreachable.
 // Callers use this to distinguish bootstrap / service-down conditions (where a
@@ -97,14 +98,13 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	// Read request.
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil || n == 0 {
+	buf, err := readPipeMessage(conn, 4096)
+	if err != nil || len(buf) == 0 {
 		return
 	}
 
 	var req PipeRequest
-	if err := json.Unmarshal(buf[:n], &req); err != nil {
+	if err := json.Unmarshal(buf, &req); err != nil {
 		resp := PipeResponse{OK: false, Error: "invalid request"}
 		data, _ := json.Marshal(resp)
 		_, _ = conn.Write(data)
@@ -291,27 +291,53 @@ func pipeRPCTimeout(req PipeRequest, timeout time.Duration) (*PipeResponse, erro
 	return &resp, nil
 }
 
-// readPipeResponse reads a full message-mode pipe response. Windows named pipes
-// can return ERROR_MORE_DATA when the current read buffer is smaller than the
-// pending message; that signals "continue reading" rather than a fatal error.
-func readPipeResponse(r io.Reader) ([]byte, error) {
-	var out bytes.Buffer
-	chunk := make([]byte, 32*1024)
+func readPipeMessage(r io.Reader, initialBufSize int) ([]byte, error) {
+	if initialBufSize <= 0 {
+		initialBufSize = 4096
+	}
+
+	out := make([]byte, 0, initialBufSize)
+	chunkSize := initialBufSize
 
 	for {
+		if len(out) >= pipeMessageCap {
+			return nil, fmt.Errorf("pipe: message exceeds 1 MiB cap")
+		}
+		remaining := pipeMessageCap - len(out)
+		if chunkSize > remaining {
+			chunkSize = remaining
+		}
+		chunk := make([]byte, chunkSize)
+
 		n, err := r.Read(chunk)
 		if n > 0 {
-			_, _ = out.Write(chunk[:n])
+			out = append(out, chunk[:n]...)
 		}
 		switch {
 		case err == nil:
-			continue
+			return out, nil
 		case errors.Is(err, io.EOF):
-			return out.Bytes(), nil
+			return out, nil
 		case errors.Is(err, windows.ERROR_MORE_DATA):
+			if len(out) >= pipeMessageCap {
+				return nil, fmt.Errorf("pipe: message exceeds 1 MiB cap")
+			}
+			if chunkSize < 32*1024 {
+				chunkSize *= 2
+				if chunkSize > 32*1024 {
+					chunkSize = 32 * 1024
+				}
+			}
 			continue
 		default:
 			return nil, err
 		}
 	}
+}
+
+// readPipeResponse reads a full message-mode pipe response. Windows named pipes
+// can return ERROR_MORE_DATA when the current read buffer is smaller than the
+// pending message; that signals "continue reading" rather than a fatal error.
+func readPipeResponse(r io.Reader) ([]byte, error) {
+	return readPipeMessage(r, 32*1024)
 }
