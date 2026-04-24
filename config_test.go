@@ -3,10 +3,12 @@
 package drainctl
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1210,6 +1212,125 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	}
 	if got.GracePeriod != 90 {
 		t.Errorf("GracePeriod = %d, want 90", got.GracePeriod)
+	}
+}
+
+func TestConfigRMW_NoInterleave(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	values := make([]int, 20)
+	for i := range values {
+		values[i] = 10 + i
+	}
+
+	start := make(chan struct{})
+	errCh := make(chan error, len(values))
+	var wg sync.WaitGroup
+	for _, pct := range values {
+		pct := pct
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < 10; i++ {
+				if err := UpdateSessionThreshold(pct); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("UpdateSessionThreshold: %v", err)
+		}
+	}
+
+	data, err := os.ReadFile(DefaultConfigPath())
+	if err != nil {
+		t.Fatalf("ReadFile(config.json): %v", err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal(config.json): %v\n%s", err, string(data))
+	}
+
+	found := false
+	for _, pct := range values {
+		if got.SessionWarningThreshold == pct {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SessionWarningThreshold = %d, want one of %v", got.SessionWarningThreshold, values)
+	}
+}
+
+func TestConfigRMW_ConcurrentNotificationsAndGraceBothPersist(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	wantTargets := []NotificationTarget{
+		{Type: "webhook", URL: "https://example.com/hook"},
+		{Type: "ntfy", URL: "https://ntfy.sh/drainctl"},
+	}
+	wantGrace := 135
+
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 25; i++ {
+			if err := UpdateNotifications(wantTargets); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 25; i++ {
+			if err := UpdateGracePeriod(wantGrace); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent updater: %v", err)
+		}
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !reflect.DeepEqual(got.Notifications, wantTargets) {
+		t.Fatalf("Notifications = %#v, want %#v", got.Notifications, wantTargets)
+	}
+	if got.GracePeriod != wantGrace {
+		t.Fatalf("GracePeriod = %d, want %d", got.GracePeriod, wantGrace)
 	}
 }
 

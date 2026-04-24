@@ -650,6 +650,10 @@ func clampFloatField(name string, v, def, min, max float64) float64 {
 // exist it attempts a one-time migration from registry values. If the
 // registry has no config either, a default config is written and returned.
 func LoadConfig() (*Config, error) {
+	return withConfigFileLockValue(loadConfigLocked)
+}
+
+func loadConfigLocked() (*Config, error) {
 	path := DefaultConfigPath()
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -673,7 +677,7 @@ func LoadConfig() (*Config, error) {
 
 	// No registry config either — fresh install.
 	cfg := DefaultConfig()
-	if err := saveConfigToFile(cfg); err != nil {
+	if err := saveConfigToFileLocked(cfg); err != nil {
 		return nil, fmt.Errorf("write default config: %w", err)
 	}
 	slog.Default().Info("default config written", "path", path)
@@ -690,6 +694,12 @@ func SaveConfig(cfg *Config) error {
 // saveConfigToFile atomically writes config.json using a named mutex for
 // cross-process serialization.
 func saveConfigToFile(cfg *Config) error {
+	return withConfigFileLock(func() error {
+		return saveConfigToFileLocked(cfg)
+	})
+}
+
+func saveConfigToFileLocked(cfg *Config) error {
 	path := DefaultConfigPath()
 	tmpPath := path + ".tmp"
 
@@ -698,6 +708,35 @@ func saveConfigToFile(cfg *Config) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
+	// Marshal with indentation for human readability.
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	data = append(data, '\n')
+
+	// Write to temp file.
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+		return fmt.Errorf("write temp config: %w", err)
+	}
+
+	// Atomic rename.
+	src, _ := windows.UTF16PtrFromString(tmpPath)
+	dst, _ := windows.UTF16PtrFromString(path)
+	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
+		// Fallback: plain rename (works if no other process holds the file).
+		if renameErr := os.Rename(tmpPath, path); renameErr != nil {
+			return fmt.Errorf("rename config: %w (movefileex: %v)", renameErr, err)
+		}
+	}
+
+	// Restrict ACL after rename — config.json may contain notification secrets.
+	restrictConfigACL(path)
+
+	return nil
+}
+
+func withConfigFileLock(fn func() error) error {
 	// Pin this goroutine to its current OS thread for the entire acquire-use-
 	// release window. Windows named mutexes are owned by the THREAD that called
 	// WaitForSingleObject; only that thread may call ReleaseMutex. Go's
@@ -727,32 +766,34 @@ func saveConfigToFile(cfg *Config) error {
 	}
 	defer func() { _ = windows.ReleaseMutex(mutex) }()
 
-	// Marshal with indentation for human readability.
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	data = append(data, '\n')
+	return fn()
+}
 
-	// Write to temp file.
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
-		return fmt.Errorf("write temp config: %w", err)
-	}
+func withConfigFileLockValue[T any](fn func() (T, error)) (T, error) {
+	var out T
+	err := withConfigFileLock(func() error {
+		var err error
+		out, err = fn()
+		return err
+	})
+	return out, err
+}
 
-	// Atomic rename.
-	src, _ := windows.UTF16PtrFromString(tmpPath)
-	dst, _ := windows.UTF16PtrFromString(path)
-	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
-		// Fallback: plain rename (works if no other process holds the file).
-		if renameErr := os.Rename(tmpPath, path); renameErr != nil {
-			return fmt.Errorf("rename config: %w (movefileex: %v)", renameErr, err)
+func readModifyWrite(f func(*Config) error) error {
+	return withConfigFileLock(func() error {
+		cfg, err := loadConfigLocked()
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
 		}
-	}
-
-	// Restrict ACL after rename — config.json may contain notification secrets.
-	restrictConfigACL(path)
-
-	return nil
+		if err := f(cfg); err != nil {
+			return err
+		}
+		cfg.Validate()
+		if err := saveConfigToFileLocked(cfg); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // restrictConfigACL sets the ACL on a config file to SYSTEM + Administrators.
@@ -804,13 +845,10 @@ func isElevated() bool {
 // UpdateNotifications replaces the notification targets in config.json.
 // This is the only way the dashboard API should modify notifications.
 func UpdateNotifications(targets []NotificationTarget) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.Notifications = targets
-	cfg.Validate()
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Notifications = targets
+		return nil
+	})
 }
 
 // UpdateSessionThreshold sets the session warning threshold in config.json.
@@ -819,12 +857,10 @@ func UpdateSessionThreshold(pct int) error {
 	if pct < 0 || pct > 100 {
 		return fmt.Errorf("threshold must be 0-100, got %d", pct)
 	}
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.SessionWarningThreshold = pct
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.SessionWarningThreshold = pct
+		return nil
+	})
 }
 
 // UpdateGracePeriod sets the grace period (minutes) in config.json.
@@ -832,23 +868,18 @@ func UpdateGracePeriod(minutes int) error {
 	if minutes < 1 || minutes > 1440 {
 		return fmt.Errorf("grace period must be 1-1440 minutes, got %d", minutes)
 	}
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.GracePeriod = minutes
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.GracePeriod = minutes
+		return nil
+	})
 }
 
 // UpdatePerformanceConfig replaces the performance monitoring settings in config.json.
 func UpdatePerformanceConfig(perf PerformanceConfig) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.Performance = perf
-	cfg.Validate()
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Performance = perf
+		return nil
+	})
 }
 
 // UpdateNotifySettings atomically updates notification targets, session warning
@@ -856,36 +887,33 @@ func UpdatePerformanceConfig(perf PerformanceConfig) error {
 // config load+save cycle. Any nil argument is left unchanged. This is the
 // preferred API for the dashboard PUT /api/v1/settings handler.
 func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *PerformanceConfig) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if notifications != nil {
-		cfg.Notifications = *notifications
-	}
-	if sessionThreshold != nil {
-		if *sessionThreshold < 0 || *sessionThreshold > 100 {
-			return fmt.Errorf("threshold must be 0-100, got %d", *sessionThreshold)
+	return readModifyWrite(func(cfg *Config) error {
+		if notifications != nil {
+			cfg.Notifications = *notifications
 		}
-		cfg.SessionWarningThreshold = *sessionThreshold
-	}
-	if gracePeriod != nil {
-		if *gracePeriod < 1 || *gracePeriod > 1440 {
-			return fmt.Errorf("grace period must be 1-1440 minutes, got %d", *gracePeriod)
+		if sessionThreshold != nil {
+			if *sessionThreshold < 0 || *sessionThreshold > 100 {
+				return fmt.Errorf("threshold must be 0-100, got %d", *sessionThreshold)
+			}
+			cfg.SessionWarningThreshold = *sessionThreshold
 		}
-		cfg.GracePeriod = *gracePeriod
-	}
-	if pollInterval != nil {
-		if *pollInterval < 10 || *pollInterval > MaxPollInterval {
-			return fmt.Errorf("poll interval must be 10-%d seconds, got %d", MaxPollInterval, *pollInterval)
+		if gracePeriod != nil {
+			if *gracePeriod < 1 || *gracePeriod > 1440 {
+				return fmt.Errorf("grace period must be 1-1440 minutes, got %d", *gracePeriod)
+			}
+			cfg.GracePeriod = *gracePeriod
 		}
-		cfg.PollInterval = *pollInterval
-	}
-	if performance != nil {
-		cfg.Performance = *performance
-	}
-	cfg.Validate()
-	return saveConfigToFile(cfg)
+		if pollInterval != nil {
+			if *pollInterval < 10 || *pollInterval > MaxPollInterval {
+				return fmt.Errorf("poll interval must be 10-%d seconds, got %d", MaxPollInterval, *pollInterval)
+			}
+			cfg.PollInterval = *pollInterval
+		}
+		if performance != nil {
+			cfg.Performance = *performance
+		}
+		return nil
+	})
 }
 
 // UpdateEvtSpikeEnabled flips only the evtspike.enabled flag, leaving all
@@ -899,14 +927,11 @@ func UpdateEvtSpikeEnabled(enabled *bool) error {
 	if enabled == nil {
 		return nil
 	}
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.EvtSpike.Enabled = *enabled
-	ClampEvtSpike(&cfg.EvtSpike)
-	cfg.Validate()
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.EvtSpike.Enabled = *enabled
+		ClampEvtSpike(&cfg.EvtSpike)
+		return nil
+	})
 }
 
 // InstallCertificate copies a PEM cert and key into the data directory and
@@ -940,13 +965,11 @@ func InstallCertificate(certPath, keyPath string) error {
 		return fmt.Errorf("write key: %w", err)
 	}
 
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	cfg.Dashboard.TLSCert = dstCert
-	cfg.Dashboard.TLSKey = dstKey
-	return saveConfigToFile(cfg)
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Dashboard.TLSCert = dstCert
+		cfg.Dashboard.TLSKey = dstKey
+		return nil
+	})
 }
 
 // ── Registry migration ──────────────────────────────────────────────────
