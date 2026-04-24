@@ -58,6 +58,36 @@ func TestGetHistory_ReturnsAllRecords(t *testing.T) {
 	}
 }
 
+func TestGetHistory_AcceptsFilePath(t *testing.T) {
+	now := time.Now().UTC()
+	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{
+		{Ts: now, Host: "h", PrevState: 0, NewState: 1},
+	})
+
+	recs, err := GetHistory(HistoryOptions{DBPath: filepath.Join(filepath.Dir(dbPath), "drainctl.db")})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("len = %d, want 1", len(recs))
+	}
+}
+
+func TestGetHistory_AcceptsDirPath(t *testing.T) {
+	now := time.Now().UTC()
+	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{
+		{Ts: now, Host: "h", PrevState: 0, NewState: 1},
+	})
+
+	recs, err := GetHistory(HistoryOptions{DBPath: filepath.Dir(dbPath)})
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("len = %d, want 1", len(recs))
+	}
+}
+
 func TestGetHistory_ChangesOnly(t *testing.T) {
 	now := time.Now().UTC()
 	dbPath := seedTelemetryAudit(t, []telemetry.AuditRecord{

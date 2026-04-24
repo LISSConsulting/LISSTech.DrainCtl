@@ -5,6 +5,7 @@ package drainctl
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -22,10 +23,10 @@ type HistoryOptions struct {
 
 // GetHistory returns audit records from the SQLite telemetry store.
 //
-// DBPath names a file inside the drainctl data directory (historically the
-// JSONL trail); its parent directory is used as the telemetry data dir so
-// existing callers that pass the legacy audit.jsonl path keep working without
-// a signature change (T028). An empty DBPath selects DefaultDataDir().
+// DBPath may name either the SQLite file itself or the containing data
+// directory. Legacy callers that still pass the old "audit" file path keep
+// working because file inputs are mapped to their parent directory. An empty
+// DBPath selects DefaultDBDir().
 //
 // Opens the store read-only so the CLI never writes to drainctl.db while the
 // service may be running concurrently (tasks.md T028a / research.md §13).
@@ -33,9 +34,14 @@ type HistoryOptions struct {
 // writer or an ACL mismatch surfaces as an explicit error rather than silent
 // fallback to stale data.
 func GetHistory(opts HistoryOptions) ([]AuditRecord, error) {
-	dataDir := DefaultDataDir()
+	dataDir := DefaultDBDir()
 	if opts.DBPath != "" {
-		dataDir = filepath.Dir(opts.DBPath)
+		info, err := os.Stat(opts.DBPath)
+		if err == nil && info.IsDir() {
+			dataDir = opts.DBPath
+		} else {
+			dataDir = filepath.Dir(opts.DBPath)
+		}
 	}
 
 	db, err := telemetry.OpenReadOnly(dataDir)

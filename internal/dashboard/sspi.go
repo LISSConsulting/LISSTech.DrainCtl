@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"runtime"
 	"strings"
 	"sync"
@@ -264,7 +264,7 @@ func RequireGroup(group string, next http.Handler) http.Handler {
 		}
 
 		if !found {
-			slog.Warn("sspi: access denied", slog.Int("event_id", dc.EvtAccessDenied), "user", auth.Username, "group", group)
+			slog.Warn("sspi: access denied", slog.Int("event_id", etwids.EvtAccessDenied), "user", auth.Username, "group", group)
 			http.Error(w, "access denied: not a member of "+group, http.StatusForbidden)
 			return
 		}
