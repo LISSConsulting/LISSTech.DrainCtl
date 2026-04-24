@@ -2041,6 +2041,321 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 </tbody>
             </table>
 
+            <h3>Configuration knobs</h3>
+            <p>
+                Every numeric knob below lives under <code>"evtspike"</code> in <code>config.json</code> on the
+                dashboard server and propagates to every connected agent on the next pull. Numeric fields are clamped
+                to the ranges shown; setting a value outside the range silently falls back to the default. The only
+                runtime knob also editable from the dashboard UI is <code>enabled</code>; everything else is an
+                admin-only file edit.
+            </p>
+
+            <p>A complete block with defaults:</p>
+            <pre><code>"evtspike": {
+  "enabled": true,
+  "min_count": 10,
+  "threshold": 1e-4,
+  "cooldown_minutes": 10,
+  "slot_maturity_observations": 7,
+  "persist_interval_seconds": 900,
+  "half_life_buckets": 360,
+  "prior_strength": 60.0,
+  "mean_per_bucket_prior": 0.1,
+  "security_channel_enabled": false,
+  "disabled_channels": [],
+  "added_channels": []
+}</code></pre>
+
+            <h4>Detection knobs &mdash; how loudly the detector fires</h4>
+            <p>
+                These three work together. The detector emits a <em>candidate</em> spike when (a) the 10-second bucket
+                count is at least <code>min_count</code>, <em>and</em> (b) the Bayesian tail probability of seeing that
+                count under the learned baseline is below <code>threshold</code>. Two-of-three consecutive candidates
+                confirm a spike, and <code>cooldown_minutes</code> then suppresses repeats on the same channel.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Range</th>
+                        <th>What it does &mdash; and when to tune</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>min_count</code></td>
+                        <td>10</td>
+                        <td>1 &ndash; 10000</td>
+                        <td>
+                            Floor on the bucket count required to even consider scoring an anomaly. Rare channels where
+                            two events/10&nbsp;s is already catastrophic want <code>3</code>&ndash;<code>5</code>. Very
+                            chatty channels where background is 50+/10&nbsp;s want <code>25</code>&ndash;<code>50</code> to
+                            avoid scoring normal noise. Raising this is the single most effective lever for cutting
+                            false positives on a noisy channel without retraining the baseline.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>threshold</code></td>
+                        <td><code>1e-4</code></td>
+                        <td><code>1e-9</code> &ndash; <code>0.1</code></td>
+                        <td>
+                            Maximum tail probability for a count to qualify as anomalous. Lower = stricter. At
+                            <code>1e-4</code> the detector flags roughly one-in-ten-thousand buckets under a well-learned
+                            baseline. Drop to <code>1e-6</code>&ndash;<code>1e-8</code> if you trust the baseline deeply
+                            and only want the most extreme deviations. Raise to <code>1e-3</code>&ndash;<code>1e-2</code>
+                            for exploratory fleets where you want to see borderline activity.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>cooldown_minutes</code></td>
+                        <td>10</td>
+                        <td>1 &ndash; 1440</td>
+                        <td>
+                            After a confirmed spike fires on a channel, further spikes on the same channel are
+                            suppressed for this many minutes. Pair with your notification target's
+                            <code>repeat_minutes</code>: the detector cooldown gates the first fire; the target cooldown
+                            gates reminder notifications. Short cooldowns (<code>2</code>&ndash;<code>5</code>) are useful
+                            on channels where distinct incidents can arrive back-to-back (auth failure storms). Long
+                            cooldowns (<code>60</code>+) fit channels where a single incident produces a multi-hour
+                            burst (patch storms, scheduled backup windows).
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Learning knobs &mdash; how the baseline adapts</h4>
+            <p>
+                The baseline is a per-channel Gamma-Poisson posterior with one bucket per 15-minute time-of-day slot
+                (96 slots/day). These knobs control how fast the baseline learns, how confidently it starts, and when
+                a slot is considered mature enough for its own scoring.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Range</th>
+                        <th>What it does &mdash; and when to tune</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>slot_maturity_observations</code></td>
+                        <td>7</td>
+                        <td>1 &ndash; 100</td>
+                        <td>
+                            Number of bucket observations a single 15-minute slot must accumulate before scoring
+                            prefers it over the global posterior. The default of <code>7</code> is generous &mdash; the
+                            slot is declared mature after roughly 70 seconds of coverage in that time-of-day window. For
+                            a stricter "one full visit to the slot" posture, set to <code>90</code> (all 10-second
+                            buckets in a 15-minute slot) or higher. Higher values mean more time in TRAINING before
+                            per-slot scoring kicks in; lower values accept less evidence before trusting a slot's own
+                            statistics.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>half_life_buckets</code></td>
+                        <td>360</td>
+                        <td>60 &ndash; 10000</td>
+                        <td>
+                            Exponential-forgetting half-life in 10-second buckets. At <code>360</code> the baseline
+                            weights the last hour heavily and older data fades; after one half-life the contribution
+                            of a given observation drops to half. Shorter (<code>120</code>&ndash;<code>180</code>,
+                            20&ndash;30 minutes) adapts faster to channel-behaviour drift but is more easily dragged
+                            by a sustained background-rate shift. Longer (<code>720</code>+, two-plus hours) is more
+                            stable across short incidents but slower to re-home on a permanent rate change (e.g., a
+                            newly deployed application that changed the channel's idle rate).
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>prior_strength</code></td>
+                        <td>60.0</td>
+                        <td>1.0 &ndash; 10000.0</td>
+                        <td>
+                            How many bucket-equivalents of "pretend evidence" the initial prior is worth. With the
+                            default, the baseline starts with the equivalent of 60 observations already seen at the
+                            prior mean, so scoring is meaningful from minute one rather than exquisitely sensitive.
+                            Raise this to <code>300</code>+ to make the detector slower and more skeptical on freshly
+                            installed agents; lower to <code>10</code>&ndash;<code>20</code> to let a real baseline take
+                            over faster. Rarely worth touching outside a staging environment.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>mean_per_bucket_prior</code></td>
+                        <td>0.1</td>
+                        <td>0.0 &ndash; 1000.0</td>
+                        <td>
+                            Expected events per 10-second bucket under "normal" conditions. Used only to seed the prior
+                            before real data arrives. <code>0.1</code> reflects the assumption that most curated channels
+                            are mostly quiet. For a known-chatty channel (SMB audit, Kerberos on a DC with many
+                            short-lived tickets) you can seed a larger value so the first few minutes of observation
+                            aren't flagged as anomalous simply because the prior was too low.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>persist_interval_seconds</code></td>
+                        <td>900</td>
+                        <td>60 &ndash; 86400</td>
+                        <td>
+                            How often the in-memory detector state is written to <code>baseline.json</code> on disk.
+                            Shorter = less learning lost on a hard service kill; longer = fewer disk writes on
+                            constrained hosts. The default of 15&nbsp;minutes loses at most one slot's worth of
+                            observations on a crash. A clean service stop always forces a final save regardless of
+                            cadence.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Channel selection</h4>
+            <p>
+                The detector subscribes to a curated list of 54 default channels &mdash; Application, System, FSLogix,
+                RemoteApp/RDP, SMB client/server, Terminal Services subsystems, auth (NTLM / Kerberos / LSA),
+                infrastructure (DNS / TCPIP / CAPI2), user experience (GroupPolicy / User Profile Service / PrintService),
+                and stability (WHEA / Windows Defender / Crashdump). Three knobs shape that list:
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>What it does</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>security_channel_enabled</code></td>
+                        <td>false</td>
+                        <td>
+                            Opt-in subscription to the <code>Security</code> channel. Disabled by default because
+                            subscribing requires <code>SeSecurityPrivilege</code> on the service account &mdash; the
+                            DrainCtl service runs as <code>LocalSystem</code>, which has this privilege, but if you
+                            run it under a different service account you must grant the right first. Enabling this
+                            can generate a lot of noise on a domain controller; pair with higher <code>min_count</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>disabled_channels</code></td>
+                        <td><code>[]</code></td>
+                        <td>
+                            Case-insensitive list of default channels to <em>remove</em> from the subscription set. Use
+                            this to silence a default channel without editing the curated list. Does not affect
+                            <code>added_channels</code> &mdash; so an admin who disables a default can still re-add it
+                            explicitly via the added list if they want custom per-channel tuning later.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>added_channels</code></td>
+                        <td><code>[]</code></td>
+                        <td>
+                            Extra channel names to subscribe to beyond the curated defaults. Any channel you actually
+                            want the detector watching and that isn't already in the default set goes here &mdash;
+                            application-specific channels (<code>Microsoft-Windows-Hyper-V-Worker/Operational</code>,
+                            vendor-specific subsystems) are the typical case. Non-existent channels are logged as
+                            skipped at service start and do not block other subscriptions.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="callout">
+                <strong>&#x1F4A1; Discovering channel names.</strong> List the full set of channels currently
+                registered on a host with <code>wevtutil el</code>. The case used in that output is the exact string
+                DrainCtl expects in <code>added_channels</code>. For a channel's log path, use
+                <code>wevtutil gl &lt;channel-name&gt;</code>.
+            </div>
+
+            <h3>Tuning for your fleet</h3>
+            <p>
+                Defaults ship for a general-purpose Terminal Services host running well-behaved line-of-business apps.
+                Four common scenarios warrant different postures:
+            </p>
+
+            <h4>Cautious (exploratory, new fleet)</h4>
+            <p>
+                You just turned the detector on. You don't yet know what your baseline looks like. You want to see
+                borderline activity so you can decide what to tune. Prefer false positives to false negatives.
+            </p>
+            <pre><code>"evtspike": {
+  "enabled": true,
+  "min_count": 5,
+  "threshold": 1e-3,
+  "cooldown_minutes": 30,
+  "slot_maturity_observations": 7
+}</code></pre>
+            <p>
+                Lower <code>min_count</code> and looser <code>threshold</code> catch more. Longer <code>cooldown</code>
+                prevents a single noisy channel from pager-bombing you while you figure out if it's signal or normal.
+                Leave the learning knobs at defaults until the detector has seen a full week of your real traffic.
+            </p>
+
+            <h4>Strict (mature fleet, high-signal alerts only)</h4>
+            <p>
+                The baseline has been learning for a month. Operators are tired of informational spikes. You want only
+                real emergencies to fire.
+            </p>
+            <pre><code>"evtspike": {
+  "enabled": true,
+  "min_count": 25,
+  "threshold": 1e-6,
+  "cooldown_minutes": 10,
+  "slot_maturity_observations": 90
+}</code></pre>
+            <p>
+                Higher <code>min_count</code> filters out small deviations. Tighter <code>threshold</code> demands
+                extreme tail events. <code>slot_maturity_observations = 90</code> means the detector refuses to call
+                a slot mature until it has seen a full 15-minute visit in that time-of-day window &mdash; eliminates
+                the "first morning back after a three-day weekend" false positive class.
+            </p>
+
+            <h4>Noisy-channel surgery (keep the rest, tame the one)</h4>
+            <p>
+                Global defaults work for 50+ channels but one specific channel (often <code>Microsoft-Windows-SMBClient/Audit</code>
+                or <code>Microsoft-Windows-Kerberos/Operational</code> on a DC) keeps firing and you trust it's
+                operational noise, not signal. Disable just that channel:
+            </p>
+            <pre><code>"evtspike": {
+  "enabled": true,
+  "disabled_channels": [
+    "Microsoft-Windows-SMBClient/Audit"
+  ]
+}</code></pre>
+            <p>
+                Prefer this to globally raising <code>min_count</code> &mdash; it preserves sensitivity on the other 53
+                channels. Reinstate the channel after the workload stabilises.
+            </p>
+
+            <h4>DC-heavy fleet with Security auditing</h4>
+            <p>
+                You're running DrainCtl on domain controllers and want auth-failure flood detection. Enable Security,
+                tighten thresholds since the baseline on auth channels is naturally high:
+            </p>
+            <pre><code>"evtspike": {
+  "enabled": true,
+  "min_count": 50,
+  "threshold": 1e-6,
+  "cooldown_minutes": 5,
+  "security_channel_enabled": true,
+  "mean_per_bucket_prior": 2.0,
+  "half_life_buckets": 720
+}</code></pre>
+            <p>
+                Higher <code>mean_per_bucket_prior</code> stops the first few hours of runtime from flagging normal
+                Security churn. Longer <code>half_life_buckets</code> gives the baseline two hours of memory so short
+                spiky authentications don't nudge the baseline upward. Short <code>cooldown</code> is appropriate
+                because auth storms (password-spraying, service-account lockouts) are often distinct incidents arriving
+                minutes apart.
+            </p>
+
+            <div class="callout warn">
+                <strong>&#x26A0;&#xFE0F; After changing learning knobs, reset the baseline.</strong>
+                <code>prior_strength</code>, <code>mean_per_bucket_prior</code>, and <code>half_life_buckets</code> only
+                affect the <em>initial</em> seeding of a detector &mdash; an already-running detector keeps its current
+                posterior. Run <code>drainctl baseline reset</code> after changing any of these so the new values
+                actually take effect. Detection knobs (<code>min_count</code>, <code>threshold</code>, <code>cooldown</code>)
+                and channel knobs apply immediately on the next config pull; no reset needed.
+            </div>
+
             <h3>Baseline persistence</h3>
             <p>
                 The detector stores its per-channel sufficient statistics (Gamma-Poisson posteriors, robust-cap state,
