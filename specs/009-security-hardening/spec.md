@@ -204,7 +204,7 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 - **SC-008**: Zero non-admin callers succeed at `register` / `remove-server` / `baseline-reset`; read-only verbs (`status`, `history`, `servers`) remain available to the same callers.
 - **SC-009**: Registry-change attribution timestamp error (wall-clock vs event `SystemTime`) reduced to zero on delayed-delivery test payloads.
 - **SC-010**: Root `drainctl` package public surface shrinks by at least four symbols (`UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig`); ETW event-ID constants no longer exported from root.
-- **SC-011**: `internal/svc/handler.go` drops from 1138 lines to no single new file exceeding 400 lines; public signatures unchanged (verified by `go build ./...` on a binary-compatible build).
+- **SC-011**: ~~`internal/svc/handler.go` drops from 1138 lines to no single new file exceeding 400 lines~~. **Deferred** — first-pass split during US5 produced tangled duplicate declarations and was reverted; tracked as `FEATURES.md` F5 for a follow-up branch (`010-handler-split`). Current state: file remains at 1149 lines, behavior-correct.
 - **SC-012**: Svelte duplicated blocks reduced from 4 copies to 2 call sites; `deriveP95`/`deriveP50` removed from `state.svelte.js` exports.
 
 ## Assumptions
