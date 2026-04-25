@@ -68,7 +68,7 @@ const (
 	DefaultEvtSpikeCooldownMinutes          = 10
 	MinEvtSpikeCooldownMinutes              = 1
 	MaxEvtSpikeCooldownMinutes              = 1440
-	DefaultEvtSpikeSlotMaturityObservations = 7
+	DefaultEvtSpikeSlotMaturityObservations = 90
 	MinEvtSpikeSlotMaturityObservations     = 1
 	MaxEvtSpikeSlotMaturityObservations     = 100
 	DefaultEvtSpikePersistIntervalSeconds   = 900
