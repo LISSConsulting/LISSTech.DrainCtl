@@ -2056,7 +2056,7 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
   "min_count": 10,
   "threshold": 1e-4,
   "cooldown_minutes": 10,
-  "slot_maturity_observations": 7,
+  "slot_maturity_observations": 90,
   "persist_interval_seconds": 900,
   "half_life_buckets": 360,
   "prior_strength": 60.0,
@@ -2142,16 +2142,18 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <tbody>
                     <tr>
                         <td><code>slot_maturity_observations</code></td>
-                        <td>7</td>
+                        <td>90</td>
                         <td>1 &ndash; 100</td>
                         <td>
                             Number of bucket observations a single 15-minute slot must accumulate before scoring
-                            prefers it over the global posterior. The default of <code>7</code> is generous &mdash; the
-                            slot is declared mature after roughly 70 seconds of coverage in that time-of-day window. For
-                            a stricter "one full visit to the slot" posture, set to <code>90</code> (all 10-second
-                            buckets in a 15-minute slot) or higher. Higher values mean more time in TRAINING before
-                            per-slot scoring kicks in; lower values accept less evidence before trusting a slot's own
-                            statistics.
+                            prefers it over the global posterior. The default of <code>90</code> means a slot is
+                            declared mature only after a full 15-minute visit (90 ten-second buckets) in that
+                            time-of-day window — eliminating the "first morning back after a long weekend" false
+                            positive class. Lower values accept less evidence before trusting a slot's own
+                            statistics; if you find the detector spends too long in TRAINING on quiet channels,
+                            <code>30</code>&ndash;<code>60</code> is a reasonable softer setting. Pre-009 the default
+                            was <code>7</code> (≈70 s of coverage); persisted <code>7</code> values are NOT
+                            auto-migrated, so existing installs keep their tuning.
                         </td>
                     </tr>
                     <tr>
@@ -2281,30 +2283,32 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
   "min_count": 5,
   "threshold": 1e-3,
   "cooldown_minutes": 30,
-  "slot_maturity_observations": 7
+  "slot_maturity_observations": 30
 }</code></pre>
             <p>
                 Lower <code>min_count</code> and looser <code>threshold</code> catch more. Longer <code>cooldown</code>
                 prevents a single noisy channel from pager-bombing you while you figure out if it's signal or normal.
-                Leave the learning knobs at defaults until the detector has seen a full week of your real traffic.
+                Lower <code>slot_maturity_observations</code> than the default (90) lets per-slot scoring engage sooner
+                so you see borderline activity earlier — at the cost of more false positives in the first few hours.
             </p>
 
             <h4>Strict (mature fleet, high-signal alerts only)</h4>
             <p>
                 The baseline has been learning for a month. Operators are tired of informational spikes. You want only
-                real emergencies to fire.
+                real emergencies to fire. Defaults already give you the strict-direction slot maturity; tighten the
+                detection knobs:
             </p>
             <pre><code>"evtspike": {
   "enabled": true,
   "min_count": 25,
   "threshold": 1e-6,
-  "cooldown_minutes": 10,
-  "slot_maturity_observations": 90
+  "cooldown_minutes": 10
 }</code></pre>
             <p>
                 Higher <code>min_count</code> filters out small deviations. Tighter <code>threshold</code> demands
-                extreme tail events. <code>slot_maturity_observations = 90</code> means the detector refuses to call
-                a slot mature until it has seen a full 15-minute visit in that time-of-day window &mdash; eliminates
+                extreme tail events. The default <code>slot_maturity_observations = 90</code> already means the
+                detector refuses to call a slot mature until it has seen a full 15-minute visit in that time-of-day
+                window &mdash; eliminates
                 the "first morning back after a three-day weekend" false positive class.
             </p>
 
