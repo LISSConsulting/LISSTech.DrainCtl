@@ -5,6 +5,7 @@ package drainctl
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -728,18 +729,40 @@ func saveConfigToFileLocked(cfg *Config) error {
 		return fmt.Errorf("write temp config: %w", err)
 	}
 
-	// Atomic rename.
+	// Apply ACL to the tmp file BEFORE the rename. NTFS same-volume rename
+	// preserves the source file's explicit security descriptor, so a tight
+	// ACL on tmp carries into the final path. Tightening AFTER the rename
+	// leaves a window where %ProgramData%-inherited ACLs (which grant Users
+	// read+execute) make notification secrets briefly readable by any local
+	// user.
+	if aclErr := restrictConfigACL(tmpPath); aclErr != nil {
+		// Don't leak a tmp file that may already contain unprotected secrets.
+		if rmErr := os.Remove(tmpPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return errors.Join(
+				fmt.Errorf("restrict acl on tmp config: %w", aclErr),
+				fmt.Errorf("cleanup tmp: %w", rmErr),
+			)
+		}
+		return fmt.Errorf("restrict acl on tmp config: %w", aclErr)
+	}
+
+	// Atomic rename. The tight ACL just applied to tmpPath carries into path
+	// because NTFS same-volume rename preserves explicit DACLs.
 	src, _ := windows.UTF16PtrFromString(tmpPath)
 	dst, _ := windows.UTF16PtrFromString(path)
 	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
 		// Fallback: plain rename (works if no other process holds the file).
 		if renameErr := os.Rename(tmpPath, path); renameErr != nil {
-			return fmt.Errorf("rename config: %w (movefileex: %v)", renameErr, err)
+			// Both rename attempts failed. Clean up the tmp file so a
+			// world-readable config.json.tmp doesn't accumulate in
+			// %ProgramData% across retries.
+			renameWrap := fmt.Errorf("rename config: %w (movefileex: %v)", renameErr, err)
+			if rmErr := os.Remove(tmpPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				return errors.Join(renameWrap, fmt.Errorf("cleanup tmp: %w", rmErr))
+			}
+			return renameWrap
 		}
 	}
-
-	// Restrict ACL after rename — config.json may contain notification secrets.
-	restrictConfigACL(path)
 
 	return nil
 }
@@ -805,14 +828,23 @@ func readModifyWrite(f func(*Config) error) error {
 }
 
 // restrictConfigACL sets the ACL on a config file to SYSTEM + Administrators.
-// Best-effort — errors are ignored
-// since the file is still functional with inherited ACLs.
-func restrictConfigACL(path string) {
+// Returns nil in non-elevated contexts (tests, dev) without modifying the
+// file — icacls /inheritance:r would otherwise lock out the current user
+// and break the dev loop. Returns an error in elevated contexts when
+// icacls fails twice (one retry to ride past transient sharing-violation
+// races against AV / Windows Defender / search indexer briefly opening
+// the file).
+//
+// Errors propagate to SaveConfig so a config.json with notification
+// secrets cannot silently land on disk with %ProgramData%-inherited ACLs
+// (which grant Users read+execute). Pre-009: errors were swallowed and a
+// failed icacls call left the file world-readable forever.
+func restrictConfigACL(path string) error {
 	// Only restrict ACLs when running as SYSTEM or an elevated admin.
 	// In non-elevated contexts (tests, dev), icacls /inheritance:r would
 	// lock out the current user.
 	if !isElevated() {
-		return
+		return nil
 	}
 	cmds := [][]string{
 		{"icacls", path, "/inheritance:r"},
@@ -821,8 +853,17 @@ func restrictConfigACL(path string) {
 		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators
 	}
 	for _, args := range cmds {
-		_ = winexec.Command(args[0], args[1:]...).Run()
+		if err := winexec.Command(args[0], args[1:]...).Run(); err != nil {
+			// One retry — icacls can hit a transient sharing-violation
+			// when AV/indexer briefly opens the file behind us.
+			if retryErr := winexec.Command(args[0], args[1:]...).Run(); retryErr != nil {
+				slog.Error("config: icacls failed", "args", args[1:], "err", err, "retry_err", retryErr)
+				return fmt.Errorf("icacls %v: %w", args[1:], retryErr)
+			}
+			slog.Warn("config: icacls succeeded on retry", "args", args[1:], "first_err", err)
+		}
 	}
+	return nil
 }
 
 // isElevated returns true if the current process token is a member of the
