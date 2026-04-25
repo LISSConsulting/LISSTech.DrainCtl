@@ -210,7 +210,7 @@ drainctl baseline reset     Wipe the evtspike anomaly-detector baseline
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--db` | `%ProgramData%\...\audit.jsonl` | Legacy audit-path flag kept for backwards compatibility; the CLI uses the file's **parent directory** as the telemetry data dir and always opens `drainctl.db` inside it (read-only — the service owns the writer) |
+| `--db` | `%ProgramData%\...\drainctl.db` | Path to the SQLite telemetry/audit database. The CLI accepts either the DB file itself or the containing directory; either way it opens `drainctl.db` read-only — the service owns the writer. Legacy `audit.jsonl` paths are accepted and resolved to `drainctl.db` in the same parent directory |
 | `--format` | `plain` (check) / `table` (history) | Output: `plain`, `table`, `csv`, `json` |
 | `--log-level` | `info` | CLI log verbosity: `debug`, `info`, `warn`, `error` |
 
@@ -554,18 +554,18 @@ ntfy messages use priority 3 for `status: "warning"` and priority 4 for `status:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `evtspike.enabled` | bool | `false` | Master opt-in. When `false` the subsystem is never constructed and has zero runtime cost |
+| `evtspike.enabled` | bool | `false` | Master opt-in. When `false` the subsystem is constructed but quiescent (no subscriptions, no scoring, no persistence — runtime cost is effectively zero, but the subsystem object exists in process memory) |
 | `evtspike.security_channel_enabled` | bool | `false` | Adds `Security` to the watched list; enables `SeSecurityPrivilege` on the service token at Start |
 | `evtspike.disabled_channels` | string[] | `[]` | Channel names to remove from the default list (case-insensitive match) |
 | `evtspike.added_channels` | string[] | `[]` | Extra channels to subscribe to beyond the default list |
 | `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability below which a bucket counts as anomalous |
 | `evtspike.min_count` | int | `10` | Lower observed-event floor; buckets below this never flag regardless of tail probability |
-| `evtspike.cooldown_minutes` | int | `15` | Minimum time between `event_spike` notifications for the same (host, channel) |
+| `evtspike.cooldown_minutes` | int | `10` | Minimum time between `event_spike` notifications for the same (host, channel) |
 | `evtspike.slot_maturity_observations` | int | `90` | Observations before a per-slot baseline is considered mature. Scoring runs every 10 s, so one 15-minute visit to a time-of-day slot contributes up to 90 observations — 90 means "this slot has been populated for at least one full visit" before the detector is declared HEALTHY and scoring stops leaning on the global posterior |
 | `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence |
-| `evtspike.half_life_buckets` | int | `8640` | EWMA half-life in 10 s buckets (~1 day) for baseline adaptation |
-| `evtspike.prior_strength` | float | `1.0` | Gamma prior α/β strength; higher = more resistant to early outliers |
-| `evtspike.mean_per_bucket_prior` | float | `0.5` | Gamma prior mean; initial "expected events per bucket" before learning |
+| `evtspike.half_life_buckets` | int | `360` | Exponential-forgetting half-life in 10 s buckets (~1 hour) for baseline adaptation. Lower = adapts faster to behaviour drift; higher = more stable across short incidents |
+| `evtspike.prior_strength` | float | `60.0` | Gamma prior α/β strength expressed as bucket-equivalents of "pretend evidence." With 60 the baseline starts with the equivalent of 60 observations at the prior mean, so scoring is meaningful from minute one without being exquisitely sensitive |
+| `evtspike.mean_per_bucket_prior` | float | `0.1` | Gamma prior mean; initial "expected events per 10-second bucket" before learning. 0.1 reflects the assumption that most curated channels are mostly quiet |
 
 All scalar fields except the channel lists and `baseline_path` hot-reload without a subsystem restart. See `specs/006-evtspike-detection/quickstart.md` for end-to-end setup, injection recipes, and troubleshooting.
 
