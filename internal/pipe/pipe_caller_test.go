@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"strings"
@@ -62,7 +63,21 @@ func TestRegisterViaPipe_CurrentProcessPrivileged(t *testing.T) {
 		return strings.Contains(low, "access is denied") || strings.Contains(low, "access denied")
 	}
 
-	raw, err := RegisterViaPipe("https://dash.example:8443")
+	// Retry the dial briefly: the server goroutine creates the pipe inside
+	// acceptPipeConn, so a too-fast dial races and gets "file not found" /
+	// ErrPipeUnavailable. The pipe usually exists within a millisecond of
+	// goroutine launch, but slower CI runners (GitHub Actions Windows
+	// runners are ~3× slower than dev) can stretch this past 100 ms.
+	var raw json.RawMessage
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		raw, err = RegisterViaPipe("https://dash.example:8443")
+		if err == nil || !errors.Is(err, ErrPipeUnavailable) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err != nil {
 		if isEnvAccessDenied(err) {
 			cancel()
