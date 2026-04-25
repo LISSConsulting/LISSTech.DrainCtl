@@ -677,7 +677,6 @@ Configuration lives in a JSON file, hot-reloaded via event-based (ReadDirectoryC
 
 **Notes on notification transport**:
 - Authenticated SMTP (`secret` set) requires STARTTLS or implicit TLS (`smtps://`). DrainCtl refuses to transmit `AUTH` on a cleartext connection — the error message names the offending host.
-- Webhook and ntfy URLs with hostname `169.254.169.254` (cloud metadata IP) are rejected at both send-time and at dashboard save/test time.
 
 ### Retention & Storage
 

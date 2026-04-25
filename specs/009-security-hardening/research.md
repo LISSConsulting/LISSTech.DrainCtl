@@ -47,28 +47,38 @@ alternatives without re-reading the review transcript.
   - Use a random per-install entropy stored in the registry: rejected — buys nothing
     over a fixed constant against the in-scope threat, and adds install-time state.
 
-## Decision 3: On-prem LAN webhooks are legitimate — no general SSRF guard
+## Decision 3 (revised 2026-04-24): No SSRF guard on notification URLs
 
-- **Decision**: Drop the general RFC1918 / link-local / ULA SSRF block from the
-  proposed Step 8. Keep only a single literal rejection of `http://169.254.169.254`
-  (cloud metadata IP) at the notify send-time and dashboard-UI save/test paths.
-  No allowlist config field. No `internal/neturl` package. The existing scheme block
-  (reject `file://`, `ftp://`, `gopher://`) stays in place.
-- **Rationale**: Drainctl is an on-prem Windows Server product. LAN webhooks — internal
-  Slack bridges, internal ntfy, internal Mattermost, internal monitoring — are the
-  *primary legitimate use case*, not the exception. An RFC1918 block would break more
-  operators than it would protect from a threat (authenticated-admin-to-private-IP
-  pivot) that a compromised dashboard admin can already exceed via dozens of other
-  paths. The `169.254.169.254` carveout is a cheap hedge against a future cloud-hosted
-  build where the exploitation payoff (IAM credential exfiltration) is disproportionate
-  to the check's cost.
+- **Decision**: Keep only the existing scheme allowlist (`http`/`https`). No
+  RFC1918 / link-local / ULA block. No `169.254.169.254` literal rejection.
+  No allowlist config field. No `internal/neturl` package.
+- **Rationale**: Drainctl is an on-prem Windows Server product. LAN webhooks —
+  internal Slack bridges, internal ntfy, internal Mattermost, internal monitoring —
+  are the *primary legitimate use case*, not the exception. An RFC1918 block would
+  break more operators than it would protect from a threat (authenticated-admin-to-
+  private-IP pivot) that a compromised dashboard admin can already exceed via
+  dozens of other paths. An earlier 009 revision kept a single literal
+  `169.254.169.254` rejection as a "cheap cloud-metadata hedge"; that
+  rejection was withdrawn during 009 codex post-review after it was shown to be
+  bypass-prone (IPv6-mapped addresses like `[::ffff:169.254.169.254]`,
+  decimal/hex IPv4 variants, trailing-dot, and 302 redirect — Go's default
+  HTTP client follows redirects). Hedge value was zero while the spec implied
+  a guarantee we couldn't deliver.
 - **Alternatives considered**:
-  - Full SSRF guard with allowlist config: rejected — breaks common deployments; cost
+  - **Full SSRF guard** (RFC1918 + link-local + ULA + cloud-metadata, with
+    allowlist config): rejected — breaks common on-prem deployments; cost
     far exceeds benefit in the documented threat model.
-  - Drop Step 8 entirely: considered; rejected because the metadata IP check is a
-    single-line, high-signal, zero-friction guard against a specific future risk.
-  - Also block `::1`/`127.0.0.0/8`: rejected — loopback notification targets are
-    plausible for development and mock-server workflows.
+  - **Literal `169.254.169.254` rejection only** (the 2026-04-24 first-revision
+    decision): adopted, then **withdrawn** during 009 codex post-review.
+    Bypass-prone via IPv6-mapped, decimal/hex IPv4, trailing-dot, and HTTP
+    redirect. The check advertised protection it could not deliver. See
+    `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
+  - **Hardened metadata check** (canonicalize IPv6, follow-redirects guard,
+    DNS-resolution check): rejected — meaningful hardening costs more than a
+    one-line check, and on-prem charter doesn't justify that investment until
+    the product actually deploys to a cloud VM.
+  - **Block `::1` / `127.0.0.0/8`**: rejected — loopback notification targets
+    are plausible for development and mock-server workflows.
 
 ## Decision 4: SMTP AUTH requires encrypted transport (STARTTLS or smtps://)
 

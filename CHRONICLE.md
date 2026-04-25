@@ -16,10 +16,10 @@ Remediates 16 confirmed items from the 2026-04-24 codex full-codebase review (sc
 - Named-pipe server shares `readPipeMessage` with the response path; 1 MiB cap; `ERROR_MORE_DATA` loop. Requests >4 KB no longer silently truncate.
 
 **Defense in depth (US4)**:
-- Webhook/ntfy URLs with hostname exactly `169.254.169.254` (cloud-metadata IP) are rejected at send-time and at dashboard persist/test paths. RFC1918 LAN webhooks remain allowed — on-prem deployment model keeps internal bridges legitimate.
 - Pipe caller-SID check for privileged verbs (`register`, `remove-server`, `baseline-reset`): `GetNamedPipeClientProcessId` + `OpenProcessToken` + `Token.IsMember(adminSID)`. Denied calls get `access denied`, a `slog.Warn("pipe=access_denied", ...)`, and an `EvtAccessDenied` audit event. Read-only verbs (`status`, `history`, `servers`) still accessible to any OS-permitted caller.
 - Email rendering swapped from `text/template` to `html/template`. Crafted event-log fields can no longer inject HTML into admin inboxes.
 - Registry-change attribution uses the event's own `SystemTime` (RFC3339Nano), not wall-clock `time.Now()`. Buffered audit-log deliveries no longer stamp the wrong transition.
+- ~~Cloud-metadata IP rejection~~ **withdrawn 2026-04-24**: an earlier 009 revision rejected `http://169.254.169.254` notification targets as a "cheap cloud-metadata hedge." Removed during 009 codex post-review after the literal-string check was shown to be bypassable via IPv6-mapped (`[::ffff:169.254.169.254]`), decimal/hex IPv4, trailing-dot, and 302 redirect (default Go HTTP client follows redirects). Hedge value was zero while the spec implied a guarantee we couldn't deliver. RFC1918 LAN webhooks were always allowed; that's unchanged. See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
 
 **Surface drift cleanup (US5)**:
 - Deleted four dead `Update*` exports (`UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig`). `UpdateNotifySettings` is the sole write path now.

@@ -134,7 +134,7 @@ description: "Task list for security and correctness hardening (009)"
 
 ## Phase 6: User Story 4 — Close medium-severity security paper cuts (Priority: P2)
 
-**Goal**: Four defense-in-depth fixes that individually don't block release but cheaply remove easy pivots: cloud-metadata URL rejection (FR-009), pipe caller-SID check (FR-010), HTML template (FR-011), event `SystemTime` attribution (FR-012).
+**Goal**: Three defense-in-depth fixes that individually don't block release but cheaply remove easy pivots: pipe caller-SID check (FR-010), HTML template (FR-011), event `SystemTime` attribution (FR-012). (An earlier revision included cloud-metadata URL rejection / FR-009; withdrawn during 009 codex post-review — see `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.)
 
 **Independent Test**: See `specs/009-security-hardening/quickstart.md` §User Story 4 — metadata IP save fails, LAN URL saves; non-admin pipe privileged verb denied, read-only verb still works; email escapes `<script>` to `&lt;script&gt;`; synthetic event with `SystemTime` is attributed correctly.
 
@@ -142,11 +142,11 @@ description: "Task list for security and correctness hardening (009)"
 
 ### Implementation for User Story 4
 
-- [x] T050 [P] [US4] (Step 8) Add `rejectCloudMetadata(rawURL string) error` helper in `notify.go` per `specs/009-security-hardening/contracts/notify-url-validation.md` §Helper function contract
-- [x] T051 [P] [US4] (Step 8) Call `rejectCloudMetadata` at the top of `sendWebhook` (`notify.go:390`) and `sendNtfy` (`notify.go:580`); return error before any network activity
-- [x] T052 [US4] (Step 8) Call `rejectCloudMetadata` per-target in `internal/dashboard/server.go:748` `handlePutSettings` (iterate webhook/ntfy targets; fail whole PUT with 400 on any rejection)
-- [x] T053 [US4] (Step 8) Call `rejectCloudMetadata` in `internal/dashboard/server.go:930` `handleNotifyTest` before dispatching; return 400 on rejection
-- [x] T054 [P] [US4] (Step 8) Add rejection subtests in `notify_test.go` covering all cases in `specs/009-security-hardening/contracts/notify-url-validation.md` §Testing contract (metadata IP variants, LAN allowed, loopback allowed, parse failure delegated)
+- [~] T050 [P] [US4] (Step 8 — WITHDRAWN 2026-04-24) `rejectCloudMetadata` helper. Reverted: literal-string check was bypass-prone (IPv6-mapped, decimal/hex, redirects). See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
+- [~] T051 [P] [US4] (Step 8 — WITHDRAWN) `rejectCloudMetadata` at sendWebhook/sendNtfy.
+- [~] T052 [US4] (Step 8 — WITHDRAWN) `rejectCloudMetadata` in handlePutSettings.
+- [~] T053 [US4] (Step 8 — WITHDRAWN) `rejectCloudMetadata` in handleNotifyTest.
+- [~] T054 [P] [US4] (Step 8 — WITHDRAWN) rejection subtests in notify_test.go.
 - [x] T055 [P] [US4] (Step 9) Create `internal/pipe/sid_windows.go` implementing `callerIsPrivileged(conn net.Conn) (bool, string, error)` per `specs/009-security-hardening/contracts/pipe-access-control.md` §Authorization algorithm; respect handle-lifetime invariants in §Handle-lifetime invariants
 - [x] T056 [US4] (Step 9) Integrate `callerIsPrivileged` into `handlePipeConn` in `internal/pipe/pipe.go`: for verbs `register`, `remove-server`, `baseline-reset`, check before dispatch; on deny return `PipeResponse{OK: false, Error: "access denied"}` and emit `slog.Warn("pipe=access_denied", "cmd", req.Cmd, "sid", sidStr)` plus `EvtAccessDenied` ETW audit event
 - [x] T057 [P] [US4] (Step 9) Create `internal/pipe/sid_test.go` with stub-injectable token reader; table-test SID classes: SYSTEM, admin, non-admin, filtered-admin (UAC), unknown SID, token-open error, process-open error
@@ -209,7 +209,7 @@ description: "Task list for security and correctness hardening (009)"
 **Purpose**: Cross-story verification, docs refresh, release readiness.
 
 - [ ] T100 Run the full quickstart.md validation across all 5 user stories on a fresh Windows VM with an installed MSI (manual — run post-release)
-- [x] T101 [P] Update `README.md` notifications section if any operator-visible text changes (SMTP transport requirement, cloud-metadata rejection)
+- [x] T101 [P] Update `README.md` notifications section if any operator-visible text changes (SMTP transport requirement)
 - [ ] T102 [P] Update `docs/index.html` release notes with the 009 summary (defer to release time)
 - [x] T103 [P] Update `CHRONICLE.md` with the 009 entry covering: per-story scope decisions, cert-rotation operator procedure, SMTP transport requirement, greenfield DPAPI reason
 - [x] T104 Run `go test ./...`, `just lint`, `just vulncheck`, `pnpm -C frontend build` — all exit 0, zero warnings
@@ -262,10 +262,7 @@ description: "Task list for security and correctness hardening (009)"
 ```bash
 # Four developers (or four codex-writer instances) can take one step each:
 
-# Developer A — Step 8: cloud metadata rejection
-Task: T050 rejectCloudMetadata helper in notify.go
-Task: T051 call helper at sendWebhook/sendNtfy
-Task: T054 rejection subtests in notify_test.go
+# (Step 8 — cloud-metadata rejection — WITHDRAWN, see remediation plan Step 1)
 
 # Developer B — Step 9: pipe SID check
 Task: T055 sid_windows.go with callerIsPrivileged
