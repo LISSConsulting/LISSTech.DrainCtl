@@ -311,6 +311,23 @@ The `DrainCtl` Windows Service provides:
 - **Auto-registration** with dashboard on startup (via SRV discovery or explicit `dashboard.url`)
 - **HTTPS by default** — auto-generated self-signed cert, or bring your own PEM files
 
+### Diagnostic profiling (opt-in)
+
+Set `DRAINCTL_PPROF_PORT` on the service environment to enable a loopback-only Go runtime/pprof debug HTTP server. Used for memory-leak and goroutine-leak diagnosis on production hosts without rebuilding:
+
+```powershell
+# On the service host, pick a free local port:
+[Environment]::SetEnvironmentVariable('DRAINCTL_PPROF_PORT','6060','Machine')
+Restart-Service DrainCtl
+
+# From the same host:
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap        # heap snapshot
+go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine   # goroutine inventory
+curl -o heap.pprof http://127.0.0.1:6060/debug/pprof/heap   # without `go` installed
+```
+
+The listener binds **`127.0.0.1` only** — never reachable from another host even by accident — and is off by default. Unset the variable and restart the service to disable.
+
 ### Event Log
 
 Events are written to `Application` log under source `DrainCtl`:
