@@ -395,6 +395,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	slog.Info("service=starting", "version", dc.Version, "grace", cfg.GracePeriod, "poll", cfg.PollInterval, "retention_days", cfg.RetentionDays, "fetch_interval", dashCfg.FetchInterval, "memory_limit_mb", memLimitMB)
 
+	// Optional runtime/pprof debug server. Off unless DRAINCTL_PPROF_PORT
+	// is set. Loopback-only. Used for memory-leak and goroutine-leak
+	// diagnosis on production boxes without rebuilding.
+	startPprof(ctx)
+
 	// Open SQLite telemetry store before the named pipe and HTTP servers.
 	telDB, err := telemetry.Open(dc.DefaultDataDir())
 	if err != nil {
