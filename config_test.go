@@ -854,16 +854,39 @@ func TestValidate_PreservesExistingAuditPath(t *testing.T) {
 func TestValidate_RewritesLegacyJSONLAuditPath(t *testing.T) {
 	// Pre-007 installs wrote audit.jsonl as the default AuditPath; that file
 	// was retired when audit moved to SQLite in feature 007. Validate rewrites
-	// any lingering audit.jsonl tail to the canonical DefaultDBPath so
-	// operators don't see stale references to a file that no longer exists.
-	const legacy = `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\audit.jsonl`
-	cfg := &Config{AuditPath: legacy}
-	cfg.Validate()
-	if cfg.AuditPath == legacy {
-		t.Errorf("AuditPath = %q, want legacy path to be rewritten", cfg.AuditPath)
+	// any lingering audit.jsonl tail to drainctl.db in the SAME directory so
+	// operators don't see stale references to a file that no longer exists,
+	// and operators with custom data-dir paths don't get their data silently
+	// relocated to %ProgramData% (codex round-1 finding C-1).
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "default-dir legacy",
+			in:   `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\audit.jsonl`,
+			want: `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db`,
+		},
+		{
+			name: "custom dir legacy preserves directory",
+			in:   `D:\Custom\DrainCtl\audit.jsonl`,
+			want: `D:\Custom\DrainCtl\drainctl.db`,
+		},
+		{
+			name: "case-insensitive suffix",
+			in:   `D:\Custom\AUDIT.JSONL`,
+			want: `D:\Custom\drainctl.db`,
+		},
 	}
-	if cfg.AuditPath != DefaultDBPath() {
-		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, DefaultDBPath())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{AuditPath: tc.in}
+			cfg.Validate()
+			if cfg.AuditPath != tc.want {
+				t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, tc.want)
+			}
+		})
 	}
 }
 

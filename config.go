@@ -391,11 +391,12 @@ func (c *Config) Validate() {
 	} else if strings.HasSuffix(strings.ToLower(c.AuditPath), "audit.jsonl") {
 		// Legacy value from pre-007 installs (JSONL audit trail). The file
 		// was retired in feature 007 when audit moved to SQLite; rewrite
-		// to the canonical drainctl.db path so operators don't see a stale
-		// reference to a file that no longer exists. GetHistory still
-		// accepts either form at read time, but keeping audit.jsonl here
-		// rots further as the field name ultimately renames to db_path.
-		c.AuditPath = DefaultDBPath()
+		// to drainctl.db within the SAME directory so a custom data-dir
+		// configuration (e.g. D:\DrainCtl\audit.jsonl) doesn't get
+		// silently relocated to %ProgramData%. GetHistory still accepts
+		// either form at read time, but keeping audit.jsonl here rots
+		// further as the field name ultimately renames to db_path.
+		c.AuditPath = filepath.Join(filepath.Dir(c.AuditPath), "drainctl.db")
 	}
 	if c.Dashboard.Port < 1 || c.Dashboard.Port > 65535 {
 		c.Dashboard.Port = DefaultDashboardPort
