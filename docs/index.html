@@ -1611,16 +1611,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.113</h2>
+                <h2 class="section-title">v26.115</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Tiered SQLite telemetry</strong> &mdash; raw samples roll up to 5-minute and hourly tiers via a watermarked aggregator, with per-tier retention. One store (<code>drainctl.db</code>, WAL) backs audit, metrics, and charts</li>
-                            <li><strong>Overview dashboard charts</strong> &mdash; LOAD (CPU, CPU&nbsp;P95, memory, sessions), Health Indicators (input delay, pages/sec, TCP retrans, disk queue with fleet P95), Session metrics, and RemoteFX when collected</li>
-                            <li><strong>Per-host Server Detail chart</strong> &mdash; same dual-axis LOAD presentation scoped to one host, with shared zoom presets and live updates</li>
-                            <li><strong>Dashboard-authoritative pull-config</strong> &mdash; edit once on the dashboard, every agent inherits on the next reload; local config changes propagate synchronously</li>
-                            <li><strong>Daily log rotation</strong> &mdash; <code>drainctl-YYYY-MM-DD.log</code>, 7 days retained &mdash; replaces the previous size-based scheme</li>
-                            <li><strong>Event log anomaly detection</strong> &mdash; opt-in <code>evtspike</code> watches 54 curated Windows event channels, learns a per-slot Bayesian baseline, and fires <code>event_spike</code> alerts on confirmed deviations. New <code>drainctl baseline reset</code> wipes learned baselines when the environment changes</li>
+                            <li><strong>Security hardening</strong> &mdash; dashboard refuses silently-changed TLS fingerprints; authenticated SMTP requires STARTTLS or <code>smtps://</code> (no more cleartext AUTH on plain port 25); <code>config.json</code> ACL drops the SERVICE group and tightens before rename so notification secrets are never world-readable; DPAPI ciphertext is entropy-scoped so other services on the host can't decrypt drainctl secrets</li>
+                            <li><strong>Pipe authorization</strong> &mdash; privileged verbs (<code>register</code>, <code>remove-server</code>, <code>baseline-reset</code>) verify the caller's token; non-admin callers get <code>access denied</code>. Read-only verbs (<code>status</code>, <code>history</code>, <code>servers</code>) stay accessible to any authorized caller</li>
+                            <li><strong>Pipeline correctness</strong> &mdash; concurrent config writes no longer race (atomic read-modify-write under the existing named mutex); evtspike's dead-subscription detection now actually fires; named-pipe requests above 4 KB no longer truncate</li>
+                            <li><strong>Backend-authoritative fleet charts</strong> &mdash; Overview LOAD / Health / Sessions / RemoteFX charts pull from SQLite at cold start so a fresh browser shows retained history immediately, no more 30-second warm-up. Shared 5M / 1H / 1D / 3D / 5D window pill plus wheel-zoom and drag-pan across all four chart families</li>
+                            <li><strong>Defense in depth</strong> &mdash; email rendering escapes HTML so crafted event-log fields can't inject into operator inboxes; registry-change attribution uses the event's own timestamp so delayed audit deliveries don't get stamped to the wrong drain transition</li>
+                            <li><strong>Operational</strong> &mdash; per-host event-spike swimlane on the Server Detail panel; new evtspike configuration knobs documented in the operator guide with tuning presets for cautious / strict / DC-heavy / noisy-channel deployments</li>
                         </ul>
                     </div>
                 </div>
