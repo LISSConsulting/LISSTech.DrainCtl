@@ -120,15 +120,12 @@ Stories 2-5 being complete, and vice versa, because they ship as separate PRs.
 
 ## User Story 4 Validation — Medium security paper cuts (P2)
 
-### Cloud metadata IP rejection
+### (Cloud metadata IP rejection — WITHDRAWN)
 
-1. Open the dashboard, navigate to notification targets.
-2. Attempt to add a webhook target with URL `http://169.254.169.254/latest/meta-data/`.
-3. Confirm the save fails with a clear error message naming the metadata IP.
-4. Attempt again with `http://192.168.1.10/x`. Confirm save succeeds (LAN allowed).
-5. Click **Test** on the `192.168.1.10` target; expect the test to succeed
-   (or fail cleanly with a network error if no server is listening — not the
-   metadata-IP rejection error).
+The earlier-revision FR-009 cloud-metadata block was removed during 009 codex
+post-review (bypass-prone via IPv6/decimal/redirect). No validation step here;
+webhook/ntfy URLs to `169.254.169.254` will be accepted just like any other host.
+See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
 
 ### Pipe caller-SID check
 

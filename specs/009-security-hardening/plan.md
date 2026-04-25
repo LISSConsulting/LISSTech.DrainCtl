@@ -5,7 +5,7 @@
 
 ## Summary
 
-Remediate the 16 active issues surfaced by the 2026-04-24 codex full-codebase review, scope-pruned per product decisions captured in `docs/reviews/codex-2026-04-24-fullcodebase-remediation-plan.md`. The batch ships as four themed PRs: **Phase 1 security** (refuse silently-changed dashboard fingerprints; require STARTTLS or `smtps://` when SMTP auth is set; drop `SERVICE` from `config.json` ACL; add fixed-entropy DPAPI scope), **Phase 2 correctness** (plumb evtspike loss callback; atomic config read-modify-write; shared named-pipe message reader), **Phase 3 medium** (reject cloud-metadata IP in notification URLs; pipe caller-SID check for privileged verbs; `html/template` for email; event `SystemTime` for registry attribution), **Phase 4 cleanup** (delete dead `Update*` helpers; move ETW IDs to `internal/etwids`; retire `DefaultAuditPath`; split `internal/svc/handler.go`; extract shared Svelte helpers; delete orphan `deriveP95`/`deriveP50`).
+Remediate the 16 active issues surfaced by the 2026-04-24 codex full-codebase review, scope-pruned per product decisions captured in `docs/reviews/codex-2026-04-24-fullcodebase-remediation-plan.md`. The batch ships as four themed PRs: **Phase 1 security** (refuse silently-changed dashboard fingerprints; require STARTTLS or `smtps://` when SMTP auth is set; drop `SERVICE` from `config.json` ACL; add fixed-entropy DPAPI scope), **Phase 2 correctness** (plumb evtspike loss callback; atomic config read-modify-write; shared named-pipe message reader), **Phase 3 medium** (pipe caller-SID check for privileged verbs; `html/template` for email; event `SystemTime` for registry attribution; an earlier-revision cloud-metadata IP rejection was withdrawn during 009 codex post-review — see `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1), **Phase 4 cleanup** (delete dead `Update*` helpers; move ETW IDs to `internal/etwids`; retire `DefaultAuditPath`; split `internal/svc/handler.go`; extract shared Svelte helpers; delete orphan `deriveP95`/`deriveP50`).
 
 Technical approach in one sentence: land each phase as an independently revertible PR against `009-security-hardening`, driven by the existing remediation plan as the authoritative file:line source, with greenfield assumptions (no migration writebacks, no deployed-agent compatibility shims) to keep per-step effort at S everywhere except the `handler.go` split.
 
@@ -32,7 +32,7 @@ Technical approach in one sentence: land each phase as an independently revertib
 
 - **Windows-first delivery**: PASS. All touched Go files are already `//go:build windows` or reside in `frontend/` (non-Go). The new `internal/etwids/` package will carry the build tag. Affected operator surfaces: root package (API shrinks), CLI (`register` error path), service (pipe privilege check + handler split), dashboard (notify target validation), installer (`restrictConfigACL` tightened in `config.go`). PowerShell and DLL: unchanged.
 - **Stable operator surfaces**: PASS with documented migrations.
-  - **Updated**: `drainctl register` (new error on fingerprint mismatch); SMTP send path (refuses AUTH without TLS); privileged pipe verbs (deny non-admin); notify target validation (rejects cloud-metadata IP); email rendering (HTML-escape dynamic fields); registry attribution timestamp (event `SystemTime`).
+  - **Updated**: `drainctl register` (new error on fingerprint mismatch); SMTP send path (refuses AUTH without TLS); privileged pipe verbs (deny non-admin); email rendering (HTML-escape dynamic fields); registry attribution timestamp (event `SystemTime`).
   - **Deprecated**: root-package `DefaultAuditPath` (becomes alias for `DefaultDBPath`; hard removal deferred one release cycle).
   - **Removed from public root surface**: `UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig`; ETW event-ID constants (moved to `internal/etwids`).
   - **Unchanged**: CLI verb list; config shape; PowerShell module; DLL exports; dashboard routes; telemetry schema.
@@ -62,7 +62,7 @@ specs/009-security-hardening/
 ├── contracts/
 │   ├── pipe-access-control.md                # Privileged-vs-readonly verb classification + deny shape
 │   ├── register-fingerprint-refusal.md       # CLI+service mismatch-refusal behavior
-│   └── notify-url-validation.md              # Cloud-metadata IP rejection rule
+│   └── notify-url-validation.md              # SUPERSEDED — see remediation plan Step 1
 ├── checklists/
 │   └── requirements.md                       # /speckit.specify checklist
 └── tasks.md                                  # Phase 2 output (/speckit.tasks — NOT created here)
@@ -103,10 +103,7 @@ internal/pipe/
 └── pipe_test.go                              # scriptedReader ERROR_MORE_DATA subtest + 1 MiB cap subtest
 
 # Phase 3 — Medium hardening
-notify.go                                     # rejectCloudMetadata helper at sendWebhook/sendNtfy entry
-notify_test.go                                # 169.254.169.254 reject subtest; LAN IP allow subtest
-
-internal/dashboard/server.go                  # Call rejectCloudMetadata at handlePutSettings + handleNotifyTest
+# (rejectCloudMetadata helper was withdrawn in 009 codex post-review — no notify.go changes for cloud-metadata)
 
 internal/pipe/
 ├── sid_windows.go                            # NEW: GetNamedPipeClientProcessId + token SID check
