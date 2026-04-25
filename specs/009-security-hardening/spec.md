@@ -68,22 +68,22 @@ Three latent correctness bugs hide in pipelines the operator can't see directly.
 
 ### User Story 4 - Close medium-severity security paper cuts (Priority: P2)
 
-Four smaller hardening items that don't individually protect against a named incident but collectively remove easy pivots: (a) reject `http://169.254.169.254` (cloud-metadata IP) as a notification target so a future cloud-hosted build can't turn an admin bug into IAM-credential exfiltration; (b) verify the caller SID on privileged pipe verbs (`register`, `remove-server`, `baseline-reset`) so a future DACL regression doesn't silently lower the bar; (c) swap `text/template` for `html/template` in email rendering so crafted event-log fields can't inject HTML into an admin's inbox; (d) parse the event's `SystemTime` for registry-change attribution instead of wall-clock `time.Now()` so a buffered delayed event doesn't get stamped to the wrong transition.
+Three smaller hardening items that don't individually protect against a named incident but collectively remove easy pivots: (a) verify the caller SID on privileged pipe verbs (`register`, `remove-server`, `baseline-reset`) so a future DACL regression doesn't silently lower the bar; (b) swap `text/template` for `html/template` in email rendering so crafted event-log fields can't inject HTML into an admin's inbox; (c) parse the event's `SystemTime` for registry-change attribution instead of wall-clock `time.Now()` so a buffered delayed event doesn't get stamped to the wrong transition.
+
+> **Note (2026-04-24)**: an earlier revision of this story included a fourth item — reject `http://169.254.169.254` as a notification target. **Withdrawn** during 009 codex post-review: the literal-string check was bypassable via IPv6-mapped, decimal/hex IPv4, trailing-dot, and 302 redirect (Go's default HTTP client follows redirects). Hedge value was zero while the spec implied a guarantee we couldn't deliver. See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
 
 **Why this priority**: Each item is defense-in-depth or attribution accuracy — not a currently-exploitable hole, but cheap to fix and each removes one assumption an attacker or a bug could lean on later.
 
 **Independent Test**:
-- Adding `http://169.254.169.254/x` as a webhook target in the dashboard UI fails at save time with a clear error; `http://192.168.1.10/x` still saves.
 - From a non-admin shell, `drainctl register https://dash/` is denied over the pipe; from the same shell, `drainctl status` still works.
 - An email rendered with `Message: "<script>alert(1)</script>"` produces output containing `&lt;script&gt;` and not the raw tag.
 - Feeding a synthetic event with `SystemTime="2026-04-24T10:00:00Z"` makes `LatestAttribution().Timestamp` equal the parsed time.
 
 **Acceptance Scenarios**:
 
-1. **Given** an admin UI user adding a notification target, **When** the URL hostname is `169.254.169.254`, **Then** save and test both fail with a descriptive error.
-2. **Given** a non-admin caller, **When** they invoke a privileged pipe verb, **Then** the server returns `access denied` and logs `pipe=access_denied` with the caller's SID; read-only verbs still succeed.
-3. **Given** an event-log payload that could contain HTML, **When** the notification email renders, **Then** angle brackets and entities are escaped.
-4. **Given** a registry-change event that arrives 10 s late, **When** drainctl records the attribution, **Then** the stored timestamp matches the event's own `SystemTime` and `WaitAttribution(after=eventTime+5s, …)` correctly ignores it.
+1. **Given** a non-admin caller, **When** they invoke a privileged pipe verb, **Then** the server returns `access denied` and logs `pipe=access_denied` with the caller's SID; read-only verbs still succeed.
+2. **Given** an event-log payload that could contain HTML, **When** the notification email renders, **Then** angle brackets and entities are escaped.
+3. **Given** a registry-change event that arrives 10 s late, **When** drainctl records the attribution, **Then** the stored timestamp matches the event's own `SystemTime` and `WaitAttribution(after=eventTime+5s, …)` correctly ignores it.
 
 ---
 
@@ -133,7 +133,7 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 
 **Phase 3 — Medium hardening**
 
-- **FR-009**: Webhook and ntfy notification paths — both at send time and at dashboard-UI save/test time — MUST reject URLs whose hostname is exactly `169.254.169.254` with a descriptive error.
+- **FR-009**: ~~Webhook and ntfy cloud-metadata IP rejection~~. **Withdrawn 2026-04-24**: literal-string check was bypassable via IPv6-mapped, decimal/hex IPv4, trailing-dot, and 302 redirect. See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
 - **FR-010**: The pipe server MUST verify via `GetNamedPipeClientProcessId` + token SID check that callers of `register`, `remove-server`, and `baseline-reset` are `SYSTEM` or members of the local Administrators group. Denied calls MUST return `access denied` and MUST emit `slog.Warn("pipe=access_denied", "cmd", …, "sid", …)` plus the existing `EvtAccessDenied` audit event. Read-only verbs (`status`, `history`, `servers`) MUST remain accessible.
 - **FR-011**: The email notification template MUST be rendered via `html/template` (not `text/template`). All dynamic fields (`Subject`, `Message`, `Host`, `ChangedBy`, `SpikeChannel`, and any others) MUST be contextually auto-escaped.
 - **FR-012**: `RegistryChangeAttribution.Timestamp` MUST be populated from the event's `<TimeCreated SystemTime="…">` parsed via `time.Parse(time.RFC3339Nano, …)`. On parse error, fallback to `time.Now()` with a `slog.Warn` carrying the raw value.
@@ -151,7 +151,7 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 
 - **Dashboard TLS Fingerprint**: A SHA-256 hex string stored in `DashboardConfig.TLSFingerprint` representing the pinned dashboard certificate. After this feature, a stored non-empty value is immutable via automatic register; any change requires explicit operator action.
 - **DPAPI Entropy**: A fixed process-constant 35-byte byte slice (`LISSTech.DrainCtl/v1/notify-secret`). Not a secret; its purpose is to prevent cross-service `CryptUnprotectData` by other processes running as SYSTEM or SERVICE on the same host.
-- **Notify Target**: Webhook / ntfy / SMTP / email entry persisted in `Config.Notifications`. Gains a new validation rule (cloud-metadata IP rejection) and, for SMTP+auth, a transport requirement.
+- **Notify Target**: Webhook / ntfy / SMTP / email entry persisted in `Config.Notifications`. For SMTP+auth, gains a transport requirement (STARTTLS or `smtps://`).
 - **Pipe Verb Privilege Class**: Read-only (`status`, `history`, `servers`) vs. privileged (`register`, `remove-server`, `baseline-reset`). The latter gains caller-SID verification.
 - **Registry Change Attribution**: Existing struct in `internal/watcher`. Its `Timestamp` field changes provenance from wall-clock to event-embedded `SystemTime`.
 
@@ -159,12 +159,11 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 
 ### Operator Surface Impact
 
-- **Affected surfaces**: root package (exports renamed/deleted), CLI (`register` refusal path), service (pipe caller-SID check; config RMW; evtspike loss wiring), dashboard (notify target validation), installer (`restrictConfigACL` tightened), internal packages (new `internal/etwids/`; `internal/svc/handler.go` split; `internal/pipe` reader shared).
+- **Affected surfaces**: root package (exports renamed/deleted), CLI (`register` refusal path), service (pipe caller-SID check; config RMW; evtspike loss wiring), installer (`restrictConfigACL` tightened), internal packages (new `internal/etwids/`; `internal/svc/handler.go` split; `internal/pipe` reader shared).
 - **Public behavior changes**:
   - `drainctl register` against a dashboard with a changed cert now errors instead of silently re-pinning.
   - SMTP notifications with a `Secret` set now require STARTTLS or `smtps://`; plain-text-capable relays that previously worked will fail.
   - Privileged pipe verbs from non-admin callers now return `access denied`.
-  - Notification targets cannot resolve to `169.254.169.254`.
   - `DefaultAuditPath` remains callable but is deprecated; `DefaultDBPath` is the new canonical name.
   - Four `Update*` helpers removed from the public root-package surface.
 - **Compatibility / migration**:
@@ -176,8 +175,8 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 ### Quality and Observability Impact
 
 - **Required tests**:
-  - Unit: fingerprint mismatch refusal (CLI + service), STARTTLS refusal, ACL absence of SERVICE ACE (manual, documented), DPAPI entropy round-trip + wrong-entropy failure, evtspike loss callback, concurrent config RMW (20-goroutine stress), pipe `ERROR_MORE_DATA` loop via `scriptedReader` (not `net.Pipe`), cloud-metadata URL rejection, pipe caller-SID verdict table, HTML template escaping, event `SystemTime` parse + fallback.
-  - Integration: pipe admin/non-admin integration test, register → rotate cert → register mismatch manual walkthrough, webhook save/test UI flow with bad URL.
+  - Unit: fingerprint mismatch refusal (CLI + service), STARTTLS refusal, ACL absence of SERVICE ACE (manual, documented), DPAPI entropy round-trip + wrong-entropy failure, evtspike loss callback, concurrent config RMW (20-goroutine stress), pipe `ERROR_MORE_DATA` loop via `scriptedReader` (not `net.Pipe`), pipe caller-SID verdict table, HTML template escaping, event `SystemTime` parse + fallback.
+  - Integration: pipe admin/non-admin integration test, register → rotate cert → register mismatch manual walkthrough.
   - Regression: `TestWaitAttribution_IgnoresOlderEvents`, `go build ./... && go test ./...` after the handler split and rename.
 - **Operational signals**:
   - New `slog.Warn`: `"smtp: no STARTTLS available, sending without encryption"`.
@@ -212,7 +211,7 @@ Six cleanup items that remove dead code, stale naming, and growing god-files wit
 
 - The product is greenfield: there are **no** external deployments holding secrets encrypted under the old zero-entropy DPAPI scheme. This assumption drives the decision to drop all migration-writeback complexity from the DPAPI change.
 - TOFU (trust-on-first-use) for dashboard certificate pinning remains an acceptable product posture. This feature strengthens *after*-pin tamper detection; it does not harden first-contact.
-- Drainctl runs on on-prem Windows Server hosts, not cloud VMs. This assumption drives the decision to drop the general RFC1918/link-local SSRF guard and keep only a single rejection of `169.254.169.254` as a cheap hedge against a future cloud-hosted build.
+- Drainctl runs on on-prem Windows Server hosts, not cloud VMs. This assumption drives the decision to drop the general RFC1918/link-local SSRF guard. An earlier 009 revision kept a single rejection of `169.254.169.254` as a cheap cloud-metadata hedge; that hedge was withdrawn during 009 codex post-review (bypass-prone, see Step 1 of the 009-branch remediation plan).
 - LAN webhooks (internal Slack bridges, internal ntfy, internal Mattermost) are legitimate and common deployment patterns. No RFC1918 block.
 - Operators who run authenticated SMTP relays on plain port 25 without STARTTLS are rare enough that refusing AUTH on such connections is the right default, with a clear error message as the migration aid.
 - Named-pipe DACL on a SYSTEM-owned pipe is sufficiently restrictive by default; the caller-SID check is defense-in-depth against a future regression, not a current hole.
