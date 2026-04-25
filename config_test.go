@@ -1695,4 +1695,31 @@ func TestSaveConfig_RenameError(t *testing.T) {
 	if !strings.Contains(err.Error(), "rename config") {
 		t.Errorf("error = %q, want 'rename config' in message", err.Error())
 	}
+
+	// Regression: post-009-codex-review, both rename failures must clean up
+	// the tmp file. Pre-fix, config.json.tmp leaked in %ProgramData% with
+	// inherited ACLs (Users could read notification secrets) until something
+	// else garbage-collected the directory.
+	tmpPath := configPath + ".tmp"
+	if _, statErr := os.Stat(tmpPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected %s to be removed after rename failure, stat err = %v", tmpPath, statErr)
+	}
+}
+
+// TestRestrictConfigACL_NonElevatedReturnsNil confirms that the new
+// error-returning signature still no-ops cleanly in non-elevated test/dev
+// contexts (icacls /inheritance:r would lock the current user out
+// otherwise). Locks in the non-elevated short-circuit so a future change
+// can't accidentally fail a unit test run on a developer workstation.
+func TestRestrictConfigACL_NonElevatedReturnsNil(t *testing.T) {
+	if isElevated() {
+		t.Skip("test only meaningful when running non-elevated")
+	}
+	tmpFile := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(tmpFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := restrictConfigACL(tmpFile); err != nil {
+		t.Errorf("restrictConfigACL non-elevated returned err = %v, want nil", err)
+	}
 }
