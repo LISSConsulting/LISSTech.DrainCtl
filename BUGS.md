@@ -247,3 +247,33 @@ Tests: `TestDrainMode_String` (including deprecated-alias compat cases), `go tes
 **Verification:** `go test ./internal/svc/ ./internal/telemetry/` green (existing reconcile_test.go already covered the function itself; the gap was the call site). Operator verification: repeat T067 B5 — the log should now show `drift_reconciliation=complete` and the audit table should gain a row with `reconciliation=1` when an offline drain toggle happened.
 
 **Related:** T025's text in tasks.md was accurate about WHERE the call should happen ("from service boot after `telemetry.Open()` AND after `MigrateJSONL` has completed ... and before live ingest starts"); only the implementation was missing.
+
+---
+
+## Feature 009 — Security hardening (post-codex)
+
+### 13. `seedServerMetrics` overwrites fresher SSE samples on cold start
+
+**Status:** Open. Pre-009 behavior; surfaced by 2026-04-24 codex review on the 009 branch.
+
+**Symptom:** on a cold dashboard load, if an SSE `server_update` event arrives between the `fetchAllServerMetrics` request leaving the browser and the seed promise resolving, the live perf sample gets clobbered by the older retained-history seed. One sample lost per host per cold start. Largely invisible to operators — sparkline gets a single missing point that gets backfilled on the next 30 s poll.
+
+**Root cause:** `frontend/src/lib/state.svelte.js:823` (`seedServerMetrics`) does `next.set(host, samples.slice(-MAX_METRICS))` unconditionally. The function name says "seed" but the implementation says "replace." `frontend/src/App.svelte:160` kicks the seed in parallel with `frontend/src/App.svelte:369` opening the SSE EventSource, and SSE's `onmessage` calls `appendPerfToRingBuffer` which mutates the same Map.
+
+**Fix sketch:** in `seedServerMetrics`, only set the host's ring buffer if the existing entry is empty OR the seed sample's max timestamp is newer than the buffer's max timestamp. Pre-008 the helper was conditional ("only if not yet seeded"); the unconditional overwrite was introduced when the seed path moved from one-shot bootstrap to "always overwrites stale browser-local."
+
+**Why deferred from 009:** semantically pre-existing (predates US5's helper extraction). Codex found it because the prompt pointed at state.svelte.js, not because 009 introduced it. Out-of-scope for the 009 cleanup batch.
+
+---
+
+### 14. Stale `detectorStatuses` / `recentSpikes` after ServerTable delete + re-register
+
+**Status:** Open. Pre-009; surfaced by 2026-04-24 codex review.
+
+**Symptom:** delete a server in the dashboard, re-register the same hostname later, and the Server Detail panel shows the previous host's evtspike detector state until the next SSE `detector_status` transition arrives. `recentSpikes` map carries forward similarly. UI looks broken until something triggers an update.
+
+**Root cause:** `frontend/src/components/ServerTable.svelte:185` (`doRemoveServer`) calls `removeServerMetrics(host)` to clear the perf ring buffer but does not clear `detectorStatuses` or `recentSpikes`. The cold-start seeding effect at `:56-65` skips the REST seed (`fetchEvtSpikeStatus`) when `appState.detectorStatuses.has(host)` is true — so a re-registered hostname sees the old map entry, declines to fetch fresh state, and shows stale until SSE happens to update.
+
+**Fix sketch:** add `removeEvtSpikeState(host)` and `removeRecentSpikes(host)` calls alongside `removeServerMetrics(host)` in `doRemoveServer`. The `removeEvtSpikeState` helper already exists in `state.svelte.js:801` (used by `App.svelte:426` on SSE `server_deleted`); just call it from the local-delete path too.
+
+**Why deferred from 009:** pre-009; codex flagged because the prompt pointed at ServerTable.svelte but the issue isn't a 009 regression. Out-of-scope for the 009 cleanup batch.
