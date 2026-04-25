@@ -1611,16 +1611,15 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.115</h2>
+                <h2 class="section-title">v26.115 &mdash; Stronger defaults, faster dashboards</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Security hardening</strong> &mdash; dashboard refuses silently-changed TLS fingerprints; authenticated SMTP requires STARTTLS or <code>smtps://</code> (no more cleartext AUTH on plain port 25); <code>config.json</code> ACL drops the SERVICE group and tightens before rename so notification secrets are never world-readable; DPAPI ciphertext is entropy-scoped so other services on the host can't decrypt drainctl secrets</li>
-                            <li><strong>Pipe authorization</strong> &mdash; privileged verbs (<code>register</code>, <code>remove-server</code>, <code>baseline-reset</code>) verify the caller's token; non-admin callers get <code>access denied</code>. Read-only verbs (<code>status</code>, <code>history</code>, <code>servers</code>) stay accessible to any authorized caller</li>
-                            <li><strong>Pipeline correctness</strong> &mdash; concurrent config writes no longer race (atomic read-modify-write under the existing named mutex); evtspike's dead-subscription detection now actually fires; named-pipe requests above 4 KB no longer truncate</li>
-                            <li><strong>Backend-authoritative fleet charts</strong> &mdash; Overview LOAD / Health / Sessions / RemoteFX charts pull from SQLite at cold start so a fresh browser shows retained history immediately, no more 30-second warm-up. Shared 5M / 1H / 1D / 3D / 5D window pill plus wheel-zoom and drag-pan across all four chart families</li>
-                            <li><strong>Defense in depth</strong> &mdash; email rendering escapes HTML so crafted event-log fields can't inject into operator inboxes; registry-change attribution uses the event's own timestamp so delayed audit deliveries don't get stamped to the wrong drain transition</li>
-                            <li><strong>Operational</strong> &mdash; per-host event-spike swimlane on the Server Detail panel; new evtspike configuration knobs documented in the operator guide with tuning presets for cautious / strict / DC-heavy / noisy-channel deployments</li>
+                            <li><strong>Tamper-evident agents.</strong> A swapped dashboard certificate stops the agent in its tracks instead of silently re-trusting. Notification credentials stay encrypted, scoped to drainctl alone &mdash; other services on the host can't read them. Authenticated SMTP refuses to send if your relay can't speak TLS.</li>
+                            <li><strong>Charts with history at first glance.</strong> Cold-load the dashboard and you see your fleet's last hour, last day, or last five days &mdash; not a blank canvas waiting to fill. Wheel-zoom, drag-pan, six time windows. The same crisp interactions on every Overview chart and every Server Detail panel.</li>
+                            <li><strong>Privileged actions require admin.</strong> Registering hosts, removing servers, and resetting detection baselines now demand admin rights. Read-only commands stay accessible to anyone authorized.</li>
+                            <li><strong>Per-host event-spike timeline.</strong> A swimlane on each Server Detail panel that places confirmed Windows event-log anomalies on a time axis &mdash; one row per channel, one dot per spike. Sized by volume, coloured by severity. Paired with a new tuning guide that walks the detector's knobs through four scenario presets: cautious, strict, DC-heavy, and noisy-channel surgery.</li>
+                            <li><strong>Quiet fixes you'll feel.</strong> Concurrent config saves no longer step on each other. Event-log monitoring actually recovers from dropped subscriptions. Large administrative requests stop truncating. Drain-mode attribution always points at the right user, even when Windows audit delivery lags by minutes.</li>
                         </ul>
                     </div>
                 </div>
