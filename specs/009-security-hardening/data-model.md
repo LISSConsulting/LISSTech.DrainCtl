@@ -33,17 +33,15 @@ struct, constant, or configuration surface — what the implementation tasks mus
 - **Lifetime**: Process-constant. Version-qualified (`v1`) so a future rotation can
   introduce `v2` alongside.
 
-## 3. NotifyTarget.URL (new validation rule)
+## 3. NotifyTarget.URL (validation unchanged from pre-009)
 
 - **Location**: `config.go` — existing field on `NotifyTarget`.
 - **Type**: `string` (HTTP(S) URL for webhook / ntfy; SMTP server for email).
-- **New validation (FR-009)**: Webhook and ntfy target URLs MUST be rejected when the
-  hostname is exactly `169.254.169.254` (IPv4 cloud-metadata IP). Rejection happens at:
-  - Send time (`notify.sendWebhook`, `notify.sendNtfy`): return error before dial.
-  - Persist time (`internal/dashboard/server.go` `handlePutSettings`): refuse save.
-  - Test time (`internal/dashboard/server.go` `handleNotifyTest`): refuse dispatch.
-- **Unchanged**: Existing scheme check (`http`, `https` only) stays. No RFC1918 guard.
-  No allowlist config field.
+- **Validation**: existing scheme check (`http`, `https`, `smtp`, `smtps`) stays. No new
+  validation rule under 009. An earlier 009 revision proposed an FR-009
+  cloud-metadata IP rejection (literal `169.254.169.254`); withdrawn during 009 codex
+  post-review as bypass-prone. See `docs/reviews/codex-2026-04-24-009-branch-remediation.md`
+  Step 1 for the full reasoning.
 
 ## 4. NotifyTarget.Secret — transport requirement for SMTP AUTH
 

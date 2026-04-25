@@ -1,4 +1,22 @@
-# Contract: Notification URL Validation
+# Contract: Notification URL Validation — **SUPERSEDED 2026-04-24**
+
+> **Status: WITHDRAWN.** This contract specified an FR-009 cloud-metadata IP
+> rejection (`169.254.169.254`). It was withdrawn during 009 codex post-review
+> after the literal-string check was shown to be bypassable via IPv6-mapped
+> addresses, decimal/hex IPv4 variants, trailing-dot, and 302 redirect (Go's
+> default HTTP client follows redirects with no `CheckRedirect` set).
+>
+> The hedge value was zero while the spec implied a guarantee we couldn't
+> deliver. Drained product charter remains: drainctl ships on-prem, RFC1918
+> LAN webhooks are legitimate, no validation rule beyond the existing scheme
+> allowlist (`http`/`https`). See
+> `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1 and
+> `docs/reviews/codex-2026-04-24-009-branch-synthesis.md` §B-1 for the full
+> reasoning.
+>
+> The body below is preserved as historical record only.
+
+---
 
 ## Scope
 

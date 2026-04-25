@@ -827,12 +827,6 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 					http.Error(w, fmt.Sprintf("notifications[%d]: URL must use http, https, smtp, or smtps scheme", i), http.StatusBadRequest)
 					return
 				}
-				if t.Type == "webhook" || t.Type == "ntfy" {
-					if err := dc.RejectCloudMetadata(t.URL); err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-				}
 			}
 			for _, tr := range t.Triggers {
 				if !dc.ValidTriggers[tr] {
@@ -969,13 +963,6 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if singleTarget != nil && (singleTarget.Type == "webhook" || singleTarget.Type == "ntfy") {
-		if err := dc.RejectCloudMetadata(singleTarget.URL); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
 	var (
 		results []dc.TestNotificationResult
 		err     error
@@ -996,13 +983,6 @@ func (ds *DashboardServer) handleNotifyTest(w http.ResponseWriter, r *http.Reque
 				cfg, loadErr := loadFn()
 				if loadErr != nil {
 					return nil, fmt.Errorf("failed to load config: %w", loadErr)
-				}
-				for _, target := range cfg.Notifications {
-					if (target.Type == "webhook" || target.Type == "ntfy") && target.URL != "" {
-						if err := dc.RejectCloudMetadata(target.URL); err != nil {
-							return nil, err
-						}
-					}
 				}
 				return dc.SendTestNotification(cfg.Notifications)
 			}

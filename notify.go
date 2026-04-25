@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -389,9 +388,6 @@ func SendTestNotification(targets []NotificationTarget) ([]TestNotificationResul
 // If secret is non-empty the request includes an X-DrainCtl-Signature header
 // containing the HMAC-SHA256 of the body: "sha256=<hex>".
 func sendWebhook(rawURL string, secret string, payload map[string]any) error {
-	if err := rejectCloudMetadata(rawURL); err != nil {
-		return err
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -582,9 +578,6 @@ func formatDuration(d time.Duration) string {
 // sendNtfy posts a message to an ntfy.sh-compatible endpoint. A non-empty tags
 // value is set as the ntfy "Tags" header (comma-separated list per ntfy.sh).
 func sendNtfy(rawURL string, title string, message string, priority string, tags string) error {
-	if err := rejectCloudMetadata(rawURL); err != nil {
-		return err
-	}
 	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewBufferString(message))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -639,20 +632,6 @@ func spikeNtfyTags(host string, channel string) string {
 		base = base[idx+1:]
 	}
 	return "evtspike," + host + "," + base
-}
-
-func rejectCloudMetadata(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err == nil && u.Hostname() == "169.254.169.254" {
-		return fmt.Errorf("notify: cloud metadata IP 169.254.169.254 is not a valid notification target")
-	}
-	return nil
-}
-
-// RejectCloudMetadata exposes the shared metadata-IP rejection used by both
-// send-time notification dispatch and dashboard save/test validation paths.
-func RejectCloudMetadata(rawURL string) error {
-	return rejectCloudMetadata(rawURL)
 }
 
 // perfTriggers is the set of performance-related triggers that use repeat intervals.
