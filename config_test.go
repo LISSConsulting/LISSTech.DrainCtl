@@ -200,6 +200,31 @@ func TestClampEvtSpike_WithinRangeIsUnchanged(t *testing.T) {
 	}
 }
 
+func TestClampEvtSpike_PreservesPersistedLegacy7(t *testing.T) {
+	// The default for slot_maturity_observations rose from 7 to 90 in
+	// 009 codex post-review. We deliberately do NOT auto-migrate persisted
+	// values: 7 was a documented supported value in feature 006's data-model
+	// and might be an operator's intentional tuning choice. ClampEvtSpike
+	// must leave 7 alone — only zero / out-of-range values get the new
+	// default. This test locks that decision in so a future contributor
+	// can't accidentally re-introduce a silent 7→90 migration.
+	cfg := EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                1e-4,
+		CooldownMinutes:          10,
+		SlotMaturityObservations: 7,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+	}
+	ClampEvtSpike(&cfg)
+	if cfg.SlotMaturityObservations != 7 {
+		t.Errorf("SlotMaturityObservations = %d, want 7 preserved (no auto-migration)", cfg.SlotMaturityObservations)
+	}
+}
+
 func TestClampEvtSpike_PersistIntervalNonMultipleOf900Warns(t *testing.T) {
 	// We can't trivially intercept slog without rewiring; assert the value
 	// stays put (it's in [60, 86400] and should not be re-clamped) so the
