@@ -400,6 +400,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	// diagnosis on production boxes without rebuilding.
 	startPprof(ctx)
 
+	// Periodic self-metrics emitted at slog.Debug — runtime heap state,
+	// goroutine count, RSS, GC stats. Passive (no listener); operators
+	// see the trend by setting log_file_level=debug and grepping
+	// "selfmetrics=" out of the daily log.
+	startSelfMetricsLogger(ctx)
+
 	// Open SQLite telemetry store before the named pipe and HTTP servers.
 	telDB, err := telemetry.Open(dc.DefaultDataDir())
 	if err != nil {
