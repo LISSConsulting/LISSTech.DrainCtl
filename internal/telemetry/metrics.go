@@ -48,6 +48,16 @@ var prepareWriter = func(ctx context.Context, w *sql.DB, sqlStr string) (*sql.St
 // BEFORE BeginTx — so a blocked hook holds the RLock with no DB tx open.
 var appendHook = func() {}
 
+// txBindStmt is the seam every Append goes through to bind the cached
+// *sql.Stmt to the per-call transaction. Production wraps tx.StmtContext;
+// tests count invocations to prove Append actually uses the cached stmt
+// instead of regressing back to a per-call tx.PrepareContext. A regression
+// that replaced this with a fresh PrepareContext would not increment the
+// counter and the prepare-reuse test would fail.
+var txBindStmt = func(ctx context.Context, tx *sql.Tx, stmt *sql.Stmt) *sql.Stmt {
+	return tx.StmtContext(ctx, stmt)
+}
+
 // Tier identifies the resolution tier of a metrics query.
 type Tier int
 
@@ -165,7 +175,7 @@ func (s *MetricsStore) Append(ctx context.Context, samples []Sample) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	stmt := tx.StmtContext(ctx, s.appendStmt)
+	stmt := txBindStmt(ctx, tx, s.appendStmt)
 	// no defer stmt.Close() — tx-scoped wrapper does not own underlying
 
 	now := time.Now().UTC()
