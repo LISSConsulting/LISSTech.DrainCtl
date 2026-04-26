@@ -348,7 +348,11 @@ publish: (header "publish")
     } else {
         $body = "Initial release"
     }
-    & gh release create $tag @assets --title "LISSTech DrainCtl $version" --notes $body
+    # All current releases ship as pre-release / beta until 1.0 is declared.
+    # The --prerelease flag drops the green "Latest" badge on the GitHub
+    # releases page so operators picking a download URL must opt in
+    # explicitly. Drop this flag at 1.0.
+    & gh release create $tag @assets --prerelease --title "LISSTech DrainCtl $version" --notes $body
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Release created with $($assets.Count) asset(s)" -ForegroundColor Green
     Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
