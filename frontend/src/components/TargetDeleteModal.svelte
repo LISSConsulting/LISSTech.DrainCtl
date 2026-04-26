@@ -1,7 +1,7 @@
 <script>
     import { Trash2 } from 'lucide-svelte';
 
-    let { target, onconfirm, oncancel } = $props();
+    let { target, deleting = false, onconfirm, oncancel } = $props();
 
     let dest = $derived(target?.type === 'email' ? (target?.to || []).join(', ') : target?.url || '');
 
@@ -13,12 +13,15 @@
         setTimeout(() => cb?.(), CLOSE_MS);
     }
 
+    // Confirm fires synchronously — the parent owns the network call and will
+    // dismiss this modal on success. Animating close before the request
+    // resolves would leave a half-faded modal stuck on screen if delete fails.
     $effect(() => {
         function onKey(e) {
-            if (e.key === 'Escape') animateClose(oncancel);
-            if (e.key === 'Enter') {
+            if (e.key === 'Escape' && !deleting) animateClose(oncancel);
+            if (e.key === 'Enter' && !deleting) {
                 e.preventDefault();
-                animateClose(onconfirm);
+                onconfirm?.();
             }
         }
         document.addEventListener('keydown', onKey);
@@ -43,8 +46,10 @@
                 {dest}
             </p>
             <div class="btn-row">
-                <button class="btn-brutal btn-cancel" onclick={() => animateClose(oncancel)}>Cancel</button>
-                <button class="btn-brutal btn-danger" onclick={() => animateClose(onconfirm)}>Delete</button>
+                <button class="btn-brutal btn-cancel" onclick={() => animateClose(oncancel)} disabled={deleting}>Cancel</button>
+                <button class="btn-brutal btn-danger" onclick={() => onconfirm?.()} disabled={deleting}>
+                    {deleting ? 'Deleting...' : 'Delete'}
+                </button>
             </div>
         </div>
     </div>

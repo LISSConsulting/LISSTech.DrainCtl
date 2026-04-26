@@ -4863,3 +4863,215 @@ func TestFleetMetrics_US2_ResponseBoundsPresent(t *testing.T) {
 		t.Error("newest_available is nil; want non-null when data exists")
 	}
 }
+
+// ── Per-target notification CRUD ────────────────────────────────────────────
+//
+// These exercise the real readModifyWrite path (not the testPutSettingsFunc
+// shortcut) since the new handlers share no test seam with the bulk PUT.
+// t.Setenv("ProgramData", t.TempDir()) gives each test a private config dir
+// so the named mutex contention surface is identical to production.
+
+// decodeNotifyTargetsResponse pulls the {notifications:[…]} body returned by
+// every per-target CRUD endpoint into a typed slice for assertions.
+func decodeNotifyTargetsResponse(t *testing.T, w *httptest.ResponseRecorder) []notifyTargetView {
+	t.Helper()
+	var resp notifyTargetsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, w.Body.String())
+	}
+	return resp.Notifications
+}
+
+func TestHandleAddNotificationTarget_AppendsAndReturnsList(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	body := `{"type":"webhook","url":"https://hooks.example.com/1","secret":"hmac-1","triggers":["alert"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notifications", strings.NewReader(body))
+	ds.handleAddNotificationTarget(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	got := decodeNotifyTargetsResponse(t, w)
+	if len(got) != 1 {
+		t.Fatalf("len(notifications) = %d, want 1", len(got))
+	}
+	if got[0].URL != "https://hooks.example.com/1" {
+		t.Errorf("URL = %q, want https://hooks.example.com/1", got[0].URL)
+	}
+	if !got[0].HasSecret {
+		t.Error("has_secret = false, want true (we set a secret)")
+	}
+
+	// Disk should reflect the change — and the secret is on disk under DPAPI.
+	cfg, err := dc.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(cfg.Notifications) != 1 || cfg.Notifications[0].URL != "https://hooks.example.com/1" {
+		t.Errorf("disk = %+v, want one webhook", cfg.Notifications)
+	}
+	if cfg.Notifications[0].Secret == "" {
+		t.Error("on-disk secret empty; expected DPAPI-encrypted value")
+	}
+}
+
+func TestHandleAddNotificationTarget_RejectsInvalidType(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	body := `{"type":"slack","url":"https://hooks.example.com/1","triggers":["alert"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notifications", strings.NewReader(body))
+	ds.handleAddNotificationTarget(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateNotificationTarget_PreservesSecretOnURLRename(t *testing.T) {
+	// This is the bug the per-target endpoints fix: bulk PUT keys secret
+	// preservation on Type+URL, so editing the URL silently drops the saved
+	// HMAC. The indexed PUT looks up the existing secret by slot, so a rename
+	// is safe.
+	t.Setenv("ProgramData", t.TempDir())
+
+	seed := dc.DefaultConfig()
+	seed.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://old/", Secret: "old-hmac", Triggers: dc.DefaultTriggers},
+	}
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	// Empty secret + new URL ⇒ preserve existing secret.
+	body := `{"type":"webhook","url":"https://renamed/","triggers":["drain_on","drain_off","alert","healthy"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings/notifications/0", strings.NewReader(body))
+	r.SetPathValue("idx", "0")
+	ds.handleUpdateNotificationTarget(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	cfg, _ := dc.LoadConfig()
+	if len(cfg.Notifications) != 1 {
+		t.Fatalf("len = %d, want 1", len(cfg.Notifications))
+	}
+	if cfg.Notifications[0].URL != "https://renamed/" {
+		t.Errorf("URL = %q, want https://renamed/", cfg.Notifications[0].URL)
+	}
+	if cfg.Notifications[0].Secret == "" {
+		t.Error("Secret was dropped; expected to be preserved across URL rename")
+	}
+}
+
+func TestHandleUpdateNotificationTarget_ClearSecretWipes(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	seed := dc.DefaultConfig()
+	seed.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://hook/", Secret: "old-hmac", Triggers: dc.DefaultTriggers},
+	}
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	body := `{"type":"webhook","url":"https://hook/","triggers":["drain_on","drain_off","alert","healthy"],"clear_secret":true}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings/notifications/0", strings.NewReader(body))
+	r.SetPathValue("idx", "0")
+	ds.handleUpdateNotificationTarget(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	got := decodeNotifyTargetsResponse(t, w)
+	if len(got) != 1 || got[0].HasSecret {
+		t.Errorf("has_secret should be false after clear_secret, got %+v", got)
+	}
+	cfg, _ := dc.LoadConfig()
+	if cfg.Notifications[0].Secret != "" {
+		t.Errorf("on-disk secret = %q, want empty", cfg.Notifications[0].Secret)
+	}
+}
+
+func TestHandleUpdateNotificationTarget_OutOfRange_Returns404(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	body := `{"type":"webhook","url":"https://hook/","triggers":["alert"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings/notifications/7", strings.NewReader(body))
+	r.SetPathValue("idx", "7")
+	ds.handleUpdateNotificationTarget(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateNotificationTarget_NonIntegerIdx_Returns400(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	body := `{"type":"webhook","url":"https://hook/","triggers":["alert"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings/notifications/foo", strings.NewReader(body))
+	r.SetPathValue("idx", "foo")
+	ds.handleUpdateNotificationTarget(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleDeleteNotificationTarget_RemovesByIndex(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	seed := dc.DefaultConfig()
+	seed.Notifications = []dc.NotificationTarget{
+		{Type: "webhook", URL: "https://a/", Triggers: dc.DefaultTriggers},
+		{Type: "webhook", URL: "https://b/", Triggers: dc.DefaultTriggers},
+		{Type: "webhook", URL: "https://c/", Triggers: dc.DefaultTriggers},
+	}
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/settings/notifications/1", nil)
+	r.SetPathValue("idx", "1")
+	ds.handleDeleteNotificationTarget(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	got := decodeNotifyTargetsResponse(t, w)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].URL != "https://a/" || got[1].URL != "https://c/" {
+		t.Errorf("urls = %q, %q; want https://a/, https://c/", got[0].URL, got[1].URL)
+	}
+}
+
+func TestHandleDeleteNotificationTarget_OutOfRange_Returns404(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/settings/notifications/0", nil)
+	r.SetPathValue("idx", "0")
+	ds.handleDeleteNotificationTarget(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
