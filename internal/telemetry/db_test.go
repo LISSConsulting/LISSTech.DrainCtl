@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -402,6 +403,82 @@ func TestCLIReadOnly_SidecarCorruptError(t *testing.T) {
 	if !strings.Contains(openErr.Error(), "partially-closed") {
 		t.Errorf("error does not describe partially-closed writer: %v", openErr)
 	}
+}
+
+// TestReaderPoolBounded verifies that both Open and OpenReadOnly cap the
+// reader pool to readerMaxOpenConns. Without this bound, modernc.org/sqlite
+// will keep allocating per-connection page caches under concurrent dashboard
+// reads — see docs/reviews/codex-2026-04-26-leak-perf-synthesis.md C1.
+func TestReaderPoolBounded(t *testing.T) {
+	hammer := func(t *testing.T, db *DB) {
+		t.Helper()
+		stats := db.ReaderStats()
+		if stats.MaxOpenConnections != readerMaxOpenConns {
+			t.Errorf("MaxOpenConnections = %d, want %d", stats.MaxOpenConnections, readerMaxOpenConns)
+		}
+
+		ctx := context.Background()
+		var wg sync.WaitGroup
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var v int
+				if err := db.reader.QueryRowContext(ctx, "SELECT 1").Scan(&v); err != nil {
+					t.Errorf("SELECT 1: %v", err)
+				}
+			}()
+		}
+		wg.Wait()
+
+		stats = db.ReaderStats()
+		if stats.OpenConnections > readerMaxOpenConns {
+			t.Errorf("OpenConnections = %d, want <= %d", stats.OpenConnections, readerMaxOpenConns)
+		}
+		// database/sql does not expose the configured MaxIdleConns directly.
+		// Assert it indirectly: with MaxIdleConns == MaxOpenConns, no idle
+		// connection should ever be closed by the idle cap (MaxIdleClosed > 0
+		// would mean MaxIdleConns < MaxOpenConns).
+		if stats.MaxIdleClosed != 0 {
+			t.Errorf("MaxIdleClosed = %d, want 0 (MaxIdleConns must equal MaxOpenConns)", stats.MaxIdleClosed)
+		}
+		if stats.Idle > readerMaxOpenConns {
+			t.Errorf("Idle = %d, want <= %d", stats.Idle, readerMaxOpenConns)
+		}
+	}
+
+	t.Run("Open", func(t *testing.T) {
+		db, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		hammer(t, db)
+	})
+
+	t.Run("OpenReadOnly", func(t *testing.T) {
+		dir := t.TempDir()
+		// Seed with Open so the file (and a row) exist, then close before
+		// OpenReadOnly to mirror the CLI fallback path.
+		seedDB, err := Open(dir)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedOneAudit(t, seedDB, "host-pool")
+		if _, err := seedDB.writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			t.Fatalf("checkpoint: %v", err)
+		}
+		if err := seedDB.Close(); err != nil {
+			t.Fatalf("Close seed: %v", err)
+		}
+
+		db, err := OpenReadOnly(dir)
+		if err != nil {
+			t.Fatalf("OpenReadOnly: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		hammer(t, db)
+	})
 }
 
 func TestOpen_CorruptFileReturnsClearError(t *testing.T) {

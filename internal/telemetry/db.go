@@ -29,6 +29,8 @@ const (
 	walTruncateHoldoff   = time.Hour        // minimum gap between TRUNCATE escalations
 	readerMaxLifetime    = 60 * time.Second // max read-transaction lifetime (WAL pin guard)
 	checkpointDeadline   = 5 * time.Second  // per-checkpoint call budget
+	// readerMaxOpenConns bounds the dashboard reader pool — see docs/reviews/codex-2026-04-26-leak-perf-synthesis.md C1.
+	readerMaxOpenConns = 4
 )
 
 // DB holds the writer, reader, audit, and checkpoint sql.DB pools for drainctl.db.
@@ -173,6 +175,8 @@ func Open(dataDir string) (*DB, error) {
 
 	reader := sql.OpenDB(connector)
 	reader.SetConnMaxLifetime(readerMaxLifetime)
+	reader.SetMaxOpenConns(readerMaxOpenConns)
+	reader.SetMaxIdleConns(readerMaxOpenConns)
 
 	auditConnector := &pragmaConnector{dsn: path, drv: drv, pragmas: auditPragmas}
 	auditDB := sql.OpenDB(auditConnector)
@@ -212,6 +216,13 @@ func Open(dataDir string) (*DB, error) {
 		restrictFileACL(path + suffix)
 	}
 	return db, nil
+}
+
+// ReaderStats returns a snapshot of the read pool's database/sql stats.
+// Test-facing accessor so reader-pool bounds can be asserted without
+// exporting the unexported reader field.
+func (db *DB) ReaderStats() sql.DBStats {
+	return db.reader.Stats()
 }
 
 // Close releases all database connections. OpenReadOnly populates only the
@@ -277,6 +288,8 @@ func OpenReadOnly(dataDir string) (*DB, error) {
 
 	reader := sql.OpenDB(connector)
 	reader.SetConnMaxLifetime(readerMaxLifetime)
+	reader.SetMaxOpenConns(readerMaxOpenConns)
+	reader.SetMaxIdleConns(readerMaxOpenConns)
 
 	// Force an actual connection so pragma failures and SQLite-level errors
 	// (e.g. a malformed -shm header that slipped past the stat check) surface
