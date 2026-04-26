@@ -1089,6 +1089,7 @@ func RunService() error {
 	// starts in degraded mode and writes are silently dropped until the
 	// provider is registered and the service is restarted.
 	etwH := logging.NewETWHandler(etwLevel)
+	defer etwH.Close()
 
 	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 7) // daily rotation, 7 days kept
 	if err != nil {
