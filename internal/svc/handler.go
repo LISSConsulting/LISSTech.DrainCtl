@@ -459,7 +459,16 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			"duration", migRes.Duration)
 	}
 
-	metricsStore := telemetry.NewMetricsStore(telDB)
+	metricsStore, err := telemetry.NewMetricsStore(ctx, telDB)
+	if err != nil {
+		slog.Error("service=failed", "error", err)
+		return false, 1
+	}
+	// Defer ordering note: this Close runs BEFORE telDB.Close() because Go
+	// defers fire LIFO — declaring this later puts it on top of the stack.
+	// Required ordering: prepared stmt must be finalised before its writer
+	// pool tears down.
+	defer func() { _ = metricsStore.Close() }()
 	maintenanceStore := telemetry.NewMaintenanceStore(telDB)
 	serverStore := telemetry.NewServerStore(telDB)
 	eventSpikeStore := telemetry.NewEventSpikeStore(telDB)
