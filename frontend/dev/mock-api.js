@@ -1055,13 +1055,27 @@ function handleRequest(method, pathname, body, query = {}) {
 
   // GET /api/v1/settings
   if (method === 'GET' && pathname === '/api/v1/settings') {
-    return { status: 200, body: mockSettings };
+    // Mirror the real backend: secrets are write-only, replaced by has_secret
+    // in the response so the UI can render a "Clear" affordance.
+    const view = {
+      ...mockSettings,
+      notifications: (mockSettings.notifications || []).map(n => {
+        const { secret, ...rest } = n;
+        return { ...rest, has_secret: !!secret };
+      }),
+    };
+    return { status: 200, body: view };
   }
 
   // PUT /api/v1/settings
   if (method === 'PUT' && pathname === '/api/v1/settings') {
     if (body) {
-      mockSettings = body;
+      // Real backend treats absent `notifications` as "no change". The frontend
+      // strips notifications from this payload now (they're saved via the
+      // per-target endpoints), but be defensive here for older clients.
+      const incoming = body.notifications;
+      mockSettings = { ...mockSettings, ...body };
+      if (incoming === undefined) mockSettings.notifications = mockSettings.notifications;
       // Strip secrets before broadcast — mirrors the real backend's broadcastSettingsUpdate
       const redacted = {
         ...mockSettings,
@@ -1070,6 +1084,57 @@ function handleRequest(method, pathname, body, query = {}) {
       broadcastSSE('settings_update', redacted);
     }
     return { status: 200, body: { ok: true } };
+  }
+
+  // Per-target CRUD — atomic add/edit/delete via /api/v1/settings/notifications.
+  // Returns the full updated targets list (with has_secret) so the frontend
+  // can replace its local copy in one round-trip.
+  const notifyView = (n) => {
+    const { secret, clear_secret: _clearSecret, id: _id, ...rest } = n;
+    return { ...rest, has_secret: !!secret };
+  };
+  const notifyResponse = () => ({
+    notifications: (mockSettings.notifications || []).map(notifyView),
+  });
+  const broadcastSettings = () => {
+    const redacted = {
+      ...mockSettings,
+      notifications: (mockSettings.notifications || []).map(n => ({ ...n, secret: '' })),
+    };
+    broadcastSSE('settings_update', redacted);
+  };
+
+  if (method === 'POST' && pathname === '/api/v1/settings/notifications') {
+    const t = body || {};
+    mockSettings.notifications = [...(mockSettings.notifications || []), { ...t }];
+    broadcastSettings();
+    return { status: 200, body: notifyResponse() };
+  }
+
+  const targetIdxMatch = pathname.match(/^\/api\/v1\/settings\/notifications\/(\d+)$/);
+  if (targetIdxMatch && (method === 'PUT' || method === 'DELETE')) {
+    const idx = Number(targetIdxMatch[1]);
+    const list = mockSettings.notifications || [];
+    if (idx < 0 || idx >= list.length) {
+      return { status: 404, body: { error: `notification target index ${idx} not found` } };
+    }
+    if (method === 'DELETE') {
+      mockSettings.notifications = list.filter((_, i) => i !== idx);
+    } else {
+      const wire = body || {};
+      const existing = list[idx];
+      const updated = { ...wire };
+      // Match the backend's three-mode secret policy.
+      if (wire.clear_secret) {
+        updated.secret = '';
+      } else if (!wire.secret) {
+        updated.secret = existing.secret || '';
+      }
+      delete updated.clear_secret;
+      mockSettings.notifications = list.map((x, i) => (i === idx ? updated : x));
+    }
+    broadcastSettings();
+    return { status: 200, body: notifyResponse() };
   }
 
   // POST /api/v1/notify-test

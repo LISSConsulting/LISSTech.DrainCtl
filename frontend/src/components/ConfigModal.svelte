@@ -1,6 +1,14 @@
 <script>
     import { untrack } from 'svelte';
-    import { fetchSettings, saveSettings, sendNotifyTest, fetchMaintenance } from '../lib/api.js';
+    import {
+        fetchSettings,
+        saveSettings,
+        sendNotifyTest,
+        fetchMaintenance,
+        addNotificationTarget,
+        updateNotificationTarget,
+        deleteNotificationTarget,
+    } from '../lib/api.js';
     import { appState } from '../lib/state.svelte.js';
     import { toast } from '../lib/toast.svelte.js';
     import { rel } from '../lib/utils.js';
@@ -32,21 +40,48 @@
     let deleteIdx = $state(-1);
     let subModalOpen = $derived(editTarget !== null || deleteIdx >= 0);
 
-    function saveTarget(t) {
-        if (!config) return;
-        if (editIdx >= 0) {
-            config.notifications = config.notifications.map((x, i) => (i === editIdx ? t : x));
-        } else {
-            config.notifications = [...config.notifications, { ...t, id: crypto.randomUUID() }];
+    // Target add/edit/delete persist atomically via the per-target endpoints —
+    // they don't go through the bulk Save button. The backend returns the full
+    // updated notifications list; we sync both `config` and `original` so the
+    // dirty indicator reflects only non-target changes.
+    let targetSaving = $state(false);
+
+    async function saveTarget(t) {
+        if (!config || targetSaving) return;
+        targetSaving = true;
+        try {
+            const targets =
+                editIdx >= 0
+                    ? await updateNotificationTarget(editIdx, t)
+                    : await addNotificationTarget(t);
+            config.notifications = targets;
+            if (original) original.notifications = JSON.parse(JSON.stringify(targets));
+            appState.config = JSON.parse(JSON.stringify(config));
+            editTarget = null;
+            toast.ok(editIdx >= 0 ? 'Target updated' : 'Target added');
+        } catch (e) {
+            toast.err((editIdx >= 0 ? 'Update' : 'Add') + ' failed: ' + (e?.detail ?? e?.message ?? String(e)));
+        } finally {
+            targetSaving = false;
         }
-        editTarget = null;
     }
 
-    function confirmDelete() {
-        if (deleteIdx >= 0 && config) {
-            config.notifications = config.notifications.filter((_, i) => i !== deleteIdx);
+    async function confirmDelete() {
+        if (deleteIdx < 0 || !config || targetSaving) return;
+        const idx = deleteIdx;
+        targetSaving = true;
+        try {
+            const targets = await deleteNotificationTarget(idx);
+            config.notifications = targets;
+            if (original) original.notifications = JSON.parse(JSON.stringify(targets));
+            appState.config = JSON.parse(JSON.stringify(config));
+            deleteIdx = -1;
+            toast.ok('Target deleted');
+        } catch (e) {
+            toast.err('Delete failed: ' + (e?.detail ?? e?.message ?? String(e)));
+        } finally {
+            targetSaving = false;
         }
-        deleteIdx = -1;
     }
 
     let dirty = $derived.by(() => {
@@ -950,6 +985,7 @@
     <TargetEditModal
         target={editTarget}
         isNew={editIdx < 0}
+        saving={targetSaving}
         onsave={saveTarget}
         onclose={() => {
             editTarget = null;
@@ -960,6 +996,7 @@
 {#if deleteIdx >= 0 && config}
     <TargetDeleteModal
         target={config.notifications[deleteIdx]}
+        deleting={targetSaving}
         onconfirm={confirmDelete}
         oncancel={() => (deleteIdx = -1)}
     />

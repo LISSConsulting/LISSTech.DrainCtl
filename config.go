@@ -924,6 +924,32 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 	})
 }
 
+// ReadModifyWriteNotifications atomically modifies the notifications slice
+// under the same cross-process config lock used by every other config writer.
+// The mutate callback receives a copy of the current targets and returns the
+// new slice; returning an error aborts the write. This is the building block
+// used by the dashboard's per-target REST endpoints (POST/PUT/DELETE
+// /api/v1/settings/notifications) — they need a single load+save cycle that's
+// indistinguishable from the bulk PUT path so the SSE broadcast and disk ACLs
+// behave identically.
+func ReadModifyWriteNotifications(mutate func(targets []NotificationTarget) ([]NotificationTarget, error)) error {
+	return readModifyWrite(func(cfg *Config) error {
+		// Pass a defensive copy so callers can't accidentally mutate the
+		// original slice header before deciding to abort.
+		current := make([]NotificationTarget, len(cfg.Notifications))
+		copy(current, cfg.Notifications)
+		next, err := mutate(current)
+		if err != nil {
+			return err
+		}
+		if next == nil {
+			next = []NotificationTarget{}
+		}
+		cfg.Notifications = next
+		return nil
+	})
+}
+
 // UpdateEvtSpikeEnabled flips only the evtspike.enabled flag, leaving all
 // other evtspike fields (thresholds, channel lists, baseline_path, security
 // channel gate) untouched. Per FR-028 the dashboard Settings modal surfaces

@@ -111,7 +111,9 @@ const BASE = '/api/v1';
  * @property {string} url              - webhook or ntfy URL (empty for email)
  * @property {string} [from]           - email from address (email type only)
  * @property {string[]} [to]           - email to addresses (email type only)
- * @property {string} [secret]         - HMAC secret for webhook signing
+ * @property {string} [secret]         - HMAC secret for webhook signing (write-only; never returned)
+ * @property {boolean} [has_secret]    - read-only marker that the backend has a saved secret
+ * @property {boolean} [clear_secret]  - write-only flag: true wipes the saved secret on update
  * @property {string[]} triggers
  * @property {number} repeat_minutes   - 0 = once only
  * @property {boolean} [enabled]       - false = skip this target; absent/true = send (default)
@@ -425,6 +427,12 @@ export async function fetchSettings() {
  * PUT /api/v1/settings
  * Returns {ok: true} on success — does NOT return the saved config.
  * Callers should treat the local config as authoritative after a successful save.
+ *
+ * Notification targets are stripped from the payload — they are managed via
+ * the per-target CRUD endpoints (addNotificationTarget, updateNotificationTarget,
+ * deleteNotificationTarget) and saved atomically. Including them here would
+ * either be a no-op or, in the worst case, race against an in-flight CRUD.
+ *
  * @param {Settings} config
  * @returns {Promise<void>}
  */
@@ -435,11 +443,79 @@ export async function saveSettings(config) {
         payload.performance.mem_warn_pct = 100 - (payload.performance.mem_warn_pct ?? 0);
         payload.performance.mem_crit_pct = 100 - (payload.performance.mem_crit_pct ?? 0);
     }
+    // Backend treats absent `notifications` as "no change", so omitting it
+    // keeps targets entirely in the per-target endpoints' lane.
+    delete payload.notifications;
     await apiFetch('/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
     });
+}
+
+/**
+ * @typedef {Object} NotifyTargetsResponse
+ * @property {NotifyTarget[]} notifications
+ */
+
+/**
+ * Strip frontend-only fields from a target before sending to the backend.
+ * `id` is a UUID generated for Svelte list keying; `has_secret` is a read-only
+ * marker the GET response sets. Both would be silently ignored by Go's JSON
+ * decoder, but dropping them keeps the wire shape honest.
+ * @param {NotifyTarget} target
+ * @returns {Object}
+ */
+function stripClientFields(target) {
+    const { id, has_secret, ...wire } = target;
+    return wire;
+}
+
+/**
+ * POST /api/v1/settings/notifications
+ * Append a new notification target. Returns the full updated targets list.
+ * @param {NotifyTarget} target
+ * @returns {Promise<NotifyTarget[]>}
+ */
+export async function addNotificationTarget(target) {
+    const res = await apiFetch('/settings/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stripClientFields(target)),
+    });
+    const body = /** @type {NotifyTargetsResponse} */ (await res.json());
+    return body.notifications ?? [];
+}
+
+/**
+ * PUT /api/v1/settings/notifications/{idx}
+ * Replace the target at the given index. Set `target.clear_secret = true` to
+ * wipe a saved secret; an empty `secret` field preserves the existing one.
+ * Returns the full updated targets list.
+ * @param {number} idx
+ * @param {NotifyTarget} target
+ * @returns {Promise<NotifyTarget[]>}
+ */
+export async function updateNotificationTarget(idx, target) {
+    const res = await apiFetch(`/settings/notifications/${idx}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stripClientFields(target)),
+    });
+    const body = /** @type {NotifyTargetsResponse} */ (await res.json());
+    return body.notifications ?? [];
+}
+
+/**
+ * DELETE /api/v1/settings/notifications/{idx}
+ * Remove the target at the given index. Returns the full updated targets list.
+ * @param {number} idx
+ * @returns {Promise<NotifyTarget[]>}
+ */
+export async function deleteNotificationTarget(idx) {
+    const res = await apiFetch(`/settings/notifications/${idx}`, { method: 'DELETE' });
+    const body = /** @type {NotifyTargetsResponse} */ (await res.json());
+    return body.notifications ?? [];
 }
 
 // ---------------------------------------------------------------------------
