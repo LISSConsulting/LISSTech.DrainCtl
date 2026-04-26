@@ -7,11 +7,17 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// helperGoroutineCount tracks the cancel-event helper goroutine's lifetime
+// so tests can deterministically verify it exits with each accept (B1).
+// Production code only increments/decrements; the value is read by tests.
+var helperGoroutineCount atomic.Int64
 
 // pipeConn wraps a Windows named pipe handle as a net.Conn.
 type pipeConn struct {
@@ -93,9 +99,17 @@ func acceptPipeConn(ctx context.Context) (net.Conn, error) {
 		return nil, fmt.Errorf("CreateEvent cancel: %w", err)
 	}
 	defer func() { _ = windows.CloseHandle(cancelEvent) }()
+	// LIFO defer ordering: cancelAccept must be declared AFTER the
+	// CloseHandle defer above so it runs FIRST on return — that wakes the
+	// helper goroutine via acceptCtx.Done() before CloseHandle invalidates
+	// cancelEvent. Do not reorder these two defers.
+	acceptCtx, cancelAccept := context.WithCancel(ctx)
+	defer cancelAccept()
 
 	go func() {
-		<-ctx.Done()
+		helperGoroutineCount.Add(1)
+		defer helperGoroutineCount.Add(-1)
+		<-acceptCtx.Done()
 		_ = windows.SetEvent(cancelEvent)
 	}()
 
