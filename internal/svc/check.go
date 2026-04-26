@@ -314,7 +314,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 			}
 		} else {
 			slog.Debug("dashboard heartbeat sending", "url", dashCfg.URL)
-			dashboard.ReportState(dashCfg.URL, result)
+			dashboard.ReportState(ctx, dashCfg.URL, result)
 		}
 	}
 

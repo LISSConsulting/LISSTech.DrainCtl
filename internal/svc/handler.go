@@ -77,6 +77,24 @@ const (
 	// Audit event IDs (5xxx) are in the root dc package.
 )
 
+// reportSpike is the indirection seam used by the spike-launch goroutine in
+// Execute. Production wires it to dashboard.ReportSpike; tests swap it to a
+// hook that observes ctx cancellation and waitgroup tracking without booting
+// the whole service.
+var reportSpike = dashboard.ReportSpike
+
+// startSpikeReport launches a tracked goroutine that forwards a spike to the
+// remote dashboard via reportSpike. It mirrors the production call site in
+// Execute so the lifecycle wiring (Add/Done + ctx propagation) is exercised
+// from tests without driving the full service loop.
+func startSpikeReport(ctx context.Context, wg *sync.WaitGroup, url string, spike *dc.SpikePayload) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		reportSpike(ctx, url, spike)
+	}()
+}
+
 // drainService implements svc.Handler.
 type drainService struct {
 	etw       *logging.ETWHandler
@@ -322,7 +340,12 @@ func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, e
 	if dashboardURL == "" {
 		return nil, fmt.Errorf("dashboard url required")
 	}
-	result, err := dashboard.Register(dashboardURL)
+	// HandleRegister is invoked from the named-pipe server goroutine, which has
+	// no service-scoped ctx threaded through. Bound the call locally so a stuck
+	// SSPI/HTTP exchange cannot wedge the pipe handler indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := dashboard.Register(ctx, dashboardURL)
 	if err != nil {
 		return nil, err
 	}
@@ -722,7 +745,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		if dashState != nil {
 			cfgRemote, cfgErr = dashboard.GetSettings()
 		} else {
-			cfgRemote, cfgErr = dashboard.FetchSettings(dashCfg.URL)
+			cfgRemote, cfgErr = dashboard.FetchSettings(ctx, dashCfg.URL)
 		}
 		if cfgErr != nil {
 			dashConfigFailures++
@@ -789,14 +812,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// subsystem fired OnSpike — reporting again would double-insert.
 			if dashState == nil && dashCfg.URL != "" && dashRegistered {
 				spikeCopy := spike
-				go dashboard.ReportSpike(dashCfg.URL, &spikeCopy)
+				telemetryWG.Add(1)
+				go func() {
+					defer telemetryWG.Done()
+					reportSpike(ctx, dashCfg.URL, &spikeCopy)
+				}()
 			}
 
 		case <-dashBootstrap:
 			// First async dashboard registration attempt after startup.
 			dashBootstrap = nil // one-shot
 			if dashCfg.URL != "" && !dashRegistered {
-				if registerWithDashboard(&dashCfg) {
+				if registerWithDashboard(ctx, &dashCfg) {
 					dashRegistered = true
 					dashConfigFailures = 0
 					// Pull config immediately on successful registration so
@@ -811,7 +838,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Retry registration if a previous attempt failed. Once registered,
 			// dashRegistered stays true and this branch is skipped.
 			if dashCfg.URL != "" && !dashRegistered {
-				if registerWithDashboard(&dashCfg) {
+				if registerWithDashboard(ctx, &dashCfg) {
 					dashRegistered = true
 					dashConfigFailures = 0
 					// Same register-triggered fetch as the bootstrap path.
@@ -865,7 +892,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				if dashState != nil {
 					fresh, ferr = dashboard.GetSettings()
 				} else {
-					fresh, ferr = dashboard.FetchSettings(newFullCfg.Dashboard.URL)
+					fresh, ferr = dashboard.FetchSettings(ctx, newFullCfg.Dashboard.URL)
 				}
 				if ferr == nil {
 					lastRemote = fresh
@@ -1030,9 +1057,9 @@ func syncPerfCollector(
 // registerWithDashboard registers this host with the dashboard and performs
 // auto-pin if enabled. Returns true on success. Safe to call multiple times;
 // the dashboard treats re-registration as a no-op for already-known hosts.
-func registerWithDashboard(dashCfg *dc.DashboardConfig) bool {
+func registerWithDashboard(ctx context.Context, dashCfg *dc.DashboardConfig) bool {
 	slog.Debug("dashboard registration attempt", "url", dashCfg.URL)
-	regResult, err := dashboard.Register(dashCfg.URL)
+	regResult, err := dashboard.Register(ctx, dashCfg.URL)
 	if err != nil {
 		slog.Warn("dashboard: registration failed, will retry on next poll", "error", err)
 		return false

@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
@@ -124,7 +126,9 @@ func registerThroughServiceOrDirect(dashURL string) (*dashboard.RegisterResult, 
 	if err != nil {
 		if errors.Is(err, pipe.ErrPipeUnavailable) {
 			slog.Info("register: service pipe unreachable, falling back to direct call", "error", err)
-			return dashboard.Register(dashURL)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return dashboard.Register(ctx, dashURL)
 		}
 		return nil, err
 	}
