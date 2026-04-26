@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -349,5 +350,42 @@ func TestShouldRefuseFingerprintUpdate(t *testing.T) {
 				t.Fatalf("err = %q, want substring %q", err.Error(), "fingerprint mismatch")
 			}
 		})
+	}
+}
+
+// TestSpikeReportTracksWaitGroup verifies the production spike-launch wiring:
+// the goroutine started by startSpikeReport (and its sibling at the call site
+// in Execute) increments a waitgroup, and the goroutine actually exits when
+// the supplied ctx is cancelled. Without that wg/ctx wiring shutdown drops
+// these goroutines on the floor and they linger inside SSPI/HTTP for the
+// dashboard client's internal timeout.
+//
+// The hook MUST observe ctx — if it blocked forever instead, wg.Done would
+// never run and the test would hang regardless of correctness.
+func TestSpikeReportTracksWaitGroup(t *testing.T) {
+	prev := reportSpike
+	t.Cleanup(func() { reportSpike = prev })
+
+	reportSpike = func(ctx context.Context, _ string, _ *dc.SpikePayload) {
+		<-ctx.Done()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	startSpikeReport(ctx, &wg, "http://dashboard.invalid", &dc.SpikePayload{Host: "h"})
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Goroutine observed ctx cancel and called wg.Done.
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("spike-report goroutine did not exit within 200ms after ctx cancel — wg/ctx wiring broken")
 	}
 }

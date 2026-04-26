@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -87,7 +88,7 @@ type RegisterResult struct {
 // Register notifies the dashboard server that this host exists.
 // On success it returns the dashboard's TLS certificate fingerprint
 // (if the dashboard is running HTTPS) so the caller can enable pinning.
-func Register(dashboardURL string) (*RegisterResult, error) {
+func Register(ctx context.Context, dashboardURL string) (*RegisterResult, error) {
 	hostname, err := hostName()
 	if err != nil {
 		slog.Warn("dashboard: cannot get hostname", "error", err)
@@ -95,7 +96,7 @@ func Register(dashboardURL string) (*RegisterResult, error) {
 	}
 
 	payload, _ := json.Marshal(map[string]string{"hostname": hostname})
-	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/register", payload)
+	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/register", payload)
 	if err != nil {
 		slog.Warn("dashboard: register failed", "error", err)
 		return nil, err
@@ -135,13 +136,13 @@ func Register(dashboardURL string) (*RegisterResult, error) {
 // dashState is non-nil. Errors are logged and swallowed — the agent also
 // delivers the spike via notifications, so a transient dashboard outage never
 // suppresses the alert itself.
-func ReportSpike(dashboardURL string, spike *dc.SpikePayload) {
+func ReportSpike(ctx context.Context, dashboardURL string, spike *dc.SpikePayload) {
 	payload, err := json.Marshal(spike)
 	if err != nil {
 		slog.Warn("dashboard: spike marshal failed", "error", err)
 		return
 	}
-	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/spike", payload)
+	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/spike", payload)
 	if err != nil {
 		slog.Warn("dashboard: spike report failed", "error", err, "host", spike.Host)
 		return
@@ -160,14 +161,14 @@ func ReportSpike(dashboardURL string, spike *dc.SpikePayload) {
 
 // ReportState sends the latest CheckResult to the dashboard server.
 // Errors are logged but never crash the service.
-func ReportState(dashboardURL string, result *dc.CheckResult) {
+func ReportState(ctx context.Context, dashboardURL string, result *dc.CheckResult) {
 	payload, err := json.Marshal(result)
 	if err != nil {
 		slog.Warn("dashboard: marshal failed", "error", err)
 		return
 	}
 
-	resp, err := negotiateRequest(http.MethodPost, dashboardURL+"/api/v1/report", payload)
+	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/report", payload)
 	if err != nil {
 		slog.Warn("dashboard: report failed", "error", err)
 		return
@@ -185,14 +186,17 @@ func ReportState(dashboardURL string, result *dc.CheckResult) {
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
 // It supports multi-leg NTLM/Kerberos exchanges by feeding server challenge
 // tokens back into the SSPI client context until the handshake completes.
-func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error) {
+// The supplied ctx is propagated into every HTTP request issued by the
+// handshake loop, so cancelling it aborts in-flight calls promptly during
+// service shutdown.
+func negotiateRequest(ctx context.Context, method, rawURL string, body []byte) (*http.Response, error) {
 	logDebug := func(msg string) {
 		slog.Debug("negotiate: " + msg)
 	}
 
 	rawURL = rewriteLoopback(rawURL)
 	logDebug(fmt.Sprintf("step=create_request method=%s url=%s", method, rawURL))
-	req, err := http.NewRequest(method, rawURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -222,7 +226,7 @@ func negotiateRequest(method, rawURL string, body []byte) (*http.Response, error
 
 	for attempt := 1; attempt <= 5; attempt++ {
 		logDebug(fmt.Sprintf("step=request attempt=%d token_len=%d", attempt, len(token)))
-		req, err = http.NewRequest(method, rawURL, bytes.NewReader(body))
+		req, err = http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}
@@ -344,8 +348,8 @@ type RemoteSettings struct {
 
 // FetchSettings retrieves dashboard settings via the agent config endpoint.
 // Uses SSPI Negotiate auth and TLS pinning (same as Register/Report).
-func FetchSettings(dashboardURL string) (*RemoteSettings, error) {
-	resp, err := negotiateRequest(http.MethodGet, dashboardURL+"/api/v1/config", nil)
+func FetchSettings(ctx context.Context, dashboardURL string) (*RemoteSettings, error) {
+	resp, err := negotiateRequest(ctx, http.MethodGet, dashboardURL+"/api/v1/config", nil)
 	if err != nil {
 		slog.Warn("dashboard: fetch settings failed", "error", err)
 		return nil, fmt.Errorf("fetch settings: %w", err)
@@ -389,7 +393,7 @@ func FetchServers(url string) ([]ServerInfo, error) {
 // RemoveServer sends a DELETE request to remove a server from the dashboard.
 // Used by the CLI's "dashboard remove-server" command (localhost only).
 func RemoveServer(url string) error {
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, url, nil)
 	if err != nil {
 		return err
 	}
