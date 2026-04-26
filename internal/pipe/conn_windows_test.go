@@ -41,8 +41,12 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 // the real Windows named pipe and verifies that the cancel-event helper
 // goroutine launched inside acceptPipeConn exits each time. Before the B1
 // fix, each successful accept leaked one goroutine parked on <-ctx.Done().
+//
+// Each cycle uses a fresh pipe name so a slow client.Close on the prior
+// cycle cannot leave a half-disconnected instance under the same name to
+// race the next CreateNamedPipe. The previous shared-name approach was
+// flaky on busy CI runners with ERROR_PIPE_CONNECTED on cycle 2+.
 func TestAcceptPipeConnHelperExits(t *testing.T) {
-	uniquePipeName(t)
 	const cycles = 10
 
 	// Baseline: any helper goroutines from earlier tests must have drained.
@@ -51,7 +55,12 @@ func TestAcceptPipeConnHelperExits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	origName := PipeName
+	t.Cleanup(func() { PipeName = origName })
+
 	for i := 0; i < cycles; i++ {
+		PipeName = fmt.Sprintf(`\\.\pipe\drainctl-test-%d-%d-%d`, os.Getpid(), time.Now().UnixNano(), i)
+
 		acceptErr := make(chan error, 1)
 		acceptConn := make(chan net.Conn, 1)
 
