@@ -17,8 +17,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// PipeName is the named pipe path the service listens on.
-const PipeName = `\\.\pipe\drainctl`
+// PipeName is the named pipe path the service listens on. Declared as a var
+// rather than a const so tests can substitute a unique pipe name per run via
+// t.Cleanup, isolating the test pipe from any existing service instance on
+// the host.
+var PipeName = `\\.\pipe\drainctl`
 
 // PipeRequest is the JSON request sent by clients.
 type PipeRequest struct {
