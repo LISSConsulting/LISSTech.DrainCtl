@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -34,6 +36,17 @@ type ServerInfo struct {
 // servers.json file-based implementation.
 type ServerState struct {
 	store *telemetry.ServerStore
+
+	// cache holds the most recent immutable *ServerInfo per host. Populated by
+	// Update after a successful DB write; consulted by GetCached on the SSE
+	// hot path so broadcastServerUpdate avoids a DB read + JSON unmarshal of
+	// data we just persisted. Invalidated by Remove. Keys are hostnames,
+	// values are *ServerInfo.
+	cache sync.Map
+	// storeGetCalls counts invocations of (*ServerState).Get. Test seam used
+	// by TestBroadcastServerUpdateUsesCache to prove the SSE hot path skips
+	// the DB; production overhead is one atomic add per Get call.
+	storeGetCalls atomic.Int64
 
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
 	// Used by DashboardServer to broadcast SSE events.
@@ -79,7 +92,9 @@ func (s *ServerState) Register(hostname string) {
 	}
 }
 
-// Remove deletes a server by hostname. Returns true if found.
+// Remove deletes a server by hostname. Returns true if found. Invalidates the
+// per-host cache so a subsequent re-register starts from a clean slate and a
+// stale cached *ServerInfo can't outlive the row it described.
 func (s *ServerState) Remove(hostname string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
@@ -88,6 +103,7 @@ func (s *ServerState) Remove(hostname string) bool {
 		slog.Error("dashboard: remove failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 		return false
 	}
+	s.cache.Delete(hostname)
 	return found
 }
 
@@ -108,6 +124,21 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 // Update sets the last result and last-seen time for a registered host. No-op
 // for unregistered hosts. After persistence, fires OnUpdate + OnMetrics in
 // order (both may be nil).
+//
+// Caching contract: on a successful DB write Update populates an internal
+// cache with an immutable *ServerInfo for hostname. The cached value is built
+// from a top-level value-copy of *result wrapped in a fresh ServerInfo, which
+// breaks aliasing on the CheckResult struct itself. Inner pointer fields of
+// CheckResult (notably *PerfSnapshot, *Sessions, *EvtSpikeStatus, *time.Time
+// fields) are NOT deep-cloned — they are shared with the caller. The contract
+// is therefore: callers MUST NOT mutate *result, *result.Performance, or any
+// other inner pointer they handed to Update after the call returns. Both
+// in-tree callers (the HTTP /report handler in server.go and ReportLocal via
+// internal/svc/check.go) build a fresh CheckResult per heartbeat and do not
+// retain or mutate it after Update, so the contract holds.
+//
+// On store.Update error the cache is left untouched: a failed write must not
+// poison the cache with an unpersisted snapshot.
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	lastJSON := ""
 	if result != nil {
@@ -123,11 +154,41 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	defer cancel()
 	updated, err := s.store.Update(ctx, hostname, lastJSON)
 	if err != nil {
+		// DB write failed — do NOT populate the cache. The DB is the source
+		// of truth; caching unpersisted data would let GetCached return a
+		// view that diverges from what Get/All/the SQLite row would yield.
 		slog.Error("dashboard: update failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 		return
 	}
 	if !updated {
 		return
+	}
+
+	// Populate the SSE hot-path cache with an immutable *ServerInfo. We
+	// fetch RegisteredAt/LastSeen once from the store here so that
+	// broadcastServerUpdate can serve toServerView entirely from the cache
+	// without a per-heartbeat DB round trip + JSON unmarshal.
+	row, getErr := s.store.Get(ctx, hostname)
+	if getErr == nil && row != nil {
+		info := &ServerInfo{
+			Hostname:     row.Hostname,
+			RegisteredAt: row.RegisteredAt,
+			LastSeen:     row.LastSeen,
+		}
+		if result != nil {
+			// Top-level deep-copy: take a value copy of *result and wrap
+			// the address of that copy. This breaks aliasing on the
+			// CheckResult struct so a later call that replaces fields on
+			// the caller's *CheckResult cannot mutate the cached entry.
+			// See the godoc above for the full contract on inner pointers.
+			cached := *result
+			info.LastResult = &cached
+		}
+		s.cache.Store(hostname, info)
+	} else if getErr != nil {
+		// Couldn't read back the row we just wrote; skip caching this
+		// round so GetCached falls back to Get on the next broadcast.
+		slog.Warn("dashboard: update cache repopulate failed", "host", hostname, "error", getErr) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 	}
 
 	if s.OnUpdate != nil {
@@ -138,8 +199,27 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	}
 }
 
+// GetCached returns the cached *ServerInfo for hostname populated by the most
+// recent successful Update, or nil on miss. Callers that need a guaranteed
+// fallback (e.g. first broadcast after restart, before any Update has run)
+// must invoke Get themselves on nil. By design GetCached does NOT touch the
+// DB — that's the point of the cache and the property
+// TestBroadcastServerUpdateUsesCache asserts.
+func (s *ServerState) GetCached(hostname string) *ServerInfo {
+	v, ok := s.cache.Load(hostname)
+	if !ok {
+		return nil
+	}
+	info, ok := v.(*ServerInfo)
+	if !ok {
+		return nil
+	}
+	return info
+}
+
 // Get returns a snapshot of the named server, or nil if not registered.
 func (s *ServerState) Get(hostname string) *ServerInfo {
+	s.storeGetCalls.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
 	info, err := s.store.Get(ctx, hostname)
