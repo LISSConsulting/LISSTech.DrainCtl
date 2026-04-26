@@ -2742,14 +2742,18 @@ func newTestServerWithStore(t *testing.T) (*DashboardServer, *telemetry.MetricsS
 	if err != nil {
 		t.Fatalf("telemetry.Open: %v", err)
 	}
-	ms := telemetry.NewMetricsStore(db)
+	ms, err := telemetry.NewMetricsStore(context.Background(), db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("NewMetricsStore: %v", err)
+	}
 	ds := &DashboardServer{
 		state:  newTestServerState(t),
 		cfg:    dc.DashboardConfig{Group: "Domain Admins"},
 		broker: NewBroker(),
 		ms:     ms,
 	}
-	return ds, ms, func() { _ = db.Close() }
+	return ds, ms, func() { _ = ms.Close(); _ = db.Close() }
 }
 
 func TestMetricsHandler_ContractShape(t *testing.T) {
@@ -2936,7 +2940,11 @@ func newTestServerWithAggregator(t *testing.T) (*DashboardServer, *telemetry.Met
 	if err != nil {
 		t.Fatalf("telemetry.Open: %v", err)
 	}
-	ms := telemetry.NewMetricsStore(db)
+	ms, err := telemetry.NewMetricsStore(context.Background(), db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("NewMetricsStore: %v", err)
+	}
 	agg := telemetry.NewAggregator(db, 60)
 	ds := &DashboardServer{
 		state:  newTestServerState(t),
@@ -2944,7 +2952,7 @@ func newTestServerWithAggregator(t *testing.T) (*DashboardServer, *telemetry.Met
 		broker: NewBroker(),
 		ms:     ms,
 	}
-	return ds, ms, agg, func() { _ = db.Close() }
+	return ds, ms, agg, func() { _ = ms.Close(); _ = db.Close() }
 }
 
 // decodeMetricsTier reads just the `tier` field from a handler response body.
