@@ -43,9 +43,19 @@ type ServerState struct {
 	// data we just persisted. Invalidated by Remove. Keys are hostnames,
 	// values are *ServerInfo.
 	cache sync.Map
-	// storeGetCalls counts invocations of (*ServerState).Get. Test seam used
-	// by TestBroadcastServerUpdateUsesCache to prove the SSE hot path skips
-	// the DB; production overhead is one atomic add per Get call.
+	// registeredAt caches each host's immutable registered_at timestamp so
+	// the heartbeat path can build cached *ServerInfo values without a
+	// per-Update store.Get. Lazy-loaded on first Update per host (one Get
+	// per host process-lifetime); subsequent Updates for that host skip the
+	// DB read entirely. Invalidated on Remove so re-registration's fresh
+	// timestamp is picked up on next Update. Keys are hostnames, values
+	// are time.Time.
+	registeredAt sync.Map
+	// storeGetCalls counts every call this ServerState makes into the
+	// underlying telemetry.ServerStore.Get — the public Get wrapper AND
+	// the lazy lookupRegisteredAt path. Test seam used to prove the SSE
+	// broadcast and the steady-state heartbeat both skip the DB. Production
+	// overhead is one atomic add per underlying Get call.
 	storeGetCalls atomic.Int64
 
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
@@ -104,6 +114,7 @@ func (s *ServerState) Remove(hostname string) bool {
 		return false
 	}
 	s.cache.Delete(hostname)
+	s.registeredAt.Delete(hostname)
 	return found
 }
 
@@ -164,32 +175,42 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		return
 	}
 
-	// Populate the SSE hot-path cache with an immutable *ServerInfo. We
-	// fetch RegisteredAt/LastSeen once from the store here so that
-	// broadcastServerUpdate can serve toServerView entirely from the cache
-	// without a per-heartbeat DB round trip + JSON unmarshal.
-	row, getErr := s.store.Get(ctx, hostname)
-	if getErr == nil && row != nil {
-		info := &ServerInfo{
-			Hostname:     row.Hostname,
-			RegisteredAt: row.RegisteredAt,
-			LastSeen:     row.LastSeen,
+	// Populate the SSE hot-path cache with an immutable *ServerInfo. The
+	// registered_at timestamp is immutable post-Register, so we cache it
+	// per-host on first Update (one DB read per host process-lifetime) and
+	// reuse for every subsequent heartbeat — that's the actual hot-path
+	// DB-read elimination this commit was meant to deliver. LastSeen is
+	// generated locally from time.Now() to match the timestamp ServerStore
+	// just wrote (modulo sub-millisecond skew, inconsequential for stale-
+	// status display).
+	registeredAt, ok := s.lookupRegisteredAt(ctx, hostname)
+	if !ok {
+		// Couldn't determine registered_at (DB error or row vanished
+		// between Update and Get). Skip caching this round; GetCached
+		// falls back to Get on the next broadcast.
+		if s.OnUpdate != nil {
+			s.OnUpdate(hostname)
 		}
-		if result != nil {
-			// Top-level deep-copy: take a value copy of *result and wrap
-			// the address of that copy. This breaks aliasing on the
-			// CheckResult struct so a later call that replaces fields on
-			// the caller's *CheckResult cannot mutate the cached entry.
-			// See the godoc above for the full contract on inner pointers.
-			cached := *result
-			info.LastResult = &cached
+		if s.OnMetrics != nil && result != nil {
+			s.OnMetrics(*result)
 		}
-		s.cache.Store(hostname, info)
-	} else if getErr != nil {
-		// Couldn't read back the row we just wrote; skip caching this
-		// round so GetCached falls back to Get on the next broadcast.
-		slog.Warn("dashboard: update cache repopulate failed", "host", hostname, "error", getErr) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return
 	}
+	info := &ServerInfo{
+		Hostname:     hostname,
+		RegisteredAt: registeredAt,
+		LastSeen:     time.Now().UTC(),
+	}
+	if result != nil {
+		// Top-level deep-copy: take a value copy of *result and wrap
+		// the address of that copy. This breaks aliasing on the
+		// CheckResult struct so a later call that replaces fields on
+		// the caller's *CheckResult cannot mutate the cached entry.
+		// See the godoc above for the full contract on inner pointers.
+		cached := *result
+		info.LastResult = &cached
+	}
+	s.cache.Store(hostname, info)
 
 	if s.OnUpdate != nil {
 		s.OnUpdate(hostname)
@@ -197,6 +218,28 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if s.OnMetrics != nil && result != nil {
 		s.OnMetrics(*result)
 	}
+}
+
+// lookupRegisteredAt returns the cached registered_at for hostname or, on a
+// cache miss, performs ONE store.Get to read it and populate the cache. After
+// the first Update for a given host, every subsequent Update for that host
+// hits the cache and skips the DB. Returns (zero, false) on any DB error or
+// when the row is missing.
+func (s *ServerState) lookupRegisteredAt(ctx context.Context, hostname string) (time.Time, bool) {
+	if v, ok := s.registeredAt.Load(hostname); ok {
+		return v.(time.Time), true
+	}
+	s.storeGetCalls.Add(1)
+	row, err := s.store.Get(ctx, hostname)
+	if err != nil {
+		slog.Warn("dashboard: lookupRegisteredAt failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return time.Time{}, false
+	}
+	if row == nil {
+		return time.Time{}, false
+	}
+	s.registeredAt.Store(hostname, row.RegisteredAt)
+	return row.RegisteredAt, true
 }
 
 // GetCached returns the cached *ServerInfo for hostname populated by the most

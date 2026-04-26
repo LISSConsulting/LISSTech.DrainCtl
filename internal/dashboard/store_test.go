@@ -324,6 +324,34 @@ func hostname(n int) string {
 
 // ── SSE hot-path cache (Step 7 / C2) ──────────────────────────────────────────
 
+// TestUpdateLazilyLoadsRegisteredAt is a load-bearing assertion for the
+// heartbeat hot-path optimization: after the first Update for a given host
+// has cached its immutable registered_at, subsequent Updates must NOT touch
+// the underlying ServerStore.Get. Without this property the C2 cache only
+// shifts the per-heartbeat DB read from broadcastServerUpdate into Update —
+// a wash. With it, the steady-state heartbeat is one DB write only.
+func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	baseline := ds.state.storeGetCalls.Load()
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	afterFirst := ds.state.storeGetCalls.Load()
+
+	if afterFirst != baseline+1 {
+		t.Fatalf("first Update for SRV01: storeGetCalls baseline=%d after=%d, want exactly +1 (lazy registered_at load)", baseline, afterFirst)
+	}
+
+	for i := 0; i < 10; i++ {
+		ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	}
+	afterSteadyState := ds.state.storeGetCalls.Load()
+
+	if afterSteadyState != afterFirst {
+		t.Fatalf("steady-state Updates for SRV01: storeGetCalls afterFirst=%d afterSteadyState=%d, want equal — heartbeat path still hits ServerStore.Get", afterFirst, afterSteadyState)
+	}
+}
+
 // TestBroadcastServerUpdateUsesCache is the load-bearing assertion for the
 // per-host SSE cache: after Update has populated the cache, broadcastServerUpdate
 // must NOT touch the underlying ServerStore. We probe this via the
