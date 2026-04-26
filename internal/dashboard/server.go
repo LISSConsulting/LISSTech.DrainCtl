@@ -2391,7 +2391,7 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 	ts := r.Timestamp
 	host := r.Host
 
-	var out []telemetry.Sample
+	out := make([]telemetry.Sample, 0, 32)
 	add := func(counter string, v float64) {
 		out = append(out, telemetry.Sample{Ts: ts, Host: host, Counter: counter, Value: v})
 	}
