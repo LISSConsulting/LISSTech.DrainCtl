@@ -13,7 +13,12 @@ import (
 func newAggregator(t *testing.T) (*Aggregator, *MetricsStore, *DB) {
 	t.Helper()
 	db := openTestDB(t)
-	return NewAggregator(db, 60), NewMetricsStore(db), db
+	ms, err := NewMetricsStore(context.Background(), db)
+	if err != nil {
+		t.Fatalf("NewMetricsStore: %v", err)
+	}
+	t.Cleanup(func() { _ = ms.Close() })
+	return NewAggregator(db, 60), ms, db
 }
 
 // pastBucketStart returns the start of an hour bucket comfortably past the

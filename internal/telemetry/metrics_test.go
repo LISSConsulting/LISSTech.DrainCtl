@@ -4,10 +4,13 @@ package telemetry
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,7 +18,12 @@ import (
 func newMetricsStore(t *testing.T) (*MetricsStore, *DB) {
 	t.Helper()
 	db := openTestDB(t)
-	return NewMetricsStore(db), db
+	ms, err := NewMetricsStore(context.Background(), db)
+	if err != nil {
+		t.Fatalf("NewMetricsStore: %v", err)
+	}
+	t.Cleanup(func() { _ = ms.Close() })
+	return ms, db
 }
 
 // capturingHandler is a slog.Handler that records every emitted record for
@@ -465,7 +473,11 @@ func TestRestart_LosesAtMostOneSamplingInterval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open (pre): %v", err)
 	}
-	ms1 := NewMetricsStore(db1)
+	ms1, err := NewMetricsStore(context.Background(), db1)
+	if err != nil {
+		_ = db1.Close()
+		t.Fatalf("NewMetricsStore (pre): %v", err)
+	}
 	preBatch := make([]Sample, preSamples)
 	for i := 0; i < preSamples; i++ {
 		preBatch[i] = Sample{
@@ -496,7 +508,11 @@ func TestRestart_LosesAtMostOneSamplingInterval(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db2.Close() })
 
-	ms2 := NewMetricsStore(db2)
+	ms2, err := NewMetricsStore(context.Background(), db2)
+	if err != nil {
+		t.Fatalf("NewMetricsStore (post): %v", err)
+	}
+	t.Cleanup(func() { _ = ms2.Close() })
 	resumeStart := base.Add(time.Duration(preSamples+1) * samplingInterval) // skip exactly one interval
 	postBatch := make([]Sample, postSamples)
 	for i := 0; i < postSamples; i++ {
@@ -534,5 +550,145 @@ func TestRestart_LosesAtMostOneSamplingInterval(t *testing.T) {
 			t.Errorf("gap at index %d = %d ms, exceeds %d ms (2 × sampling interval = %d s) — SC-004 violated",
 				i, gap, maxGapMs, samplingInterval/time.Second)
 		}
+	}
+}
+
+// TestNewMetricsStoreFailsOnReadOnlyDB proves the nil-writer guard. A *DB
+// produced by OpenReadOnly has writer == nil; passing it to NewMetricsStore
+// must return errReadOnlyDB rather than nil-panicking on first Append.
+func TestNewMetricsStoreFailsOnReadOnlyDB(t *testing.T) {
+	roDB := &DB{} // writer/auditDB/checkpointDB all nil — same shape as OpenReadOnly result
+	ms, err := NewMetricsStore(context.Background(), roDB)
+	if !errors.Is(err, errReadOnlyDB) {
+		t.Fatalf("err = %v, want errReadOnlyDB", err)
+	}
+	if ms != nil {
+		t.Errorf("store = %v on error path, want nil", ms)
+	}
+
+	// nil DB should also be rejected by the same guard.
+	if _, err := NewMetricsStore(context.Background(), nil); !errors.Is(err, errReadOnlyDB) {
+		t.Errorf("nil DB err = %v, want errReadOnlyDB", err)
+	}
+}
+
+// TestMetricsStoreAppendReusesStmt is the load-bearing verification for the
+// Step 6 change: across 100 Append calls the cached statement must be
+// prepared exactly once, not 100×. Test seam: swap prepareWriter for a
+// counting wrapper around (*sql.DB).PrepareContext (same pattern as
+// internal/evtspike/subscriber_windows.go and internal/dashboard/sspi.go).
+func TestMetricsStoreAppendReusesStmt(t *testing.T) {
+	var prepares atomic.Int32
+	origPrepare := prepareWriter
+	prepareWriter = func(ctx context.Context, w *sql.DB, sqlStr string) (*sql.Stmt, error) {
+		prepares.Add(1)
+		return w.PrepareContext(ctx, sqlStr)
+	}
+	t.Cleanup(func() { prepareWriter = origPrepare })
+
+	ms, _ := newMetricsStore(t)
+
+	if got := prepares.Load(); got != 1 {
+		t.Fatalf("prepareWriter called %d times after construction, want 1", got)
+	}
+
+	base := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 100; i++ {
+		err := ms.Append(context.Background(), []Sample{
+			{Ts: base.Add(time.Duration(i) * time.Second), Host: "SRV01", Counter: "cpu.util", Value: float64(i)},
+		})
+		if err != nil {
+			t.Fatalf("Append #%d: %v", i, err)
+		}
+	}
+
+	if got := prepares.Load(); got != 1 {
+		t.Errorf("prepareWriter called %d times after 100 Appends, want exactly 1", got)
+	}
+}
+
+// TestMetricsStoreCloseDuringAppendIsSafe drives the close-during-Append
+// race deterministically via appendHook. Asserts ordering: Close blocks
+// while Append holds the RLock at the hook, then proceeds; the in-flight
+// Append commits successfully; subsequent Appends return errStoreClosed.
+func TestMetricsStoreCloseDuringAppendIsSafe(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+
+	hookEntered := make(chan struct{})
+	hookRelease := make(chan struct{})
+	origHook := appendHook
+	appendHook = func() {
+		close(hookEntered)
+		<-hookRelease
+	}
+	t.Cleanup(func() { appendHook = origHook })
+
+	appendDone := make(chan error, 1)
+	go func() {
+		appendDone <- ms.Append(context.Background(), []Sample{
+			{Ts: time.Now().UTC(), Host: "SRV01", Counter: "cpu.util", Value: 1},
+		})
+	}()
+
+	// Wait until the in-flight Append is parked at the hook holding RLock.
+	<-hookEntered
+
+	// Reset the hook so Close (called below from another goroutine) and
+	// any subsequent Append do NOT re-enter the blocking path.
+	appendHook = origHook
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- ms.Close()
+	}()
+
+	// Close must NOT complete while Append still holds the RLock.
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned (%v) before in-flight Append released RLock — RWMutex contract violated", err)
+	case <-time.After(100 * time.Millisecond):
+		// expected: Close is parked waiting for the RLock.
+	}
+
+	// Release the in-flight Append. It should commit successfully because
+	// stmt was prepared before Close fires (the tx-scoped wrapper from
+	// StmtContext was acquired prior to the hook).
+	close(hookRelease)
+
+	if err := <-appendDone; err != nil {
+		t.Errorf("in-flight Append returned %v, want nil — close-during-append corrupted tx", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Errorf("Close returned %v, want nil", err)
+	}
+
+	// Subsequent Append must return errStoreClosed, no panic.
+	err := ms.Append(context.Background(), []Sample{
+		{Ts: time.Now().UTC(), Host: "SRV01", Counter: "cpu.util", Value: 2},
+	})
+	if !errors.Is(err, errStoreClosed) {
+		t.Errorf("post-Close Append err = %v, want errStoreClosed", err)
+	}
+}
+
+// TestMetricsStoreAppendAfterCloseFails is the simple no-race counterpart
+// to the close-during-Append test: serial Close → Append must surface
+// errStoreClosed without nil-panicking on the cleared stmt pointer.
+func TestMetricsStoreAppendAfterCloseFails(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+
+	if err := ms.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Idempotent — second Close is a no-op.
+	if err := ms.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+
+	err := ms.Append(context.Background(), []Sample{
+		{Ts: time.Now().UTC(), Host: "SRV01", Counter: "cpu.util", Value: 1},
+	})
+	if !errors.Is(err, errStoreClosed) {
+		t.Errorf("post-Close Append err = %v, want errStoreClosed", err)
 	}
 }

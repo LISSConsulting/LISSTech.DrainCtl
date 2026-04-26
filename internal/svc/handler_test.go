@@ -131,7 +131,11 @@ func TestHandleHistory_EnrichesFromMetrics(t *testing.T) {
 		t.Fatalf("NewAuditStore: %v", err)
 	}
 	defer func() { _ = audit.Close() }()
-	ms := telemetry.NewMetricsStore(db)
+	ms, err := telemetry.NewMetricsStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewMetricsStore: %v", err)
+	}
+	defer func() { _ = ms.Close() }()
 
 	h := &serviceHandler{audit: audit, metrics: ms}
 	cfg := dc.DefaultConfig().ToServiceConfig()

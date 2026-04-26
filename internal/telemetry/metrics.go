@@ -5,9 +5,11 @@ package telemetry
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +17,36 @@ import (
 // before Append logs a WARN. Samples are stored regardless — clock sync is
 // the operator's responsibility (spec.md §Assumptions, spec.md:121).
 const futureSkewThreshold = 5 * time.Minute
+
+// metricsAppendSQL is the constant insert prepared once at MetricsStore
+// construction. The previous inline form re-prepared on every Append; with
+// per-host heartbeats that adds up. Whitespace + ON CONFLICT clause are
+// preserved verbatim so the cached plan matches the prior inline plan.
+const metricsAppendSQL = "INSERT INTO metrics_raw (ts, host, counter, value) VALUES (?, ?, ?, ?) ON CONFLICT(host, ts, counter) DO NOTHING"
+
+// errReadOnlyDB is returned by NewMetricsStore when the supplied *DB has no
+// writer pool (e.g. produced by OpenReadOnly). Self-defending guard — no
+// current caller passes a read-only DB, but the contract should fail loudly
+// rather than nil-panic on first Append.
+var errReadOnlyDB = errors.New("telemetry: NewMetricsStore requires a writer-capable DB")
+
+// errStoreClosed is returned by Append after Close has been called. The
+// store rejects further work rather than re-preparing or nil-panicking.
+var errStoreClosed = errors.New("telemetry: MetricsStore is closed")
+
+// prepareWriter is a test seam for verifying that the cached statement is
+// prepared exactly once across an Append loop. Production sets it to a thin
+// wrapper around (*sql.DB).PrepareContext; tests swap in a counting wrapper.
+// Same pattern as evtspike.subscribe / dashboard.acquireServerCredentials.
+var prepareWriter = func(ctx context.Context, w *sql.DB, sqlStr string) (*sql.Stmt, error) {
+	return w.PrepareContext(ctx, sqlStr)
+}
+
+// appendHook is a deterministic test seam used by
+// TestMetricsStoreCloseDuringAppendIsSafe to drive the close-during-Append
+// race. Production no-op. Position inside Append: AFTER the closed-check,
+// BEFORE BeginTx — so a blocked hook holds the RLock with no DB tx open.
+var appendHook = func() {}
 
 // Tier identifies the resolution tier of a metrics query.
 type Tier int
@@ -72,34 +104,69 @@ type Series struct {
 
 // MetricsStore provides write and read access to all metrics tiers.
 type MetricsStore struct {
-	db *DB
+	db         *DB
+	stmtMu     sync.RWMutex // serializes Append (RLock) against Close (Lock)
+	appendStmt *sql.Stmt    // nil after Close; set under Lock
 }
 
-// NewMetricsStore wraps an open DB as a MetricsStore.
-func NewMetricsStore(db *DB) *MetricsStore {
-	return &MetricsStore{db: db}
+// NewMetricsStore prepares the cached metrics-insert statement and returns a
+// store ready for Append/QueryRange. The metricsAppendSQL plan is parsed
+// once here instead of per-call inside Append — heartbeats (one Append per
+// host per minute) used to re-prepare on every call.
+//
+// The db.writer == nil guard is required: OpenReadOnly returns a *DB with a
+// nil writer pool, and the constructor's contract is to fail loudly rather
+// than nil-panic on the first Append.
+func NewMetricsStore(ctx context.Context, db *DB) (*MetricsStore, error) {
+	if db == nil || db.writer == nil {
+		return nil, errReadOnlyDB
+	}
+	stmt, err := prepareWriter(ctx, db.writer, metricsAppendSQL)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: prepare metrics insert: %w", err)
+	}
+	return &MetricsStore{db: db, appendStmt: stmt}, nil
+}
+
+// Close releases the cached append statement. Idempotent — a second call is
+// a no-op. Must be invoked before the underlying DB's Close on shutdown so
+// the prepared statement is finalised before its connection pool tears down.
+func (s *MetricsStore) Close() error {
+	s.stmtMu.Lock()
+	defer s.stmtMu.Unlock()
+	if s.appendStmt == nil {
+		return nil
+	}
+	err := s.appendStmt.Close()
+	s.appendStmt = nil
+	return err
 }
 
 // Append inserts samples into metrics_raw in a single batched transaction.
 // ON CONFLICT DO NOTHING makes the call idempotent for duplicate (host, ts, counter) triples.
+//
+// The prepared statement is acquired under stmtMu.RLock so Close (which
+// takes the write lock) waits for in-flight Appends to finish. tx.StmtContext
+// returns a tx-scoped wrapper that does NOT own the cached *sql.Stmt — the
+// wrapper is released when the tx commits or rolls back.
 func (s *MetricsStore) Append(ctx context.Context, samples []Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
+	s.stmtMu.RLock()
+	defer s.stmtMu.RUnlock()
+	if s.appendStmt == nil {
+		return errStoreClosed
+	}
+	appendHook()
 	tx, err := s.db.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("telemetry: metrics Append begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO metrics_raw (ts, host, counter, value)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(host, ts, counter) DO NOTHING`)
-	if err != nil {
-		return fmt.Errorf("telemetry: metrics Append prepare: %w", err)
-	}
-	defer func() { _ = stmt.Close() }()
+	stmt := tx.StmtContext(ctx, s.appendStmt)
+	// no defer stmt.Close() — tx-scoped wrapper does not own underlying
 
 	now := time.Now().UTC()
 	skewCutoff := now.Add(futureSkewThreshold)
