@@ -51,6 +51,7 @@ prune_*.html
 .superpowers/
 .playwright-mcp/
 .claude/settings.local.json
+.claude/worktrees/
 
 # Local MSI revision counter (per-commit; bumped by `just all`/`just release`)
 .msi-revision.json
