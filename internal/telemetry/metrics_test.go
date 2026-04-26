@@ -574,9 +574,11 @@ func TestNewMetricsStoreFailsOnReadOnlyDB(t *testing.T) {
 
 // TestMetricsStoreAppendReusesStmt is the load-bearing verification for the
 // Step 6 change: across 100 Append calls the cached statement must be
-// prepared exactly once, not 100×. Test seam: swap prepareWriter for a
-// counting wrapper around (*sql.DB).PrepareContext (same pattern as
-// internal/evtspike/subscriber_windows.go and internal/dashboard/sspi.go).
+// prepared exactly once AND every Append must bind that exact cached stmt
+// to its per-call transaction. Counts both seams so a regression that
+// replaced txBindStmt with a fresh tx.PrepareContext would fail this test:
+// prepareWriter alone wouldn't catch it because that seam only fires inside
+// NewMetricsStore.
 func TestMetricsStoreAppendReusesStmt(t *testing.T) {
 	var prepares atomic.Int32
 	origPrepare := prepareWriter
@@ -585,6 +587,16 @@ func TestMetricsStoreAppendReusesStmt(t *testing.T) {
 		return w.PrepareContext(ctx, sqlStr)
 	}
 	t.Cleanup(func() { prepareWriter = origPrepare })
+
+	var binds atomic.Int32
+	var boundStmtPtr atomic.Pointer[sql.Stmt]
+	origBind := txBindStmt
+	txBindStmt = func(ctx context.Context, tx *sql.Tx, stmt *sql.Stmt) *sql.Stmt {
+		binds.Add(1)
+		boundStmtPtr.Store(stmt)
+		return tx.StmtContext(ctx, stmt)
+	}
+	t.Cleanup(func() { txBindStmt = origBind })
 
 	ms, _ := newMetricsStore(t)
 
@@ -604,6 +616,12 @@ func TestMetricsStoreAppendReusesStmt(t *testing.T) {
 
 	if got := prepares.Load(); got != 1 {
 		t.Errorf("prepareWriter called %d times after 100 Appends, want exactly 1", got)
+	}
+	if got := binds.Load(); got != 100 {
+		t.Errorf("txBindStmt called %d times across 100 Appends, want exactly 100 — Append regressed away from binding the cached stmt?", got)
+	}
+	if got := boundStmtPtr.Load(); got != ms.appendStmt {
+		t.Errorf("txBindStmt was called with stmt=%p, want the cached appendStmt=%p — Append is binding a different stmt", got, ms.appendStmt)
 	}
 }
 
