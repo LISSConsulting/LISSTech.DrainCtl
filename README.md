@@ -6,11 +6,20 @@
 
 <p align="center"><strong>Real-time Remote Desktop Session Host drain mode monitoring for Windows Server.</strong></p>
 
+![Status](https://img.shields.io/badge/Status-Beta-orange)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows_Server_2016+-0078D4?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue)
-[![Version](https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?label=Version&color=green)](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest)
-[![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
+[![Version](https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?label=Version&color=green&include_prereleases)](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases)
+[![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue&include_prereleases)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
+
+> **⚠️ Beta — every release is a pre-release until 1.0.** DrainCtl is in active development and runs in production on the LISS Technologies fleet. Things move quickly; treat it as a release candidate. PSGallery installs require `-AllowPrerelease`:
+>
+> ```powershell
+> Install-Module LISSTech.DrainCtl -AllowPrerelease
+> ```
+>
+> GitHub releases are flagged "Pre-release"; pick a download URL deliberately rather than relying on a "Latest" badge.
 
 Know the instant someone blocks new connections on your RDSH servers. DrainCtl runs as a Windows Service that detects drain mode changes in real time, persists audit events and performance metrics to a local SQLite store, and tells you exactly who made the change. Query it from the CLI, PowerShell, or your RMM &mdash; the answer is always instant.
 

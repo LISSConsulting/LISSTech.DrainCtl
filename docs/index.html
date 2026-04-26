@@ -1252,6 +1252,12 @@
             </div>
         </nav>
 
+        <!-- Beta banner -->
+        <div style="background:linear-gradient(90deg,rgba(255,165,0,0.18),rgba(255,165,0,0.08));border-bottom:2px solid rgba(255,140,0,0.55);padding:12px 16px;text-align:center;font-size:14px;line-height:1.5;color:var(--fg)">
+            <strong>⚠️ Beta &mdash;</strong> every release is a pre-release until 1.0. DrainCtl is in active development and runs in production on the LISS Technologies fleet. Things move quickly; treat it as a release candidate.
+            <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" style="text-decoration:underline;color:inherit">Browse releases &rarr;</a>
+        </div>
+
         <!-- Hero -->
         <section class="hero">
             <div class="wrap">
@@ -1264,9 +1270,9 @@
                 </p>
                 <div class="hero-buttons">
                     <a
-                        href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
+                        href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases"
                         class="btn btn-fill"
-                        >Download MSI</a
+                        >Choose release &rarr;</a
                     >
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl" class="btn btn-ghost">View Source</a>
                 </div>
@@ -1878,9 +1884,9 @@
                         </ul>
                         <div class="install-cta">
                             <a
-                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
+                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases"
                                 class="btn btn-fill btn--block"
-                                >Download MSI</a
+                                >Choose release &rarr;</a
                             >
                         </div>
                     </div>
@@ -1899,16 +1905,16 @@
                         </ul>
                         <div class="install-cta">
                             <a
-                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest/download/LISSTech.DrainCtl.msi"
+                                href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases"
                                 class="btn btn-fill btn--block"
-                                >Download MSI</a
+                                >Choose release &rarr;</a
                             >
                         </div>
                     </div>
                     <div class="install-card card">
                         <h3>&#128026; PowerShell Gallery</h3>
-                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting.</p>
-                        <code class="mono">Install-Module LISSTech.DrainCtl</code>
+                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting. <strong>Pre-release</strong> &mdash; <code>-AllowPrerelease</code> required.</p>
+                        <code class="mono">Install-Module LISSTech.DrainCtl -AllowPrerelease</code>
                         <ul>
                             <li>12 cmdlets</li>
                             <li>PS 5.1 + PS 7+</li>
