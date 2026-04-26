@@ -321,3 +321,111 @@ func TestServerState_ConcurrentAccess(t *testing.T) {
 func hostname(n int) string {
 	return "SRV" + string(rune('A'+n))
 }
+
+// ── SSE hot-path cache (Step 7 / C2) ──────────────────────────────────────────
+
+// TestBroadcastServerUpdateUsesCache is the load-bearing assertion for the
+// per-host SSE cache: after Update has populated the cache, broadcastServerUpdate
+// must NOT touch the underlying ServerStore. We probe this via the
+// storeGetCalls counter that wraps (*ServerState).Get.
+func TestBroadcastServerUpdateUsesCache(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	before := ds.state.storeGetCalls.Load()
+	ds.broadcastServerUpdate("SRV01")
+	after := ds.state.storeGetCalls.Load()
+
+	if after != before {
+		t.Fatalf("broadcastServerUpdate hit store.Get: before=%d after=%d, want equal", before, after)
+	}
+	if ds.state.GetCached("SRV01") == nil {
+		t.Error("GetCached(SRV01) returned nil after Update")
+	}
+}
+
+// TestUpdateDoesNotPoisonCacheOnDBError forces the underlying telemetry DB
+// closed so store.Update returns an error, then verifies the cache stays
+// empty for the never-persisted hostname.
+func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	s := NewServerState(telemetry.NewServerStore(db))
+
+	s.Register("SRV01") // succeeds while DB is open
+
+	// Close the DB; subsequent store.Update calls must error out.
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close: %v", err)
+	}
+
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+
+	if got := s.GetCached("SRV01"); got != nil {
+		t.Fatalf("GetCached after failed Update = %+v, want nil (cache must not be poisoned)", got)
+	}
+}
+
+// TestRemoveClearsCache verifies Remove invalidates the cache and that a
+// post-Remove broadcast falls through to store.Get (visible via the counter).
+func TestRemoveClearsCache(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	if ds.state.GetCached("SRV01") == nil {
+		t.Fatal("precondition: cache should be populated after Update")
+	}
+
+	if !ds.state.Remove("SRV01") {
+		t.Fatal("Remove returned false for a registered host")
+	}
+
+	if got := ds.state.GetCached("SRV01"); got != nil {
+		t.Fatalf("GetCached after Remove = %+v, want nil", got)
+	}
+
+	before := ds.state.storeGetCalls.Load()
+	ds.broadcastServerUpdate("SRV01")
+	after := ds.state.storeGetCalls.Load()
+
+	if after != before+1 {
+		t.Fatalf("broadcastServerUpdate after Remove: storeGetCalls before=%d after=%d, want exactly +1 (cache miss → Get fallback)", before, after)
+	}
+}
+
+// TestCachedServerInfoIsImmutable verifies that the cache stores an immutable
+// snapshot — a second Update with a different *CheckResult must NOT mutate
+// the *ServerInfo a previous GetCached caller is still holding.
+func TestCachedServerInfoIsImmutable(t *testing.T) {
+	s := newTestServerState(t)
+	s.Register("SRV01")
+
+	first := &dc.CheckResult{Host: "SRV01", Status: "Healthy"}
+	s.Update("SRV01", first)
+
+	captured := s.GetCached("SRV01")
+	if captured == nil || captured.LastResult == nil {
+		t.Fatal("GetCached after first Update returned nil/empty")
+	}
+	if captured.LastResult.Status != "Healthy" {
+		t.Fatalf("captured.LastResult.Status = %q, want Healthy", captured.LastResult.Status)
+	}
+
+	// Second Update with a DIFFERENT result.
+	second := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
+	s.Update("SRV01", second)
+
+	if captured.LastResult.Status != "Healthy" {
+		t.Errorf("first cached snapshot mutated by second Update: status=%q, want Healthy", captured.LastResult.Status)
+	}
+
+	// And the new GetCached call returns the new snapshot.
+	now := s.GetCached("SRV01")
+	if now == nil || now.LastResult == nil || now.LastResult.Status != "Alert" {
+		t.Errorf("post-second-Update GetCached.LastResult.Status = %v, want Alert", now)
+	}
+}

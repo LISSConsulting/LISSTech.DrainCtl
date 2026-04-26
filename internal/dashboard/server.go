@@ -2164,9 +2164,16 @@ func mustMarshal(v any) json.RawMessage {
 }
 
 // broadcastServerUpdate builds a ServerView for the named host and broadcasts
-// it as a server_update SSE event.
+// it as a server_update SSE event. Reads the cached *ServerInfo populated by
+// the most recent ServerState.Update; falls back to a DB read only when the
+// cache is cold (e.g. broadcast triggered by Register before any heartbeat,
+// or process restart). The cache hit path skips the per-heartbeat DB read +
+// JSON unmarshal that previously fired for every registered host.
 func (ds *DashboardServer) broadcastServerUpdate(host string) {
-	info := ds.state.Get(host)
+	info := ds.state.GetCached(host)
+	if info == nil {
+		info = ds.state.Get(host)
+	}
 	if info == nil {
 		return
 	}
