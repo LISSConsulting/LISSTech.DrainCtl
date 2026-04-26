@@ -13,7 +13,7 @@
 [![Version](https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?label=Version&color=green&include_prereleases)](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases)
 [![PSGallery](https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?label=PSGallery&color=blue&include_prereleases)](https://www.powershellgallery.com/packages/LISSTech.DrainCtl)
 
-> **⚠️ Beta — every release is a pre-release until 1.0.** DrainCtl is in active development and runs in production on the LISS Technologies fleet. Things move quickly; treat it as a release candidate. PSGallery installs require `-AllowPrerelease`:
+> **⚠️ Beta.** DrainCtl uses CalVer (`YY.DOY.N`) — there is no 1.0. The product is in active development and runs in production on the LISS Technologies fleet. Things move quickly; treat every release as a release candidate. PSGallery installs require `-AllowPrerelease`:
 >
 > ```powershell
 > Install-Module LISSTech.DrainCtl -AllowPrerelease
