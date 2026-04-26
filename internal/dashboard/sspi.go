@@ -40,16 +40,59 @@ func GetAuthInfo(r *http.Request) *AuthInfo {
 
 // pendingCtx holds an in-progress NTLM multi-leg server context.
 type pendingCtx struct {
-	cred    *sspi.Credentials
 	sc      *negotiate.ServerContext
 	created time.Time
+}
+
+// acquireServerCredentials is a package var so tests can inject a fake.
+// Per-request invocation leaks LSASS-side state via Win32 AcquireCredentialsHandle;
+// see sharedServerCred for the once-and-reuse contract.
+var acquireServerCredentials = negotiate.AcquireServerCredentials
+
+// sharedServerCred lazily acquires SSPI server credentials on first use and
+// reuses the handle for every subsequent caller. Acquiring credentials per
+// request is the documented anti-pattern that grows lsass.exe linearly.
+// Errors are not cached: a failed acquire is retried on the next call so a
+// transient LSASS hiccup at startup doesn't permanently disable auth.
+type sharedServerCred struct {
+	acquire func(string) (*sspi.Credentials, error)
+	mu      sync.Mutex
+	cred    *sspi.Credentials
+}
+
+func (s *sharedServerCred) get() (*sspi.Credentials, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cred != nil {
+		return s.cred, nil
+	}
+	cred, err := s.acquire("")
+	if err != nil {
+		return nil, err
+	}
+	s.cred = cred
+	return s.cred, nil
+}
+
+func (s *sharedServerCred) release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cred != nil {
+		_ = s.cred.Release()
+		s.cred = nil
+	}
 }
 
 // NegotiateMiddleware wraps an http.Handler with SSPI Negotiate (Kerberos/NTLM)
 // authentication. Supports multi-leg NTLM by keying pending contexts on the
 // TCP connection's remote address (preserved across HTTP/1.1 keep-alive).
 // The ctx parameter controls the lifetime of the background reaper goroutine.
+//
+// SSPI server credentials are acquired once on first request and shared across
+// every ServerContext for the lifetime of the middleware. Per-request acquisition
+// leaks lsass.exe state at ~2.5 MB/h on hosts with active dashboard auth.
 func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
+	creds := &sharedServerCred{acquire: acquireServerCredentials}
 	var pending sync.Map // remoteAddr → *pendingCtx
 
 	// Reap stale contexts; exits when ctx is cancelled.
@@ -59,14 +102,14 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		for {
 			select {
 			case <-ctx.Done():
-				// Release all pending contexts on shutdown.
+				// Release all pending contexts and the shared cred on shutdown.
 				pending.Range(func(key, value any) bool {
 					pc := value.(*pendingCtx)
 					_ = pc.sc.Release()
-					_ = pc.cred.Release()
 					pending.Delete(key)
 					return true
 				})
+				creds.release()
 				return
 			case <-ticker.C:
 				now := time.Now()
@@ -74,7 +117,6 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 					pc := value.(*pendingCtx)
 					if now.Sub(pc.created) > 60*time.Second {
 						_ = pc.sc.Release()
-						_ = pc.cred.Release()
 						pending.Delete(key)
 					}
 					return true
@@ -103,35 +145,31 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 
 		// Check for an existing multi-leg context from a previous 401 exchange.
 		var sc *negotiate.ServerContext
-		var cred *sspi.Credentials
 		var authDone bool
 		var responseToken []byte
 
 		if v, ok := pending.LoadAndDelete(connKey); ok {
 			// Second leg: continue the existing context.
 			pc := v.(*pendingCtx)
-			cred = pc.cred
 			sc = pc.sc
 			authDone, responseToken, err = sc.Update(token)
 			if err != nil {
 				_ = sc.Release()
-				_ = cred.Release()
 				slog.Warn("sspi: negotiate leg2 failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
 				return
 			}
 		} else {
-			// First leg: create new context.
-			cred, err = negotiate.AcquireServerCredentials("")
-			if err != nil {
-				slog.Error("sspi: acquire credentials failed", "error", err)
+			// First leg: create new context using the shared cred.
+			cred, errCred := creds.get()
+			if errCred != nil {
+				slog.Error("sspi: acquire credentials failed", "error", errCred)
 				http.Error(w, "server auth error", http.StatusInternalServerError)
 				return
 			}
 			sc, authDone, responseToken, err = negotiate.NewServerContext(cred, token)
 			if err != nil {
-				_ = cred.Release()
 				slog.Warn("sspi: negotiate failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
@@ -141,7 +179,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 
 		if !authDone {
 			// Multi-leg: store context for the next request on this connection.
-			pending.Store(connKey, &pendingCtx{cred: cred, sc: sc, created: time.Now()})
+			pending.Store(connKey, &pendingCtx{sc: sc, created: time.Now()})
 			if len(responseToken) > 0 {
 				w.Header().Set("WWW-Authenticate",
 					"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
@@ -150,10 +188,9 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 			return
 		}
 
-		// Auth complete — clean up.
+		// Auth complete — release the per-request server context.
 		defer func() {
 			_ = sc.Release()
-			_ = cred.Release()
 		}()
 
 		if len(responseToken) > 0 {
