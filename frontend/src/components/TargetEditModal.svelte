@@ -4,7 +4,7 @@
     import { ALL_TRIGGERS, TRIGGER_LABELS, REPEAT_OPTIONS, REPEAT_MAP } from '../lib/notify.js';
     import { Bell } from 'lucide-svelte';
 
-    let { target, isNew, onsave, onclose } = $props();
+    let { target, isNew, saving = false, onsave, onclose } = $props();
 
     // Local working copy — snapshot taken at open time; later mutations only touch `t`.
     // Use JSON round-trip instead of structuredClone to avoid Svelte 5 proxy issues.
@@ -73,8 +73,9 @@
             return;
         }
         // Empty secret = "preserve existing" on the backend. Non-empty = new secret.
+        // The parent (ConfigModal) is responsible for the success/failure toast
+        // because it owns the network call to the per-target CRUD endpoints.
         onsave?.(t);
-        toast.ok(isNew ? 'Target added' : 'Target updated');
     }
 
     async function testTarget() {
@@ -281,9 +282,13 @@
                     {testing ? 'Sending...' : '▶ Test'}
                 </button>
                 <div class="tgt-form-actions-right">
-                    <button class="btn-brutal btn-secondary-sm" onclick={animateClose}>Cancel</button>
-                    <button class="btn-brutal btn-save-sm" onclick={handleSave}>
-                        {isNew ? 'Add Target' : 'Save'}
+                    <button class="btn-brutal btn-secondary-sm" onclick={animateClose} disabled={saving}>Cancel</button>
+                    <button class="btn-brutal btn-save-sm" onclick={handleSave} disabled={saving}>
+                        {#if saving}
+                            Saving...
+                        {:else}
+                            {isNew ? 'Add Target' : 'Save'}
+                        {/if}
                     </button>
                 </div>
             </div>

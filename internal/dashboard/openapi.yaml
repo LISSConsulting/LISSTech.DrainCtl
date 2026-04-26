@@ -532,7 +532,25 @@ components:
           description: "0 = fire once per incident. Max 10080 (1 week)."
         secret:
           type: string
-          description: "HMAC-SHA256 signing secret (webhooks) or SMTP password (email)."
+          description: |
+            HMAC-SHA256 signing secret (webhooks) or SMTP password (email).
+            **Write-only.** GET responses never include this field — see
+            `has_secret` instead. On PUT/POST, an empty value preserves the
+            existing on-disk secret; a non-empty value replaces it.
+        has_secret:
+          type: boolean
+          readOnly: true
+          description: |
+            True when a secret is saved on disk for this target. Returned by
+            GET /settings and the per-target CRUD responses; ignored on input.
+        clear_secret:
+          type: boolean
+          writeOnly: true
+          description: |
+            When true on PUT, wipes the saved secret regardless of the `secret`
+            field. The escape hatch for going back to "no secret" once one was
+            set, since an empty `secret` field means "preserve existing".
+            Ignored on POST (nothing to clear on a brand-new target).
         to:
           type: array
           items:
@@ -548,6 +566,16 @@ components:
           nullable: true
           description: "null or true = enabled. false = disabled."
       required: [type, url]
+
+    NotificationTargetsResponse:
+      type: object
+      description: "Returned by per-target CRUD endpoints — full list of saved targets after the change."
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationTarget"
+      required: [notifications]
 
     PerformanceConfig:
       type: object
@@ -626,7 +654,11 @@ components:
           items:
             $ref: "#/components/schemas/NotificationTarget"
           nullable: true
-          description: "null = no change. Empty array = clear all targets."
+          description: |
+            null/absent = no change. Empty array = clear all targets.
+            For per-target add/edit/delete, prefer the dedicated
+            `/settings/notifications` endpoints — they're indexed (so URL
+            renames preserve secrets) and only touch the one target.
         session_warning_threshold:
           type: integer
           minimum: 0
@@ -1013,6 +1045,122 @@ paths:
                 $ref: "#/components/schemas/Error"
         "401":
           description: Not authenticated.
+        "500":
+          description: Failed to save config.
+
+  /settings/notifications:
+    post:
+      tags: [settings]
+      summary: Add a notification target
+      description: |
+        Append a new target. Saves atomically under the same config lock used
+        by the bulk PUT — preferred over the bulk endpoint when only the
+        notifications list is changing. Returns the full updated targets list
+        (with `has_secret`) so the client can replace its local copy without a
+        follow-up GET.
+
+        `clear_secret` is ignored on this route — there is no existing secret
+        to clear on a brand-new target.
+      operationId: addNotificationTarget
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationTarget"
+      responses:
+        "200":
+          description: Target added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTargetsResponse"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Failed to save config.
+
+  /settings/notifications/{idx}:
+    put:
+      tags: [settings]
+      summary: Update a notification target
+      description: |
+        Replace the target at `idx`. Secrets follow the standard three-mode
+        policy (clear / preserve / replace), with the existing secret looked up
+        by INDEX rather than Type+URL — so renaming a webhook URL no longer
+        silently drops the saved HMAC.
+      operationId: updateNotificationTarget
+      security:
+        - session: []
+      parameters:
+        - in: path
+          name: idx
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Zero-based position in the saved notifications list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationTarget"
+      responses:
+        "200":
+          description: Target updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTargetsResponse"
+        "400":
+          description: Validation error or non-integer idx.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: idx is out of range for the current targets list.
+        "500":
+          description: Failed to save config.
+
+    delete:
+      tags: [settings]
+      summary: Delete a notification target
+      description: Remove the target at `idx`. Returns the full updated targets list.
+      operationId: deleteNotificationTarget
+      security:
+        - session: []
+      parameters:
+        - in: path
+          name: idx
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Target deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTargetsResponse"
+        "400":
+          description: Non-integer idx.
+        "401":
+          description: Not authenticated.
+        "404":
+          description: idx is out of range for the current targets list.
         "500":
           description: Failed to save config.
 

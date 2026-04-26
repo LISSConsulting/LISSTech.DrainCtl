@@ -376,6 +376,11 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 	mux.Handle("DELETE /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleDeleteServer))))
 	mux.Handle("GET /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handleGetSettings))))
 	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
+	// Per-target CRUD — atomic add/edit/delete that bypasses the bulk PUT and
+	// returns the updated targets list (with has_secret) in one round-trip.
+	mux.Handle("POST /api/v1/settings/notifications", rlw(rs(http.HandlerFunc(ds.handleAddNotificationTarget))))
+	mux.Handle("PUT /api/v1/settings/notifications/{idx}", rlw(rs(http.HandlerFunc(ds.handleUpdateNotificationTarget))))
+	mux.Handle("DELETE /api/v1/settings/notifications/{idx}", rlw(rs(http.HandlerFunc(ds.handleDeleteNotificationTarget))))
 	mux.Handle("POST /api/v1/notify-test", rlw(rs(http.HandlerFunc(ds.handleNotifyTest))))
 	mux.Handle("GET /api/v1/maintenance/status", rlw(rs(http.HandlerFunc(ds.handleMaintenance))))
 	mux.Handle("GET /api/evtspike/status", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeStatus))))
@@ -673,6 +678,103 @@ func (ds *DashboardServer) handleDeleteServer(w http.ResponseWriter, r *http.Req
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+// notifyTargetView is the write-only view of a notification target returned to
+// the dashboard. Secrets are stripped — only a has_secret boolean is exposed
+// so the UI can tell whether a saved credential exists.
+type notifyTargetView struct {
+	Type          string       `json:"type"`
+	URL           string       `json:"url"`
+	Triggers      []dc.Trigger `json:"triggers"`
+	RepeatMinutes int          `json:"repeat_minutes,omitempty"`
+	HasSecret     bool         `json:"has_secret"`
+	To            []string     `json:"to,omitempty"`
+	From          string       `json:"from,omitempty"`
+	Enabled       *bool        `json:"enabled,omitempty"`
+}
+
+// notifyTargetWire is the inbound shape used by both the bulk PUT /settings and
+// the per-target CRUD endpoints. ClearSecret is wire-only: when true, the
+// existing on-disk secret is wiped regardless of the Secret field. We can't put
+// it on dc.NotificationTarget because that struct is also the on-disk format.
+type notifyTargetWire struct {
+	dc.NotificationTarget
+	ClearSecret bool `json:"clear_secret,omitempty"`
+}
+
+// makeNotifyTargetView projects an on-disk target into the redacted view.
+func makeNotifyTargetView(t dc.NotificationTarget) notifyTargetView {
+	return notifyTargetView{
+		Type:          t.Type,
+		URL:           t.URL,
+		Triggers:      t.Triggers,
+		RepeatMinutes: t.RepeatMinutes,
+		HasSecret:     t.Secret != "",
+		To:            t.To,
+		From:          t.From,
+		Enabled:       t.Enabled,
+	}
+}
+
+// makeNotifyTargetViews projects a slice with a non-nil empty fallback so JSON
+// encoding produces [] rather than null.
+func makeNotifyTargetViews(targets []dc.NotificationTarget) []notifyTargetView {
+	views := make([]notifyTargetView, len(targets))
+	for i, t := range targets {
+		views[i] = makeNotifyTargetView(t)
+	}
+	return views
+}
+
+// validateNotificationTarget returns a 400-class error describing why the
+// target is rejected, or nil if it passes structural validation. The idx is
+// included only in error messages from the bulk PUT path; per-target endpoints
+// pass -1 to suppress the prefix.
+func validateNotificationTarget(t dc.NotificationTarget, idx int) error {
+	prefix := ""
+	if idx >= 0 {
+		prefix = fmt.Sprintf("notifications[%d]: ", idx)
+	}
+	if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
+		return fmt.Errorf("%sunknown type %q (want \"webhook\", \"ntfy\", or \"email\")", prefix, t.Type)
+	}
+	if t.URL != "" {
+		lower := strings.ToLower(t.URL)
+		validScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
+			strings.HasPrefix(lower, "smtp://") || strings.HasPrefix(lower, "smtps://")
+		if !validScheme {
+			return fmt.Errorf("%sURL must use http, https, smtp, or smtps scheme", prefix)
+		}
+	}
+	for _, tr := range t.Triggers {
+		if !dc.ValidTriggers[tr] {
+			return fmt.Errorf("%sunknown trigger %q", prefix, tr)
+		}
+	}
+	if t.RepeatMinutes < 0 || t.RepeatMinutes > dc.MaxRepeatMinutes {
+		return fmt.Errorf("%srepeat_minutes must be 0–%d", prefix, dc.MaxRepeatMinutes)
+	}
+	return nil
+}
+
+// applySecretPolicy implements the three-mode secret semantics shared between
+// the bulk PUT and the per-target endpoints:
+//
+//	clearSecret=true  → wipe the saved secret (regardless of new.Secret)
+//	new.Secret == ""  → preserve the existing secret
+//	new.Secret != ""  → replace with the new value (DPAPI-encrypted by Validate)
+//
+// existingSecret is the secret loaded from disk for this target slot. Per-target
+// endpoints pass it in by index (robust to URL renames). The bulk PUT path
+// looks it up by Type+URL.
+func applySecretPolicy(newTarget *dc.NotificationTarget, existingSecret string, clearSecret bool) {
+	switch {
+	case clearSecret:
+		newTarget.Secret = ""
+	case newTarget.Secret == "":
+		newTarget.Secret = existingSecret
+	}
+}
+
 // handleGetSettings returns the current dashboard settings as JSON.
 func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
 	var cfg *dc.Config
@@ -688,35 +790,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		return
 	}
 
-	// Build write-only view of notification targets — secret is never returned,
-	// only a has_secret boolean so the frontend knows one exists.
-	type targetView struct {
-		Type          string       `json:"type"`
-		URL           string       `json:"url"`
-		Triggers      []dc.Trigger `json:"triggers"`
-		RepeatMinutes int          `json:"repeat_minutes,omitempty"`
-		HasSecret     bool         `json:"has_secret"`
-		To            []string     `json:"to,omitempty"`
-		From          string       `json:"from,omitempty"`
-		Enabled       *bool        `json:"enabled,omitempty"`
-	}
-	targets := cfg.Notifications
-	if targets == nil {
-		targets = []dc.NotificationTarget{}
-	}
-	views := make([]targetView, len(targets))
-	for i, t := range targets {
-		views[i] = targetView{
-			Type:          t.Type,
-			URL:           t.URL,
-			Triggers:      t.Triggers,
-			RepeatMinutes: t.RepeatMinutes,
-			HasSecret:     t.Secret != "",
-			To:            t.To,
-			From:          t.From,
-			Enabled:       t.Enabled,
-		}
-	}
+	views := makeNotifyTargetViews(cfg.Notifications)
 	// evtspike surface is intentionally narrow: the modal only exposes the
 	// enabled toggle per FR-028. Other evtspike fields (thresholds, channel
 	// lists, baseline_path, security-channel gate) stay admin-only in
@@ -725,7 +799,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		Enabled bool `json:"enabled"`
 	}
 	out := struct {
-		Notifications           []targetView         `json:"notifications"`
+		Notifications           []notifyTargetView   `json:"notifications"`
 		SessionWarningThreshold int                  `json:"session_warning_threshold"`
 		GracePeriod             int                  `json:"grace_period"`
 		PollInterval            int                  `json:"poll_interval"`
@@ -757,14 +831,6 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Wire-only target type so the frontend can send clear_secret=true to
-	// explicitly wipe a saved secret. We can't put ClearSecret on
-	// dc.NotificationTarget because that struct is also the on-disk format.
-	type wireTarget struct {
-		dc.NotificationTarget
-		ClearSecret bool `json:"clear_secret,omitempty"`
-	}
-
 	// evtspikeInput narrows the modal's write surface to just the enabled
 	// flag (FR-028). Admin-only evtspike fields are not accepted here; those
 	// belong in config.json.
@@ -774,7 +840,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	// Use pointer-to-slice so we can distinguish absent ("don't change") from
 	// explicit empty array ("clear all notifications").
 	var in struct {
-		Notifications           *[]wireTarget         `json:"notifications"`
+		Notifications           *[]notifyTargetWire   `json:"notifications"`
 		SessionWarningThreshold *int                  `json:"session_warning_threshold,omitempty"`
 		GracePeriod             *int                  `json:"grace_period,omitempty"`
 		PollInterval            *int                  `json:"poll_interval,omitempty"`
@@ -815,27 +881,8 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	// 400 instead of being silently stripped by Config.Validate() after save.
 	if notifications != nil {
 		for i, t := range *notifications {
-			if t.Type != "webhook" && t.Type != "ntfy" && t.Type != "email" {
-				http.Error(w, fmt.Sprintf("notifications[%d]: unknown type %q (want \"webhook\", \"ntfy\", or \"email\")", i, t.Type), http.StatusBadRequest)
-				return
-			}
-			if t.URL != "" {
-				lower := strings.ToLower(t.URL)
-				validScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") ||
-					strings.HasPrefix(lower, "smtp://") || strings.HasPrefix(lower, "smtps://")
-				if !validScheme {
-					http.Error(w, fmt.Sprintf("notifications[%d]: URL must use http, https, smtp, or smtps scheme", i), http.StatusBadRequest)
-					return
-				}
-			}
-			for _, tr := range t.Triggers {
-				if !dc.ValidTriggers[tr] {
-					http.Error(w, fmt.Sprintf("notifications[%d]: unknown trigger %q", i, tr), http.StatusBadRequest)
-					return
-				}
-			}
-			if t.RepeatMinutes < 0 || t.RepeatMinutes > dc.MaxRepeatMinutes {
-				http.Error(w, fmt.Sprintf("notifications[%d]: repeat_minutes must be 0–%d", i, dc.MaxRepeatMinutes), http.StatusBadRequest)
+			if err := validateNotificationTarget(t, i); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
@@ -856,11 +903,9 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Secrets are write-only: the GET response never includes them.
-	// Three semantics on a per-target basis:
-	//   clear_secret=true  → wipe the saved secret (regardless of secret field)
-	//   secret == ""       → preserve the existing secret from disk
-	//   secret != ""       → replace with the new value (DPAPI-encrypted by Validate)
+	// Apply the three-mode secret policy. Bulk PUT keys lookups by Type+URL,
+	// which is fragile across renames — the per-target endpoints below address
+	// this by index instead.
 	if notifications != nil {
 		existing, err := dc.LoadConfig()
 		secretMap := map[string]string{}
@@ -872,12 +917,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		for i := range *notifications {
 			t := &(*notifications)[i]
 			wire := (*in.Notifications)[i] // sibling slot in the wire-only slice
-			switch {
-			case wire.ClearSecret:
-				t.Secret = ""
-			case t.Secret == "":
-				t.Secret = secretMap[t.Type+"\x00"+t.URL]
-			}
+			applySecretPolicy(t, secretMap[t.Type+"\x00"+t.URL], wire.ClearSecret)
 		}
 	}
 
@@ -926,6 +966,173 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// notifyTargetsResponse is the body returned by the per-target CRUD endpoints.
+// It carries the full updated targets list (with has_secret) so the frontend
+// can replace its local copy in one round-trip — no follow-up GET required.
+type notifyTargetsResponse struct {
+	Notifications []notifyTargetView `json:"notifications"`
+}
+
+// updateTargetsAndRespond runs `mutate` under the config lock, writes the
+// resulting notifications list, broadcasts the change, and renders the new
+// view to the client. mutate may return an error to abort with a 4xx (the
+// caller picks the status code by inspecting the error).
+func (ds *DashboardServer) updateTargetsAndRespond(w http.ResponseWriter, r *http.Request, mutate func(targets []dc.NotificationTarget) ([]dc.NotificationTarget, error)) {
+	var newTargets []dc.NotificationTarget
+	err := dc.ReadModifyWriteNotifications(func(targets []dc.NotificationTarget) ([]dc.NotificationTarget, error) {
+		out, mErr := mutate(targets)
+		if mErr != nil {
+			return nil, mErr
+		}
+		newTargets = out
+		return out, nil
+	})
+	if err != nil {
+		// Handler errors carry a wrapped HTTP status via httpStatusError.
+		var httpErr *httpStatusError
+		if errors.As(err, &httpErr) {
+			http.Error(w, httpErr.msg, httpErr.status)
+			return
+		}
+		slog.Error("update notification targets failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	auth := GetAuthInfo(r)
+	user := ""
+	if auth != nil {
+		user = auth.Username
+	}
+	slog.Info("dashboard=settings-updated", slog.Int("event_id", etwids.EvtDashboardConfigChange), "user", user, "scope", "notifications")
+
+	ds.broadcastSettingsUpdate()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(notifyTargetsResponse{Notifications: makeNotifyTargetViews(newTargets)})
+}
+
+// httpStatusError lets the per-target CRUD handlers signal a desired HTTP
+// status from inside the readModifyWrite callback.
+type httpStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+func badRequest(msg string) error { return &httpStatusError{status: http.StatusBadRequest, msg: msg} }
+func notFound(msg string) error   { return &httpStatusError{status: http.StatusNotFound, msg: msg} }
+
+// decodeNotifyTargetWire reads a single notifyTargetWire from the request body,
+// rejecting payloads larger than 4 KB. Returns 400-class errors for the caller
+// to surface to the client.
+func decodeNotifyTargetWire(r *http.Request) (notifyTargetWire, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		return notifyTargetWire{}, badRequest("bad request")
+	}
+	var w notifyTargetWire
+	if err := json.Unmarshal(body, &w); err != nil {
+		return notifyTargetWire{}, badRequest("invalid JSON")
+	}
+	return w, nil
+}
+
+// handleAddNotificationTarget appends a new notification target to the saved
+// list. The wire-only clear_secret flag is ignored on add — there is no
+// existing secret to clear. Returns the full updated targets list.
+func (ds *DashboardServer) handleAddNotificationTarget(w http.ResponseWriter, r *http.Request) {
+	wire, err := decodeNotifyTargetWire(r)
+	if err != nil {
+		var httpErr *httpStatusError
+		if errors.As(err, &httpErr) {
+			http.Error(w, httpErr.msg, httpErr.status)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if vErr := validateNotificationTarget(wire.NotificationTarget, -1); vErr != nil {
+		http.Error(w, vErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ds.updateTargetsAndRespond(w, r, func(targets []dc.NotificationTarget) ([]dc.NotificationTarget, error) {
+		// clear_secret on add is a no-op (nothing to clear). New secret is taken
+		// as-is; empty means no credential.
+		return append(targets, wire.NotificationTarget), nil
+	})
+}
+
+// handleUpdateNotificationTarget replaces the target at the given index with
+// the request body. Secrets follow the standard three-mode policy, except the
+// existing secret is looked up by INDEX (not Type+URL), so URL renames preserve
+// the credential.
+func (ds *DashboardServer) handleUpdateNotificationTarget(w http.ResponseWriter, r *http.Request) {
+	idx, ok := parseTargetIndex(w, r)
+	if !ok {
+		return
+	}
+	wire, err := decodeNotifyTargetWire(r)
+	if err != nil {
+		var httpErr *httpStatusError
+		if errors.As(err, &httpErr) {
+			http.Error(w, httpErr.msg, httpErr.status)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if vErr := validateNotificationTarget(wire.NotificationTarget, -1); vErr != nil {
+		http.Error(w, vErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ds.updateTargetsAndRespond(w, r, func(targets []dc.NotificationTarget) ([]dc.NotificationTarget, error) {
+		if idx < 0 || idx >= len(targets) {
+			return nil, notFound(fmt.Sprintf("notification target index %d not found (have %d)", idx, len(targets)))
+		}
+		updated := wire.NotificationTarget
+		applySecretPolicy(&updated, targets[idx].Secret, wire.ClearSecret)
+		out := make([]dc.NotificationTarget, len(targets))
+		copy(out, targets)
+		out[idx] = updated
+		return out, nil
+	})
+}
+
+// handleDeleteNotificationTarget removes the target at the given index.
+func (ds *DashboardServer) handleDeleteNotificationTarget(w http.ResponseWriter, r *http.Request) {
+	idx, ok := parseTargetIndex(w, r)
+	if !ok {
+		return
+	}
+
+	ds.updateTargetsAndRespond(w, r, func(targets []dc.NotificationTarget) ([]dc.NotificationTarget, error) {
+		if idx < 0 || idx >= len(targets) {
+			return nil, notFound(fmt.Sprintf("notification target index %d not found (have %d)", idx, len(targets)))
+		}
+		out := make([]dc.NotificationTarget, 0, len(targets)-1)
+		out = append(out, targets[:idx]...)
+		out = append(out, targets[idx+1:]...)
+		return out, nil
+	})
+}
+
+// parseTargetIndex extracts and validates the {idx} path parameter. Writes a
+// 400 response and returns ok=false on failure.
+func parseTargetIndex(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.PathValue("idx")
+	idx, err := strconv.Atoi(raw)
+	if err != nil || idx < 0 {
+		http.Error(w, "idx must be a non-negative integer", http.StatusBadRequest)
+		return 0, false
+	}
+	return idx, true
 }
 
 // handleNotifyTest sends a test notification.
