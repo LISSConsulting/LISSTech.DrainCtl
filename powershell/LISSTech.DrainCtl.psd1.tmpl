@@ -43,9 +43,11 @@
             LicenseUri   = 'https://github.com/LISSConsulting/LISSTech.DrainCtl/blob/main/LICENSE'
             ProjectUri   = 'https://lissconsulting.github.io/LISSTech.DrainCtl/'
             # Prerelease tag — every published version is treated as a
-            # pre-release until 1.0 is declared. PSGallery operators must
-            # use `Install-Module LISSTech.DrainCtl -AllowPrerelease` to
-            # see and install these. Drop this entry at 1.0.
+            # pre-release. CalVer means there is no 1.0 to graduate to;
+            # "stable" is owner-declared rather than a version threshold.
+            # PSGallery operators must use
+            # `Install-Module LISSTech.DrainCtl -AllowPrerelease` to see
+            # and install these. Drop this entry when stable is declared.
             Prerelease   = 'beta'
             ReleaseNotes = 'Beta release. See the GitHub releases page for the per-version changelog: https://github.com/LISSConsulting/LISSTech.DrainCtl/releases'
         }
