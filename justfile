@@ -307,14 +307,32 @@ release-sign-keygen:
 
 # Sign the built MSI: produce dist/release.json and dist/release.json.sig
 # alongside dist/LISSTech.DrainCtl.msi for upload to the GitHub release.
-# Skipped silently when $env:RELEASE_SIGNING_KEY is unset (transition mode).
+#
+# Behavior depends on whether internal/updater/keys_windows.go embeds any
+# release-signing pubkeys (transition vs enforced mode):
+#   - keys file empty AND RELEASE_SIGNING_KEY unset → silent skip
+#     (legitimate transition build pre-rotation)
+#   - keys file embeds N>0 keys AND RELEASE_SIGNING_KEY set → sign
+#   - keys file embeds N>0 keys AND RELEASE_SIGNING_KEY unset → red
+#     error, exit 1 (refuses to ship a release that fielded binaries
+#     will refuse to install)
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 sign-release-manifest:
+    $keysFile = "{{justfile_directory()}}/internal/updater/keys_windows.go"
+    $keyCount = & go run "{{justfile_directory()}}/cmd/release-sign" check-keys-file --keys $keysFile
+    if ($LASTEXITCODE -ne 0) { Write-Error "check-keys-file failed"; exit $LASTEXITCODE }
+    $keyCount = [int]$keyCount.Trim()
+
+    if ($keyCount -eq 0) {
+        Write-Host "`n⏭️  Skipping manifest signing (no embedded release keys; transition mode)" -ForegroundColor Yellow
+        exit 0
+    }
+
     $key = $env:RELEASE_SIGNING_KEY
     if (-not $key) {
-        Write-Host "`n⏭️  Skipping manifest signing (RELEASE_SIGNING_KEY unset)" -ForegroundColor Yellow
-        exit 0
+        Write-Error "$keyCount release-signing key(s) embedded in $keysFile but RELEASE_SIGNING_KEY env var is unset. Refusing to publish an unsigned release — fielded binaries with the embedded key will refuse to install. Set RELEASE_SIGNING_KEY to the matching private key path, or remove the keys from $keysFile to ship in transition mode."
+        exit 1
     }
     if (-not (Test-Path $key)) { Write-Error "Key not found: $key"; exit 1 }
     $msi = "{{dist_dir}}/LISSTech.DrainCtl.msi"
@@ -379,8 +397,18 @@ publish: (header "publish")
     if ($LASTEXITCODE -ne 0) { Write-Error "git push tag failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Tag $tag pushed" -ForegroundColor Green
 
-    # Create release with MSI
+    # Create release with MSI plus signed manifest sidecars when present.
+    # release.json + release.json.sig are produced by sign-release-manifest
+    # whenever internal/updater/keys_windows.go embeds any pubkey; once
+    # they're on disk in dist/ they MUST be uploaded so fielded binaries
+    # can verify the manifest. Skipping them here would silently break
+    # auto-update on every host that has embedded keys.
     $assets = @($msiPath)
+    $manifestPath = "{{dist_dir}}/release.json"
+    $manifestSigPath = "{{dist_dir}}/release.json.sig"
+    if (Test-Path $manifestPath) { $assets += $manifestPath }
+    if (Test-Path $manifestSigPath) { $assets += $manifestSigPath }
+
     $prevTag = & git describe --tags --abbrev=0 "$tag^" 2>$null
     if ($prevTag) {
         $notes = & git log "$prevTag..$tag" --pretty=format:"- %s" --no-merges

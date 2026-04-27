@@ -59,6 +59,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
+	case "check-keys-file":
+		if err := checkKeysFile(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -79,7 +84,13 @@ func usage() {
 
   release-sign sign --key PATH --msi PATH --version V --out-dir DIR
       Produce DIR/release.json + DIR/release.json.sig signing the SHA-256
-      of --msi under version V. Upload both alongside the MSI on GitHub.`)
+      of --msi under version V. Upload both alongside the MSI on GitHub.
+
+  release-sign check-keys-file --keys FILE
+      Print the count of non-empty entries in releaseSigningKeysB64 in
+      FILE. Exit 0 on well-formed file; exit 1 on parse failure or
+      sentinel-slice missing. Used by the just release pipeline to
+      decide whether manifest signing is required.`)
 }
 
 func keygen(args []string) error {
@@ -137,6 +148,79 @@ func keygen(args []string) error {
 		fmt.Printf("    %q,\n", pubB64)
 	}
 	return nil
+}
+
+// checkKeysFile prints the number of non-empty entries in
+// releaseSigningKeysB64 in the named Go source file. Exits non-zero
+// (via the caller's error return) if the file is malformed or the
+// sentinel slice is missing. Used by the `just release` pipeline to
+// decide whether manifest signing is required for this build.
+func checkKeysFile(args []string) error {
+	fs := flag.NewFlagSet("check-keys-file", flag.ExitOnError)
+	keys := fs.String("keys", "", "path to internal/updater/keys_windows.go (or fixture)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *keys == "" {
+		return errors.New("--keys required")
+	}
+	count, err := countReleaseSigningKeysB64(*keys)
+	if err != nil {
+		return err
+	}
+	fmt.Println(count)
+	return nil
+}
+
+// countReleaseSigningKeysB64 parses the Go source file at path and
+// returns the count of non-empty string literal entries in the
+// releaseSigningKeysB64 slice. Empty entries (e.g. commented out via
+// `""`) are skipped, matching decodeReleaseSigningKeys' behavior.
+func countReleaseSigningKeysB64(path string) (int, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
+	if err != nil {
+		return 0, fmt.Errorf("parse: %w", err)
+	}
+	var slice *ast.CompositeLit
+	ast.Inspect(file, func(n ast.Node) bool {
+		vs, ok := n.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+		for i, name := range vs.Names {
+			if name.Name == "releaseSigningKeysB64" && i < len(vs.Values) {
+				if cl, ok := vs.Values[i].(*ast.CompositeLit); ok {
+					slice = cl
+					return false
+				}
+			}
+		}
+		return true
+	})
+	if slice == nil {
+		return 0, errors.New("could not find `var releaseSigningKeysB64 = []string{...}` in file")
+	}
+	count := 0
+	for _, elt := range slice.Elts {
+		bl, ok := elt.(*ast.BasicLit)
+		if !ok || bl.Kind != token.STRING {
+			continue
+		}
+		// Unquote to detect empty string entries (`""` or `` `` ``).
+		s, err := strconv.Unquote(bl.Value)
+		if err != nil {
+			return 0, fmt.Errorf("unquote slice element: %w", err)
+		}
+		if s != "" {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // addKeyToReleaseSigningKeysB64 inserts pubKeyB64 into the
