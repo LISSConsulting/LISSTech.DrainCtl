@@ -111,7 +111,7 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 
 ## Compatibility / migration
 
-- **Config**: `update` is a new top-level object. Missing in old `config.json` → defaults to `{enabled: true, poll_interval: "24h"}`. No migration step needed; the JSON unmarshal handles missing fields via Go's zero-value behavior plus an explicit default in `LoadConfig`.
+- **Config**: `update` is a new top-level object. Missing in old `config.json` → defaults to `{enabled: false, channel: "stable", poll_interval: "24h"}` (opt-in by design — see Decision 8). No migration step needed; the JSON unmarshal handles missing fields via Go's zero-value behavior plus an explicit default in `LoadConfig` for the non-zero-value defaults (`Channel="stable"` and `PollInterval=24h`).
 - **Service surface**: No new CLI verbs, no new pipe verbs, no new dashboard routes in this feature.
 - **Telemetry**: No schema change. Durable audit-row for version transitions was originally specced here but is deferred (see FR-011); v1 records transitions via `slog.Info` only.
 

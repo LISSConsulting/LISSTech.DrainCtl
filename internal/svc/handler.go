@@ -940,6 +940,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			oldPerfCfg := cfg.Performance
 			cfg = newCfg
 			handler.cfg.Store(&cfg)
+			// Push the new UpdateConfig into the running updater
+			// subsystem so an operator's enabled / channel flip is
+			// honored within seconds (the wakeCh interrupts the
+			// poll-loop's current sleep). Without this call the
+			// updater's view of cfg stays frozen at service start.
+			updaterSub.UpdateConfig(newFullCfg.Update)
 			newDashCfg := newFullCfg.ToDashboardConfig()
 
 			// Handle dashboard URL or TLS fingerprint changes.
