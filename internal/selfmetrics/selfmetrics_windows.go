@@ -31,11 +31,15 @@ const DefaultInterval = 60 * time.Second
 
 // Subsystem owns the selfmetrics ticker goroutine. Construct via New,
 // register alongside other lifecycle.Subsystems, call Start with a
-// service-scoped ctx, call Stop on shutdown.
+// service-scoped ctx, call Stop on shutdown. Stop is self-contained:
+// it cancels the derived ctx itself before waiting on the wg, so callers
+// don't have to plumb cancellation in addition to invoking Stop. Mirrors
+// the evtspike / updater Subsystem pattern.
 type Subsystem struct {
 	interval time.Duration
 
 	wg       sync.WaitGroup
+	cancel   context.CancelFunc
 	stopOnce sync.Once
 }
 
@@ -50,17 +54,24 @@ func New(interval time.Duration) *Subsystem {
 }
 
 // Start launches the ticker goroutine. Returns nil — there's no
-// synchronous init that can fail. Goroutine exits when ctx is cancelled
-// (the service is responsible for cancelling per LCI Stop contract).
+// synchronous init that can fail. The derived ctx is owned by the
+// Subsystem so Stop can cancel it independently of the caller.
 func (s *Subsystem) Start(ctx context.Context) error {
+	derived, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
 	s.wg.Add(1)
-	go s.run(ctx)
+	go s.run(derived)
 	return nil
 }
 
-// Stop blocks until the ticker goroutine has exited. Idempotent.
+// Stop cancels the derived ctx and blocks until the ticker goroutine
+// has exited. Idempotent. Safe to call before Start (the cancel field
+// is nil-checked).
 func (s *Subsystem) Stop() {
 	s.stopOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
 		s.wg.Wait()
 	})
 }
