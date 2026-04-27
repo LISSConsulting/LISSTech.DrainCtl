@@ -350,10 +350,35 @@ sign-release-manifest:
 # Build everything (CLI + DLL + PS module + MSI), unsigned
 all: (header "all") msi
 
+# Reset version-bearing files to HEAD before a release rebuild.
+#
+# Why this exists: sign-binaries re-signs docs/install.ps1 in place mid-build.
+# If a release fails partway through (e.g. sign-release-manifest aborts on a
+# missing env var), docs/install.ps1 is left modified. The NEXT release run's
+# `psmodule -> cli` then builds Go binaries against a dirty working tree, and
+# scripts/version.ps1 embeds a "-dirty+gSHA" suffix into the binary's
+# --version output. That contaminated string then propagates into the GitHub
+# release tag and the PSGallery prerelease entry — both of which require
+# manual cleanup (see v26.117.13/14 incident).
+#
+# Reset is scoped to docs/install.ps1 (the file sign-binaries mutates) plus
+# any other tracked file the build chain re-signs in place. Untracked files
+# and unrelated working-tree changes are not touched.
+[private]
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+release-preflight:
+    $modified = & git diff --name-only -- docs/install.ps1
+    if ($modified) {
+        Write-Host "?? Resetting docs/install.ps1 (left modified by a prior release attempt)" -ForegroundColor Yellow
+        & git checkout -- docs/install.ps1
+        if ($LASTEXITCODE -ne 0) { Write-Error "git checkout docs/install.ps1 failed"; exit $LASTEXITCODE }
+    }
+
 # Build and sign everything: binaries → sign → MSI → sign MSI → sign manifest
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: (header "release") gotest psmodule sign-binaries msi sign-msi sign-release-manifest
+release: (header "release") release-preflight gotest psmodule sign-binaries msi sign-msi sign-release-manifest
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
