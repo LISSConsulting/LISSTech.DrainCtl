@@ -69,6 +69,12 @@ type Subsystem struct {
 	cfgMu sync.RWMutex
 	cfg   dc.UpdateConfig
 
+	// wakeCh signals the poll loop to abandon its current sleep and
+	// immediately re-evaluate cfg + run a tick. Used by UpdateConfig so
+	// an operator's enabled=false → true flip is picked up within
+	// seconds rather than at the next poll_interval tick.
+	wakeCh chan struct{}
+
 	// Mutable state held by the poll goroutine only — no synchronization.
 	etag    string
 	backoff backoff
@@ -87,18 +93,30 @@ func New(cfg dc.UpdateConfig, shutdownService context.CancelFunc) *Subsystem {
 		cfg:             cfg,
 		shutdownService: shutdownService,
 		client:          &http.Client{Timeout: httpClientTimeout},
+		wakeCh:          make(chan struct{}, 1),
 	}
 }
 
 // UpdateConfig replaces the in-memory cfg with a new one. Called by the
 // config-watcher path on a config.json change so an operator can flip
-// Enabled or change Channel without a service restart. PollInterval
-// changes do NOT take effect until next Subsystem reconstruction —
-// the loop's ticker is bound to the value present at Start.
+// Enabled or change Channel without a service restart.
+//
+// Enabled and Channel changes take effect within seconds: the poll
+// goroutine's sleep is interrupted via wakeCh, and the next tick reads
+// the new cfg. PollInterval changes do NOT interrupt the current sleep
+// (the sleep was sized at the OLD interval); the new interval applies
+// to the NEXT sleep, so worst-case lag is one old-interval cycle.
 func (s *Subsystem) UpdateConfig(cfg dc.UpdateConfig) {
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
 	s.cfg = cfg
+	s.cfgMu.Unlock()
+	// Non-blocking send: if the goroutine is mid-tick or already has a
+	// pending wake (buffered 1), we drop this signal — the next tick
+	// will see the new cfg either way.
+	select {
+	case s.wakeCh <- struct{}{}:
+	default:
+	}
 }
 
 // snapshot returns a value copy of the current cfg. Held briefly under
@@ -110,22 +128,22 @@ func (s *Subsystem) snapshot() dc.UpdateConfig {
 	return s.cfg
 }
 
-// Start implements lifecycle.Subsystem. If Enabled is false at Start
-// time, the subsystem is a no-op — Stop will return immediately. If the
-// operator flips Enabled=true post-Start via UpdateConfig, that change
-// is NOT picked up; we'd need to start a goroutine retroactively. The
-// expected operational pattern is: edit config to enabled=true BEFORE
-// service start (or accept a service restart on the rare opt-in event).
+// Start implements lifecycle.Subsystem. Always launches the poll
+// goroutine. When cfg.Enabled is false, the goroutine sleeps and
+// re-checks on every tick — it never makes a GitHub call until the
+// operator flips Enabled=true via UpdateConfig (file-watcher path) or
+// service restart with the new config. Operators get "edit config.json
+// and reload within seconds" semantics that match the documentation,
+// at the cost of one always-parked goroutine on opt-out hosts.
 func (s *Subsystem) Start(ctx context.Context) error {
-	cfg := s.snapshot()
-	if !cfg.Enabled {
-		slog.Debug("update=disabled at_start")
-		return nil
-	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.wg.Add(1)
 	go s.run()
-	slog.Info("update=started", "channel", cfg.Channel, "poll_interval", time.Duration(cfg.PollInterval).String())
+	cfg := s.snapshot()
+	slog.Info("update=started",
+		"enabled", cfg.Enabled,
+		"channel", cfg.Channel,
+		"poll_interval", time.Duration(cfg.PollInterval).String())
 	return nil
 }
 
@@ -295,9 +313,10 @@ func downloadToTemp(ctx context.Context, client *http.Client, url string) (strin
 	return path, nil
 }
 
-// sleepCtx sleeps for d or until ctx is cancelled. Returns true if the
-// full duration elapsed, false if ctx fired first (the caller should
-// then exit the loop).
+// sleepCtx sleeps for d, returning early on ctx cancel OR a wakeCh
+// signal from UpdateConfig. Returns true if the timer fired or wakeCh
+// fired (caller should proceed with the next tick), false if ctx fired
+// (caller should exit the loop).
 func (s *Subsystem) sleepCtx(d time.Duration) bool {
 	if d <= 0 {
 		return s.ctx.Err() == nil
@@ -306,6 +325,10 @@ func (s *Subsystem) sleepCtx(d time.Duration) bool {
 	defer t.Stop()
 	select {
 	case <-t.C:
+		return true
+	case <-s.wakeCh:
+		// UpdateConfig flipped Enabled or Channel; abandon the rest of
+		// this sleep and re-evaluate immediately.
 		return true
 	case <-s.ctx.Done():
 		return false

@@ -1,6 +1,6 @@
 # Data Model: Agent Self-Poll Auto-Update (010)
 
-This feature adds one new config struct and one new audit event string. No persisted runtime state, no schema migrations, no new tables.
+This feature adds one new config struct. Durable persistence of version transitions to the audit store was originally specced here but is **deferred** — see [§2](#2-audit-event-string-auto_update_install-new-value-no-schema-change) for the rationale.
 
 ## 1. UpdateConfig (new struct on root `Config`)
 
@@ -38,7 +38,7 @@ const (
 )
 ```
 
-## 2. Audit event string `auto_update_install` (new value, no schema change)
+## 2. Audit event string `auto_update_install` (DEFERRED — see status below)
 
 **STATUS: deferred to a follow-up spec.** The original draft of this file claimed `AuditStore.Append` accepts a free-form `event string` — that was wrong. The actual `internal/telemetry/audit.go` table is purpose-built for drain-mode transitions (`prev_state`/`new_state` int columns, no `event` or `metadata` columns), and a clean integration for `auto_update_install` requires a separate decision: extend `AuditRecord` with optional event+metadata fields, add new columns to the audit table, or stand up a sibling `events` table. None of those decisions belong inside the 010 PR. v1 records version transitions via `slog.Info` only — durable for 7 days via the daily file-log rotation. A follow-up spec will revisit durable persistence once the audit-table redesign is decided.
 
@@ -68,4 +68,4 @@ We depend on the subset of `/repos/.../releases/latest` documented in [contracts
 - No `last_poll_at` field on Config. (FR-015.)
 - No release-notes cache, no asset-list cache, no install-log table.
 - No `update_pending: bool` flag — there is no "pending" state; the updater either spawns msiexec immediately upon decision or it doesn't.
-- No new ETW event IDs in `internal/etwids` for updater events. The slog signals plus the audit row are sufficient for operator visibility; ETW IDs are reserved for state transitions the dashboard's event stream cares about.
+- No new ETW event IDs in `internal/etwids` for updater events. The slog signals are sufficient for operator visibility in v1; ETW IDs are reserved for state transitions the dashboard's event stream cares about. (A future durable-audit follow-up may add ETW IDs alongside the audit-row write — see §2.)
