@@ -33,11 +33,11 @@ After installing a release that includes this feature (010 or later), auto-updat
    Look for `update=poll_start` lines at the configured interval (after the 5–15 min initial delay).
 7. To change the cadence: set `"poll_interval"` to any Go duration string ≥ `"1h"` (e.g., `"6h"`, `"12h"`, `"72h"` for 3 days). Values below `"1h"` are clamped to `"1h"` with a `slog.Warn`.
 8. To opt back out at any time: set `"enabled": false`. The poll loop sees the change on its next tick and skips the GitHub call.
-9. Verify auto-update has fired by checking the audit log:
+9. Verify auto-update has fired by grepping the daily file log (durable audit-store row deferred to a follow-up — see spec.md FR-011):
    ```
-   drainctl history --since 7d --filter event=auto_update_install
+   Get-Content '$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl-*.log' | Select-String 'update=installing'
    ```
-   A row appears each time a version transition is initiated.
+   One `update=installing old=… new=…` line appears per version transition. Lines persist for 7 days (the file-log rotation window).
 
 ## What the operator does NOT need to do
 
