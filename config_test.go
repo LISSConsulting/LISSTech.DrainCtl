@@ -1771,3 +1771,145 @@ func TestRestrictConfigACL_NonElevatedReturnsNil(t *testing.T) {
 		t.Errorf("restrictConfigACL non-elevated returned err = %v, want nil", err)
 	}
 }
+
+// ── UpdateConfig (010 auto-update) ────────────────────────────────────────────
+
+func TestUpdateConfig_DefaultConfigPopulatesUpdate(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Update.Enabled {
+		t.Errorf("Update.Enabled = true, want false (opt-in default)")
+	}
+	if cfg.Update.Channel != ChannelStable {
+		t.Errorf("Update.Channel = %q, want %q", cfg.Update.Channel, ChannelStable)
+	}
+	if got := time.Duration(cfg.Update.PollInterval); got != DefaultUpdatePollInterval {
+		t.Errorf("Update.PollInterval = %v, want %v", got, DefaultUpdatePollInterval)
+	}
+}
+
+func TestUpdateConfig_ValidateClamps(t *testing.T) {
+	tests := []struct {
+		name         string
+		inChannel    string
+		inInterval   time.Duration
+		wantChannel  string
+		wantInterval time.Duration
+	}{
+		{"empty channel defaults to stable", "", time.Hour, ChannelStable, time.Hour},
+		{"recognized stable", ChannelStable, 6 * time.Hour, ChannelStable, 6 * time.Hour},
+		{"recognized prerelease", ChannelPrerelease, 24 * time.Hour, ChannelPrerelease, 24 * time.Hour},
+		{"unknown channel clamps to stable", "banana", time.Hour, ChannelStable, time.Hour},
+		{"alt typo clamps to stable", "beta", time.Hour, ChannelStable, time.Hour},
+		{"zero interval defaults to 24h", ChannelStable, 0, ChannelStable, DefaultUpdatePollInterval},
+		{"sub-minimum interval clamps to 1h", ChannelStable, 5 * time.Minute, ChannelStable, MinUpdatePollInterval},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Update.Channel = tt.inChannel
+			cfg.Update.PollInterval = Duration(tt.inInterval)
+			cfg.Validate()
+			if cfg.Update.Channel != tt.wantChannel {
+				t.Errorf("Channel = %q, want %q", cfg.Update.Channel, tt.wantChannel)
+			}
+			if got := time.Duration(cfg.Update.PollInterval); got != tt.wantInterval {
+				t.Errorf("PollInterval = %v, want %v", got, tt.wantInterval)
+			}
+		})
+	}
+}
+
+func TestUpdateConfig_JSONRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want UpdateConfig
+	}{
+		{
+			name: "missing update object → defaults after Validate",
+			in:   `{}`,
+			want: UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
+		},
+		{
+			name: "empty update object → defaults after Validate",
+			in:   `{"update": {}}`,
+			want: UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
+		},
+		{
+			name: "enabled-only → channel and interval default after Validate",
+			in:   `{"update": {"enabled": true}}`,
+			want: UpdateConfig{Enabled: true, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
+		},
+		{
+			name: "explicit prerelease",
+			in:   `{"update": {"enabled": true, "channel": "prerelease", "poll_interval": "12h"}}`,
+			want: UpdateConfig{Enabled: true, Channel: ChannelPrerelease, PollInterval: Duration(12 * time.Hour)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			if err := json.Unmarshal([]byte(tt.in), cfg); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			cfg.Validate()
+			if cfg.Update != tt.want {
+				t.Errorf("Update = %+v, want %+v", cfg.Update, tt.want)
+			}
+		})
+	}
+}
+
+func TestDuration_JSONRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want time.Duration
+	}{
+		{"24h", `"24h"`, 24 * time.Hour},
+		{"6h30m", `"6h30m"`, 6*time.Hour + 30*time.Minute},
+		{"empty string → zero", `""`, 0},
+		{"null → zero", `null`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d Duration
+			if err := json.Unmarshal([]byte(tt.in), &d); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if got := time.Duration(d); got != tt.want {
+				t.Errorf("Unmarshal(%s) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+
+	// Marshal round-trip — non-zero values render back to a parseable string.
+	d := Duration(24 * time.Hour)
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var d2 Duration
+	if err := json.Unmarshal(b, &d2); err != nil {
+		t.Fatalf("re-Unmarshal: %v", err)
+	}
+	if d != d2 {
+		t.Errorf("round-trip = %v, want %v", time.Duration(d2), time.Duration(d))
+	}
+}
+
+func TestDuration_UnmarshalRejectsInvalid(t *testing.T) {
+	tests := []string{
+		`"banana"`, // not a duration
+		`"24"`,     // missing unit
+		`123`,      // not a string
+	}
+	for _, tt := range tests {
+		t.Run(tt, func(t *testing.T) {
+			var d Duration
+			if err := json.Unmarshal([]byte(tt), &d); err == nil {
+				t.Errorf("Unmarshal(%s) = nil err, want error", tt)
+			}
+		})
+	}
+}
