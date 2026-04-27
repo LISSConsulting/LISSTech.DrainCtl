@@ -145,3 +145,54 @@ func TestAddKey_RoundTripParsesCleanly(t *testing.T) {
 		}
 	}
 }
+
+func TestCountReleaseSigningKeysB64_NonEmptyKeys(t *testing.T) {
+	path := writeTempFile(t, "keys.go", fixtureKeysFile)
+	got, err := countReleaseSigningKeysB64(path)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 1 {
+		t.Errorf("count = %d, want 1 (fixture has one non-empty key)", got)
+	}
+}
+
+func TestCountReleaseSigningKeysB64_EmptySlice(t *testing.T) {
+	path := writeTempFile(t, "keys.go", fixtureEmptySliceFile)
+	got, err := countReleaseSigningKeysB64(path)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("count = %d, want 0 (empty slice fixture)", got)
+	}
+}
+
+func TestCountReleaseSigningKeysB64_SkipsEmptyStringEntries(t *testing.T) {
+	const fixture = `package updater
+
+var releaseSigningKeysB64 = []string{
+	"",
+	"realKey1=",
+	"",
+	"realKey2=",
+}
+`
+	path := writeTempFile(t, "keys.go", fixture)
+	got, err := countReleaseSigningKeysB64(path)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("count = %d, want 2 (empty entries skipped)", got)
+	}
+}
+
+func TestCountReleaseSigningKeysB64_MissingSliceErrors(t *testing.T) {
+	path := writeTempFile(t, "keys.go", `package updater
+var unrelated = []string{}
+`)
+	if _, err := countReleaseSigningKeysB64(path); err == nil {
+		t.Fatal("expected error when releaseSigningKeysB64 is absent")
+	}
+}
