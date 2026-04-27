@@ -374,6 +374,7 @@
                     <li><a href="#performance">Performance Monitoring</a></li>
                     <li><a href="#evtspike">Event-Log Anomaly Detection</a></li>
                     <li><a href="#rmm">RMM Integration</a></li>
+                    <li><a href="#auto-update">Auto-update</a></li>
                     <li><a href="#service">Service Management</a></li>
                     <li><a href="#troubleshooting">Troubleshooting</a></li>
                 </ol>
@@ -2433,8 +2434,104 @@ if ($result.exit_code -ne 0) {
     # Send to your ticketing system, dashboard, etc.
 }</code></pre>
 
+            <!-- ── Auto-update ────────────────────────────────────────────────────── -->
+            <h2 id="auto-update">13. Auto-update</h2>
+
+            <p>
+                The agent can self-update by polling GitHub releases on a daily cadence, verifying the Authenticode
+                signature against the LISS code-signing certificate, and running <code>msiexec</code> silently. Auto-update
+                is <strong>off by default</strong> &mdash; it does not contact GitHub at all until the operator opts in.
+            </p>
+
+            <h3>Enabling auto-update</h3>
+
+            <p>Edit <code>config.json</code> and add (or modify) the <code>update</code> object:</p>
+
+            <pre><code>"update": {
+  "enabled": true,
+  "channel": "prerelease",
+  "poll_interval": "24h"
+}</code></pre>
+
+            <p>
+                The service watches <code>config.json</code> and reloads within seconds &mdash; no restart needed. The
+                first poll fires 5&ndash;15 minutes after the change (jittered); subsequent polls run every
+                <code>poll_interval</code> &plusmn; 8% (so 24h &plusmn; 2h on the default).
+            </p>
+
+            <table>
+                <thead><tr><th>Field</th><th>Default</th><th>Notes</th></tr></thead>
+                <tbody>
+                    <tr><td><code>enabled</code></td><td><code>false</code></td>
+                        <td>When <code>false</code>, no goroutine, no GitHub call. Default is opt-in by design &mdash;
+                            auto-installing software without explicit consent on a host violates the principle of least
+                            surprise.</td></tr>
+                    <tr><td><code>channel</code></td><td><code>"stable"</code></td>
+                        <td>Recognized values: <code>"stable"</code> and <code>"prerelease"</code>. <code>stable</code>
+                            polls <code>/releases/latest</code> (skips prereleases). <code>prerelease</code> polls
+                            <code>/releases?per_page=1</code> (most recent regardless of flag). Unknown values clamp to
+                            <code>"stable"</code> with a warn log.</td></tr>
+                    <tr><td><code>poll_interval</code></td><td><code>"24h"</code></td>
+                        <td>Go-duration string (<code>"24h"</code>, <code>"6h30m"</code>, <code>"72h"</code>). Minimum
+                            <code>"1h"</code>; lower values clamp.</td></tr>
+                </tbody>
+            </table>
+
+            <div class="callout">
+                <strong>&#x26A0; Today, every release ships as &ldquo;prerelease&rdquo;</strong>
+                Until the project graduates a non-prerelease build, <code>channel: "stable"</code> finds nothing on
+                GitHub and the agent logs <code>update=no_stable_release</code> on each poll. To actually receive
+                updates today, both <code>"enabled": true</code> AND <code>"channel": "prerelease"</code> are required.
+                Once a stable release is published, <code>"channel": "stable"</code> becomes operationally useful.
+            </div>
+
+            <h3>How an update lands</h3>
+
+            <ol>
+                <li>Poll <code>api.github.com</code> for the latest release on the configured channel.</li>
+                <li>Compare CalVer tags numerically. If the remote version is not newer, log
+                    <code>update=up_to_date</code> and reschedule.</li>
+                <li>Download the signed MSI to <code>%TEMP%\drainctl-update-&lt;random&gt;.msi</code>.</li>
+                <li>Verify the Authenticode signature is valid AND the signing-certificate Subject CN equals exactly
+                    <code>LISS Consulting, Corp.</code> Anything else &mdash; missing signature, untrusted chain, wrong
+                    subject &mdash; is refused and the temp file is deleted.</li>
+                <li>Spawn <code>msiexec /i &lt;path&gt; /quiet /norestart</code> as a detached process so it survives
+                    the service's exit.</li>
+                <li>Trigger our own clean shutdown so file replacement isn't blocked by the running service. The MSI's
+                    custom action restarts the new version after install.</li>
+            </ol>
+
+            <h3>Verifying it&rsquo;s working</h3>
+
+            <p>
+                Set <code>log_file_level</code> to <code>"debug"</code> in <code>config.json</code> to see every poll
+                attempt. Then tail the daily file log:
+            </p>
+
+            <pre><code>Get-Content '$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl-*.log' |
+    Select-String 'update='</code></pre>
+
+            <p>You'll see lines like:</p>
+            <ul>
+                <li><code>update=poll_start</code> &mdash; one per scheduled poll.</li>
+                <li><code>update=up_to_date</code> &mdash; remote is the same version we're running.</li>
+                <li><code>update=not_modified</code> &mdash; GitHub returned 304 against the cached ETag.</li>
+                <li><code>update=no_stable_release</code> &mdash; channel is <code>"stable"</code> and no non-prerelease
+                    release exists. Steady-state idle, not a failure.</li>
+                <li><code>update=installing old=&hellip; new=&hellip;</code> &mdash; install path triggered. Persists 7
+                    days in the rotated daily logs.</li>
+                <li><code>update=refused reason=&hellip;</code> &mdash; signature didn't verify. Stays at the configured
+                    cadence (deliberate refusal, not a transient failure).</li>
+            </ul>
+
+            <h3>Opting back out</h3>
+
+            <p>Set <code>"enabled": false</code> in <code>config.json</code>. The next poll tick (within
+                <code>poll_interval</code>) will see the change and skip the GitHub call. To stop all activity
+                immediately, restart the service after the edit.</p>
+
             <!-- ── Service Management ─────────────────────────────────────────────── -->
-            <h2 id="service">13. Service Management</h2>
+            <h2 id="service">14. Service Management</h2>
 
             <p>The MSI handles service installation. These commands are for manual management or troubleshooting.</p>
 
@@ -2548,7 +2645,7 @@ drainctl service uninstall</code></pre>
             </p>
 
             <!-- ── Troubleshooting ────────────────────────────────────────────────── -->
-            <h2 id="troubleshooting">14. Troubleshooting</h2>
+            <h2 id="troubleshooting">15. Troubleshooting</h2>
 
             <h3>"changed_by" is empty</h3>
             <p>
