@@ -73,7 +73,7 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 
 5. **Config-file watcher** — similar to the registry watcher; extract to a `config.WatcherSubsystem`. **Effort: S-M.**
 
-6. **Named-pipe server (`pipe.ServePipe`)** — the function takes `(ctx, handler)` today, called inside Execute as `go pipe.ServePipe(ctx, h)`. Wrap into a subsystem that owns its goroutine + waitgroup. **Effort: S.** With the B1 fix, the per-accept helper goroutines are already deterministic; the migration just promotes the package-level call to a subsystem struct.
+6. ~~**Named-pipe server (`pipe.ServePipe`)**~~ done — extracted to `pipe.Subsystem` in `internal/pipe/subsystem_windows.go`. Stop is wired alongside `selfMetricsSub.Stop()` in the SCM-stop branch.
 
 7. **ETW handler + file log** — `logging.ETWHandler` already has `Close()` (per A1). Wrap `etwH` in a subsystem so `Execute`'s `defer etwH.Close()` becomes `defer sub.Stop()`. **Effort: S.**
 
