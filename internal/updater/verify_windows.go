@@ -14,7 +14,9 @@ import (
 
 // expectedSubjectCN is the exact Subject CN of the LISS code-signing cert.
 // Compared verbatim — no whitespace normalization, no case folding.
-const expectedSubjectCN = "LISS Consulting, Corp."
+// Note: cert was issued without the comma in the legal name; the CN string
+// here matches the cert as provisioned, not the legal name in branding.
+const expectedSubjectCN = "LISS Consulting Corp."
 
 // Sentinel errors so callers (and tests) can branch precisely with errors.Is.
 var (
