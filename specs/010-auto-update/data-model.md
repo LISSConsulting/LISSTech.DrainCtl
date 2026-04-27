@@ -40,14 +40,7 @@ const (
 
 ## 2. Audit event string `auto_update_install` (new value, no schema change)
 
-- **Location**: `internal/telemetry/audit.go` — the existing `AuditStore.Append` accepts a free-form `event string`. No new column, no new constant if we follow the existing convention of inline string literals at the call site.
-- **Format of the row**:
-  - `ts` — install timestamp (the moment we spawned msiexec, before our own shutdown).
-  - `host` — local host (already populated by the audit-store wrapper).
-  - `event` — string literal `auto_update_install`.
-  - `metadata` — JSON: `{"old": "26.116.17", "new": "26.117.3"}`. Field names match the existing audit-row convention for transition events.
-- **When written**: After `WinVerifyTrust` and Subject CN check both pass, AFTER the `cmd.Start()` for msiexec returns nil, BEFORE the service triggers its own ctx cancel. This ordering means a successful row is durable evidence the install was *initiated*; a row absent after a service restart at a new version means the install happened via some other path (manual `irm | iex`, dashboard-driven future feature) and someone should investigate why the auto-updater didn't fire.
-- **Read path**: Existing CLI `drainctl history` and dashboard audit views surface this event with no changes; it's just another string.
+**STATUS: deferred to a follow-up spec.** The original draft of this file claimed `AuditStore.Append` accepts a free-form `event string` — that was wrong. The actual `internal/telemetry/audit.go` table is purpose-built for drain-mode transitions (`prev_state`/`new_state` int columns, no `event` or `metadata` columns), and a clean integration for `auto_update_install` requires a separate decision: extend `AuditRecord` with optional event+metadata fields, add new columns to the audit table, or stand up a sibling `events` table. None of those decisions belong inside the 010 PR. v1 records version transitions via `slog.Info` only — durable for 7 days via the daily file-log rotation. A follow-up spec will revisit durable persistence once the audit-table redesign is decided.
 
 ## 3. In-memory state (not persisted)
 
