@@ -287,15 +287,55 @@ sign-msi:
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
 
+# ── Auto-update release manifest ─────────────────────────────────────────────
+
+# Generate an Ed25519 keypair for the auto-update manifest signer.
+# Writes the private key to $env:RELEASE_SIGNING_KEY (default
+# %USERPROFILE%\.config\drainctl\release-signing.key) and inserts the
+# public key into internal/updater/keys_windows.go. Idempotent: re-running
+# with an existing keypair file is rejected; re-running the insert with
+# the same pubkey is a no-op (slice de-dupe).
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+release-sign-keygen:
+    $out = if ($env:RELEASE_SIGNING_KEY) { $env:RELEASE_SIGNING_KEY } else { Join-Path $env:USERPROFILE ".config\drainctl\release-signing.key" }
+    $dir = Split-Path $out -Parent
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $keysFile = Join-Path "{{justfile_directory()}}" "internal\updater\keys_windows.go"
+    & go run "{{justfile_directory()}}/cmd/release-sign" keygen --out $out --add-to $keysFile
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Sign the built MSI: produce dist/release.json and dist/release.json.sig
+# alongside dist/LISSTech.DrainCtl.msi for upload to the GitHub release.
+# Skipped silently when $env:RELEASE_SIGNING_KEY is unset (transition mode).
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+sign-release-manifest:
+    $key = $env:RELEASE_SIGNING_KEY
+    if (-not $key) {
+        Write-Host "`n⏭️  Skipping manifest signing (RELEASE_SIGNING_KEY unset)" -ForegroundColor Yellow
+        exit 0
+    }
+    if (-not (Test-Path $key)) { Write-Error "Key not found: $key"; exit 1 }
+    $msi = "{{dist_dir}}/LISSTech.DrainCtl.msi"
+    if (-not (Test-Path $msi)) { Write-Error "MSI not found: $msi"; exit 1 }
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔏 Signing release manifest  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    & go run "{{justfile_directory()}}/cmd/release-sign" sign --key $key --msi $msi --version $ver --out-dir "{{dist_dir}}"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "   ✅ release.json + release.json.sig" -ForegroundColor Green
+
 # ── Aggregate ────────────────────────────────────────────────────────────────
 
 # Build everything (CLI + DLL + PS module + MSI), unsigned
 all: (header "all") msi
 
-# Build and sign everything: binaries → sign → MSI → sign MSI
+# Build and sign everything: binaries → sign → MSI → sign MSI → sign manifest
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: (header "release") gotest psmodule sign-binaries msi sign-msi
+release: (header "release") gotest psmodule sign-binaries msi sign-msi sign-release-manifest
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"

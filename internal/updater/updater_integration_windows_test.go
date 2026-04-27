@@ -5,6 +5,7 @@ package updater
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,12 @@ import (
 // replaces the same-named package-level seam for the duration of the
 // test; the original value is restored via t.Cleanup. Nil fields keep
 // production behavior.
+//
+// runUpdater also unconditionally swaps decodeKeys to return an empty
+// list — the integration tests are about orchestration, not manifest
+// verification, so they run in transition mode (nil keys). Tests that
+// exercise manifest verification live in manifest_remote_windows_test.go
+// and call verifyManifestRemote directly with a fake server + keys.
 type fakes struct {
 	fetchRelease func(ctx context.Context, client *http.Client, channel, etag string) (release, error)
 	verifyMSI    func(msiPath string) error
@@ -61,6 +68,10 @@ func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, shutd
 	prevDelay := initialPollDelay
 	t.Cleanup(func() { initialPollDelay = prevDelay })
 	initialPollDelay = func() time.Duration { return 1 * time.Millisecond }
+
+	prevDecode := decodeKeys
+	t.Cleanup(func() { decodeKeys = prevDecode })
+	decodeKeys = func() ([]ed25519.PublicKey, error) { return nil, nil }
 
 	shutdownFired = make(chan struct{}, 1)
 	var once sync.Once
