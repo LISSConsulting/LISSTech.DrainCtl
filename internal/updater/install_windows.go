@@ -21,6 +21,10 @@ const (
 
 // execCommand is a test seam wrapping exec.Command — tests swap it for a
 // fake that records arguments without actually launching msiexec.
+//
+// NOT goroutine-safe. Tests that swap execCommand MUST NOT call
+// t.Parallel(); the package-level var is shared. The integration test
+// suite in this package is sequential by convention.
 var execCommand = exec.Command
 
 // spawnInstall launches msiexec on the supplied MSI path as a detached
@@ -56,6 +60,15 @@ func spawnInstall(msiPath string) error {
 // free of direct context handling at the install boundary, and makes the
 // "we exit so msiexec can replace files" intent explicit at the point
 // of decision.
+//
+// Race-window note: msiexec may issue ControlService(STOP) to SCM before
+// our cancel observable propagates through the Subsystem's poll loop.
+// Worst case, the service stops twice (SCM + our own cancel); both
+// idempotent. The Subsystem's caller invokes spawnInstall AND
+// triggerSelfShutdown back-to-back precisely to keep this window small —
+// even if the order were flipped, the eventual outcome (service stops,
+// msiexec replaces files, MSI custom action restarts the new version)
+// converges.
 func triggerSelfShutdown(cancel context.CancelFunc) {
 	if cancel == nil {
 		slog.Warn("update: triggerSelfShutdown called with nil cancel — service ctx not wired")
