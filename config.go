@@ -227,7 +227,40 @@ type Config struct {
 	Telemetry   TelemetryConfig   `json:"telemetry"`
 
 	EvtSpike EvtSpikeConfig `json:"evtspike"`
+
+	Update UpdateConfig `json:"update"`
 }
+
+// UpdateConfig controls the agent's self-poll auto-update behavior. The
+// updater subsystem (internal/updater) reads this config at Start and
+// re-reads Enabled and Channel on every poll tick so an operator can
+// disable or change channel mid-run without restart.
+//
+// Defaults: Enabled=false (opt-in), Channel="stable", PollInterval=24h.
+// Validate replaces empty Channel with "stable" and zero PollInterval
+// with the default; unknown Channel values are clamped to "stable" with
+// a slog.Warn. A fresh install does not contact GitHub until the operator
+// explicitly flips Enabled=true.
+//
+// See specs/010-auto-update/spec.md for the full feature contract.
+type UpdateConfig struct {
+	Enabled      bool     `json:"enabled"`
+	Channel      string   `json:"channel"`
+	PollInterval Duration `json:"poll_interval"`
+}
+
+// Channel string constants — exported so callers and tests can reference
+// the recognized values without string-literal duplication.
+const (
+	ChannelStable     = "stable"
+	ChannelPrerelease = "prerelease"
+)
+
+// Update-config defaults and bounds.
+const (
+	DefaultUpdatePollInterval = 24 * time.Hour
+	MinUpdatePollInterval     = 1 * time.Hour
+)
 
 // DashboardJSON holds dashboard settings in config.json.
 type DashboardJSON struct {
@@ -290,6 +323,7 @@ func DefaultConfig() *Config {
 		Retention:               RetentionConfig{MetricsDays: DefaultMetricsDays, AuditDays: DefaultAuditDays},
 		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
 		EvtSpike:                EvtSpikeConfig{DisabledChannels: []string{}, AddedChannels: []string{}},
+		Update:                  UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
 	}
 }
 
@@ -539,6 +573,26 @@ func (c *Config) Validate() {
 			continue
 		}
 		c.Notifications[i].Secret = dpapiPrefix + base64.StdEncoding.EncodeToString(ct)
+	}
+
+	// UpdateConfig: clamp Channel and PollInterval per spec 010 FR-001a / FR-003.
+	switch c.Update.Channel {
+	case ChannelStable, ChannelPrerelease:
+		// recognized — leave as-is
+	case "":
+		c.Update.Channel = ChannelStable
+	default:
+		slog.Default().Warn("update.channel unknown value, clamping to stable",
+			"requested", c.Update.Channel, "clamped", ChannelStable)
+		c.Update.Channel = ChannelStable
+	}
+	if time.Duration(c.Update.PollInterval) == 0 {
+		c.Update.PollInterval = Duration(DefaultUpdatePollInterval)
+	} else if time.Duration(c.Update.PollInterval) < MinUpdatePollInterval {
+		slog.Default().Warn("update.poll_interval below minimum, clamping",
+			"requested", time.Duration(c.Update.PollInterval).String(),
+			"clamped", MinUpdatePollInterval.String())
+		c.Update.PollInterval = Duration(MinUpdatePollInterval)
 	}
 }
 
