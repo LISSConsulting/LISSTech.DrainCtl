@@ -16,7 +16,16 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/lifecycle"
 )
+
+// Compile-time assertion that *Subsystem satisfies lifecycle.Subsystem. The
+// shape predates the interface (Start(ctx) error / Stop() were already
+// present); this line locks the contract so a refactor that drops or
+// renames either method fails at compile time. Per
+// docs/architecture/strangler-plan.md §"Migration order #1", this is the
+// demonstration migration that lands alongside the LCI's introduction.
+var _ lifecycle.Subsystem = (*Subsystem)(nil)
 
 const (
 	scoringIntervalSeconds  = 10
