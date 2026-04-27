@@ -121,3 +121,65 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 - Integration: full updater subsystem against a fake GitHub server, asserting the LCI contract (Start returns nil, Stop drains within bounded time, ctx cancel halts in-flight HTTP).
 - LCI conformance: a compile-time `var _ lifecycle.Subsystem = (*updater.Subsystem)(nil)` assertion in `internal/updater/updater_windows.go`.
 - Strangler ratchet: same PR adds the same compile-time assertion to `internal/evtspike` and confirms `go build ./...` is clean — see plan.md §"Sequencing".
+
+---
+
+## v1.1 — Signed Release Manifest Verification
+
+**Status**: implemented (see `internal/updater/manifest.go`, `cmd/release-sign/`).
+
+### Threat model addition
+
+v1.0 verifies updates with WinVerifyTrust + Subject CN equality only. That binding is weak: any attacker who can obtain a code-signing cert with the same Subject CN (`LISS Consulting Corp.`) and a chain trusted by the host can ship a malicious MSI that the v1 verifier accepts. Authenticode CAs do not enforce uniqueness on common-name strings.
+
+v1.1 adds an Ed25519 signature over a SHA-256 binding of the published MSI. The keypair is held offline; only the public keys ship in the binary. Forging an update now requires the offline private key in addition to a same-CN code-signing cert.
+
+### Contract addition
+
+Every release MUST publish, alongside `LISSTech.DrainCtl.msi`:
+
+- `release.json` — UTF-8 JSON `ReleaseManifest` with fields `schema_version` (currently `1`), `version`, `asset.name`, `asset.sha256` (lowercase hex), `signed_at` (RFC 3339 UTC).
+- `release.json.sig` — raw 64-byte Ed25519 signature over the EXACT bytes of `release.json` as published (no canonicalisation; the verifier verifies bytes-as-served).
+
+Verifier flow runs BEFORE Authenticode:
+
+1. If `internal/updater/keys_windows.go` embeds zero non-empty pubkeys → manifest verification is a no-op (transition mode).
+2. Otherwise: download both sidecars; reject if either is missing (`update=refused stage=manifest`).
+3. Verify Ed25519 signature against every embedded pubkey; first match passes (this is the rotation contract).
+4. Parse JSON; reject `schema_version` outside the supported set (currently `{0, 1}`; legacy 0 accepted during the transition window — see "Schema-version transition" below).
+5. Compare `asset.name` against the GitHub asset filename (case-sensitive equality) and the SHA-256 of the downloaded MSI bytes against `asset.sha256`. Reject on either mismatch.
+6. Run Authenticode + Subject CN check (defense in depth; the manifest is the strong binding).
+
+### Transition mode
+
+The fielded binary base may not yet embed any pubkey. To allow rolling out the verifier code before the keypair exists:
+
+- `releaseSigningKeysB64 = []` → manifest verification disabled, falls back to Authenticode-only (the v1.0 contract).
+- `releaseSigningKeysB64 = ["..."]` → manifest verification REQUIRED on every update. Releases without sidecars are refused.
+
+The `just sign-release-manifest` recipe enforces this from the publishing side: it refuses to skip signing if the keys file embeds any pubkey. The `just publish` recipe uploads the sidecars whenever they exist on disk.
+
+### Key rotation
+
+Embedded pubkey list supports multiple entries. Rotation flow:
+
+1. Generate new keypair: `just release-sign-keygen` (writes private to `$env:RELEASE_SIGNING_KEY`, inserts pubkey into `keys_windows.go` via AST-based idempotent edit).
+2. Ship release N+1 with BOTH old and new pubkey embedded; sign with the old key (existing infrastructure).
+3. Once N+1 has propagated to the active fleet, switch `$env:RELEASE_SIGNING_KEY` to the new private key. Future releases sign with the new key.
+4. Ship release N+2 dropping the old pubkey from `keys_windows.go`; old key is now retired.
+
+Multiple embedded keys also support emergency replacement: if the old private key is compromised, an out-of-band release with only the new key (no transition window) revokes the old key from the verifier.
+
+### Schema-version transition
+
+Manifests produced before the schema_version field was added unmarshal with `SchemaVersion = 0`. The verifier accepts both 0 and 1 today. A follow-up commit, after the first release with `schema_version: 1` ships and is verified live across the active fleet, tightens the verifier to reject 0. That follow-up is tracked here as a v1.1 backlog item.
+
+### Out of scope
+
+- **Local-admin attacker**: an attacker with write access to `%TEMP%\drainctl-update-*.msi` between verify and msiexec spawn can substitute the binary. The temp dir is admin-only on LocalSystem hosts; an attacker with admin can subvert the binary directly. Hardening (re-hash post-spawn-prep, fd-based msiexec) is not pursued.
+- **Replay/freeze defense**: persisting a highest-seen version to defend against signed-but-stale replay is tracked as M1 in `docs/reviews/codex-2026-04-27-sspi-update-remediation-plan.md`. Until that lands, a network-positioned attacker can stall a fleet on a previously-published signed release.
+- **Schema-version rejection-of-0** as noted above; tracked as a v1.1 backlog item.
+
+### Updated contract reference
+
+`specs/010-auto-update/contracts/github-releases-api.md` §"What we explicitly DO NOT depend on" originally listed `assets[].digest` as out of scope. v1.1 supersedes that for `release.json` + `release.json.sig` specifically; the GitHub-emitted `assets[].digest` is still ignored, but our own published `release.json.asset.sha256` is now load-bearing.
