@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexbrainman/sspi"
@@ -38,10 +39,46 @@ func GetAuthInfo(r *http.Request) *AuthInfo {
 	return nil
 }
 
+// sspiReleaser is the subset of *negotiate.ServerContext used by the
+// pending-map machinery. Lets tests substitute a counter-based fake without
+// constructing a real Win32 SSPI handle.
+type sspiReleaser interface {
+	Release() error
+}
+
 // pendingCtx holds an in-progress NTLM multi-leg server context.
+// In production sc and rel point at the same *negotiate.ServerContext.
+// In tests sc may be nil — the orphan/reaper paths only call rel.Release().
 type pendingCtx struct {
 	sc      *negotiate.ServerContext
+	rel     sspiReleaser
 	created time.Time
+}
+
+// sspiLiveContexts counts ServerContexts that have been created via
+// negotiate.NewServerContext but not yet had Release() called on them.
+// sspiPendingContexts counts entries currently in the per-middleware
+// pending map (multi-leg NTLM in flight). Both are exported via
+// SspiMetrics for selfmetrics emission so operators can confirm via the
+// daily diag bundle that neither counter trends upward over time —
+// that's the regression signal for any future SSPI handle leak.
+var (
+	sspiLiveContexts    atomic.Int64
+	sspiPendingContexts atomic.Int64
+)
+
+// SspiMetrics returns a snapshot of the live/pending ServerContext counters.
+// Used by selfmetrics; safe for concurrent use.
+func SspiMetrics() (live, pending int64) {
+	return sspiLiveContexts.Load(), sspiPendingContexts.Load()
+}
+
+// releasePendingContext releases the kernel handle owned by pc and updates
+// the live-context counter. Idempotent only at the level of "was this pc
+// already released" — caller must not invoke twice on the same pc.
+func releasePendingContext(pc *pendingCtx) {
+	_ = pc.rel.Release()
+	sspiLiveContexts.Add(-1)
 }
 
 // acquireServerCredentials is a package var so tests can inject a fake.
@@ -104,9 +141,9 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 			case <-ctx.Done():
 				// Release all pending contexts and the shared cred on shutdown.
 				pending.Range(func(key, value any) bool {
-					pc := value.(*pendingCtx)
-					_ = pc.sc.Release()
 					pending.Delete(key)
+					releasePendingContext(value.(*pendingCtx))
+					sspiPendingContexts.Add(-1)
 					return true
 				})
 				creds.release()
@@ -116,8 +153,9 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				pending.Range(func(key, value any) bool {
 					pc := value.(*pendingCtx)
 					if now.Sub(pc.created) > 60*time.Second {
-						_ = pc.sc.Release()
 						pending.Delete(key)
+						releasePendingContext(pc)
+						sspiPendingContexts.Add(-1)
 					}
 					return true
 				})
@@ -149,12 +187,14 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		var responseToken []byte
 
 		if v, ok := pending.LoadAndDelete(connKey); ok {
-			// Second leg: continue the existing context.
+			// Second leg: continue the existing context. Pending count drops;
+			// live count is unchanged (the same sc that was counted at first leg).
+			sspiPendingContexts.Add(-1)
 			pc := v.(*pendingCtx)
 			sc = pc.sc
 			authDone, responseToken, err = sc.Update(token)
 			if err != nil {
-				_ = sc.Release()
+				releasePendingContext(pc)
 				slog.Warn("sspi: negotiate leg2 failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
@@ -175,11 +215,21 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
 				return
 			}
+			sspiLiveContexts.Add(1)
 		}
 
 		if !authDone {
 			// Multi-leg: store context for the next request on this connection.
-			pending.Store(connKey, &pendingCtx{sc: sc, created: time.Now()})
+			// Use Swap (not Store) to detect a duplicate first-leg arriving on
+			// a connKey that already has a pending entry — without releasing
+			// the displaced ServerContext, its kernel handle leaks forever
+			// because the reaper only walks current map entries.
+			newPC := &pendingCtx{sc: sc, rel: sc, created: time.Now()}
+			if prev, loaded := pending.Swap(connKey, newPC); loaded {
+				releasePendingContext(prev.(*pendingCtx))
+			} else {
+				sspiPendingContexts.Add(1)
+			}
 			if len(responseToken) > 0 {
 				w.Header().Set("WWW-Authenticate",
 					"Negotiate "+base64.StdEncoding.EncodeToString(responseToken))
@@ -191,6 +241,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		// Auth complete — release the per-request server context.
 		defer func() {
 			_ = sc.Release()
+			sspiLiveContexts.Add(-1)
 		}()
 
 		if len(responseToken) > 0 {
