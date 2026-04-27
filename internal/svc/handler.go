@@ -612,7 +612,10 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
-	go pipe.ServePipe(ctx, handler)
+	pipeSub := pipe.New(handler)
+	if err := pipeSub.Start(ctx); err != nil {
+		slog.Warn("pipe server failed to start", "error", err)
+	}
 
 	// Start dashboard if enabled.
 	var dashState *dashboard.ServerState
@@ -816,6 +819,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 				updaterSub.Stop()
 				selfMetricsSub.Stop()
+				pipeSub.Stop()
 				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
