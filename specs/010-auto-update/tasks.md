@@ -91,17 +91,16 @@ Single PR. Internal commit order designed so each commit builds clean and is ind
 - New `internal/updater/updater_windows.go`:
   ```go
   type Subsystem struct {
-      cfg              dc.UpdateConfig
-      client           *http.Client
-      shutdownService  context.CancelFunc  // service-level ctx cancel
-      audit            AuditAppender       // interface — see below
-      etag             string
-      backoff          backoff
-      wg               sync.WaitGroup
-      ctx              context.Context     // set in Start
-      cancel           context.CancelFunc  // set in Start; Stop calls it then wg.Wait
+      cfg             dc.UpdateConfig
+      client          *http.Client
+      shutdownService context.CancelFunc  // service-level ctx cancel
+      etag            string
+      backoff         backoff
+      wg              sync.WaitGroup
+      ctx             context.Context     // set in Start
+      cancel          context.CancelFunc  // set in Start; Stop calls it then wg.Wait
   }
-  func New(cfg dc.UpdateConfig, audit AuditAppender, shutdownService context.CancelFunc) *Subsystem
+  func New(cfg dc.UpdateConfig, shutdownService context.CancelFunc) *Subsystem
   func (s *Subsystem) Start(ctx context.Context) error
   func (s *Subsystem) Stop()
   ```
@@ -112,11 +111,11 @@ Single PR. Internal commit order designed so each commit builds clean and is ind
   3. On 200: parse tag → version. Compare with `dc.Version`. If `<= current`: log up_to_date, reset backoff, reschedule.
   4. Newer: download to temp file. On any error: cleanup, record failure, backoff, reschedule.
   5. `verifyAuthenticode`. On error: cleanup, log refused, this is NOT a network failure so DON'T backoff (could be deliberate poisoning). Reschedule on the configured interval.
-  6. Append audit row.
+  6. Emit `slog.Info` with `update=installing old=<dc.Version> new=<tag>` — this is the v1 record of the version transition (durable audit-row deferred per FR-011 / research Decision 10).
   7. `spawnInstall(tempPath)`. On error: cleanup, log error, reschedule.
   8. `triggerSelfShutdown` — service drains, msiexec proceeds.
-- `AuditAppender` is a small interface (`Append(ctx, host, event, metadata) error`) so the subsystem doesn't import the concrete `telemetry.AuditStore`. Production wires the real one; tests use a fake.
 - LCI conformance: `var _ lifecycle.Subsystem = (*Subsystem)(nil)` at the top of the file.
+- **No `AuditAppender` interface and no audit-store dependency** — durable persistence of version transitions is deferred to a follow-up spec; v1's `slog.Info` line is sufficient for operator visibility (7-day file-log rotation).
 
 ## Commit 10 — Integration test against fake GitHub (M)
 
@@ -124,7 +123,7 @@ Single PR. Internal commit order designed so each commit builds clean and is ind
 - Spins up an `httptest.Server` mocking GitHub `/releases/latest`. Provides a tiny valid MSI byte stream as the asset (or a fixture MSI from testdata).
 - Test scenarios:
   - **Steady state, stable channel**: `channel="stable"`, server returns 200 with current version → no install, no spawn. (Use a test seam to replace `spawnInstall` with a counting fake.)
-  - **Newer available, stable channel**: `channel="stable"`, server returns 200 with bumped version → spawn fake fires once, audit row recorded, ctx cancel called. Asserts the request URL was `/releases/latest`.
+  - **Newer available, stable channel**: `channel="stable"`, server returns 200 with bumped version → spawn fake fires once, slog.Info line with `update=installing` captured (via slog test handler), ctx cancel called. Asserts the request URL was `/releases/latest`.
   - **Newer available, prerelease channel**: `channel="prerelease"`, server returns 200 with bumped version → same outcome as above. Asserts the request URL was `/releases?per_page=1`.
   - **No stable release**: `channel="stable"`, server returns 404 → no spawn, no error log, `consecutiveFailures` stays at 0 (steady-state idle, not a failure). Repeats across multiple poll cycles without escalating.
   - **Disabled**: `enabled=false` from Start → Start returns nil, no goroutine, no HTTP call. Confirmed by recording requests in the test server.
