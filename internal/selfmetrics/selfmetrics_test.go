@@ -122,3 +122,27 @@ func TestStopWithoutStartIsSafe(t *testing.T) {
 		t.Fatal("Stop on never-started subsystem did not return")
 	}
 }
+
+// TestSubsystem_StopCancelsItsOwnCtx — the M5 fix. Pass a non-cancellable
+// parent ctx (context.Background) and assert Stop still drains the
+// goroutine within a tight bound, proving Subsystem.Stop owns its own
+// cancel and does not rely on the caller plumbing cancellation.
+func TestSubsystem_StopCancelsItsOwnCtx(t *testing.T) {
+	s := New(20 * time.Millisecond)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Let the goroutine emit at least once so we know it's alive.
+	time.Sleep(40 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop did not drain within 500ms despite parent ctx never being cancelled")
+	}
+}
