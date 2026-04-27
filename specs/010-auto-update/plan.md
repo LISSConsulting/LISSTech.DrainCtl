@@ -13,7 +13,7 @@ Technical approach in one sentence: ship a leak-proof leak-free goroutine + http
 
 **Language/Version**: Go 1.26.2; service-only feature (no frontend, no DLL changes).
 **Primary Dependencies**: `net/http` (stdlib), `golang.org/x/sys/windows` (already a transitive dep), `wintrust.dll` + `crypt32.dll` (Win32, called via `windows.NewLazySystemDLL` like the existing evtspike subscriber pattern). No new third-party Go dependencies.
-**Storage**: No persisted state — ETag held in memory only; no telemetry-DB schema changes; one new audit-event string `auto_update_install`. Config gains an `update` object (see data-model.md §1).
+**Storage**: No persisted state — ETag held in memory only; no telemetry-DB schema changes. Durable persistence of version transitions to the audit store is **deferred to a follow-up spec** (see research.md Decision 10); v1 records each transition via `slog.Info` only. Config gains an `update` object (see data-model.md §1).
 **Testing**: `go test ./internal/updater/...`, `go test ./internal/evtspike/...` (LCI conformance assertion), `go test ./internal/svc/...` (Execute call-site integration), `go test -race ./...`, `just lint`, `just vulncheck`.
 **Target Platform**: Windows Server / Windows desktop running drainctld as an SCM service. CLI/DLL paths do not run the updater.
 **Project Type**: Single Go module; touched packages limited to `internal/lifecycle/` (new), `internal/updater/` (new), `internal/evtspike/` (LCI assertion only — no behavior change), `internal/svc/handler.go` (subsystem registration), root `config.go` (UpdateConfig field).
@@ -43,7 +43,7 @@ Technical approach in one sentence: ship a leak-proof leak-free goroutine + http
   - `slog.Info  "update=installing remote=…"` (decision to install).
   - `slog.Warn  "update=refused reason=…"` (signature failures, network failures).
   - `slog.Info  "update=installed_pending_restart remote=…"` (msiexec spawned, service shutting down).
-  - One audit row per successful version transition. No silent-failure paths; every refusal emits a structured log naming the reason.
+  - The `slog.Info "update=installing old=… new=…"` line IS the v1 record of the version transition (file log keeps 7 days). Durable audit-row persistence is deferred — see research.md Decision 10. No silent-failure paths; every refusal emits a structured log naming the reason.
 
 **Gate result**: Pass.
 
@@ -74,8 +74,9 @@ The whole feature ships as one PR. Internal commit order on the branch:
 3. **Add UpdateConfig to root config** — new struct, default-construction in `LoadConfig`, JSON round-trip test in `config_test.go`.
 4. **Build the updater** — small commits in the order: version → backoff → github (HTTP client) → verify (WinVerifyTrust) → install (msiexec spawn) → updater (Start/Stop wiring it all together).
 5. **Wire updater into Execute** — register the subsystem in `drainService.subsystems`. The `Execute` shape stays mostly unchanged for now; the STP §"End state" refactor is a future PR. We just add `updaterSub.Start(ctx)` next to the existing inline goroutines and `updaterSub.Stop()` next to `waitTelemetryWorkers`.
-6. **Audit-log event** — append `auto_update_install` row from the install path; no schema change.
-7. **Release notes / docs/guide.html update** — describe the new `update` config and the opt-out path.
+6. **Release notes / docs/guide.html update** — describe the new `update` config and the opt-out path.
+
+(Step "Audit-log event" was removed mid-implementation — durable persistence deferred per research.md Decision 10. The install path emits `slog.Info "update=installing old=… new=…"` which lands in the daily file log instead.)
 
 Phase 4 of the STP migration order (registry watcher, config-file watcher, named-pipe server, etc.) is OUT of this PR. The next non-hot PR migrates one of them per the ratchet rule.
 

@@ -98,7 +98,7 @@ Then the service stops (its own ctx cancel), msiexec runs, and within ~30-60s th
 ### Step 4: confirm the version transition is durable
 
 1. `drainctl --version` reports the new version.
-2. `drainctl history --since 1h --filter event=auto_update_install` shows the row with `old=V010 new=...`.
+2. Grep the daily file log for the transition record: `Get-Content '$env:ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl-*.log' | Select-String 'update=installing'` should show one line with `old=V010 new=...` (durable for 7 days via file-log rotation; durable audit-store row deferred per research.md Decision 10).
 3. Selfmetrics log lines resume normally; goroutines flat at the expected baseline.
 
 ### Step 5: stress the refusal path
