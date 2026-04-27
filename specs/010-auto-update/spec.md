@@ -17,7 +17,7 @@ A fleet operator manages a few dozen Windows hosts running drainctld. Today, eve
 
 **Acceptance Scenarios**:
 
-1. **Given** an agent running version V0 with `update.enabled=true`, **When** GitHub publishes a release Vlatest > V0, **Then** the next poll downloads `LISSTech.DrainCtl.msi`, verifies the Authenticode signature against `CN=LISS Consulting, Corp.`, spawns msiexec detached, and the service ends up at Vlatest with an audit row for the version transition.
+1. **Given** an agent running version V0 with `update.enabled=true`, **When** GitHub publishes a release Vlatest > V0, **Then** the next poll downloads `LISSTech.DrainCtl.msi`, verifies the Authenticode signature against `CN=LISS Consulting, Corp.`, spawns msiexec detached, and the service ends up at Vlatest with the version transition recorded as an `slog.Info` line in the daily file log (durable audit-store persistence deferred — see FR-011).
 2. **Given** an agent running version V0 with `update.enabled=true`, **When** the GitHub `latest` release is V0 (already current), **Then** no download or install occurs; the file log records `update=up_to_date current=V0`.
 3. **Given** an agent running version V0, **When** `update.enabled=false` in `config.json` (the default), **Then** the updater subsystem does not start its poll loop and no GitHub call is made.
 4. **Given** an agent with `update.enabled=true, channel="stable"`, **When** the only releases on GitHub are prereleases, **Then** `/releases/latest` returns 404 and the updater logs `update=no_stable_release` and reschedules at the configured interval (no error spam, no backoff escalation — this is a steady state, not a failure).
@@ -80,7 +80,7 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 - **FR-008**: After `WinVerifyTrust` succeeds, the verifier MUST extract the signing cert via `CryptQueryObject` and assert the Subject CN equals exactly `LISS Consulting, Corp.`. A mismatch rejects the install.
 - **FR-009**: Install spawns `msiexec /i <path> /quiet /norestart` with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS` so msiexec survives the service's exit. The Go process MUST call `cmd.Process.Release()` (no Wait).
 - **FR-010**: Immediately after the detached spawn, the updater triggers the service's own clean shutdown by cancelling the service-level ctx via the existing pipe-based stop mechanism (or a direct `s.shutdown()` call). The MSI is responsible for restarting the service after replacing files.
-- **FR-011**: Every poll attempt MUST emit a `slog.Debug` line with fields: `update`, `current`, `remote`, `decision` (`install|up_to_date|not_modified|skipped|error`). Each successful version transition MUST emit a `slog.Info` and append an audit row (`telemetry.AuditStore`) with `event=auto_update_install old=V0 new=Vlatest`.
+- **FR-011**: Every poll attempt MUST emit a `slog.Debug` line with fields: `update`, `current`, `remote`, `decision` (`install|up_to_date|not_modified|skipped|error`). Each successful version transition MUST emit a `slog.Info` line with fields `update=installing old=V0 new=Vlatest`. **Durable persistence to the audit store is deferred** — the existing `telemetry.AuditStore` is drain-mode-specific (int `prev_state`/`new_state` columns, no free-form `event`/`metadata`); a clean integration requires a separate decision (extend `AuditRecord`, add columns, or stand up a sibling `events` table). The 7-day file-log rotation gives operators sufficient visibility for v1; a follow-up spec covers the durable record.
 - **FR-012**: Consecutive poll errors MUST drive an exponential backoff: 5m, 15m, 45m, then capped at the larger of 24h or `poll_interval`. A successful poll resets the backoff. The backoff is in addition to (not instead of) the configured interval.
 - **FR-013**: The updater MUST honor HTTP `If-None-Match` using the `ETag` returned by GitHub. The ETag is held in memory only — a service restart starts fresh.
 - **FR-014**: If the configured `update.enabled=true` but a network probe (any DNS or TCP error reaching api.github.com) fails, the updater treats this the same as a poll failure and applies backoff. It MUST NOT crash, panic, or wedge the service.
@@ -113,7 +113,7 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 
 - **Config**: `update` is a new top-level object. Missing in old `config.json` → defaults to `{enabled: true, poll_interval: "24h"}`. No migration step needed; the JSON unmarshal handles missing fields via Go's zero-value behavior plus an explicit default in `LoadConfig`.
 - **Service surface**: No new CLI verbs, no new pipe verbs, no new dashboard routes in this feature.
-- **Telemetry**: One new audit event type (`auto_update_install`); no schema change (the audit table already takes free-form event strings).
+- **Telemetry**: No schema change. Durable audit-row for version transitions was originally specced here but is deferred (see FR-011); v1 records transitions via `slog.Info` only.
 
 ## Required tests
 
