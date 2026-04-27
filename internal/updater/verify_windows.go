@@ -29,6 +29,7 @@ const (
 	// {00aac56b-cd44-11d0-8cc2-00c04fc295ee}.
 	wtdUIChoiceNone      = 2 // WTD_UI_NONE
 	wtdRevokeNone        = 0 // WTD_REVOKE_NONE
+	wtdRevokeWholeChain  = 1 // WTD_REVOKE_WHOLECHAIN — check every cert in the chain
 	wtdChoiceFile        = 1 // WTD_CHOICE_FILE
 	wtdStateActionVerify = 1 // WTD_STATEACTION_VERIFY
 	wtdStateActionClose  = 2 // WTD_STATEACTION_CLOSE
@@ -39,6 +40,20 @@ const (
 	certQueryObjectFile                  = 1 // CERT_QUERY_OBJECT_FILE
 	certQueryContentFlagPKCS7SignedEmbed = 1024
 	certQueryFormatFlagBinary            = 2
+
+	// CryptMsgGetParam parameter id — pulls the signer's CERT_INFO
+	// (issuer + serial number) out of the decoded PKCS#7 message so we
+	// can find the actual signer cert in the embedded cert store
+	// (vs. relying on store-enumeration order, which is unspecified
+	// and lets an attacker stuff a fake cert into the bag).
+	cmsgSignerCertInfoParam = 7
+
+	// CertFindCertificateInStore.
+	certFindSubjectCert = 11 << 16 // CERT_FIND_SUBJECT_CERT — match by Issuer + SerialNumber
+
+	// Encoding flags for CertFindCertificateInStore.
+	x509AsnEncoding  = 0x00000001
+	pkcs7AsnEncoding = 0x00010000
 
 	// CertGetNameString.
 	certNameAttrType = 3
@@ -101,21 +116,25 @@ type wintrustData struct {
 // captured into package vars so tests can swap them out at the syscall
 // boundary if needed.
 var (
-	wintrustDLL             = windows.NewLazySystemDLL("wintrust.dll")
-	procWinVerifyTrust      = wintrustDLL.NewProc("WinVerifyTrust")
-	crypt32DLL              = windows.NewLazySystemDLL("crypt32.dll")
-	procCryptQueryObject    = crypt32DLL.NewProc("CryptQueryObject")
-	procCertEnumCerts       = crypt32DLL.NewProc("CertEnumCertificatesInStore")
-	procCertGetNameStringW  = crypt32DLL.NewProc("CertGetNameStringW")
-	procCertFreeCertContext = crypt32DLL.NewProc("CertFreeCertificateContext")
-	procCertCloseStore      = crypt32DLL.NewProc("CertCloseStore")
+	wintrustDLL                  = windows.NewLazySystemDLL("wintrust.dll")
+	procWinVerifyTrust           = wintrustDLL.NewProc("WinVerifyTrust")
+	crypt32DLL                   = windows.NewLazySystemDLL("crypt32.dll")
+	procCryptQueryObject         = crypt32DLL.NewProc("CryptQueryObject")
+	procCryptMsgGetParam         = crypt32DLL.NewProc("CryptMsgGetParam")
+	procCryptMsgClose            = crypt32DLL.NewProc("CryptMsgClose")
+	procCertFindCertificateStore = crypt32DLL.NewProc("CertFindCertificateInStore")
+	procCertGetNameStringW       = crypt32DLL.NewProc("CertGetNameStringW")
+	procCertFreeCertContext      = crypt32DLL.NewProc("CertFreeCertificateContext")
+	procCertCloseStore           = crypt32DLL.NewProc("CertCloseStore")
 
-	winVerifyTrust              = procWinVerifyTrust.Call
-	cryptQueryObject            = procCryptQueryObject.Call
-	certEnumCertificatesInStore = procCertEnumCerts.Call
-	certGetNameStringW          = procCertGetNameStringW.Call
-	certFreeCertificateContext  = procCertFreeCertContext.Call
-	certCloseStore              = procCertCloseStore.Call
+	winVerifyTrust             = procWinVerifyTrust.Call
+	cryptQueryObject           = procCryptQueryObject.Call
+	cryptMsgGetParam           = procCryptMsgGetParam.Call
+	cryptMsgClose              = procCryptMsgClose.Call
+	certFindCertificateInStore = procCertFindCertificateStore.Call
+	certGetNameStringW         = procCertGetNameStringW.Call
+	certFreeCertificateContext = procCertFreeCertContext.Call
+	certCloseStore             = procCertCloseStore.Call
 )
 
 // Typed test seams. The production verifyAuthenticode reads the signer
@@ -161,9 +180,17 @@ func verifyAuthenticode(msiPath string) error {
 	}
 	fileInfo.cbStruct = uint32(unsafe.Sizeof(fileInfo))
 
+	// fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN (1), NOT WTD_REVOKE_NONE (0).
+	// With WTD_REVOKE_NONE, a cert revoked AFTER our build (compromise + CA
+	// revocation) would still pass WinVerifyTrust — exactly the situation
+	// a compromised signing-cert recovery process is supposed to close.
+	// WTD_REVOKE_WHOLECHAIN walks every cert in the chain against the issuer's
+	// CRL/OCSP. Adds latency on first verify after a network outage if the
+	// host can't reach the CRL endpoint, but the failure mode is fail-closed
+	// (which is what we want).
 	data := wintrustData{
 		dwUIChoice:          wtdUIChoiceNone,
-		fdwRevocationChecks: wtdRevokeNone,
+		fdwRevocationChecks: wtdRevokeWholeChain,
 		dwUnionChoice:       wtdChoiceFile,
 		unionFile:           uintptr(unsafe.Pointer(&fileInfo)),
 		dwStateAction:       wtdStateActionVerify,
@@ -228,8 +255,17 @@ func readSignerSubjectCN(pathPtr *uint16) (string, error) {
 	return readSubjectCN(hCert)
 }
 
-// openSignerStoreImpl is the production CryptQueryObject + first-cert
-// implementation of the openSignerStore seam.
+// openSignerStoreImpl extracts the actual signer cert from a PKCS#7-signed
+// MSI. The cert bag inside the message can hold multiple certs (signer +
+// intermediates + arbitrary attached extras); store-enumeration order is
+// implementation-defined. Using "first cert in store" is exploitable: an
+// attacker who can produce a generally-trusted signature could attach an
+// extra cert with our expected Subject CN and our pure-equality check
+// would pass even though the actual signer is someone else.
+//
+// The fix: pull the signer's CERT_INFO (issuer + serial number) out of
+// the decoded PKCS#7 message via CryptMsgGetParam(CMSG_SIGNER_CERT_INFO_PARAM),
+// then look that exact cert up in the store via CertFindCertificateInStore.
 func openSignerStoreImpl(pathPtr *uint16) (hStore uintptr, hCert uintptr, err error) {
 	var (
 		encoding    uint32
@@ -253,16 +289,55 @@ func openSignerStoreImpl(pathPtr *uint16) (hStore uintptr, hCert uintptr, err er
 	if r == 0 {
 		return 0, 0, fmt.Errorf("CryptQueryObject: %w", e)
 	}
-	// hMsg is not used; CryptQueryObject returns 0 here in practice when
-	// called with the embedded-PKCS#7 content flag. We pass &hMsg only
-	// because the Win32 prototype demands a non-NULL phMsg slot.
+	// CryptMsgClose the message handle on every return path. Failure to
+	// close it leaks LSASS-side state on every install path.
+	defer func() {
+		if hMsg != 0 {
+			_, _, _ = cryptMsgClose(hMsg)
+		}
+	}()
 
-	// First cert in the store = signer (Authenticode PKCS#7 with a single
-	// signer). Iterate once with pPrev = 0.
-	cert, _, ce := certEnumCertificatesInStore(hStore, 0)
+	// Two-call CryptMsgGetParam: query the size, allocate, fill.
+	var cbSignerInfo uint32
+	r, _, e = cryptMsgGetParam(
+		hMsg,
+		uintptr(cmsgSignerCertInfoParam),
+		0,
+		0,
+		uintptr(unsafe.Pointer(&cbSignerInfo)),
+	)
+	if r == 0 || cbSignerInfo == 0 {
+		_, _, _ = certCloseStore(hStore, 0)
+		return 0, 0, fmt.Errorf("CryptMsgGetParam(size): %w", e)
+	}
+	signerInfo := make([]byte, cbSignerInfo)
+	r, _, e = cryptMsgGetParam(
+		hMsg,
+		uintptr(cmsgSignerCertInfoParam),
+		0,
+		uintptr(unsafe.Pointer(&signerInfo[0])),
+		uintptr(unsafe.Pointer(&cbSignerInfo)),
+	)
+	if r == 0 {
+		_, _, _ = certCloseStore(hStore, 0)
+		return 0, 0, fmt.Errorf("CryptMsgGetParam: %w", e)
+	}
+
+	// signerInfo is a CERT_INFO struct populated with Issuer and
+	// SerialNumber (the rest is zero). CertFindCertificateInStore with
+	// CERT_FIND_SUBJECT_CERT matches against exactly that pair, returning
+	// the PCCERT_CONTEXT for the cert that actually signed the message.
+	cert, _, ce := certFindCertificateInStore(
+		hStore,
+		uintptr(x509AsnEncoding|pkcs7AsnEncoding),
+		0,
+		uintptr(certFindSubjectCert),
+		uintptr(unsafe.Pointer(&signerInfo[0])),
+		0,
+	)
 	if cert == 0 {
 		_, _, _ = certCloseStore(hStore, 0)
-		return 0, 0, fmt.Errorf("CertEnumCertificatesInStore: %w", ce)
+		return 0, 0, fmt.Errorf("CertFindCertificateInStore: signer not in cert bag: %w", ce)
 	}
 	return hStore, cert, nil
 }
