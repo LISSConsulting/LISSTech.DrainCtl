@@ -78,6 +78,7 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 7. **ETW handler + file log** — `logging.ETWHandler` already has `Close()` (per A1). Wrap `etwH` in a subsystem so `Execute`'s `defer etwH.Close()` becomes `defer sub.Stop()`. **Effort: S.**
 
 8. **Selfmetrics + pprof endpoint** — both started by `startSelfMetricsLogger` and `startPprofServer` today (per `2f26ba6` / `ec092df` / `ab692e4`). Each becomes its own LCI subsystem. **Effort: S each.**
+   - ~~Selfmetrics~~ done — extracted to `internal/selfmetrics` package as `selfmetrics.Subsystem`. Stop is wired alongside `updaterSub.Stop()` in the SCM-stop branch.
 
 9. **Service-pipe registration handler / dashboard bootstrap timer / spike forwarder** — these are smaller dispatch loops still in Execute. Extract incrementally as they get touched. **Effort: S each.**
 
