@@ -23,6 +23,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/selfmetrics"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -425,10 +426,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	startPprof(ctx)
 
 	// Periodic self-metrics emitted at slog.Debug — runtime heap state,
-	// goroutine count, RSS, GC stats. Passive (no listener); operators
-	// see the trend by setting log_file_level=debug and grepping
-	// "selfmetrics=" out of the daily log.
-	startSelfMetricsLogger(ctx)
+	// goroutine count, RSS, GC stats, SSPI counters. Passive (no
+	// listener); operators see the trend by setting log_file_level=debug
+	// and grepping "selfmetrics=" out of the daily log. LCI Subsystem so
+	// the goroutine drains cleanly on SCM-stop instead of relying on
+	// ctx-cancel alone.
+	selfMetricsSub := selfmetrics.New(selfmetrics.DefaultInterval)
+	if err := selfMetricsSub.Start(ctx); err != nil {
+		slog.Warn("selfmetrics failed to start", "error", err)
+	}
 
 	// Open SQLite telemetry store before the named pipe and HTTP servers.
 	telDB, err := telemetry.Open(dc.DefaultDataDir())
@@ -809,6 +815,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 					evtSpikeSub.Stop()
 				}
 				updaterSub.Stop()
+				selfMetricsSub.Stop()
 				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
