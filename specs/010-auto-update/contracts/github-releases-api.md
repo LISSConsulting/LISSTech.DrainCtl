@@ -75,9 +75,24 @@ On `/releases?per_page=1` (prerelease channel), 404 means no releases exist at a
 
 For any other 404 (e.g., wrong path, repo renamed), the updater treats it as a poll failure with backoff per FR-012. Distinguish the "no releases" case by checking the path of the URL the updater issued.
 
+## v1.1 contract addition — signed manifest sidecars
+
+As of v1.1 (see [spec.md §"v1.1 — Signed Release Manifest Verification"](../spec.md#v11--signed-release-manifest-verification)), every release MUST also include two assets when the binary embeds release-signing pubkeys:
+
+- `release.json` — the `ReleaseManifest` JSON (binds asset name + SHA-256).
+- `release.json.sig` — raw 64-byte Ed25519 signature over the EXACT bytes of `release.json`.
+
+The contract for these two assets is:
+- Names are case-sensitive equality (no prefix/suffix tolerance, same as `LISSTech.DrainCtl.msi`).
+- `release.json` MUST be UTF-8 with no BOM. Signature is computed over bytes-as-published; the verifier MUST verify before parsing JSON.
+- Order of upload does not matter; the verifier downloads each by name independently.
+- A release with neither asset is acceptable when no fielded binary embeds keys (transition mode); a release missing only one of the two is a contract violation.
+
+Updaters with at least one embedded pubkey REFUSE to install when either sidecar is absent (`update=refused stage=manifest`). The `just sign-release-manifest` and `just publish` recipes enforce this from the publishing side.
+
 ## What we explicitly DO NOT depend on
 
-- The shape of `assets[].uploader`, `assets[].digest`, or any other asset metadata. Only `name` and `browser_download_url`.
+- The shape of `assets[].uploader`, `assets[].digest`, or any other GitHub-emitted asset metadata. Only `name` and `browser_download_url`. Note: our v1.1 manifest carries its OWN `asset.sha256` field, which IS load-bearing — but that's our published JSON, not GitHub's `assets[].digest`. The two are intentionally separate.
 - Pagination on `assets[]`. The MSI is always present in the first page; if GitHub ever paginates this endpoint we re-evaluate.
 - The semantics of GitHub's `prerelease` boolean BEYOND what's stated above. We rely on `/releases/latest` skipping prereleases (filter to stable) and on `/releases` not skipping anything (collection in reverse-chronological order). The `channel` config field selects which endpoint we use; we never inspect the `prerelease` boolean in the response body — the endpoint choice is what enforces the channel.
 - HTTP/2 specifics. Go's net/http picks the protocol; we don't pin.
