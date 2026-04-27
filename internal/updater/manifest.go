@@ -20,13 +20,21 @@ import (
 // check runs.
 //
 // Schema is intentionally narrow: one asset per manifest. Future shape
-// changes should add fields rather than break parsing — older verifiers
-// simply ignore unknown JSON fields.
+// changes should add fields (preferred) rather than break parsing —
+// older verifiers ignore unknown JSON fields. Schema-breaking changes
+// must bump SchemaVersion; older verifiers reject unknown versions.
 type ReleaseManifest struct {
-	Version  string        `json:"version"`
-	Asset    ManifestAsset `json:"asset"`
-	SignedAt string        `json:"signed_at"`
+	SchemaVersion int           `json:"schema_version"`
+	Version       string        `json:"version"`
+	Asset         ManifestAsset `json:"asset"`
+	SignedAt      string        `json:"signed_at"`
 }
+
+// ManifestSchemaVersion is what the signer emits today. Verifier accepts
+// 0 (legacy/missing) and 1 during the transition window — a follow-up
+// commit (after the first release with schema_version: 1 ships and is
+// verified live) tightens the verifier to reject 0.
+const ManifestSchemaVersion = 1
 
 // ManifestAsset describes the binary blob bound by the manifest.
 // SHA256 is the lowercase hex SHA-256 of the asset's bytes (64 chars).
@@ -75,6 +83,14 @@ func VerifyReleaseManifest(manifestBytes, sigBytes []byte, keys []ed25519.Public
 	var m ReleaseManifest
 	if err := json.Unmarshal(manifestBytes, &m); err != nil {
 		return ReleaseManifest{}, fmt.Errorf("%w: %v", ErrManifestParse, err)
+	}
+	// Transition window: accept schema_version == 0 (legacy/missing —
+	// manifests produced by this PR before this field was added) AND 1
+	// (current). Reject any other value so a future schema-breaking
+	// change can bump this and have older verifiers fail closed.
+	if m.SchemaVersion != 0 && m.SchemaVersion != ManifestSchemaVersion {
+		return ReleaseManifest{}, fmt.Errorf("%w: unsupported schema_version=%d (this verifier accepts 0 or %d)",
+			ErrManifestSchema, m.SchemaVersion, ManifestSchemaVersion)
 	}
 	if m.Version == "" || m.Asset.Name == "" {
 		return ReleaseManifest{}, fmt.Errorf("%w: missing version or asset.name", ErrManifestSchema)

@@ -184,3 +184,56 @@ func TestHashFileSHA256(t *testing.T) {
 		t.Errorf("hash: got %s, want %s", got, hex.EncodeToString(want[:]))
 	}
 }
+
+func TestVerifyReleaseManifest_AcceptsLegacyZeroSchemaVersion(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	// Field absent from JSON unmarshals to zero; that's the legacy case.
+	m := ReleaseManifest{
+		Version: "1",
+		Asset:   ManifestAsset{Name: "x.msi", SHA256: hex.EncodeToString(make([]byte, 32))},
+	}
+	body := mustMarshalJSON(t, m)
+	sig := ed25519.Sign(priv, body)
+
+	got, err := VerifyReleaseManifest(body, sig, []ed25519.PublicKey{pub})
+	if err != nil {
+		t.Fatalf("legacy schema_version=0 must be accepted in transition window; got err=%v", err)
+	}
+	if got.SchemaVersion != 0 {
+		t.Errorf("got SchemaVersion=%d, want 0 (legacy)", got.SchemaVersion)
+	}
+}
+
+func TestVerifyReleaseManifest_AcceptsCurrentSchemaVersion(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	m := ReleaseManifest{
+		SchemaVersion: ManifestSchemaVersion,
+		Version:       "1",
+		Asset:         ManifestAsset{Name: "x.msi", SHA256: hex.EncodeToString(make([]byte, 32))},
+	}
+	body := mustMarshalJSON(t, m)
+	sig := ed25519.Sign(priv, body)
+
+	got, err := VerifyReleaseManifest(body, sig, []ed25519.PublicKey{pub})
+	if err != nil {
+		t.Fatalf("current schema_version must be accepted; got err=%v", err)
+	}
+	if got.SchemaVersion != ManifestSchemaVersion {
+		t.Errorf("got SchemaVersion=%d, want %d", got.SchemaVersion, ManifestSchemaVersion)
+	}
+}
+
+func TestVerifyReleaseManifest_RejectsUnknownSchemaVersion(t *testing.T) {
+	pub, priv := mustGenKey(t)
+	m := ReleaseManifest{
+		SchemaVersion: 999,
+		Version:       "1",
+		Asset:         ManifestAsset{Name: "x.msi", SHA256: hex.EncodeToString(make([]byte, 32))},
+	}
+	body := mustMarshalJSON(t, m)
+	sig := ed25519.Sign(priv, body)
+
+	if _, err := VerifyReleaseManifest(body, sig, []ed25519.PublicKey{pub}); !errors.Is(err, ErrManifestSchema) {
+		t.Fatalf("got err=%v, want ErrManifestSchema for unknown schema_version", err)
+	}
+}

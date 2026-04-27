@@ -317,9 +317,10 @@ func sign(args []string) error {
 	}
 
 	manifest := updater.ReleaseManifest{
-		Version:  strings.TrimSpace(*version),
-		Asset:    updater.ManifestAsset{Name: *assetName, SHA256: hashHex},
-		SignedAt: time.Now().UTC().Format(time.RFC3339),
+		SchemaVersion: updater.ManifestSchemaVersion,
+		Version:       strings.TrimSpace(*version),
+		Asset:         updater.ManifestAsset{Name: *assetName, SHA256: hashHex},
+		SignedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
 	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
