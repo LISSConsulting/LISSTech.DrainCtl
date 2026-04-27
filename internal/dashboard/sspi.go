@@ -140,10 +140,14 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 			select {
 			case <-ctx.Done():
 				// Release all pending contexts and the shared cred on shutdown.
+				// CompareAndDelete: a concurrent leg-2 handler may have won the
+				// entry between Range yielding it and our cleanup. CAS-fail
+				// means the handler owns it now; we must NOT release.
 				pending.Range(func(key, value any) bool {
-					pending.Delete(key)
-					releasePendingContext(value.(*pendingCtx))
-					sspiPendingContexts.Add(-1)
+					if pending.CompareAndDelete(key, value) {
+						releasePendingContext(value.(*pendingCtx))
+						sspiPendingContexts.Add(-1)
+					}
 					return true
 				})
 				creds.release()
@@ -153,9 +157,10 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				pending.Range(func(key, value any) bool {
 					pc := value.(*pendingCtx)
 					if now.Sub(pc.created) > 60*time.Second {
-						pending.Delete(key)
-						releasePendingContext(pc)
-						sspiPendingContexts.Add(-1)
+						if pending.CompareAndDelete(key, value) {
+							releasePendingContext(pc)
+							sspiPendingContexts.Add(-1)
+						}
 					}
 					return true
 				})
