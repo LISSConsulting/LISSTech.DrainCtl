@@ -20,6 +20,16 @@ import (
 // prefix/suffix tolerance.
 const msiAssetName = "LISSTech.DrainCtl.msi"
 
+// manifestAssetName is the JSON release manifest signed by the offline
+// release key. sigAssetName is the raw 64-byte Ed25519 signature over
+// the exact bytes of the manifest file. Both are optional — a release
+// without them downgrades to CN-only verification, which the verifier
+// allows ONLY when releaseSigningKeys is empty.
+const (
+	manifestAssetName = "release.json"
+	sigAssetName      = "release.json.sig"
+)
+
 // apiBaseURL is the GitHub REST base for the LISSTech.DrainCtl repo.
 // It's a var (not const) so unit tests can swap it for an httptest server
 // via t.Cleanup-restored assignment. No production code mutates it.
@@ -28,8 +38,13 @@ var apiBaseURL = "https://api.github.com/repos/LISSConsulting/LISSTech.DrainCtl"
 // release is the small contract surface fetchLatestRelease exposes to the
 // caller. Callers branch on notModified and noReleases before reading
 // tag/assetURL/etag.
+//
+// manifestURL and sigURL are empty when the release does not publish the
+// signed-manifest sidecar assets. The verifier decides what to do with
+// that based on whether the binary embeds release-signing keys.
 type release struct {
 	tag, assetURL, etag string
+	manifestURL, sigURL string
 	notModified         bool // true on 304
 	noReleases          bool // true on 404 from a release-listing endpoint
 }
@@ -154,11 +169,15 @@ func parseReleaseBody(resp *http.Response, channel string) (release, error) {
 		return release{}, fmt.Errorf("github: release missing tag_name")
 	}
 
-	var assetURL string
+	var assetURL, manifestURL, sigURL string
 	for _, a := range rel.Assets {
-		if a.Name == msiAssetName {
+		switch a.Name {
+		case msiAssetName:
 			assetURL = a.BrowserDownloadURL
-			break
+		case manifestAssetName:
+			manifestURL = a.BrowserDownloadURL
+		case sigAssetName:
+			sigURL = a.BrowserDownloadURL
 		}
 	}
 	if assetURL == "" {
@@ -166,8 +185,10 @@ func parseReleaseBody(resp *http.Response, channel string) (release, error) {
 	}
 
 	return release{
-		tag:      rel.TagName,
-		assetURL: assetURL,
-		etag:     resp.Header.Get("ETag"),
+		tag:         rel.TagName,
+		assetURL:    assetURL,
+		manifestURL: manifestURL,
+		sigURL:      sigURL,
+		etag:        resp.Header.Get("ETag"),
 	}, nil
 }

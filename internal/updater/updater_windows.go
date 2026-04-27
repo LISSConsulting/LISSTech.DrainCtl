@@ -10,6 +10,7 @@ package updater
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -38,12 +39,32 @@ const httpClientTimeout = 30 * time.Second
 //
 // downloadToTemp is the package-level function form of the download step
 // so the seam is a function var, not an awkward method-pointer var.
+//
+// verifyManifest is the strong-binding check (Ed25519 signature over a
+// JSON manifest plus SHA-256 over the downloaded MSI). It runs BEFORE
+// verifyMSI so a forged-CN-but-correctly-Authenticode-signed MSI still
+// fails. When releaseSigningKeys is empty the seam is a no-op — see the
+// transition contract in keys_windows.go.
 var (
-	fetchRelease = fetchLatestRelease
-	verifyMSI    = verifyAuthenticode
-	spawnMSI     = spawnInstall
-	downloadMSI  = downloadToTemp
+	fetchRelease   = fetchLatestRelease
+	verifyManifest = verifyManifestRemote
+	verifyMSI      = verifyAuthenticode
+	spawnMSI       = spawnInstall
+	downloadMSI    = downloadToTemp
 )
+
+// decodeKeys is the seam used by Start so tests can inject a fake key
+// list (or a fake decode error) without touching releaseSigningKeysB64.
+var decodeKeys = func() ([]ed25519.PublicKey, error) {
+	return decodeReleaseSigningKeys(releaseSigningKeysB64)
+}
+
+// manifestMaxBytes caps how large a signed manifest or signature blob can
+// be before we refuse to read it. The manifest is a small JSON document
+// (~200 bytes); the signature is exactly 64 bytes. Cap is generous to
+// allow future schema growth, tight enough to bound memory on a
+// poisoned-server response.
+const manifestMaxBytes = 64 * 1024
 
 // initialPollDelay returns the jittered first-poll delay (5–15 min per
 // FR-004). A package var so tests can swap it for a near-zero delay
@@ -78,6 +99,12 @@ type Subsystem struct {
 	// Mutable state held by the poll goroutine only — no synchronization.
 	etag    string
 	backoff backoff
+
+	// signingKeys is the decoded form of keys_windows.go's
+	// releaseSigningKeysB64. Populated by Start (not package init) so a
+	// malformed entry is reported as a Start error per LCI rules. Empty
+	// list means manifest verification is disabled (transition mode).
+	signingKeys []ed25519.PublicKey
 
 	// Lifecycle.
 	wg       sync.WaitGroup
@@ -135,7 +162,16 @@ func (s *Subsystem) snapshot() dc.UpdateConfig {
 // service restart with the new config. Operators get "edit config.json
 // and reload within seconds" semantics that match the documentation,
 // at the cost of one always-parked goroutine on opt-out hosts.
+//
+// Synchronous init failure (malformed embedded signing key) is returned
+// before any goroutine launches per LCI §"Errors".
 func (s *Subsystem) Start(ctx context.Context) error {
+	keys, err := decodeKeys()
+	if err != nil {
+		return fmt.Errorf("updater: decode release signing keys: %w", err)
+	}
+	s.signingKeys = keys
+
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.wg.Add(1)
 	go s.run()
@@ -143,7 +179,8 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	slog.Info("update=started",
 		"enabled", cfg.Enabled,
 		"channel", cfg.Channel,
-		"poll_interval", time.Duration(cfg.PollInterval).String())
+		"poll_interval", time.Duration(cfg.PollInterval).String(),
+		"signing_keys", len(s.signingKeys))
 	return nil
 }
 
@@ -251,11 +288,19 @@ func (s *Subsystem) tick() {
 		return
 	}
 
+	if err := verifyManifest(s.ctx, s.client, tempPath, rel.manifestURL, rel.sigURL, s.signingKeys); err != nil {
+		// Same reasoning as below: verification failure isn't transient.
+		slog.Warn("update=refused", "path", tempPath, "stage", "manifest", "error", err.Error())
+		_ = os.Remove(tempPath)
+		s.backoff.recordSuccess()
+		return
+	}
+
 	if err := verifyMSI(tempPath); err != nil {
 		// Verification failure is NOT a transient network issue — could
 		// be deliberate poisoning. Don't escalate backoff; stay on the
 		// configured cadence.
-		slog.Warn("update=refused", "path", tempPath, "error", err.Error())
+		slog.Warn("update=refused", "path", tempPath, "stage", "authenticode", "error", err.Error())
 		_ = os.Remove(tempPath)
 		s.backoff.recordSuccess()
 		return
@@ -277,6 +322,65 @@ func (s *Subsystem) tick() {
 	triggerSelfShutdown(s.shutdownService)
 	// Don't return from run() here — Stop() will drain when the service
 	// ctx fires. The loop's next sleepCtx will see ctx.Done() and exit.
+}
+
+// verifyManifestRemote enforces Ed25519-signed manifest + SHA-256 hash
+// binding. It is a no-op when keys is empty (transition mode: no keys
+// embedded in keys_windows.go yet).
+//
+// When keys is non-empty, every release MUST publish a release.json and
+// release.json.sig sidecar; absence of either is treated as a refusal,
+// not a downgrade. That's the whole point of the strong-binding check —
+// being optional defeats it.
+func verifyManifestRemote(ctx context.Context, client *http.Client, msiPath, manifestURL, sigURL string, keys []ed25519.PublicKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if manifestURL == "" || sigURL == "" {
+		return fmt.Errorf("verifyManifest: release missing %q and/or %q sidecar", manifestAssetName, sigAssetName)
+	}
+	manifestBytes, err := downloadAssetBytes(ctx, client, manifestURL)
+	if err != nil {
+		return fmt.Errorf("verifyManifest: fetch manifest: %w", err)
+	}
+	sigBytes, err := downloadAssetBytes(ctx, client, sigURL)
+	if err != nil {
+		return fmt.Errorf("verifyManifest: fetch sig: %w", err)
+	}
+	m, err := VerifyReleaseManifest(manifestBytes, sigBytes, keys)
+	if err != nil {
+		return err
+	}
+	if err := VerifyAssetMatchesManifest(msiPath, msiAssetName, m); err != nil {
+		return err
+	}
+	return nil
+}
+
+// downloadAssetBytes fetches a small release sidecar (manifest or sig)
+// fully into memory. Caps the read at manifestMaxBytes to bound a
+// poisoned-server response.
+func downloadAssetBytes(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, manifestMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if len(b) > manifestMaxBytes {
+		return nil, fmt.Errorf("response exceeds %d bytes", manifestMaxBytes)
+	}
+	return b, nil
 }
 
 // downloadToTemp streams the asset to %TEMP%\drainctl-update-<random>.msi
