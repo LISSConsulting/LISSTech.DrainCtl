@@ -9,10 +9,10 @@ import (
 	"net/http"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sspimetrics"
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alexbrainman/sspi"
@@ -55,30 +55,17 @@ type pendingCtx struct {
 	created time.Time
 }
 
-// sspiLiveContexts counts ServerContexts that have been created via
-// negotiate.NewServerContext but not yet had Release() called on them.
-// sspiPendingContexts counts entries currently in the per-middleware
-// pending map (multi-leg NTLM in flight). Both are exported via
-// SspiMetrics for selfmetrics emission so operators can confirm via the
-// daily diag bundle that neither counter trends upward over time —
-// that's the regression signal for any future SSPI handle leak.
-var (
-	sspiLiveContexts    atomic.Int64
-	sspiPendingContexts atomic.Int64
-)
-
-// SspiMetrics returns a snapshot of the live/pending ServerContext counters.
-// Used by selfmetrics; safe for concurrent use.
-func SspiMetrics() (live, pending int64) {
-	return sspiLiveContexts.Load(), sspiPendingContexts.Load()
-}
-
 // releasePendingContext releases the kernel handle owned by pc and updates
 // the live-context counter. Idempotent only at the level of "was this pc
 // already released" — caller must not invoke twice on the same pc.
+//
+// The counters live in internal/sspimetrics (a leaf package both
+// dashboard and selfmetrics import). Putting them there avoids the
+// layering inversion that existed when selfmetrics imported dashboard
+// just to read these atomics.
 func releasePendingContext(pc *pendingCtx) {
 	_ = pc.rel.Release()
-	sspiLiveContexts.Add(-1)
+	sspimetrics.Live.Add(-1)
 }
 
 // acquireServerCredentials is a package var so tests can inject a fake.
@@ -146,7 +133,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				pending.Range(func(key, value any) bool {
 					if pending.CompareAndDelete(key, value) {
 						releasePendingContext(value.(*pendingCtx))
-						sspiPendingContexts.Add(-1)
+						sspimetrics.Pending.Add(-1)
 					}
 					return true
 				})
@@ -159,7 +146,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 					if now.Sub(pc.created) > 60*time.Second {
 						if pending.CompareAndDelete(key, value) {
 							releasePendingContext(pc)
-							sspiPendingContexts.Add(-1)
+							sspimetrics.Pending.Add(-1)
 						}
 					}
 					return true
@@ -194,7 +181,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		if v, ok := pending.LoadAndDelete(connKey); ok {
 			// Second leg: continue the existing context. Pending count drops;
 			// live count is unchanged (the same sc that was counted at first leg).
-			sspiPendingContexts.Add(-1)
+			sspimetrics.Pending.Add(-1)
 			pc := v.(*pendingCtx)
 			sc = pc.sc
 			authDone, responseToken, err = sc.Update(token)
@@ -220,7 +207,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				http.Error(w, "authentication failed", http.StatusUnauthorized)
 				return
 			}
-			sspiLiveContexts.Add(1)
+			sspimetrics.Live.Add(1)
 		}
 
 		if !authDone {
@@ -233,7 +220,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 			if prev, loaded := pending.Swap(connKey, newPC); loaded {
 				releasePendingContext(prev.(*pendingCtx))
 			} else {
-				sspiPendingContexts.Add(1)
+				sspimetrics.Pending.Add(1)
 			}
 			if len(responseToken) > 0 {
 				w.Header().Set("WWW-Authenticate",
@@ -246,7 +233,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		// Auth complete — release the per-request server context.
 		defer func() {
 			_ = sc.Release()
-			sspiLiveContexts.Add(-1)
+			sspimetrics.Live.Add(-1)
 		}()
 
 		if len(responseToken) > 0 {
