@@ -24,6 +24,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 
 	"golang.org/x/sys/windows/svc"
@@ -526,6 +527,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		"aggregator_interval_seconds", fullCfg.Telemetry.AggregatorIntervalSeconds,
 		"retention_interval_minutes", fullCfg.Telemetry.RetentionIntervalMinutes)
 
+	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
+	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
+	// the SCM-stop branch invokes — when the updater decides to install,
+	// it triggers our own clean shutdown so msiexec can replace files
+	// before SCM forces a stop. Stop is called from the SCM-stop branch
+	// alongside evtSpikeSub.Stop / waitTelemetryWorkers; the LCI Stop is
+	// idempotent so a defer-based fallback isn't needed.
+	updaterSub := updater.New(fullCfg.Update, cancel)
+	if err := updaterSub.Start(ctx); err != nil {
+		slog.Warn("updater failed to start", "error", err)
+	}
+
 	// Start registry watcher.
 	regCh, err := watcher.WatchDrainModeKey(ctx)
 	if err != nil {
@@ -795,6 +808,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				if evtSpikeSub != nil {
 					evtSpikeSub.Stop()
 				}
+				updaterSub.Stop()
 				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
