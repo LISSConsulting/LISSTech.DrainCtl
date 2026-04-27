@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sspimetrics"
 	"github.com/alexbrainman/sspi"
 )
 
@@ -25,8 +26,8 @@ func (f *fakeReleaser) Release() error {
 }
 
 func resetSspiCounters() {
-	sspiLiveContexts.Store(0)
-	sspiPendingContexts.Store(0)
+	sspimetrics.Live.Store(0)
+	sspimetrics.Pending.Store(0)
 }
 
 // TestPendingMap_OrphanReplaceReleasesPriorContext is the regression test for
@@ -45,9 +46,9 @@ func TestPendingMap_OrphanReplaceReleasesPriorContext(t *testing.T) {
 	if prev, loaded := pending.Swap(key, firstPC); loaded {
 		releasePendingContext(prev.(*pendingCtx))
 	} else {
-		sspiPendingContexts.Add(1)
+		sspimetrics.Pending.Add(1)
 	}
-	sspiLiveContexts.Add(1)
+	sspimetrics.Live.Add(1)
 
 	// Duplicate first-leg on the same connKey before the second leg arrives.
 	second := &fakeReleaser{}
@@ -55,9 +56,9 @@ func TestPendingMap_OrphanReplaceReleasesPriorContext(t *testing.T) {
 	if prev, loaded := pending.Swap(key, secondPC); loaded {
 		releasePendingContext(prev.(*pendingCtx))
 	} else {
-		sspiPendingContexts.Add(1)
+		sspimetrics.Pending.Add(1)
 	}
-	sspiLiveContexts.Add(1)
+	sspimetrics.Live.Add(1)
 
 	if got := first.released.Load(); got != 1 {
 		t.Errorf("orphaned first context: Release called %d times, want 1", got)
@@ -65,19 +66,19 @@ func TestPendingMap_OrphanReplaceReleasesPriorContext(t *testing.T) {
 	if got := second.released.Load(); got != 0 {
 		t.Errorf("active second context: Release called %d times, want 0", got)
 	}
-	if live, pending := SspiMetrics(); live != 1 || pending != 1 {
+	if live, pending := sspimetrics.Snapshot(); live != 1 || pending != 1 {
 		t.Errorf("counters: live=%d pending=%d, want live=1 pending=1", live, pending)
 	}
 
 	// Drain — the active context should still be releasable normally.
 	if v, ok := pending.LoadAndDelete(key); ok {
 		releasePendingContext(v.(*pendingCtx))
-		sspiPendingContexts.Add(-1)
+		sspimetrics.Pending.Add(-1)
 	}
 	if got := second.released.Load(); got != 1 {
 		t.Errorf("after take: Release called %d times, want 1", got)
 	}
-	if live, p := SspiMetrics(); live != 0 || p != 0 {
+	if live, p := sspimetrics.Snapshot(); live != 0 || p != 0 {
 		t.Errorf("counters after drain: live=%d pending=%d, want 0/0", live, p)
 	}
 }
@@ -95,14 +96,14 @@ func TestPendingMap_FreshKeyDoesNotReleaseAnything(t *testing.T) {
 	if prev, loaded := pending.Swap("10.0.0.2:9", pc); loaded {
 		releasePendingContext(prev.(*pendingCtx))
 	} else {
-		sspiPendingContexts.Add(1)
+		sspimetrics.Pending.Add(1)
 	}
-	sspiLiveContexts.Add(1)
+	sspimetrics.Live.Add(1)
 
 	if got := rel.released.Load(); got != 0 {
 		t.Errorf("fresh insert: Release called %d times, want 0", got)
 	}
-	if live, p := SspiMetrics(); live != 1 || p != 1 {
+	if live, p := sspimetrics.Snapshot(); live != 1 || p != 1 {
 		t.Errorf("counters: live=%d pending=%d, want 1/1", live, p)
 	}
 }
@@ -201,8 +202,8 @@ func TestPendingReaper_NoRaceReleasesEntry(t *testing.T) {
 	rel := &fakeReleaser{}
 	pc := &pendingCtx{rel: rel, created: time.Now().Add(-90 * time.Second)}
 	pending.Store(key, pc)
-	sspiPendingContexts.Add(1)
-	sspiLiveContexts.Add(1)
+	sspimetrics.Pending.Add(1)
+	sspimetrics.Live.Add(1)
 
 	// Walk the map exactly the way the reaper does, applying the new
 	// CompareAndDelete-guarded cleanup.
@@ -211,7 +212,7 @@ func TestPendingReaper_NoRaceReleasesEntry(t *testing.T) {
 		if time.Since(entry.created) > 60*time.Second {
 			if pending.CompareAndDelete(k, v) {
 				releasePendingContext(entry)
-				sspiPendingContexts.Add(-1)
+				sspimetrics.Pending.Add(-1)
 			}
 		}
 		return true
@@ -225,11 +226,11 @@ func TestPendingReaper_NoRaceReleasesEntry(t *testing.T) {
 	if !mapEmpty {
 		t.Error("pending map not drained after reaper")
 	}
-	if live := sspiLiveContexts.Load(); live != 0 {
-		t.Errorf("sspiLiveContexts = %d, want 0 after release", live)
+	if live := sspimetrics.Live.Load(); live != 0 {
+		t.Errorf("sspimetrics.Live = %d, want 0 after release", live)
 	}
-	if p := sspiPendingContexts.Load(); p != 0 {
-		t.Errorf("sspiPendingContexts = %d, want 0 after delete", p)
+	if p := sspimetrics.Pending.Load(); p != 0 {
+		t.Errorf("sspimetrics.Pending = %d, want 0 after delete", p)
 	}
 }
 
@@ -238,7 +239,7 @@ func TestPendingReaper_NoRaceReleasesEntry(t *testing.T) {
 // a leg-2 handler wins pending.LoadAndDelete(K) AFTER pending.Range has
 // yielded (K, value) to the reaper but BEFORE the reaper's cleanup runs.
 // The buggy code (bare pending.Delete + releasePendingContext) would
-// double-release the kernel handle and drive sspiPendingContexts to -1.
+// double-release the kernel handle and drive sspimetrics.Pending to -1.
 // The fix's CompareAndDelete returns false on a stolen entry; the reaper
 // skips the release entirely.
 func TestPendingReaper_LosesCompareAndDeleteWhenHandlerWonFirst(t *testing.T) {
@@ -252,8 +253,8 @@ func TestPendingReaper_LosesCompareAndDeleteWhenHandlerWonFirst(t *testing.T) {
 	rel := &fakeReleaser{}
 	pc := &pendingCtx{rel: rel, created: time.Now().Add(-90 * time.Second)}
 	pending.Store(key, pc)
-	sspiPendingContexts.Add(1)
-	sspiLiveContexts.Add(1)
+	sspimetrics.Pending.Add(1)
+	sspimetrics.Live.Add(1)
 
 	// Reaper begins iterating; capture the value Range would have yielded.
 	var observed any
@@ -263,11 +264,11 @@ func TestPendingReaper_LosesCompareAndDeleteWhenHandlerWonFirst(t *testing.T) {
 	})
 
 	// Concurrent leg-2 handler wins the entry (mirrors sspi.go:189-192:
-	// LoadAndDelete + sspiPendingContexts.Add(-1) on the leg-2 path).
+	// LoadAndDelete + sspimetrics.Pending.Add(-1) on the leg-2 path).
 	if _, ok := pending.LoadAndDelete(key); !ok {
 		t.Fatal("handler should have found the entry")
 	}
-	sspiPendingContexts.Add(-1)
+	sspimetrics.Pending.Add(-1)
 
 	// Now the reaper resumes its cleanup against the value it captured.
 	// CompareAndDelete must fail (entry already gone) → no double-release.
@@ -280,10 +281,10 @@ func TestPendingReaper_LosesCompareAndDeleteWhenHandlerWonFirst(t *testing.T) {
 	if got := rel.released.Load(); got != 0 {
 		t.Errorf("Release called %d times, want 0 (handler owns the context)", got)
 	}
-	if live := sspiLiveContexts.Load(); live != 1 {
-		t.Errorf("sspiLiveContexts = %d, want 1 (handler hasn't called its deferred Release in this test)", live)
+	if live := sspimetrics.Live.Load(); live != 1 {
+		t.Errorf("sspimetrics.Live = %d, want 1 (handler hasn't called its deferred Release in this test)", live)
 	}
-	if p := sspiPendingContexts.Load(); p != 0 {
-		t.Errorf("sspiPendingContexts = %d, want 0 (1 from setup, -1 from handler model, 0 net)", p)
+	if p := sspimetrics.Pending.Load(); p != 0 {
+		t.Errorf("sspimetrics.Pending = %d, want 0 (1 from setup, -1 from handler model, 0 net)", p)
 	}
 }
