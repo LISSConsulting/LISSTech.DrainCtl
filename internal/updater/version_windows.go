@@ -57,6 +57,16 @@ func (a version) less(b version) bool {
 	return a.n < b.n
 }
 
+// equals reports whether a and b are the same parsed version. This is
+// the parsed-comparison primitive the replay-defense gate uses to allow
+// re-polling the same legitimate release through (the "not below
+// highest_seen" carve-out). Compares parsed fields rather than String()
+// output so "v26.116.17" and "26.116.17" are correctly recognised as
+// equal across the persisted-state and remote-fetched paths.
+func (a version) equals(b version) bool {
+	return a.year == b.year && a.doy == b.doy && a.n == b.n
+}
+
 // String renders back to canonical "YY.DOY.N" form (no leading "v").
 func (a version) String() string {
 	return fmt.Sprintf("%d.%d.%d", a.year, a.doy, a.n)

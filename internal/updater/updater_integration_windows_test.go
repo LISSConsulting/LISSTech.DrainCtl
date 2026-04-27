@@ -43,6 +43,11 @@ type fakes struct {
 	spawnMSI       func(msiPath string) error
 	downloadMSI    func(ctx context.Context, client *http.Client, url string) (string, error)
 	decodeKeys     func() ([]ed25519.PublicKey, error)
+	// initialState seeds the in-memory updateState before Start runs.
+	// Used by replay-defense tests to model a binary that has previously
+	// observed a higher version. Saves through runUpdater's in-memory
+	// fakes flow into a t.Cleanup'd capture for assertions.
+	initialState updateState
 }
 
 // runUpdater wires the fakes in, drives initialPollDelay near zero, and
@@ -89,6 +94,28 @@ func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, shutd
 		decodeKeys = f.decodeKeys
 	} else {
 		decodeKeys = func() ([]ed25519.PublicKey, error) { return nil, nil }
+	}
+
+	// Default to in-memory state so existing tests don't touch production
+	// %ProgramData%. Tests exercising the real persistence path override
+	// updateStatePath/loadUpdateState/saveUpdateState directly.
+	prevLoad := loadUpdateState
+	prevSave := saveUpdateState
+	t.Cleanup(func() { loadUpdateState = prevLoad; saveUpdateState = prevSave })
+	var (
+		memState   = f.initialState
+		memStateMu sync.Mutex
+	)
+	loadUpdateState = func() (updateState, error) {
+		memStateMu.Lock()
+		defer memStateMu.Unlock()
+		return memState, nil
+	}
+	saveUpdateState = func(s updateState) error {
+		memStateMu.Lock()
+		defer memStateMu.Unlock()
+		memState = s
+		return nil
 	}
 
 	shutdownFired = make(chan struct{}, 1)

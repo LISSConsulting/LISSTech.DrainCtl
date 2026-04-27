@@ -172,6 +172,11 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	}
 	s.signingKeys = keys
 
+	// Seed the replay-defense pin from the running binary's version.
+	// Best-effort: failure here is logged inside seedHighestSeenFromVersion
+	// and never blocks Start.
+	seedHighestSeenFromVersion()
+
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.wg.Add(1)
 	go s.run()
@@ -274,6 +279,26 @@ func (s *Subsystem) tick() {
 		s.backoff.recordSuccess()
 		return
 	}
+
+	// Replay/freeze gate: refuse any remote strictly less than the
+	// highest version we've ever seen. The carve-out for remote == highSeen
+	// lets a re-poll of the exact same legitimate release pass through;
+	// the up-to-date branch below catches the no-op case. Parsed version
+	// comparison (not String()) so "v26.116.17" and "26.116.17" are
+	// recognised as equal across the persisted-state and remote paths.
+	if state, _ := loadUpdateState(); state.HighestSeenVersion != "" {
+		if highSeen, err := parseVersion(state.HighestSeenVersion); err == nil {
+			if remote.less(highSeen) && !remote.equals(highSeen) {
+				slog.Warn("update=refused",
+					"stage", "replay",
+					"highest_seen", highSeen.String(),
+					"remote", remote.String())
+				s.backoff.recordSuccess()
+				return
+			}
+		}
+	}
+
 	if !current.less(remote) {
 		slog.Info("update=up_to_date", "current", current.String(), "remote", remote.String())
 		s.backoff.recordSuccess()
@@ -318,10 +343,34 @@ func (s *Subsystem) tick() {
 		return
 	}
 
+	// Persist highest-seen ONLY now: manifest + authenticode + spawn all
+	// succeeded. Persisting earlier (at fetch or post-verify) would let a
+	// failed install permanently block a future legitimate release with
+	// the same tag. Failure to save is logged and ignored — replay
+	// defense is best-effort, not a service-block.
+	if state, _ := loadUpdateState(); state.HighestSeenVersion == "" || mustParseLessThan(state.HighestSeenVersion, remote) {
+		state.HighestSeenVersion = remote.String()
+		if err := saveUpdateState(state); err != nil {
+			slog.Warn("update=state_save_failed", "error", err.Error())
+		}
+	}
+
 	slog.Info("update=installed_pending_restart", "new", remote.String())
 	triggerSelfShutdown(s.shutdownService)
 	// Don't return from run() here — Stop() will drain when the service
 	// ctx fires. The loop's next sleepCtx will see ctx.Done() and exit.
+}
+
+// mustParseLessThan reports whether the persisted highest-seen string,
+// when parsed, is strictly less than v. Returns true if parsing fails
+// (treat unparseable persisted state as "should be replaced") so the
+// post-install save path always advances on a successful install.
+func mustParseLessThan(persisted string, v version) bool {
+	hs, err := parseVersion(persisted)
+	if err != nil {
+		return true
+	}
+	return hs.less(v)
 }
 
 // verifyManifestRemote enforces Ed25519-signed manifest + SHA-256 hash
