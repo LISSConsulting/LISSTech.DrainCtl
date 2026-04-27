@@ -16,8 +16,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/lifecycle"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sspimetrics"
 	"golang.org/x/sys/windows"
 )
 
@@ -111,7 +111,7 @@ func emit() {
 	runtime.ReadMemStats(&m)
 
 	rss, pagefile := readProcessMemory()
-	sspiLive, sspiPending := dashboard.SspiMetrics()
+	sspiLive, sspiPending := sspimetrics.Snapshot()
 
 	slog.Debug("selfmetrics",
 		"heap_alloc_mb", m.HeapAlloc>>20,
