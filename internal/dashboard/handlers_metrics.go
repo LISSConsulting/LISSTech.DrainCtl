@@ -16,13 +16,6 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// writeJSONError writes a JSON body {"error":"<code>"} with the given HTTP status.
-func writeJSONError(w http.ResponseWriter, code string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
-}
-
 // resolveMetricsTier maps a request's resolution parameter to a concrete tier.
 // Explicit "raw"/"1min"/"5min"/"hourly" pass through. "auto" picks by window
 // size (≤15m → raw, ≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to
