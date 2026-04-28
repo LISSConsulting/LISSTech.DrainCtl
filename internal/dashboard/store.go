@@ -32,10 +32,10 @@ type ServerInfo struct {
 }
 
 // ServerState manages the set of registered servers, persisted to the
-// SQLite `servers` table via telemetry.ServerStore. Replaces the pre-009
-// servers.json file-based implementation.
+// SQLite `servers` table via a serverReader (typically *telemetry.ServerStore).
+// Replaces the pre-009 servers.json file-based implementation.
 type ServerState struct {
-	store *telemetry.ServerStore
+	store serverReader
 
 	// cache holds the most recent immutable *ServerInfo per host. Populated by
 	// Update after a successful DB write; consulted by GetCached on the SSE
@@ -85,10 +85,10 @@ type ServerState struct {
 	GetRemoteEvtSpikeStatus func(host string) evtspike.DetectorStatus
 }
 
-// NewServerState wraps a telemetry.ServerStore with the callback plumbing the
-// dashboard needs. The store must be open for the lifetime of the returned
-// ServerState.
-func NewServerState(store *telemetry.ServerStore) *ServerState {
+// NewServerState wraps a serverReader (typically *telemetry.ServerStore) with
+// the callback plumbing the dashboard needs. The store must be open for the
+// lifetime of the returned ServerState.
+func NewServerState(store serverReader) *ServerState {
 	return &ServerState{store: store}
 }
 
