@@ -115,6 +115,29 @@
             Return="ignore"
             BinaryRef="Wix4UtilCA_X64" />
 
+        <!-- Diagnostics scheduled task: registered disabled on first install,
+             re-registered on upgrade with the operator's prior enable bit
+             preserved by install-diag-task.ps1. Removed on full uninstall but
+             NOT on the upgrade-driven removal of the previous version, since
+             the new install already re-registered it. -->
+        <SetProperty Id="RegisterDiagsTask" Before="RegisterDiagsTask" Sequence="execute"
+            Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[ScriptsFolder]install-diag-task.ps1&quot; -TaskXml &quot;[TasksFolder]DrainCtl-Diags.xml&quot;" />
+        <CustomAction Id="RegisterDiagsTask"
+            DllEntry="WixQuietExec"
+            Execute="deferred"
+            Impersonate="no"
+            Return="ignore"
+            BinaryRef="Wix4UtilCA_X64" />
+
+        <SetProperty Id="UnregisterDiagsTask" Before="UnregisterDiagsTask" Sequence="execute"
+            Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;LISSTech\DrainCtl-Diags&quot; /F" />
+        <CustomAction Id="UnregisterDiagsTask"
+            DllEntry="WixQuietExec"
+            Execute="deferred"
+            Impersonate="no"
+            Return="ignore"
+            BinaryRef="Wix4UtilCA_X64" />
+
         <InstallExecuteSequence>
             <Custom Action="ApplyInstallerConfig"
                 After="InstallFiles"
@@ -134,6 +157,12 @@
             <Custom Action="StartDrainCtlService"
                 After="AddEventLogReaders"
                 Condition="NOT REMOVE" />
+            <Custom Action="RegisterDiagsTask"
+                After="StartDrainCtlService"
+                Condition="NOT REMOVE" />
+            <Custom Action="UnregisterDiagsTask"
+                After="InstallInitialize"
+                Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
         </InstallExecuteSequence>
 
         <Feature Id="Main">
@@ -147,6 +176,8 @@
             <Directory Id="LISSTechFolder" Name="LISS Technologies">
                 <Directory Id="INSTALLFOLDER" Name="LISSTech DrainCtl">
                     <Directory Id="BinFolder" Name="bin" />
+                    <Directory Id="ScriptsFolder" Name="Scripts" />
+                    <Directory Id="TasksFolder" Name="Tasks" />
                 </Directory>
             </Directory>
         </StandardDirectory>
@@ -285,6 +316,33 @@
         </Component>
     </Fragment>
 
+    <!-- ── Diagnostics: hourly pprof + selfmetrics scheduled task ────────── -->
+    <Fragment>
+        <Component Id="DiagsCollectScript" Directory="ScriptsFolder"
+            Guid="7e9b3a1c-4d5f-4a6b-8c2d-1e3f5a7b9c0d">
+            <File Id="collect_diags.ps1"
+                Source="scripts\collect-diags.ps1"
+                Name="collect-diags.ps1"
+                KeyPath="yes" />
+        </Component>
+
+        <Component Id="DiagsInstallTaskScript" Directory="ScriptsFolder"
+            Guid="8f0c4b2d-5e6a-4b7c-9d3e-2f4a6b8c0d1e">
+            <File Id="install_diag_task.ps1"
+                Source="scripts\install-diag-task.ps1"
+                Name="install-diag-task.ps1"
+                KeyPath="yes" />
+        </Component>
+
+        <Component Id="DiagsTaskXml" Directory="TasksFolder"
+            Guid="9a1d5c3e-6f7b-4c8d-ae4f-3a5b7c9d1e2f">
+            <File Id="DrainCtl_Diags_xml"
+                Source="tasks\DrainCtl-Diags.xml"
+                Name="DrainCtl-Diags.xml"
+                KeyPath="yes" />
+        </Component>
+    </Fragment>
+
     <!-- ── Firewall rule ─────────────────────────────────────────────────── -->
     <!-- Always installed — an allow rule for a closed port is a no-op.
          Conditional install broke upgrades: INSTALL_MODE defaults to
@@ -316,6 +374,9 @@
             <ComponentRef Id="PSModule" />
             <ComponentRef Id="FirewallRule" />
             <ComponentRef Id="EnableLagCounter" />
+            <ComponentRef Id="DiagsCollectScript" />
+            <ComponentRef Id="DiagsInstallTaskScript" />
+            <ComponentRef Id="DiagsTaskXml" />
         </ComponentGroup>
     </Fragment>
 </Wix>
