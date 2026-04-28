@@ -141,7 +141,7 @@ func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	// Back-date LastSeen past the stale threshold.
-	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-15*time.Minute)); err != nil {
+	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-15*time.Minute)); err != nil {
 		t.Fatalf("BackdateLastSeen: %v", err)
 	}
 
@@ -194,10 +194,11 @@ func TestHandleHealth_StaleAlertAndGraceCountedAsOffline(t *testing.T) {
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
 
-	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-20*time.Minute)); err != nil {
+	store := ds.state.store.(*telemetry.ServerStore)
+	if err := store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-20*time.Minute)); err != nil {
 		t.Fatalf("BackdateLastSeen SRV01: %v", err)
 	}
-	if err := ds.state.store.BackdateLastSeen(context.Background(), "SRV02", time.Now().Add(-11*time.Minute)); err != nil {
+	if err := store.BackdateLastSeen(context.Background(), "SRV02", time.Now().Add(-11*time.Minute)); err != nil {
 		t.Fatalf("BackdateLastSeen SRV02: %v", err)
 	}
 

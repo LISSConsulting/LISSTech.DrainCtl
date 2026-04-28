@@ -35,7 +35,7 @@ type legacyServerInfo struct {
 // binary, imports its rows into the `servers` SQLite table, and renames the
 // file so the import is one-shot. Absent or unreadable files are silent
 // no-ops — this boot helper never blocks dashboard startup.
-func MigrateLegacyServersJSON(ctx context.Context, dataDir string, store *telemetry.ServerStore) error {
+func MigrateLegacyServersJSON(ctx context.Context, dataDir string, store serverReader) error {
 	if dataDir == "" || store == nil {
 		return nil
 	}
