@@ -113,7 +113,7 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
 	}
 
-	wireServerStateCallbacks(ds, state, ms)
+	ds.wireServerStateCallbacks()
 
 	mux := http.NewServeMux()
 	registerRoutes(ctx, ds, mux)
@@ -178,7 +178,12 @@ func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string,
 
 // wireServerStateCallbacks installs the SSE/metrics/spike callbacks that bridge
 // the ServerState event surface to DashboardServer's broker and stores.
-func wireServerStateCallbacks(ds *DashboardServer, state *ServerState, ms *telemetry.MetricsStore) {
+func (ds *DashboardServer) wireServerStateCallbacks() {
+	// Snapshot fields into locals so closures below capture fixed pointers,
+	// matching the original parameter-capture semantics of the free-function form.
+	state := ds.state
+	ms := ds.ms
+
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
 	// triggers a server_update event to all connected browsers.
 	state.OnUpdate = ds.broadcastServerUpdate
