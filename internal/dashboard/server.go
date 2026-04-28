@@ -19,7 +19,6 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 //go:embed all:dist
@@ -39,9 +38,9 @@ type DashboardServer struct {
 	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
 	sessionStore *SessionStore // in-memory dashboard session store
 	broker       *Broker       // SSE event broker for real-time updates
-	ms           *telemetry.MetricsStore
-	as           *telemetry.AuditStore
-	mnt          *telemetry.MaintenanceStore
+	ms           metricsReader
+	as           auditReader
+	mnt          maintenanceReader
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -72,7 +71,7 @@ type DashboardServer struct {
 	// a per-host in-memory ring buffer. Always non-nil once StartDashboard returns;
 	// the handler still tolerates nil so zero-telemetry bring-up paths (e.g. tests)
 	// keep working.
-	spikes *telemetry.EventSpikeStore
+	spikes eventSpikeReader
 
 	// remoteEvtSpikeStatus caches the DetectorStatus most recently reported by
 	// each registered agent via /api/v1/report. Remote hosts don't run a local
@@ -92,7 +91,7 @@ type DashboardServer struct {
 // mnt may be nil; when nil, /api/v1/maintenance/status returns storage_error.
 // srv and sps are required — the dashboard depends on the SQLite-backed
 // server roster and spike store since feature 009.
-func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms *telemetry.MetricsStore, as *telemetry.AuditStore, mnt *telemetry.MaintenanceStore, srv *telemetry.ServerStore, sps *telemetry.EventSpikeStore) (*ServerState, error) {
+func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader) (*ServerState, error) {
 	// One-shot import of any legacy servers.json produced by a pre-009 binary.
 	// Renames the file so the import is idempotent across reboots.
 	if err := MigrateLegacyServersJSON(ctx, dataDir, srv); err != nil {
