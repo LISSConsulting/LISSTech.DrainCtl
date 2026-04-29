@@ -3009,9 +3009,8 @@ func TestMetricsHandler_ResolutionAutoMatrix(t *testing.T) {
 		window time.Duration
 		tier   string
 	}{
-		{"5m → raw", 5 * time.Minute, "raw"},
-		{"15m (inclusive) → raw", 15 * time.Minute, "raw"},
-		{"15m+1m → 1min", 15*time.Minute + time.Minute, "1min"},
+		{"5m → 1min", 5 * time.Minute, "1min"},
+		{"15m → 1min", 15 * time.Minute, "1min"},
 		{"1h (inclusive) → 1min", time.Hour, "1min"},
 		{"1h+1m → 5min", time.Hour + time.Minute, "5min"},
 		{"12h → 5min", 12 * time.Hour, "5min"},
