@@ -16,6 +16,7 @@
     import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
+    import { formatTime12 } from './lib/utils.js';
 
     import Nav from './components/Nav.svelte';
     import Login from './components/Login.svelte';
@@ -194,12 +195,7 @@
             // On the first refresh prevStates is empty, so every server emits a
             // "registered" event — giving the user an initial status snapshot.
             // Subsequent stable cycles emit nothing; transitions are always logged.
-            const evtTime = new Date().toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-            });
+            const evtTime = formatTime12(new Date(), { seconds: true });
             const seenHosts = new Set((servers || []).map((sv) => sv.host));
             for (const sv of servers || []) {
                 const prev = prevStates.get(sv.host);
@@ -297,12 +293,7 @@
         } catch (e) {
             appState.connected = false;
             addEvent({
-                time: new Date().toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false,
-                }),
+                time: formatTime12(new Date(), { seconds: true }),
                 host: '',
                 text: `Refresh failed: ${e?.message ?? e}`,
                 sev: 'alert',
@@ -383,12 +374,7 @@
                     // Also keep prevStates current so the poll doesn't re-log the same
                     // transition as a duplicate.
                     const prevStatus = prevStates.get(event.host);
-                    const evtTime = new Date().toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: false,
-                    });
+                    const evtTime = formatTime12(new Date(), { seconds: true });
                     if (prevStatus === undefined) {
                         // Brand-new server appearing via SSE — log "registered" so the
                         // event log captures the first appearance instead of being silent.
@@ -427,12 +413,7 @@
                     prevStates.delete(event.host);
                     addEvent(
                         serverEvent(
-                            new Date().toLocaleTimeString('en-US', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: false,
-                            }),
+                            formatTime12(new Date(), { seconds: true }),
                             { host: event.host, status: 'off', changed_by: event.data?.changed_by ?? '' },
                             'removed from dashboard',
                             'alert',
@@ -454,12 +435,7 @@
                     }
                     appState.config = cfg;
                     addEvent({
-                        time: new Date().toLocaleTimeString('en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                            hour12: false,
-                        }),
+                        time: formatTime12(new Date(), { seconds: true }),
                         host: '',
                         text: 'settings updated',
                         sev: 'ok',

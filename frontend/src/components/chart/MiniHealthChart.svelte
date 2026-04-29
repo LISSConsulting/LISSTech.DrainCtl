@@ -16,6 +16,7 @@
      */
 
     import { appState } from '../../lib/state.svelte.js';
+    import { formatTime12, formatTs } from '../../lib/utils.js';
 
     /**
      * @type {{
@@ -169,16 +170,10 @@
      * Overview chart's x-axis reads the same. */
     function formatAxisTime(ms, spanMs) {
         const d = new Date(ms);
-        if (spanMs < 2 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        }
-        if (spanMs < 48 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
-        }
-        if (spanMs < 14 * 24 * 60 * 60 * 1000) {
-            return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-        }
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
+        if (spanMs < 2 * 60 * 60 * 1000) return formatTime12(d, { seconds: true });
+        if (spanMs < 48 * 60 * 60 * 1000) return formatTime12(d);
+        if (spanMs < 14 * 24 * 60 * 60 * 1000) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
     }
 
     // ── X-axis time labels (5 evenly-spaced ticks, using timeKey) ─────────────
@@ -537,16 +532,7 @@
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
                         )}
                         {@const hoverT = /** @type {any} */ ((history[displayIndex])?.[timeKey])}
-                        {@const timeStr = Number.isFinite(hoverT)
-                            ? new Date(hoverT).toLocaleString('en', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                  hour12: false,
-                              })
-                            : '—'}
+                        {@const timeStr = Number.isFinite(hoverT) ? formatTs(new Date(hoverT).toISOString()) : '—'}
 
                         <rect
                             x={tipX + 4}

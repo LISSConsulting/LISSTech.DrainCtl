@@ -1,6 +1,7 @@
 <script>
     import { appState } from '../lib/state.svelte.js';
     import { authState } from '../lib/auth.svelte.js';
+    import { formatTime12 } from '../lib/utils.js';
     import { Wifi, WifiOff, RefreshCw, Users, BookOpen, User } from 'lucide-svelte';
 
     /** @type {{
@@ -13,14 +14,7 @@
     } = $props();
 
     const lastUpdatedStr = $derived(
-        appState.lastUpdated
-            ? appState.lastUpdated.toLocaleTimeString('en-US', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: false,
-              })
-            : '—',
+        appState.lastUpdated ? formatTime12(appState.lastUpdated, { seconds: true }) : '—',
     );
 
     const version = $derived(appState.health?.version ?? '—');
