@@ -23,7 +23,7 @@
      */
     import { appState } from '../lib/state.svelte.js';
     import { fetchSpikeRange } from '../lib/api.js';
-    import { formatTs } from '../lib/utils.js';
+    import { formatTs, formatTime12 } from '../lib/utils.js';
 
     /** @typedef {import('../lib/types.js').RecentSpike} RecentSpike */
 
@@ -159,12 +159,9 @@
         const d = new Date(ms);
         const now = Date.now();
         const sameDay = new Date(now).toDateString() === d.toDateString();
-        if (sameDay) {
-            return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        }
-        const mmdd = d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
-        const hhmm = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        return `${mmdd} ${hhmm}`;
+        if (sameDay) return formatTime12(d);
+        const mmdd = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
+        return `${mmdd} ${formatTime12(d)}`;
     }
     function fmtVolume(n) {
         if (!Number.isFinite(n)) return '—';
@@ -187,7 +184,7 @@
         if (ds.enabled_channels > 0) {
             lines.push(`${ds.mature_channels}/${ds.enabled_channels} channels mature`);
         }
-        if (ds.last_spike_at) lines.push(`Last spike: ${new Date(ds.last_spike_at).toLocaleString()}`);
+        if (ds.last_spike_at) lines.push(`Last spike: ${formatTs(ds.last_spike_at)}`);
         return lines.join('\n');
     }
 
@@ -327,18 +324,10 @@
 
     function formatTick(ms, span) {
         const d = new Date(ms);
-        if (span <= 60 * 60 * 1000) {
-            // <= 1h: show HH:MM:SS
-            return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        }
-        if (span <= 24 * 60 * 60 * 1000) {
-            // <= 1d: HH:MM
-            return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        }
-        // multi-day: MM-DD HH:MM
-        const mmdd = d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
-        const hhmm = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        return `${mmdd} ${hhmm}`;
+        if (span <= 60 * 60 * 1000) return formatTime12(d, { seconds: true });
+        if (span <= 24 * 60 * 60 * 1000) return formatTime12(d);
+        const mmdd = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
+        return `${mmdd} ${formatTime12(d)}`;
     }
 
     // Tick text-anchor picks based on proximity to the chart edges so the

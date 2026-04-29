@@ -16,7 +16,7 @@
      *               crosshair + dot + tooltip
      */
     import { getContext } from 'svelte';
-    import { counterLabel, isPercentCounter } from '../../lib/utils.js';
+    import { counterLabel, isPercentCounter, formatTime12, formatTs } from '../../lib/utils.js';
 
     /** @type {{ points: {t:number,v:number}[], counter: string, color: string, hideHover?: boolean }} */
     let { points, counter, color, hideHover = false } = $props();
@@ -63,29 +63,15 @@
         const [x0, x1] = $xDomain;
         const span = x1 - x0;
         const d = new Date(ms);
-        if (span < 2 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        }
-        if (span < 48 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
-        }
-        if (span < 14 * 24 * 60 * 60 * 1000) {
-            return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-        }
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
+        if (span < 2 * 60 * 60 * 1000) return formatTime12(d, { seconds: true });
+        if (span < 48 * 60 * 60 * 1000) return formatTime12(d);
+        if (span < 14 * 24 * 60 * 60 * 1000) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
     }
 
     /** @param {number} ms */
     function formatTooltipTime(ms) {
-        const d = new Date(ms);
-        return d.toLocaleString('en', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-        });
+        return formatTs(new Date(ms).toISOString());
     }
 
     // ── Path geometry ────────────────────────────────────────────────────

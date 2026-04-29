@@ -1,6 +1,7 @@
 <script>
     import { getContext } from 'svelte';
     import { appState } from '../../lib/state.svelte.js';
+    import { formatTime12, formatTs } from '../../lib/utils.js';
 
     /**
      * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
@@ -33,16 +34,10 @@
      * agrees on how axis labels read. */
     function formatAxisTime(ms, spanMs) {
         const d = new Date(ms);
-        if (spanMs < 2 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        }
-        if (spanMs < 48 * 60 * 60 * 1000) {
-            return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
-        }
-        if (spanMs < 14 * 24 * 60 * 60 * 1000) {
-            return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-        }
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
+        if (spanMs < 2 * 60 * 60 * 1000) return formatTime12(d, { seconds: true });
+        if (spanMs < 48 * 60 * 60 * 1000) return formatTime12(d);
+        if (spanMs < 14 * 24 * 60 * 60 * 1000) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
     }
 
     // X-axis labels — up to 5 evenly spaced ticks (only when showXAxis is true)
@@ -293,16 +288,7 @@
         {@const th = tipHeight(vis)}
         {@const tx = cx + 14 + TIP_W > $width ? cx - TIP_W - 10 : cx + 14}
         {@const ty = Math.max(2, Math.min($height - th - 2, $yScale(50) - th / 2))}
-        {@const timeStr = Number.isFinite(d.time)
-            ? new Date(d.time).toLocaleString('en', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: false,
-              })
-            : '—'}
+        {@const timeStr = Number.isFinite(d.time) ? formatTs(new Date(d.time).toISOString()) : '—'}
 
         <!-- Tooltip shadow (neobrutalist offset) -->
         <rect x={tx + 5} y={ty + 5} width={TIP_W} height={th} rx="6" fill="var(--color-shadow)" />

@@ -33,22 +33,35 @@ export function rel(iso, _now = Date.now()) {
 }
 
 /**
+ * Format a Date / numeric / ISO timestamp as American 12-hour time with
+ * lowercase meridiem and no space between minutes and am/pm — e.g. "1:03pm",
+ * "1:03:01pm". Centralised so charts, footers, tooltips, and event-log
+ * entries render identically; en-US's default "1:03 PM" with the space + caps
+ * doesn't match the house style.
+ *
+ * @param {Date|number|string} t
+ * @param {{ seconds?: boolean }} [opts]
+ * @returns {string}
+ */
+export function formatTime12(t, { seconds = false } = {}) {
+    const d = t instanceof Date ? t : new Date(t);
+    if (isNaN(d.getTime())) return '';
+    const fmtOpts = { hour: 'numeric', minute: '2-digit', hour12: true };
+    if (seconds) fmtOpts.second = '2-digit';
+    return d.toLocaleTimeString('en-US', fmtOpts).replace(' ', '').toLowerCase();
+}
+
+/**
  * Format an ISO timestamp for compact display in history and event log panels.
- * Output: "Apr 11, 14:32:01" (always en-US 24-hour locale).
+ * Output: "Apr 11, 1:03:01pm" (en-US, 12-hour, lowercase meridiem).
  * @param {string} iso
  * @returns {string}
  */
 export function formatTs(iso) {
     const d = new Date(iso);
     if (isNaN(d)) return iso;
-    return d.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    });
+    const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date + ', ' + formatTime12(d, { seconds: true });
 }
 
 /**
