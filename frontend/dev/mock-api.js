@@ -728,6 +728,12 @@ function handleRequest(method, pathname, body, query = {}) {
       cpu_p95_pct:             (s) => s.cpuP95,
       mem_avail_mb:            (s) => MEM_TOTAL_MB * (1 - (s.mem ?? 0) / 100),
       mem_total_mb:            () => MEM_TOTAL_MB,
+      // Synthetic counter — server computes per-host (1-avail/total)*100 then
+      // averages across hosts. The mock's identical MEM_TOTAL_MB across hosts
+      // means avg-of-pct happens to equal avg(avail)/avg(total), but exposing
+      // the counter explicitly keeps MetricsChart's read path consistent with
+      // production.
+      mem_used_pct:            (s) => s.mem,
       pages_sec:               (s) => s.pagesPerSec,
       disk_queue:              (s) => s.diskQueue,
       tcp_retrans_sec:         (s) => s.tcpRetrans,

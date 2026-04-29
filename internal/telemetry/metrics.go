@@ -453,6 +453,20 @@ var summableFleetCounters = []string{
 	"sessions_max",
 }
 
+// MemUsedPctCounter is the synthetic fleet-only counter name for memory
+// pressure. Storing it as a real counter would mean every host runs the
+// (1-avail/total) computation on its own clock and emits one more raw row
+// per poll; computing it on the read path means the formula lives in one
+// place and changes don't require an agent rebuild.
+//
+// The fleet aggregation cannot be done by averaging mem_avail_mb / mem_total_mb
+// independently across hosts: hosts have different total memory, so
+// SUM(avail)/SUM(total) is total-weighted and lets a big host dilute a small
+// host's near-OOM into the noise. This counter computes (1-avail/total)*100
+// per host per bucket first, then averages those percentages across hosts —
+// each host contributes equally to the displayed fleet pressure.
+const MemUsedPctCounter = "mem_used_pct"
+
 // summableCase returns a SQLite CASE expression that evaluates sumExpr when
 // the `counter` column matches one of summableFleetCounters, otherwise avgExpr.
 // Counter names are compile-time constants — safe to inline as string literals.
@@ -590,6 +604,121 @@ func buildAggQueryFleet(table string, hosts []string, fromMs, toMs int64, counte
 	return q, args
 }
 
+// buildMemUsedPctRawFleet computes the synthetic mem_used_pct counter at the
+// raw tier with the given cross-host bucket size. The inner subquery resolves
+// (1 - avail/total) per (bucket, host); the outer averages across hosts so a
+// host with twice the RAM doesn't dilute another host's pressure.
+//
+// CASE WHEN counter='…' THEN value END returns NULL for the wrong counter,
+// and AVG(NULL) is NULL — so AVG over the mixed CASE column yields the avg
+// of just the matching counter's values within the (bucket, host) group.
+// HAVING per_host_pct IS NOT NULL drops a host that has avail samples but no
+// total in the same bucket (or vice versa) so it can't poison the cross-host
+// average.
+func buildMemUsedPctRawFleet(hosts []string, fromMs, toMs int64, bucketMs int64) (string, []any) {
+	if bucketMs < MinRawFleetBucketMs {
+		bucketMs = MinRawFleetBucketMs
+	}
+	args := make([]any, 0, len(hosts)+2)
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	bucket := fmt.Sprintf("%d", bucketMs)
+	q := `SELECT bucket_ts,
+	             AVG(per_host_pct) AS avg_pct,
+	             MIN(per_host_pct) AS min_pct,
+	             MAX(per_host_pct) AS max_pct
+	      FROM (
+	          SELECT (ts / ` + bucket + `) * ` + bucket + ` AS bucket_ts, host,
+	                 (1 - AVG(CASE WHEN counter='mem_avail_mb' THEN value END) /
+	                      NULLIF(AVG(CASE WHEN counter='mem_total_mb' THEN value END), 0)) * 100 AS per_host_pct
+	          FROM metrics_raw
+	          WHERE host IN (` + placeholders(len(hosts)) + `)
+	            AND ts >= ? AND ts < ?
+	            AND counter IN ('mem_avail_mb','mem_total_mb')
+	          GROUP BY bucket_ts, host
+	          HAVING per_host_pct IS NOT NULL
+	      )
+	      GROUP BY bucket_ts ORDER BY bucket_ts ASC`
+	return q, args
+}
+
+// buildMemUsedPctOneMinFleet is the 1-minute virtual-tier sibling — same
+// per-host-pct-then-avg pattern with a fixed 60_000 ms bucket on metrics_raw.
+func buildMemUsedPctOneMinFleet(hosts []string, fromMs, toMs int64) (string, []any) {
+	args := make([]any, 0, len(hosts)+2)
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	q := `SELECT bucket_ts,
+	             AVG(per_host_pct) AS avg_pct,
+	             MIN(per_host_pct) AS min_pct,
+	             MAX(per_host_pct) AS max_pct
+	      FROM (
+	          SELECT (ts / 60000) * 60000 AS bucket_ts, host,
+	                 (1 - AVG(CASE WHEN counter='mem_avail_mb' THEN value END) /
+	                      NULLIF(AVG(CASE WHEN counter='mem_total_mb' THEN value END), 0)) * 100 AS per_host_pct
+	          FROM metrics_raw
+	          WHERE host IN (` + placeholders(len(hosts)) + `)
+	            AND ts >= ? AND ts < ?
+	            AND counter IN ('mem_avail_mb','mem_total_mb')
+	          GROUP BY bucket_ts, host
+	          HAVING per_host_pct IS NOT NULL
+	      )
+	      GROUP BY bucket_ts ORDER BY bucket_ts ASC`
+	return q, args
+}
+
+// buildMemUsedPctAggFleet handles TierFiveMin and TierHourly. Each
+// (host, bucket_ts, counter) row in the aggregated tables already has one
+// avg_value, so MAX(CASE …) is just an idiom to extract the value of the
+// matching counter from the per-host group.
+func buildMemUsedPctAggFleet(table string, hosts []string, fromMs, toMs int64) (string, []any) {
+	args := make([]any, 0, len(hosts)+2)
+	for _, h := range hosts {
+		args = append(args, h)
+	}
+	args = append(args, fromMs, toMs)
+	q := fmt.Sprintf(`SELECT bucket_ts,
+	             AVG(per_host_pct) AS avg_pct,
+	             MIN(per_host_pct) AS min_pct,
+	             MAX(per_host_pct) AS max_pct
+	      FROM (
+	          SELECT bucket_ts, host,
+	                 (1 - MAX(CASE WHEN counter='mem_avail_mb' THEN avg_value END) /
+	                      NULLIF(MAX(CASE WHEN counter='mem_total_mb' THEN avg_value END), 0)) * 100 AS per_host_pct
+	          FROM %s
+	          WHERE host IN (`+placeholders(len(hosts))+`)
+	            AND bucket_ts >= ? AND bucket_ts < ?
+	            AND counter IN ('mem_avail_mb','mem_total_mb')
+	          GROUP BY bucket_ts, host
+	          HAVING per_host_pct IS NOT NULL
+	      )
+	      GROUP BY bucket_ts ORDER BY bucket_ts ASC`, table)
+	return q, args
+}
+
+// splitMemUsedPctRequest separates the synthetic mem_used_pct counter from a
+// counter list. Returns the residual list to feed to the regular query, plus
+// flags describing what to run. Empty input means "all counters" — that
+// implicitly includes mem_used_pct alongside the real ones.
+func splitMemUsedPctRequest(counters []string) (rest []string, wantVirtual bool, runRegular bool) {
+	if len(counters) == 0 {
+		return counters, true, true
+	}
+	for _, c := range counters {
+		if c == MemUsedPctCounter {
+			wantVirtual = true
+			continue
+		}
+		rest = append(rest, c)
+	}
+	runRegular = len(rest) > 0
+	return rest, wantVirtual, runRegular
+}
+
 // BoundsForTierFleet returns the oldest and newest timestamp the tier holds
 // across any of the given hosts. Returns nil/nil when no rows exist.
 func (s *MetricsStore) BoundsForTierFleet(ctx context.Context, hosts []string, tier Tier) (*time.Time, *time.Time, error) {
@@ -665,27 +794,106 @@ func (s *MetricsStore) QueryRangeFleet(
 	}
 	fromMs := from.UTC().UnixMilli()
 	toMs := to.UTC().UnixMilli()
+	rest, wantVirtual, runRegular := splitMemUsedPctRequest(counters)
 	switch tier {
 	case TierRaw:
-		if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, counters, rawBucketMs); err != nil {
-			return nil, err
+		if runRegular {
+			if err := s.queryRawFleet(ctx, sr, hosts, fromMs, toMs, rest, rawBucketMs); err != nil {
+				return nil, err
+			}
+		}
+		if wantVirtual {
+			if err := s.queryMemUsedPctFleet(ctx, sr, tier, hosts, fromMs, toMs, rawBucketMs); err != nil {
+				return nil, err
+			}
 		}
 	case TierOneMin:
-		if err := s.queryOneMinFleet(ctx, sr, hosts, fromMs, toMs, counters); err != nil {
-			return nil, err
+		if runRegular {
+			if err := s.queryOneMinFleet(ctx, sr, hosts, fromMs, toMs, rest); err != nil {
+				return nil, err
+			}
+		}
+		if wantVirtual {
+			if err := s.queryMemUsedPctFleet(ctx, sr, tier, hosts, fromMs, toMs, 0); err != nil {
+				return nil, err
+			}
 		}
 	case TierFiveMin:
-		if err := s.queryAggregatedFleet(ctx, sr, "metrics_5min", hosts, fromMs, toMs, counters); err != nil {
-			return nil, err
+		if runRegular {
+			if err := s.queryAggregatedFleet(ctx, sr, "metrics_5min", hosts, fromMs, toMs, rest); err != nil {
+				return nil, err
+			}
+		}
+		if wantVirtual {
+			if err := s.queryMemUsedPctFleet(ctx, sr, tier, hosts, fromMs, toMs, 0); err != nil {
+				return nil, err
+			}
 		}
 	case TierHourly:
-		if err := s.queryAggregatedFleet(ctx, sr, "metrics_hourly", hosts, fromMs, toMs, counters); err != nil {
-			return nil, err
+		if runRegular {
+			if err := s.queryAggregatedFleet(ctx, sr, "metrics_hourly", hosts, fromMs, toMs, rest); err != nil {
+				return nil, err
+			}
+		}
+		if wantVirtual {
+			if err := s.queryMemUsedPctFleet(ctx, sr, tier, hosts, fromMs, toMs, 0); err != nil {
+				return nil, err
+			}
 		}
 	default:
 		return nil, fmt.Errorf("telemetry: tier %q not available in this version", tier.TierName())
 	}
 	return sr, nil
+}
+
+// queryMemUsedPctFleet runs the per-host-pct-then-avg query for the synthetic
+// mem_used_pct counter and appends the result series to sr. The bucketMs
+// argument is only used at TierRaw; the other tiers have fixed bucket sizes.
+func (s *MetricsStore) queryMemUsedPctFleet(
+	ctx context.Context,
+	sr *Series,
+	tier Tier,
+	hosts []string,
+	fromMs, toMs int64,
+	bucketMs int64,
+) error {
+	var q string
+	var args []any
+	switch tier {
+	case TierRaw:
+		q, args = buildMemUsedPctRawFleet(hosts, fromMs, toMs, bucketMs)
+	case TierOneMin:
+		q, args = buildMemUsedPctOneMinFleet(hosts, fromMs, toMs)
+	case TierFiveMin:
+		q, args = buildMemUsedPctAggFleet("metrics_5min", hosts, fromMs, toMs)
+	case TierHourly:
+		q, args = buildMemUsedPctAggFleet("metrics_hourly", hosts, fromMs, toMs)
+	default:
+		return fmt.Errorf("telemetry: mem_used_pct not available for tier %q", tier.TierName())
+	}
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet mem_used_pct query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	// Lazy-create the counter only when a row materialises so a no-data
+	// window keeps Series.Data empty and no-data assertions stay tight.
+	var cs *CounterSeries
+	for rows.Next() {
+		var bucket int64
+		var avg, min, max float64
+		if err := rows.Scan(&bucket, &avg, &min, &max); err != nil {
+			return fmt.Errorf("telemetry: fleet mem_used_pct scan: %w", err)
+		}
+		if cs == nil {
+			cs = getOrMakeCounter(sr, MemUsedPctCounter)
+		}
+		cs.T = append(cs.T, bucket)
+		cs.Avg = append(cs.Avg, avg)
+		cs.Min = append(cs.Min, min)
+		cs.Max = append(cs.Max, max)
+	}
+	return rows.Err()
 }
 
 // queryOneMinFleet is the fleet sibling of queryOneMin — 1-minute grouping of
