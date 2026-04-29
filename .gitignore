@@ -21,6 +21,10 @@ cmd/drainctl/drainctl.syso
 installer/obj/
 installer/bin/
 
+# .NET custom-action build outputs
+installer/customactions/**/obj/
+installer/customactions/**/bin/
+
 # Message compiler intermediates (keep .mc source and .dll output)
 assets/*.h
 assets/*.rc

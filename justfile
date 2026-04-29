@@ -184,19 +184,18 @@ psmodule: cli daemon dll
     Write-Host "   LISSTech.DrainCtl.psd1 — v$ver" -ForegroundColor DarkGray
     Write-Host "   LISSTech.DrainCtl.psm1" -ForegroundColor DarkGray
 
-# Build the MSI custom action DLL.
+# Build the MSI custom action DLL (managed C# via WiX DTF; SFXCA-wrapped output
+# at dist/customactions/DrainCtl.MsiCA.CA.dll is what the MSI's <Binary> loads).
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 msica:
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building MSI custom action  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     New-Item -ItemType Directory -Force "{{ca_dir}}" | Out-Null
-    $env:CGO_ENABLED = "1"
-    & go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags "-s -w" -o "{{ca_dir}}/drainctl-msica.dll" ./cmd/msica/
+    & dotnet build "{{installer_dir}}/customactions/DrainCtl.MsiCA/DrainCtl.MsiCA.csproj" -c Release -nologo -v:q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Remove-Item -ErrorAction SilentlyContinue "{{ca_dir}}/drainctl-msica.h"
-    $size = "{0:N1} MB" -f ((Get-Item "{{ca_dir}}/drainctl-msica.dll").Length / 1MB)
-    Write-Host "   drainctl-msica.dll ($size)" -ForegroundColor DarkGray
+    $size = "{0:N1} KB" -f ((Get-Item "{{ca_dir}}/DrainCtl.MsiCA.CA.dll").Length / 1KB)
+    Write-Host "   DrainCtl.MsiCA.CA.dll ($size)" -ForegroundColor DarkGray
 
 # Build the WiX MSI installer
 [script('pwsh', '-NoProfile')]
