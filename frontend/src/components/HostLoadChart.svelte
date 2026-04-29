@@ -3,7 +3,7 @@
      * HostLoadChart — per-host equivalent of MetricsChart's LOAD panel.
      *
      * Renders a single dual-axis chart carrying CPU, CPU P95, Memory, and
-     * Sessions for one host, with window presets (15M/1H/1D/3D/5D),
+     * Sessions for one host, with window presets (1H/1D/3D/5D),
      * drag-pan, wheel-zoom, series toggles, and a current-value readout.
      * Mirrors the composition of Overview's LOAD chart so operators see
      * the same visual grammar on the Server Detail drawer.

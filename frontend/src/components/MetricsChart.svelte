@@ -208,7 +208,7 @@
 
     // Wheel zoom intentionally disabled — operators reported accidental
     // trackpad scrolls hijacking the chart. Zoom is driven by the preset
-    // pills (15M/1H/1D/3D/5D) only. lib/chart.svelte applies the same
+    // pills (1H/1D/3D/5D) only. lib/chart.svelte applies the same
     // policy for per-host charts.
 
     // ── Drag-pan: shift the time window into the past ─────────────────────────

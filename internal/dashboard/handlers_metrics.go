@@ -12,19 +12,20 @@ import (
 	"strings"
 	"time"
 
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 // resolveMetricsTier maps a request's resolution parameter to a concrete tier.
 // Explicit "raw"/"1min"/"5min"/"hourly" pass through. "auto" picks by window
-// size (≤15m → raw, ≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to
-// the next coarser tier if the chosen tier's oldest row does not cover `from`.
-// Hourly is never degraded (it is the coarsest tier).
+// size (≤1h → 1min, ≤36h → 5min, >36h → hourly) then degrades to the next
+// coarser tier if the chosen tier's oldest row does not cover `from`. Hourly
+// is never degraded (it is the coarsest tier).
 //
 // The 1-minute tier is a virtual GROUP BY on metrics_raw — the 1H dashboard
-// pill maps to 60 buckets. Short windows (15M pill) render raw so the chart
-// shows per-second detail before the minute aggregation kicks in.
+// pill maps to 60 buckets. Auto never picks raw because at the validator's
+// minimum sample_interval_sec (10 s) raw-tier resolution is at most 6×
+// finer than 1-minute, and at the default 30 s only 2× finer; both ratios
+// don't justify the per-second visual noise on a fleet chart.
 func (ds *DashboardServer) resolveMetricsTier(
 	ctx context.Context,
 	host string,
@@ -45,8 +46,6 @@ func (ds *DashboardServer) resolveMetricsTier(
 	window := to.Sub(from)
 	var tier telemetry.Tier
 	switch {
-	case window <= 15*time.Minute:
-		tier = telemetry.TierRaw
 	case window <= time.Hour:
 		tier = telemetry.TierOneMin
 	case window <= 36*time.Hour:
@@ -66,6 +65,8 @@ func (ds *DashboardServer) resolveMetricsTier(
 		switch tier {
 		case telemetry.TierRaw, telemetry.TierOneMin:
 			// Both share metrics_raw's bounds; falling through either goes to 5min.
+			// TierRaw is unreachable here from the auto path but stays in the
+			// switch so an explicit ?resolution=raw degrades coherently.
 			tier = telemetry.TierFiveMin
 		case telemetry.TierFiveMin:
 			tier = telemetry.TierHourly
@@ -231,8 +232,6 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 	window := to.Sub(from)
 	var tier telemetry.Tier
 	switch {
-	case window <= 15*time.Minute:
-		tier = telemetry.TierRaw
 	case window <= time.Hour:
 		tier = telemetry.TierOneMin
 	case window <= 36*time.Hour:
@@ -321,26 +320,13 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Raw-tier bucketing must be wide enough to absorb every agent's poll
-	// jitter — clocks drift, perfmon collection takes variable time, and
-	// pull-config propagation lag means hosts may briefly run different
-	// sample_interval_sec values. A bucket equal to sample_interval still
-	// puts hosts on opposite sides of a 30-s boundary when their phases
-	// differ by ~T, producing the alternating-host zigzag we already fixed
-	// once. 2× sample_interval guarantees every host has at least one
-	// sample per bucket regardless of phase. Falls back to the store's
-	// default when config isn't available (test harness, hot-swap gap).
+	// Raw-fleet bucketing only matters for explicit ?resolution=raw — auto
+	// never picks raw for fleet (≤1h → 1min, …). DefaultRawFleetBucketMs
+	// (60 s) is wide enough to absorb staggered per-host poll phases at
+	// the default 30 s sample_interval; explicit-raw API consumers tuning
+	// for a different cadence get clamped up to MinRawFleetBucketMs (30 s)
+	// by the query builder.
 	rawBucketMs := int64(telemetry.DefaultRawFleetBucketMs)
-	var cfg *dc.Config
-	var cerr error
-	if ds.testLoadConfigFunc != nil {
-		cfg, cerr = ds.testLoadConfigFunc()
-	} else {
-		cfg, cerr = dc.LoadConfig()
-	}
-	if cerr == nil && cfg.Performance.SampleIntervalSec > 0 {
-		rawBucketMs = int64(cfg.Performance.SampleIntervalSec) * 2 * 1000
-	}
 
 	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters, rawBucketMs)
 	if err != nil {
