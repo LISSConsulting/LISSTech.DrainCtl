@@ -514,24 +514,30 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
-	// Shutdown is bounded at 10s via waitTelemetryWorkers so a stuck worker
-	// cannot stall svc.Stop past the SCM's wait hint.
-	aggregator := telemetry.NewAggregator(telDB, fullCfg.Telemetry.AggregatorIntervalSeconds)
-	retentionWorker := telemetry.NewRetention(telDB, fullCfg.Telemetry.RetentionIntervalMinutes, newRetentionProvider(fullCfg))
+	// Aggregator + retention workers run inside an LCI subsystem owned
+	// by internal/telemetry. Shutdown is bounded at 10s via
+	// waitWithTimeout so a stuck worker cannot stall svc.Stop past the
+	// SCM's wait hint.
+	telSub := telemetry.New(
+		telemetry.Config{
+			AggregatorIntervalSeconds: fullCfg.Telemetry.AggregatorIntervalSeconds,
+			RetentionIntervalMinutes:  fullCfg.Telemetry.RetentionIntervalMinutes,
+		},
+		telemetry.Deps{
+			Aggregator: telemetry.NewAggregator(telDB, fullCfg.Telemetry.AggregatorIntervalSeconds),
+			Retention:  telemetry.NewRetention(telDB, fullCfg.Telemetry.RetentionIntervalMinutes, newRetentionProvider(fullCfg)),
+		},
+	)
+	if err := telSub.Start(ctx); err != nil {
+		slog.Error("service=failed", "error", fmt.Errorf("telemetry subsystem start: %w", err))
+		return false, 1
+	}
 
-	var telemetryWG sync.WaitGroup
-	telemetryWG.Add(2)
-	go func() {
-		defer telemetryWG.Done()
-		aggregator.Run(ctx)
-	}()
-	go func() {
-		defer telemetryWG.Done()
-		retentionWorker.Run(ctx)
-	}()
-	slog.Info("telemetry=workers_started",
-		"aggregator_interval_seconds", fullCfg.Telemetry.AggregatorIntervalSeconds,
-		"retention_interval_minutes", fullCfg.Telemetry.RetentionIntervalMinutes)
+	// Spike-report fan-out goroutines tracked separately from the
+	// aggregator/retention LCI subsystem (see B2 / commit 1bacf6a). The
+	// next strangler step extracts this into its own subsystem; for now
+	// it owns its own waitgroup so subsystem boundaries are clean.
+	var spikeReportWG sync.WaitGroup
 
 	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
 	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
@@ -820,7 +826,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				updaterSub.Stop()
 				selfMetricsSub.Stop()
 				pipeSub.Stop()
-				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
+				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
+				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
@@ -846,11 +853,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// subsystem fired OnSpike — reporting again would double-insert.
 			if dashState == nil && dashCfg.URL != "" && dashRegistered {
 				spikeCopy := spike
-				telemetryWG.Add(1)
-				go func() {
-					defer telemetryWG.Done()
-					reportSpike(ctx, dashCfg.URL, &spikeCopy)
-				}()
+				startSpikeReport(ctx, &spikeReportWG, dashCfg.URL, &spikeCopy)
 			}
 
 		case <-dashBootstrap:
@@ -1197,19 +1200,21 @@ func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings
 	}
 }
 
-// waitTelemetryWorkers blocks until wg signals done or timeout elapses. A log
-// warning is emitted when the bound is exceeded so operators see a stuck
-// worker rather than a silent service-stop hang.
-func waitTelemetryWorkers(wg *sync.WaitGroup, timeout time.Duration) {
+// waitWithTimeout invokes wait (typically a Subsystem.Stop or
+// (*sync.WaitGroup).Wait) on a goroutine and blocks until either it
+// returns or timeout elapses. A log warning is emitted when the bound
+// is exceeded so operators see a stuck worker rather than a silent
+// service-stop hang. label distinguishes call sites in the warning.
+func waitWithTimeout(label string, wait func(), timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
+		wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		slog.Warn("telemetry: workers did not exit within shutdown budget",
+		slog.Warn(label+": did not exit within shutdown budget",
 			"timeout", timeout, slog.Int("event_id", EvtGenericWarning))
 	}
 }
