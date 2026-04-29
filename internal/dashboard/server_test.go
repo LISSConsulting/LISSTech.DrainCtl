@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -4405,6 +4407,86 @@ func TestFleetMetrics_SumsSessionCountersAcrossHosts(t *testing.T) {
 			for i, v := range cpu.Avg {
 				if v != 50.0 {
 					t.Errorf("cpu_pct avg[%d] = %v, want 50.0 (avg of two hosts at 50)", i, v)
+				}
+			}
+		})
+	}
+}
+
+// TestFleetMetrics_MemUsedPctIsAverageOfPerHostPercentages pins the fix for
+// the Overview LOAD memory line over-weighting hosts with more total RAM.
+// The displayed fleet pressure must be the unweighted average of per-host
+// (1 - avail/total) percentages, NOT (1 - avg(avail)/avg(total)) — the
+// latter is total-weighted and lets a 16 GB host's 50%-used dilute a 4 GB
+// host's 95%-used into ~59% rather than the correct 72.5%.
+func TestFleetMetrics_MemUsedPctIsAverageOfPerHostPercentages(t *testing.T) {
+	tiers := []struct {
+		name       string
+		resolution string
+		wantTier   string
+	}{
+		{"raw tier", "raw", "raw"},
+		{"1min tier", "1min", "1min"},
+		{"5min tier", "5min", "5min"},
+	}
+	for _, tier := range tiers {
+		t.Run(tier.name, func(t *testing.T) {
+			ds, ms, agg, closeDB := newTestServerWithAggregator(t)
+			defer closeDB()
+			ds.state.Register("S_SMALL")
+			ds.state.Register("S_BIG")
+
+			// One bucket of samples 50 h back so all three tiers materialise.
+			base := time.Now().UTC().Truncate(time.Second).Add(-50 * time.Hour)
+			ctx := context.Background()
+			samples := []telemetry.Sample{}
+			for i := range 5 {
+				ts := base.Add(time.Duration(i) * 30 * time.Second)
+				// S_SMALL: 200 MB free out of 4 GB → 95% used
+				samples = append(samples,
+					telemetry.Sample{Ts: ts, Host: "S_SMALL", Counter: "mem_avail_mb", Value: 200},
+					telemetry.Sample{Ts: ts, Host: "S_SMALL", Counter: "mem_total_mb", Value: 4000},
+				)
+				// S_BIG: 8 GB free out of 16 GB → 50% used
+				samples = append(samples,
+					telemetry.Sample{Ts: ts, Host: "S_BIG", Counter: "mem_avail_mb", Value: 8000},
+					telemetry.Sample{Ts: ts, Host: "S_BIG", Counter: "mem_total_mb", Value: 16000},
+				)
+			}
+			if err := ms.Append(ctx, samples); err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+			agg.RollOnce(ctx, time.Now().UTC())
+
+			// Widen the window past the 5-min bucket boundary so the
+			// aggregated tier's bucket_ts (floored to 5-min) is included even
+			// when `base` lands mid-bucket.
+			from := base.Add(-10 * time.Minute).Format(time.RFC3339)
+			to := base.Add(10 * time.Minute).Format(time.RFC3339)
+			url := "/api/v1/metrics/_fleet?from=" + from + "&to=" + to +
+				"&resolution=" + tier.resolution + "&counters=mem_used_pct"
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, url, nil)
+			r.SetPathValue("host", "_fleet")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+			resp := decodeMetricsResp(t, w)
+			if resp.Tier != tier.wantTier {
+				t.Errorf("tier = %q, want %q", resp.Tier, tier.wantTier)
+			}
+			pct, ok := resp.Series["mem_used_pct"]
+			if !ok || len(pct.Avg) == 0 {
+				t.Fatalf("response missing mem_used_pct series; series keys = %v", slices.Sorted(maps.Keys(resp.Series)))
+			}
+			// Want: (95 + 50) / 2 = 72.5. Old (broken) formula would give
+			// 1 - (200+8000)/(4000+16000) = 59. Use a 0.5-point tolerance to
+			// absorb rounding and the per-tier path differences.
+			for i, v := range pct.Avg {
+				if v < 72.0 || v > 73.0 {
+					t.Errorf("mem_used_pct avg[%d] = %v, want ~72.5 (avg of 95%% and 50%%)", i, v)
 				}
 			}
 		})
