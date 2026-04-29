@@ -40,7 +40,7 @@
         <Property Id="AUTODISCOVER" Value="1" Secure="yes" />
 
         <Binary Id="DrainCtlMsiCA"
-            SourceFile="..\dist\customactions\drainctl-msica.dll" />
+            SourceFile="..\dist\customactions\DrainCtl.MsiCA.CA.dll" />
 
         <!-- UI: custom wizard with install mode selection -->
         <ui:WixUI Id="DrainCtlUI" />
@@ -56,11 +56,14 @@
             </ComboBox>
         </UI>
 
-        <!-- Installer-owned machine settings are applied by a dedicated Go DLL
-             custom action before the service starts. Notification targets are
-             configured post-install through the dashboard or CLI. -->
+        <!-- Installer-owned machine settings are applied by a managed C# CA
+             which execs `drainctl.exe configure` so config persistence stays
+             single-sourced in Go. Notification targets are configured
+             post-install through the dashboard or CLI. -->
+        <!-- Single-letter keys to keep this string under the 255-char
+             CustomAction.Target column cap (ICE03). Decoded on the C# side. -->
         <SetProperty Id="ApplyInstallerConfig" Before="ApplyInstallerConfig" Sequence="execute"
-            Value="m=[INSTALL_MODE]&#10;u=[DASHBOARD_URL]&#10;g=[GRACE_PERIOD]&#10;p=[POLL_INTERVAL]&#10;s=[SESSION_THRESHOLD]&#10;P=[DASHBOARD_PORT]&#10;G=[DASHBOARD_GROUP]&#10;e=[ENABLE_PERF]&#10;r=[ENABLE_RFX]&#10;f=[LOG_FILE_LEVEL]&#10;v=[LOG_EVENT_LEVEL]&#10;d=[DASHBOARD_ONLY]" />
+            Value="b=[BinFolder]&#10;m=[INSTALL_MODE]&#10;u=[DASHBOARD_URL]&#10;g=[GRACE_PERIOD]&#10;p=[POLL_INTERVAL]&#10;s=[SESSION_THRESHOLD]&#10;P=[DASHBOARD_PORT]&#10;G=[DASHBOARD_GROUP]&#10;e=[ENABLE_PERF]&#10;r=[ENABLE_RFX]&#10;f=[LOG_FILE_LEVEL]&#10;v=[LOG_EVENT_LEVEL]&#10;d=[DASHBOARD_ONLY]" />
         <CustomAction Id="ApplyInstallerConfig"
             BinaryRef="DrainCtlMsiCA"
             DllEntry="ApplyInstallerConfig"
@@ -68,43 +71,45 @@
             Impersonate="no"
             Return="check" />
 
-        <!-- ETW provider: um before im on install (clears stale registration from
-             previous installs or major upgrades), um on uninstall. -->
+        <!-- ETW provider: um before im on install (clears stale registration
+             from a same-version reinstall), um on uninstall. The CustomActionData
+             for each is the absolute path to drainctl.man — the managed CA shells
+             out to wevtutil and streams its stdout/stderr into the MSI log. -->
         <SetProperty Id="CleanETWProvider" Before="CleanETWProvider" Sequence="execute"
-            Value="&quot;[SystemFolder]wevtutil.exe&quot; um &quot;[BinFolder]drainctl.man&quot;" />
+            Value="[BinFolder]drainctl.man" />
         <CustomAction Id="CleanETWProvider"
-            DllEntry="WixQuietExec"
+            BinaryRef="DrainCtlMsiCA"
+            DllEntry="CleanEtwProvider"
             Execute="deferred"
             Impersonate="no"
-            Return="ignore"
-            BinaryRef="Wix4UtilCA_X64" />
+            Return="ignore" />
 
         <SetProperty Id="RegisterETWProvider" Before="RegisterETWProvider" Sequence="execute"
-            Value="&quot;[SystemFolder]wevtutil.exe&quot; im &quot;[BinFolder]drainctl.man&quot;" />
+            Value="[BinFolder]drainctl.man" />
         <CustomAction Id="RegisterETWProvider"
-            DllEntry="WixQuietExec"
+            BinaryRef="DrainCtlMsiCA"
+            DllEntry="RegisterEtwProvider"
             Execute="deferred"
             Impersonate="no"
-            Return="ignore"
-            BinaryRef="Wix4UtilCA_X64" />
+            Return="ignore" />
 
         <SetProperty Id="UnregisterETWProvider" Before="UnregisterETWProvider" Sequence="execute"
-            Value="&quot;[SystemFolder]wevtutil.exe&quot; um &quot;[BinFolder]drainctl.man&quot;" />
+            Value="[BinFolder]drainctl.man" />
         <CustomAction Id="UnregisterETWProvider"
-            DllEntry="WixQuietExec"
+            BinaryRef="DrainCtlMsiCA"
+            DllEntry="UnregisterEtwProvider"
             Execute="deferred"
             Impersonate="no"
-            Return="ignore"
-            BinaryRef="Wix4UtilCA_X64" />
+            Return="ignore" />
 
         <SetProperty Id="AddEventLogReaders" Before="AddEventLogReaders" Sequence="execute"
-            Value="&quot;[BinFolder]drainctl.exe&quot; service grant-eventlog" />
+            Value="[BinFolder]drainctl.exe" />
         <CustomAction Id="AddEventLogReaders"
-            DllEntry="WixQuietExec"
+            BinaryRef="DrainCtlMsiCA"
+            DllEntry="AddEventLogReaders"
             Execute="deferred"
             Impersonate="no"
-            Return="ignore"
-            BinaryRef="Wix4UtilCA_X64" />
+            Return="ignore" />
 
         <SetProperty Id="StartDrainCtlService" Before="StartDrainCtlService" Sequence="execute"
             Value="&quot;[BinFolder]drainctl.exe&quot; service start" />
@@ -150,7 +155,7 @@
                 Condition="NOT REMOVE" />
             <Custom Action="UnregisterETWProvider"
                 After="InstallInitialize"
-                Condition="REMOVE" />
+                Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="AddEventLogReaders"
                 After="InstallServices"
                 Condition="NOT REMOVE" />
