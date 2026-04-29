@@ -9,9 +9,35 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <Deterministic>true</Deterministic>
+    <!--
+      Force MakeSfxCA to bundle the x64 SFXCA stub regardless of MSBuild's
+      $(Platform) (which the .NET SDK leaves at AnyCPU for single-target
+      builds). The default targets pick x86 when $(Platform) != 'x64', and
+      the x86 stub spawns a 32-bit CA host that can't load this x64 assembly
+      → BadImageFormatException ("incorrect format") at deferred-CA time.
+      Aligning the stub bitness with PlatformTarget=x64 resolves it.
+    -->
+    <SfxCADll>$(PkgWixToolset_Dtf_CustomAction)\tools\x64\SfxCA.dll</SfxCADll>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WixToolset.Dtf.CustomAction" Version="5.0.2" />
+    <!--
+      GeneratePathProperty exposes $(PkgWixToolset_Dtf_CustomAction) so the
+      <SfxCADll> override above can address the x64 SFXCA stub by absolute
+      path. Without it, $(Pkg…) is empty and SfxCADll resolves to just
+      "\tools\x64\SfxCA.dll" — MakeSfxCA then fails with file-not-found.
+    -->
+    <PackageReference Include="WixToolset.Dtf.CustomAction" Version="5.0.2" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!--
+    SFXCA's host loads the v2 CLR by default and faceplants on net472
+    assemblies with BadImageFormatException. Declaring CustomAction.config
+    as Content makes the DTF PackCustomAction target pass it to MakeSfxCA,
+    which bundles it next to the CA assembly so SFXCA picks up the
+    supportedRuntime hint and binds to CLR v4 instead.
+  -->
+  <ItemGroup>
+    <Content Include="CustomAction.config" />
   </ItemGroup>
 </Project>

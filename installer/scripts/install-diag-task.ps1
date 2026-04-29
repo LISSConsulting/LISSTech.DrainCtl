@@ -18,16 +18,35 @@ if (-not (Test-Path -LiteralPath $TaskXml)) {
 }
 
 # Capture prior enable state, if a task with this name already exists.
+# schtasks /Query exits non-zero with stderr text ("The system cannot find
+# the file specified") when the task doesn't exist. Under
+# $ErrorActionPreference='Stop' that surfaces as a terminating
+# NativeCommandError despite `2>$null` (which redirects the text but not
+# PowerShell's exit-code-driven error promotion). On a fresh install the
+# task always doesn't exist yet → CA fails → registration silently skipped.
+# Pop the EAP for just the probe so the not-found case is treated as data,
+# not an exception.
 $wasEnabled = $false
-$existing = & schtasks.exe /Query /TN $taskName /XML 2>$null
-if ($LASTEXITCODE -eq 0) {
-    if (($existing -join "`n") -match '<Enabled>true</Enabled>') {
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
+try {
+    $existing = & schtasks.exe /Query /TN $taskName /XML 2>$null
+    if ($LASTEXITCODE -eq 0 -and (($existing -join "`n") -match '<Enabled>true</Enabled>')) {
         $wasEnabled = $true
     }
+} finally {
+    $ErrorActionPreference = $prevEAP
+    $global:LASTEXITCODE = 0
 }
 
-# Re-encode to UTF-16 LE for schtasks.
+# Re-encode to UTF-16 LE for schtasks. The source XML declares
+# encoding="UTF-8" so the declaration must be rewritten to match the new
+# on-disk encoding — otherwise schtasks reads the UTF-16 BOM, sees
+# "UTF-8" in the prolog, and aborts with "unable to switch the encoding"
+# (1,40)::ERROR before any element is parsed.
 $content = Get-Content -LiteralPath $TaskXml -Raw
+$content = $content -replace '(?i)encoding\s*=\s*"UTF-8"', 'encoding="UTF-16"' `
+                    -replace "(?i)encoding\s*=\s*'UTF-8'", "encoding='UTF-16'"
 $tmp = [System.IO.Path]::GetTempFileName()
 try {
     [System.IO.File]::WriteAllText($tmp, $content, [System.Text.Encoding]::Unicode)
