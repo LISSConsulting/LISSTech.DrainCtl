@@ -312,8 +312,11 @@
         };
         const cpuAvg = tsMap(cpu, 'avg');
         const cpuMax = tsMap(cpu, 'max');
-        const availMap = tsMap(series['mem_avail_mb']);
-        const totalMap = tsMap(series['mem_total_mb']);
+        // mem_used_pct is a server-computed virtual counter: per-host
+        // (1-avail/total)*100 first, then averaged across hosts. Replaces the
+        // older avg(avail)/avg(total) ratio that was total-weighted and
+        // diluted small-RAM hosts' near-OOM into the noise.
+        const memPctMap = tsMap(series['mem_used_pct']);
         const sessMap = tsMap(series['sessions_total']);
         const idMap = tsMap(series['input_delay_p95_ms']);
         const psMap = tsMap(series['pages_sec']);
@@ -322,14 +325,13 @@
         return cpu.t.map((ts) => {
             const cpuV = cpuAvg.get(ts) ?? 0;
             const cpuP95V = cpuMax.get(ts);
-            const a = availMap.get(ts) ?? 0;
-            const m = totalMap.get(ts) ?? 0;
+            const memV = memPctMap.get(ts);
             const sV = sessMap.get(ts);
             return {
                 time: ts,
                 cpu: cpuV,
                 cpuP95: cpuP95V != null && cpuP95V > 0 ? cpuP95V : cpuV,
-                mem: m > 0 ? (1 - a / m) * 100 : 0,
+                mem: memV ?? 0,
                 sessions: sV != null ? Math.round(sV) : 0,
                 inputDelay: idMap.get(ts) ?? 0,
                 pagesPerSec: psMap.get(ts) ?? 0,
