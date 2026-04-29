@@ -93,7 +93,6 @@ function lsGetDate(key) {
  * @type {Array<{key: OverviewWindowPreset, label: string, ms: number}>}
  */
 export const OVERVIEW_WINDOW_PRESETS = [
-    { key: '15min', label: '15M', ms: 15 * 60 * 1000 },
     { key: '1hour', label: '1H', ms: 60 * 60 * 1000 },
     { key: '1day', label: '1D', ms: 24 * 60 * 60 * 1000 },
     { key: '3day', label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
@@ -224,7 +223,7 @@ const persistReduceMotion = (v) => {
  * @property {number} count
  */
 
-/** @typedef {'15min'|'1hour'|'1day'|'3day'|'5day'} OverviewWindowPreset */
+/** @typedef {'1hour'|'1day'|'3day'|'5day'} OverviewWindowPreset */
 
 /**
  * @typedef {Object} Counters
