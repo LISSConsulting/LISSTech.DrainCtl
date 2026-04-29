@@ -514,31 +514,33 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
-	// Shutdown is bounded at 10s via waitTelemetryWorkers so a stuck worker
+	// Aggregator + retention workers run inside an LCI subsystem.
+	// Shutdown is bounded at 10s via waitWithTimeout so a stuck worker
 	// cannot stall svc.Stop past the SCM's wait hint.
-	aggregator := telemetry.NewAggregator(telDB, fullCfg.Telemetry.AggregatorIntervalSeconds)
-	retentionWorker := telemetry.NewRetention(telDB, fullCfg.Telemetry.RetentionIntervalMinutes, newRetentionProvider(fullCfg))
+	telCfg := telemetry.Config{
+		AggregatorIntervalSeconds: fullCfg.Telemetry.AggregatorIntervalSeconds,
+		RetentionIntervalMinutes:  fullCfg.Telemetry.RetentionIntervalMinutes,
+	}
+	telSub := telemetry.New(telCfg, telemetry.Deps{
+		Aggregator: telemetry.NewAggregator(telDB, telCfg.AggregatorIntervalSeconds),
+		Retention:  telemetry.NewRetention(telDB, telCfg.RetentionIntervalMinutes, newRetentionProvider(fullCfg)),
+	})
+	if err := telSub.Start(ctx); err != nil {
+		slog.Error("service=failed", "error", fmt.Errorf("telemetry subsystem start: %w", err))
+		return false, 1
+	}
 
-	var telemetryWG sync.WaitGroup
-	telemetryWG.Add(2)
-	go func() {
-		defer telemetryWG.Done()
-		aggregator.Run(ctx)
-	}()
-	go func() {
-		defer telemetryWG.Done()
-		retentionWorker.Run(ctx)
-	}()
-	slog.Info("telemetry=workers_started",
-		"aggregator_interval_seconds", fullCfg.Telemetry.AggregatorIntervalSeconds,
-		"retention_interval_minutes", fullCfg.Telemetry.RetentionIntervalMinutes)
+	// Spike-report fan-out tracked separately from the aggregator/retention
+	// LCI subsystem (the next strangler step extracts it). Its own wg keeps
+	// subsystem boundaries clean.
+	var spikeReportWG sync.WaitGroup
 
 	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
 	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
 	// the SCM-stop branch invokes — when the updater decides to install,
 	// it triggers our own clean shutdown so msiexec can replace files
 	// before SCM forces a stop. Stop is called from the SCM-stop branch
-	// alongside evtSpikeSub.Stop / waitTelemetryWorkers; the LCI Stop is
+	// alongside evtSpikeSub.Stop / telSub.Stop; the LCI Stop is
 	// idempotent so a defer-based fallback isn't needed.
 	updaterSub := updater.New(fullCfg.Update, cancel)
 	if err := updaterSub.Start(ctx); err != nil {
@@ -820,7 +822,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				updaterSub.Stop()
 				selfMetricsSub.Stop()
 				pipeSub.Stop()
-				waitTelemetryWorkers(&telemetryWG, 10*time.Second)
+				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
+				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
@@ -846,11 +849,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// subsystem fired OnSpike — reporting again would double-insert.
 			if dashState == nil && dashCfg.URL != "" && dashRegistered {
 				spikeCopy := spike
-				telemetryWG.Add(1)
-				go func() {
-					defer telemetryWG.Done()
-					reportSpike(ctx, dashCfg.URL, &spikeCopy)
-				}()
+				startSpikeReport(ctx, &spikeReportWG, dashCfg.URL, &spikeCopy)
 			}
 
 		case <-dashBootstrap:
@@ -1197,19 +1196,21 @@ func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings
 	}
 }
 
-// waitTelemetryWorkers blocks until wg signals done or timeout elapses. A log
-// warning is emitted when the bound is exceeded so operators see a stuck
-// worker rather than a silent service-stop hang.
-func waitTelemetryWorkers(wg *sync.WaitGroup, timeout time.Duration) {
+// waitWithTimeout invokes wait (typically a Subsystem.Stop or
+// (*sync.WaitGroup).Wait) on a goroutine and blocks until either it
+// returns or timeout elapses. A log warning is emitted when the bound
+// is exceeded so operators see a stuck worker rather than a silent
+// service-stop hang. label distinguishes call sites in the warning.
+func waitWithTimeout(label string, wait func(), timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
+		wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		slog.Warn("telemetry: workers did not exit within shutdown budget",
+		slog.Warn(label+": did not exit within shutdown budget",
 			"timeout", timeout, slog.Int("event_id", EvtGenericWarning))
 	}
 }
