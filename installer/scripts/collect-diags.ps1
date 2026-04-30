@@ -1,5 +1,5 @@
 # Hourly diagnostics collector for LISSTech DrainCtl. Invoked by Task Scheduler
-# (\LISSTech\DrainCtl-Diags). Snapshots heap/goroutine/allocs/threadcreate
+# (\LISS Technologies\DrainCtl-Diags). Snapshots heap/goroutine/allocs/threadcreate
 # profiles from the loopback pprof endpoint and tails recent selfmetrics lines
 # from the rotating file log. Output: %ProgramData%\LISS Technologies\LISSTech DrainCtl\diags
 #
