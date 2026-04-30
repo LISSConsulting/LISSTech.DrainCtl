@@ -1617,15 +1617,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.115 &mdash; Stronger defaults, faster dashboards</h2>
+                <h2 class="section-title">v26.119 &mdash; Honest charts, signed updates, working installer</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Tamper-evident agents.</strong> A swapped dashboard certificate stops the agent in its tracks instead of silently re-trusting. Notification credentials stay encrypted, scoped to drainctl alone &mdash; other services on the host can't read them. Authenticated SMTP refuses to send if your relay can't speak TLS.</li>
-                            <li><strong>Charts with history at first glance.</strong> Cold-load the dashboard and you see your fleet's last hour, last day, or last five days &mdash; not a blank canvas waiting to fill. Wheel-zoom, drag-pan, six time windows. The same crisp interactions on every Overview chart and every Server Detail panel.</li>
-                            <li><strong>Privileged actions require admin.</strong> Registering hosts, removing servers, and resetting detection baselines now demand admin rights. Read-only commands stay accessible to anyone authorized.</li>
-                            <li><strong>Per-host event-spike timeline.</strong> A swimlane on each Server Detail panel that places confirmed Windows event-log anomalies on a time axis &mdash; one row per channel, one dot per spike. Sized by volume, coloured by severity. Paired with a new tuning guide that walks the detector's knobs through four scenario presets: cautious, strict, DC-heavy, and noisy-channel surgery.</li>
-                            <li><strong>Quiet fixes you'll feel.</strong> Concurrent config saves no longer step on each other. Event-log monitoring actually recovers from dropped subscriptions. Large administrative requests stop truncating. Drain-mode attribution always points at the right user, even when Windows audit delivery lags by minutes.</li>
+                            <li><strong>Memory pressure that doesn't lie.</strong> The fleet LOAD chart used to total-weight memory across hosts &mdash; a 16 GB box's 50% used would dilute a 4 GB box's 95% used into ~59% on the line. Now per-host pressure is averaged, so a small host's near-OOM lands at the right altitude on the chart instead of being smoothed into the noise.</li>
+                            <li><strong>Signed auto-updates.</strong> Agents pull a release manifest signed with an Ed25519 key embedded at build time, verify before fetching the MSI, and pin against version replay. A swapped publisher key is detected and refused. Manifest schema is versioned with a transition window for rolling upgrades.</li>
+                            <li><strong>Installer that finishes.</strong> The C# managed custom action introduced in v26.119.1 was failing on every fresh install, silently aborting the deferred-CA chain at the first managed step. ETW provider, event-log readers, service start, and diagnostics task all now register cleanly. Diagnostic profiling and per-host pprof scheduled task land on disk where they should.</li>
+                            <li><strong>American clocks everywhere.</strong> The dashboard is consistent: footer, event log, every chart axis, every tooltip, history modal, spike swimlane &mdash; all read 12-hour with lowercase meridiem (<code>1:03pm</code> / <code>1:03:01pm</code>) instead of a mix of 24-hour locales.</li>
+                            <li><strong>Quieter chart presets.</strong> The 15M zoom preset is gone. At 60-second polling it added no resolution over 1H, and it carried the only consumer of the fleet raw-bucket scaling code &mdash; which is also gone. Auto-tier resolves &le; 1 hour to the 1-minute virtual tier for both fleet and per-host queries.</li>
+                            <li><strong>Telemetry as a managed subsystem.</strong> The aggregator and retention worker are now lifecycle subsystems that start and stop in known order with the rest of the service &mdash; no more orphan goroutines on shutdown, deterministic test harness, cleaner restart behavior under config reload.</li>
                         </ul>
                     </div>
                 </div>
@@ -1819,7 +1820,7 @@
 <span class="c"># Machine-readable output for automation</span>
 <span class="b">PS&gt;</span> drainctl check --format json
 <span class="w">{</span>
-  <span class="b">"version"</span>: <span class="d">"26.107.26"</span>,
+  <span class="b">"version"</span>: <span class="d">"26.119.10"</span>,
   <span class="b">"host"</span>: <span class="d">"MDS-LDC1-RDS5"</span>,
   <span class="b">"drain_mode"</span>: <span class="d">"ALLOW_ALL_CONNECTIONS"</span>,
   <span class="b">"drain_mode_value"</span>: <span class="d">0</span>,
