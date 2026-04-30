@@ -1617,16 +1617,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.119 &mdash; Honest charts, signed updates, working installer</h2>
+                <h2 class="section-title">v26.119 &mdash; Sharper charts. Signed updates.</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
-                        <ul style="margin:0;padding-left:20px;line-height:1.8;color:var(--fg)">
-                            <li><strong>Memory pressure that doesn't lie.</strong> The fleet LOAD chart used to total-weight memory across hosts &mdash; a 16 GB box's 50% used would dilute a 4 GB box's 95% used into ~59% on the line. Now per-host pressure is averaged, so a small host's near-OOM lands at the right altitude on the chart instead of being smoothed into the noise.</li>
-                            <li><strong>Signed auto-updates.</strong> Agents pull a release manifest signed with an Ed25519 key embedded at build time, verify before fetching the MSI, and pin against version replay. A swapped publisher key is detected and refused. Manifest schema is versioned with a transition window for rolling upgrades.</li>
-                            <li><strong>Installer that finishes.</strong> The C# managed custom action introduced in v26.119.1 was failing on every fresh install, silently aborting the deferred-CA chain at the first managed step. ETW provider, event-log readers, service start, and diagnostics task all now register cleanly. Diagnostic profiling and per-host pprof scheduled task land on disk where they should.</li>
-                            <li><strong>American clocks everywhere.</strong> The dashboard is consistent: footer, event log, every chart axis, every tooltip, history modal, spike swimlane &mdash; all read 12-hour with lowercase meridiem (<code>1:03pm</code> / <code>1:03:01pm</code>) instead of a mix of 24-hour locales.</li>
-                            <li><strong>Quieter chart presets.</strong> The 15M zoom preset is gone. At 60-second polling it added no resolution over 1H, and it carried the only consumer of the fleet raw-bucket scaling code &mdash; which is also gone. Auto-tier resolves &le; 1 hour to the 1-minute virtual tier for both fleet and per-host queries.</li>
-                            <li><strong>Telemetry as a managed subsystem.</strong> The aggregator and retention worker are now lifecycle subsystems that start and stop in known order with the rest of the service &mdash; no more orphan goroutines on shutdown, deterministic test harness, cleaner restart behavior under config reload.</li>
+                        <ul style="margin:0;padding-left:20px;line-height:1.9;color:var(--fg)">
+                            <li><strong>Truthful fleet memory.</strong> Per-host pressure, averaged. Small hosts can't hide behind big ones.</li>
+                            <li><strong>Signed auto-updates.</strong> Ed25519 manifest verification, replay-protected.</li>
+                            <li><strong>12-hour clocks everywhere.</strong> <code>1:03pm</code> from footer to tooltip.</li>
+                            <li><strong>Tighter zoom presets.</strong> <code>1H / 1D / 3D / 5D</code> &mdash; the cadences operators actually use.</li>
+                            <li><strong>Cleaner installs.</strong> Every component, every host, first try.</li>
+                            <li><strong>Lifecycle-managed telemetry.</strong> Clean start. Clean stop. No orphans.</li>
                         </ul>
                     </div>
                 </div>
