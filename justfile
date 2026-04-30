@@ -394,6 +394,16 @@ release: (header "release") release-preflight gotest psmodule sign-binaries msi 
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 publish: (header "publish")
+    # Force UTF-8 for native-command stdout capture. PowerShell's default
+    # [Console]::OutputEncoding on Windows is the OEM codepage (CP437 / CP850
+    # on US-English), so a `git log` whose commit messages contain UTF-8
+    # bytes (en-dash, ≤, →, em-dash, …) is decoded as OEM, mojibakes the
+    # multi-byte sequences (e.g. `≤` → `Γëñ`, `→` → `Γå£`), and gh release
+    # publishes the mangled text. Setting both encodings makes `git log` and
+    # subsequent `gh` invocations agree with what's actually in the repo.
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+
     $msiPath = "{{dist_dir}}/LISSTech.DrainCtl.msi"
     $cliPath = "{{bin_dir}}/drainctl.exe"
 

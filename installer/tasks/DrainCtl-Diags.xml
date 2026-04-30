@@ -2,7 +2,7 @@
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>LISSTech DrainCtl diagnostics — hourly pprof + selfmetrics snapshots. Disabled by default; enable via Task Scheduler when investigating leaks. Requires DRAINCTL_PPROF_PORT machine env var and a service restart.</Description>
-    <URI>\LISSTech\DrainCtl-Diags</URI>
+    <URI>\LISS Technologies\DrainCtl-Diags</URI>
   </RegistrationInfo>
   <Triggers>
     <TimeTrigger>

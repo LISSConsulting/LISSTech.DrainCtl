@@ -135,7 +135,7 @@
             BinaryRef="Wix4UtilCA_X64" />
 
         <SetProperty Id="UnregisterDiagsTask" Before="UnregisterDiagsTask" Sequence="execute"
-            Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;LISSTech\DrainCtl-Diags&quot; /F" />
+            Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;LISS Technologies\DrainCtl-Diags&quot; /F" />
         <CustomAction Id="UnregisterDiagsTask"
             DllEntry="WixQuietExec"
             Execute="deferred"
