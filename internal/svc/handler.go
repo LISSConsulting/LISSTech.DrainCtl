@@ -551,9 +551,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		slog.Warn("updater failed to start", "error", err)
 	}
 
-	// Start registry watcher.
-	regCh, err := watcher.WatchDrainModeKey(ctx)
-	if err != nil {
+	// Registry watcher subsystem. A start failure (e.g. NOTIFY rights
+	// denied) drops to poll-only operation: regCh is rebound to a
+	// never-firing channel so the select arm goes inert without a nil
+	// guard. The subsystem's own events channel is left untouched and
+	// Stop is still called in the SCM-stop branch (idempotent).
+	regSub := watcher.NewRegistrySubsystem(dc.RegPath)
+	regCh := regSub.Events()
+	if err := regSub.Start(ctx); err != nil {
 		slog.Warn("registry watcher failed, polling only", "error", err)
 		regCh = make(chan struct{}) // never fires
 	}
@@ -826,6 +831,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				updaterSub.Stop()
 				selfMetricsSub.Stop()
 				pipeSub.Stop()
+				regSub.Stop()
 				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
 				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
