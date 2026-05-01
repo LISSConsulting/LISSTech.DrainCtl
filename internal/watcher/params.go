@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
-
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 // WatchConfigFile monitors the config file's directory for write changes
@@ -145,11 +143,4 @@ func statFile(path string) (time.Time, error) {
 	}
 	_ = windows.FindClose(h)
 	return time.Unix(0, fd.LastWriteTime.Nanoseconds()), nil
-}
-
-// WatchParametersKey monitors the service's Parameters registry key for
-// changes. Kept for backwards compatibility — new code should use
-// WatchConfigFile instead.
-func WatchParametersKey(ctx context.Context) (<-chan struct{}, error) {
-	return watchRegistryKey(ctx, dc.ParametersKeyPath)
 }
