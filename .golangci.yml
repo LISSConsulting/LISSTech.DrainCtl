@@ -29,6 +29,7 @@ linters:
         - G304  # file path from variable — we validate paths
         - G306  # WriteFile 0644 — same as G302
         - G118  # goroutine with background context — long-lived goroutines, not request-scoped
+        - G124  # cookie attribute false-positive: Secure/HttpOnly/SameSite are set via variable fields gosec can't statically track
         - G402  # TLS InsecureSkipVerify — used with VerifyPeerCertificate
         - G703  # path traversal — false positive on os.WriteFile
 
