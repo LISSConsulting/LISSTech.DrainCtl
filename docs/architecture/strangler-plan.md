@@ -69,7 +69,7 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 
 3. **Telemetry aggregator + retention workers** — currently two inline goroutines launched by `telemetryWG.Add(2)` in `Execute` (handler.go:483-498). Extract into a `telemetry.Subsystem` (or named more narrowly — `telemetry.AggregatorSubsystem`) that owns the goroutines and the wg. **Effort: M.** Blocker: the goroutines today share `telemetryWG` with the spike-report fan-out we added in B2 (commit `1bacf6a`). The migration disentangles those: spike-report lives in its own LCI subsystem, aggregator+retention in another.
 
-4. **Registry watcher (`RegNotifyChangeKeyValue`)** — inline goroutine + channel in Execute. Extract to `internal/watcher/RegistrySubsystem` (the package already exists). **Effort: S-M.** No real blocker; it's a straight extraction.
+4. ~~**Registry watcher (`RegNotifyChangeKeyValue`)**~~ done — extracted to `watcher.RegistrySubsystem` in `internal/watcher/registry_subsystem_windows.go`. Stop is wired alongside `pipeSub.Stop()` in the SCM-stop branch; the legacy top-level `WatchDrainModeKey` / `WatchParametersKey` / `watchRegistryKey` were retired in the same change.
 
 5. **Config-file watcher** — similar to the registry watcher; extract to a `config.WatcherSubsystem`. **Effort: S-M.**
 
