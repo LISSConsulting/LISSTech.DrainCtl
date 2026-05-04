@@ -71,7 +71,7 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 
 4. ~~**Registry watcher (`RegNotifyChangeKeyValue`)**~~ done — extracted to `watcher.RegistrySubsystem` in `internal/watcher/registry_subsystem_windows.go`. Stop is wired alongside `pipeSub.Stop()` in the SCM-stop branch; the legacy top-level `WatchDrainModeKey` / `WatchParametersKey` / `watchRegistryKey` were retired in the same change.
 
-5. **Config-file watcher** — similar to the registry watcher; extract to a `config.WatcherSubsystem`. **Effort: S-M.**
+5. ~~**Config-file watcher**~~ done — extracted to `watcher.ConfigFileSubsystem` in `internal/watcher/configfile_subsystem_windows.go`. Stop is wired alongside `regSub.Stop()` in the SCM-stop branch; the legacy top-level `WatchConfigFile` / `watchConfigFilePoll` were retired and `params.go` deleted in the same change.
 
 6. ~~**Named-pipe server (`pipe.ServePipe`)**~~ done — extracted to `pipe.Subsystem` in `internal/pipe/subsystem_windows.go`. Stop is wired alongside `selfMetricsSub.Stop()` in the SCM-stop branch.
 
