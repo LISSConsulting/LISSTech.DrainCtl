@@ -32,8 +32,8 @@ func writeEvtSpikeConfig(t *testing.T, path string, cfg *dc.Config) {
 }
 
 // TestConfigWatcherTriggersEvtSpikeReload covers T068 (US5). A mtime change
-// on config.json must fan out through internal/watcher.WatchConfigFile into
-// evtspike.Subsystem.Reload with the parsed new config.
+// on config.json must fan out through watcher.ConfigFileSubsystem.Events
+// into evtspike.Subsystem.Reload with the parsed new config.
 //
 // We do not invoke svc.Execute — it is bound to the Windows SCM and not
 // callable from tests. The test instead drives applyEvtSpikeConfigReload,
@@ -72,10 +72,12 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ch, err := watcher.WatchConfigFile(ctx, configPath)
-	if err != nil {
-		t.Fatalf("WatchConfigFile: %v", err)
+	cfgSub := watcher.NewConfigFileSubsystem(configPath)
+	if err := cfgSub.Start(ctx); err != nil {
+		t.Fatalf("ConfigFileSubsystem.Start: %v", err)
 	}
+	defer cfgSub.Stop()
+	ch := cfgSub.Events()
 
 	sub := evtspike.New(initial.EvtSpike, "TEST-HOST")
 	sub.Subscribe = func(_ context.Context, _ *sync.WaitGroup, _, _ string, _ *atomic.Int64, _ func(error)) error {

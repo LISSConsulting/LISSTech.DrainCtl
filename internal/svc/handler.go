@@ -563,9 +563,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		regCh = make(chan struct{}) // never fires
 	}
 
-	// Start config file watcher for hot-reload.
-	configCh, err := watcher.WatchConfigFile(ctx, dc.DefaultConfigPath())
-	if err != nil {
+	// Config-file watcher subsystem. Start cannot fail (the underlying
+	// FindFirstChangeNotification path silently drops to a 5 s mtime poll
+	// fallback), but the err return is preserved for symmetry with the
+	// other LCI subs and so future Start-side init can surface upward.
+	configSub := watcher.NewConfigFileSubsystem(dc.DefaultConfigPath())
+	configCh := configSub.Events()
+	if err := configSub.Start(ctx); err != nil {
 		slog.Warn("config watcher failed", "error", err)
 		configCh = make(chan struct{}) // never fires
 	}
@@ -832,6 +836,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				selfMetricsSub.Stop()
 				pipeSub.Stop()
 				regSub.Stop()
+				configSub.Stop()
 				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
 				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
