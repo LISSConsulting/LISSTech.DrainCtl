@@ -394,6 +394,10 @@ func (s *MetricsStore) BoundsForTier(ctx context.Context, host string, tier Tier
 // buildOneMinQuery groups metrics_raw into 1-minute buckets using integer
 // division on ts (milliseconds). Returns (bucket_ms, counter, avg, min, max).
 func buildOneMinQuery(host string, fromMs, toMs int64, counters []string) (string, []any) {
+	// See buildRawQueryFleet — floor to bucket boundaries so the rightmost
+	// bucket's AVG isn't trimmed by sub-bucket pan offsets.
+	fromMs = (fromMs / 60_000) * 60_000
+	toMs = (toMs / 60_000) * 60_000
 	args := []any{host, fromMs, toMs}
 	q := `SELECT (ts / 60000) * 60000 AS bucket_ts, counter,
 	             AVG(value), MIN(value), MAX(value)
@@ -514,6 +518,13 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string, b
 	if bucketMs < MinRawFleetBucketMs {
 		bucketMs = MinRawFleetBucketMs
 	}
+	// Floor the window to bucket boundaries so on-the-fly cross-host aggregation
+	// only sees complete buckets. Without this, a `to` mid-bucket trims the
+	// rightmost bucket to whichever hosts already polled before `to`, and the
+	// SUM/AVG across hosts changes with sub-bucket pan offsets — same wall-clock
+	// bucket, different value across queries.
+	fromMs = (fromMs / bucketMs) * bucketMs
+	toMs = (toMs / bucketMs) * bucketMs
 	args := make([]any, 0, len(hosts)+2+len(counters))
 	for _, h := range hosts {
 		args = append(args, h)
@@ -552,6 +563,11 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string, b
 // within the minute (inner subquery), then combine across hosts — SUM for
 // session counts, AVG for rates.
 func buildOneMinQueryFleet(hosts []string, fromMs, toMs int64, counters []string) (string, []any) {
+	// See buildRawQueryFleet — floor the window so partial buckets at the edges
+	// don't make the same wall-clock bucket aggregate to different values
+	// across pans.
+	fromMs = (fromMs / 60_000) * 60_000
+	toMs = (toMs / 60_000) * 60_000
 	args := make([]any, 0, len(hosts)+2+len(counters))
 	for _, h := range hosts {
 		args = append(args, h)
@@ -619,6 +635,10 @@ func buildMemUsedPctRawFleet(hosts []string, fromMs, toMs int64, bucketMs int64)
 	if bucketMs < MinRawFleetBucketMs {
 		bucketMs = MinRawFleetBucketMs
 	}
+	// See buildRawQueryFleet — floor the window so partial buckets don't
+	// destabilise per-host AVGs at the edges.
+	fromMs = (fromMs / bucketMs) * bucketMs
+	toMs = (toMs / bucketMs) * bucketMs
 	args := make([]any, 0, len(hosts)+2)
 	for _, h := range hosts {
 		args = append(args, h)
@@ -647,6 +667,10 @@ func buildMemUsedPctRawFleet(hosts []string, fromMs, toMs int64, bucketMs int64)
 // buildMemUsedPctOneMinFleet is the 1-minute virtual-tier sibling — same
 // per-host-pct-then-avg pattern with a fixed 60_000 ms bucket on metrics_raw.
 func buildMemUsedPctOneMinFleet(hosts []string, fromMs, toMs int64) (string, []any) {
+	// See buildRawQueryFleet — floor the window so partial buckets don't
+	// destabilise per-host AVGs at the edges.
+	fromMs = (fromMs / 60_000) * 60_000
+	toMs = (toMs / 60_000) * 60_000
 	args := make([]any, 0, len(hosts)+2)
 	for _, h := range hosts {
 		args = append(args, h)
