@@ -291,25 +291,31 @@
     });
 
     /**
+     * Build a Map<ts, value> from a counter series so adapters can join
+     * sibling counters by timestamp rather than array index. Different
+     * counters can have different T arrays when individual samples are
+     * missing, so positional indexing mispairs them.
+     * @param {{t: number[], avg: number[], min: number[], max: number[]}|undefined} s
+     * @param {'avg'|'min'|'max'} [field]
+     * @returns {Map<number, number>}
+     */
+    function tsMap(s, field = 'avg') {
+        const m = new Map();
+        if (!s) return m;
+        const t = s.t || [];
+        const v = s[field] || [];
+        for (let i = 0; i < t.length; i++) m.set(t[i], v[i]);
+        return m;
+    }
+
+    /**
      * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
-     * Joins counters on timestamp rather than array index — different counters
-     * may have different lengths when individual samples are missing, and
-     * positional indexing mispairs them (e.g. cpu_pct[i] paired with a
-     * cpu_p95_pct[i] from a different ts → P95 reads as 0 against a real CPU).
      * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
      * @returns {import('../lib/state.svelte.js').MetricsSample[]}
      */
     function adaptFleetToMetricsSamples(series) {
         const cpu = series['cpu_pct'];
         if (!cpu || cpu.t.length === 0) return [];
-        const tsMap = (s, field = 'avg') => {
-            const m = new Map();
-            if (!s) return m;
-            const t = s.t || [];
-            const v = s[field] || [];
-            for (let i = 0; i < t.length; i++) m.set(t[i], v[i]);
-            return m;
-        };
         const cpuAvg = tsMap(cpu, 'avg');
         const cpuMax = tsMap(cpu, 'max');
         // mem_used_pct is a server-computed virtual counter: per-host
@@ -430,24 +436,25 @@
     function adaptFleetToSessionSamples(series) {
         const tot = series['sessions_total'];
         if (!tot || tot.t.length === 0) return [];
-        const active = series['sessions_active']?.avg ?? [];
-        const disc = series['sessions_disconnected']?.avg ?? [];
-        const max = series['sessions_max']?.avg ?? [];
-        const scpu = series['session_cpu_p95_pct']?.max ?? [];
-        const smem = series['session_mem_p95_bytes']?.max ?? [];
-        return tot.t.map((ts, i) => {
-            const a = Math.round(active[i] ?? 0);
-            const d = Math.round(disc[i] ?? 0);
-            const t = Math.round(tot.avg[i] ?? 0);
-            const mx = Math.round(max[i] ?? 0);
+        const totAvg = tsMap(tot, 'avg');
+        const activeMap = tsMap(series['sessions_active']);
+        const discMap = tsMap(series['sessions_disconnected']);
+        const maxMap = tsMap(series['sessions_max']);
+        const scpuMap = tsMap(series['session_cpu_p95_pct'], 'max');
+        const smemMap = tsMap(series['session_mem_p95_bytes'], 'max');
+        return tot.t.map((ts) => {
+            const a = Math.round(activeMap.get(ts) ?? 0);
+            const d = Math.round(discMap.get(ts) ?? 0);
+            const t = Math.round(totAvg.get(ts) ?? 0);
+            const mx = Math.round(maxMap.get(ts) ?? 0);
             return {
                 ts,
                 active: a,
                 disconnected: d,
                 total: t,
                 utilization: mx > 0 ? Math.round((t / mx) * 100) : 0,
-                sessionCpuP95: scpu[i] ?? 0,
-                sessionMemP95: smem[i] ?? 0,
+                sessionCpuP95: scpuMap.get(ts) ?? 0,
+                sessionMemP95: smemMap.get(ts) ?? 0,
                 sessionCpuP50: 0,
                 sessionMemP50: 0,
             };
@@ -464,28 +471,29 @@
     function adaptFleetToRfxSamples(series) {
         const fps = series['rfx_fps_out'];
         if (!fps || fps.t.length === 0) return [];
-        const fpsP50 = series['rfx_fps_out_p50']?.avg ?? [];
-        const enc = series['rfx_encode_ms']?.avg ?? [];
-        const qual = series['rfx_quality_pct']?.avg ?? [];
-        const skipSrv = series['rfx_skip_server_sec']?.avg ?? [];
-        const skipNet = series['rfx_skip_net_sec']?.avg ?? [];
-        const rtt = series['rfx_rtt_ms']?.avg ?? [];
-        const loss = series['rfx_loss_pct']?.avg ?? [];
-        return fps.t.map((ts, i) => ({
+        const fpsAvg = tsMap(fps, 'avg');
+        const fpsP50Map = tsMap(series['rfx_fps_out_p50']);
+        const encMap = tsMap(series['rfx_encode_ms']);
+        const qualMap = tsMap(series['rfx_quality_pct']);
+        const skipSrvMap = tsMap(series['rfx_skip_server_sec']);
+        const skipNetMap = tsMap(series['rfx_skip_net_sec']);
+        const rttMap = tsMap(series['rfx_rtt_ms']);
+        const lossMap = tsMap(series['rfx_loss_pct']);
+        return fps.t.map((ts) => ({
             ts,
-            fpsOut: fps.avg[i] ?? 0,
-            fpsOutP50: fpsP50[i] ?? 0,
-            encodeMs: enc[i] ?? 0,
+            fpsOut: fpsAvg.get(ts) ?? 0,
+            fpsOutP50: fpsP50Map.get(ts) ?? 0,
+            encodeMs: encMap.get(ts) ?? 0,
             encodeMsP50: 0,
-            quality: qual[i] ?? 0,
+            quality: qualMap.get(ts) ?? 0,
             qualityP50: 0,
-            skipServer: skipSrv[i] ?? 0,
+            skipServer: skipSrvMap.get(ts) ?? 0,
             skipServerP50: 0,
-            skipNet: skipNet[i] ?? 0,
+            skipNet: skipNetMap.get(ts) ?? 0,
             skipNetP50: 0,
-            rtt: rtt[i] ?? 0,
+            rtt: rttMap.get(ts) ?? 0,
             rttP50: 0,
-            loss: loss[i] ?? 0,
+            loss: lossMap.get(ts) ?? 0,
             lossP50: 0,
         }));
     }
