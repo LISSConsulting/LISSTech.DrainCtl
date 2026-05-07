@@ -18,6 +18,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/debugpprof"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
@@ -420,8 +421,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Optional runtime/pprof debug server. Off unless DRAINCTL_PPROF_PORT
 	// is set. Loopback-only. Used for memory-leak and goroutine-leak
-	// diagnosis on production boxes without rebuilding.
-	startPprof(ctx)
+	// diagnosis on production boxes without rebuilding. LCI Subsystem so
+	// the listener drains cleanly on SCM-stop instead of relying on
+	// ctx-cancel alone.
+	pprofSub := debugpprof.New()
+	if err := pprofSub.Start(ctx); err != nil {
+		slog.Warn("pprof failed to start", "error", err)
+	}
 
 	// Periodic self-metrics emitted at slog.Debug — runtime heap state,
 	// goroutine count, RSS, GC stats, SSPI counters. Passive (no
@@ -832,6 +838,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 				updaterSub.Stop()
 				selfMetricsSub.Stop()
+				pprofSub.Stop()
 				pipeSub.Stop()
 				regSub.Stop()
 				configSub.Stop()
