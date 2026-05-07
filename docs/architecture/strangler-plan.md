@@ -75,7 +75,7 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 
 6. ~~**Named-pipe server (`pipe.ServePipe`)**~~ done — extracted to `pipe.Subsystem` in `internal/pipe/subsystem_windows.go`. Stop is wired alongside `selfMetricsSub.Stop()` in the SCM-stop branch.
 
-7. **ETW handler + file log** — `logging.ETWHandler` already has `Close()` (per A1). Wrap `etwH` in a subsystem so `Execute`'s `defer etwH.Close()` becomes `defer sub.Stop()`. **Effort: S.**
+7. ~~**ETW handler + file log**~~ done — extracted to `logging.Subsystem` in `internal/logging/subsystem_windows.go`. The deferred Close pair in `RunService` (`etwH.Close()` / `fw.Close()`) collapses to a single `defer logSub.Stop()`. Lifetime is the RunService scope rather than Execute's because slog must be wired before svc.Run starts and must outlive every other subsystem so SCM-stop messages still land; the type satisfies LCI for the deferred-Stop pattern. The legacy `drainService.etw` field was retired in the same change.
 
 8. **Selfmetrics + pprof endpoint** — both started by `startSelfMetricsLogger` and `startPprofServer` today (per `2f26ba6` / `ec092df` / `ab692e4`). Each becomes its own LCI subsystem. **Effort: S each.**
    - ~~Selfmetrics~~ done — extracted to `internal/selfmetrics` package as `selfmetrics.Subsystem`. Stop is wired alongside `updaterSub.Stop()` in the SCM-stop branch.
