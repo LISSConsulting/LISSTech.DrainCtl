@@ -77,8 +77,9 @@ Ranked by how close each is to LCI shape today (closest first), with a one-line 
 
 7. ~~**ETW handler + file log**~~ done — extracted to `logging.Subsystem` in `internal/logging/subsystem_windows.go`. The deferred Close pair in `RunService` (`etwH.Close()` / `fw.Close()`) collapses to a single `defer logSub.Stop()`. Lifetime is the RunService scope rather than Execute's because slog must be wired before svc.Run starts and must outlive every other subsystem so SCM-stop messages still land; the type satisfies LCI for the deferred-Stop pattern. The legacy `drainService.etw` field was retired in the same change.
 
-8. **Selfmetrics + pprof endpoint** — both started by `startSelfMetricsLogger` and `startPprofServer` today (per `2f26ba6` / `ec092df` / `ab692e4`). Each becomes its own LCI subsystem. **Effort: S each.**
+8. ~~**Selfmetrics + pprof endpoint**~~ done — both extracted as their own LCI subsystems.
    - ~~Selfmetrics~~ done — extracted to `internal/selfmetrics` package as `selfmetrics.Subsystem`. Stop is wired alongside `updaterSub.Stop()` in the SCM-stop branch.
+   - ~~pprof endpoint~~ done — extracted to `internal/debugpprof` package as `debugpprof.Subsystem`. The previous in-place `startPprof` collapsed: New() reads `DRAINCTL_PPROF_PORT` and produces a disabled subsystem when the env var is unset/invalid; Start binds the loopback listener and launches the server; Stop bounds graceful drain at 2 s. Stop is wired alongside `selfMetricsSub.Stop()` in the SCM-stop branch.
 
 9. **Service-pipe registration handler / dashboard bootstrap timer / spike forwarder** — these are smaller dispatch loops still in Execute. Extract incrementally as they get touched. **Effort: S each.**
 
