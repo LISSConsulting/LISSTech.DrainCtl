@@ -326,6 +326,10 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// Host-level (V1).
 	if v, ok := c.scalar(c.cpuH, "cpu"); ok {
 		snap.CPUPct = RoundTo(v, 1)
+		// Single-sample P95 ≡ the sample. Without this, the fallback path
+		// emits cpu_p95_pct=0 alongside a live cpu_pct, dragging bucket
+		// averages toward 0 every time Collect() races ahead of the sampler.
+		snap.CPUP95 = snap.CPUPct
 	}
 	if v, ok := c.scalar(c.memH, "mem_avail"); ok {
 		snap.MemAvailMB = RoundTo(v, 0)

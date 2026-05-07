@@ -19,7 +19,6 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/filelog"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
@@ -99,7 +98,6 @@ func startSpikeReport(ctx context.Context, wg *sync.WaitGroup, url string, spike
 
 // drainService implements svc.Handler.
 type drainService struct {
-	etw       *logging.ETWHandler
 	fileLevel *slog.LevelVar // min level for the file sink
 	etwLevel  *slog.LevelVar // min level for the ETW sink
 }
@@ -1165,25 +1163,13 @@ func RunService() error {
 		}
 	}
 
-	// Create the ETW handler.  If the manifest has not been installed yet
-	// (e.g. first-run before the MSI registers the provider), ETWHandler
-	// starts in degraded mode and writes are silently dropped until the
-	// provider is registered and the service is restarted.
-	etwH := logging.NewETWHandler(etwLevel)
-	defer etwH.Close()
+	// Logging subsystem owns the ETW handler + filelog writer and installs
+	// itself as slog.Default. Deferred Stop runs after svc.Run returns so
+	// SCM-stop log lines still land. See internal/logging/subsystem_windows.go.
+	logSub := logging.NewSubsystem(dc.DefaultDataDir()+`\drainctl.log`, 7, fileLevel, etwLevel)
+	defer logSub.Stop()
 
-	fw, err := filelog.New(dc.DefaultDataDir()+`\drainctl.log`, 7) // daily rotation, 7 days kept
-	if err != nil {
-		// File log unavailable — fall back to ETW only.
-		slog.Warn("file log unavailable, using ETW only", "error", err)
-		slog.SetDefault(slog.New(etwH))
-		return svc.Run(dc.ServiceName, &drainService{etw: etwH, fileLevel: fileLevel, etwLevel: etwLevel})
-	}
-	defer func() { _ = fw.Close() }()
-
-	fileH := logging.NewFileHandler(fw, fileLevel)
-	slog.SetDefault(slog.New(logging.NewMultiHandler(fileH, etwH)))
-	return svc.Run(dc.ServiceName, &drainService{etw: etwH, fileLevel: fileLevel, etwLevel: etwLevel})
+	return svc.Run(dc.ServiceName, &drainService{fileLevel: fileLevel, etwLevel: etwLevel})
 }
 
 // newRetentionProvider returns a closure the retention worker calls at the
