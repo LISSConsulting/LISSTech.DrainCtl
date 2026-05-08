@@ -636,15 +636,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		slog.Warn("pipe server failed to start", "error", err)
 	}
 
-	// Start dashboard if enabled.
+	// Start dashboard if enabled. The Subsystem owns the HTTP server,
+	// session/SSPI reapers, and broker; Stop drains them on SCM-stop.
 	var dashState *dashboard.ServerState
+	var dashSub *dashboard.Subsystem
 	if dashCfg.Enabled {
-		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
-		if err != nil {
+		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
+		if err := sub.Start(ctx); err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
-			dashState = st
-			handler.dashState = st
+			dashSub = sub
+			dashState = sub.State()
+			handler.dashState = dashState
 			slog.Info("dashboard=started", "port", dashCfg.Port)
 		}
 	}
@@ -842,6 +845,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				pipeSub.Stop()
 				regSub.Stop()
 				configSub.Stop()
+				if dashSub != nil {
+					dashSub.Stop()
+				}
 				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
 				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
@@ -1001,11 +1007,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Start dashboard on hot-reload if it was just enabled.
 			// Also self-register the local host if dashboard URL points here.
 			if newDashCfg.Enabled && !dashCfg.Enabled {
-				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore); err != nil {
+				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
+				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
-					dashState = st
-					handler.dashState = st
+					dashSub = sub
+					dashState = sub.State()
+					handler.dashState = dashState
 					slog.Info("dashboard=started", "port", newDashCfg.Port, "reason", "late start")
 					if isLocalDashboard(newDashCfg.URL) {
 						if h, _ := os.Hostname(); h != "" {

@@ -2467,7 +2467,7 @@ func TestHandleSSE_ClosesOnSessionExpiry(t *testing.T) {
 func TestHandleReport_BroadcastsSSEUpdate(t *testing.T) {
 	ds := newTestServer(t)
 
-	// Wire the SSE broadcast exactly as StartDashboard does in production.
+	// Wire the SSE broadcast exactly as Subsystem.Start does in production.
 	ds.state.OnUpdate = ds.broadcastServerUpdate
 
 	ds.state.Register("SRV01")

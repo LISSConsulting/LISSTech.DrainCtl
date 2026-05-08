@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -68,7 +67,7 @@ type DashboardServer struct {
 
 	// spikes backs GET /api/evtspike/spikes and the remote-agent POST /api/v1/spike
 	// path. SQLite-backed (telemetry.EventSpikeStore) since feature 009 — previously
-	// a per-host in-memory ring buffer. Always non-nil once StartDashboard returns;
+	// a per-host in-memory ring buffer. Always non-nil once Subsystem.Start returns;
 	// the handler still tolerates nil so zero-telemetry bring-up paths (e.g. tests)
 	// keep working.
 	spikes eventSpikeReader
@@ -80,99 +79,6 @@ type DashboardServer struct {
 	// this map so GET /api/evtspike/status?host=<remote> reflects reality.
 	remoteEvtSpikeStatusMu sync.RWMutex
 	remoteEvtSpikeStatus   map[string]evtspike.DetectorStatus
-}
-
-// StartDashboard creates the server state, sets up routes, and starts the
-// HTTP listener. It returns the ServerState so the service main loop can
-// call state.Update() after each check cycle. The server shuts down
-// gracefully when ctx is cancelled.
-// ms may be nil; when nil, metrics ingest is skipped (degraded mode).
-// as may be nil; when nil, /api/v1/audit returns storage_error.
-// mnt may be nil; when nil, /api/v1/maintenance/status returns storage_error.
-// srv and sps are required — the dashboard depends on the SQLite-backed
-// server roster and spike store since feature 009.
-func StartDashboard(ctx context.Context, cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader) (*ServerState, error) {
-	// One-shot import of any legacy servers.json produced by a pre-009 binary.
-	// Renames the file so the import is idempotent across reboots.
-	if err := MigrateLegacyServersJSON(ctx, dataDir, srv); err != nil {
-		slog.Warn("dashboard: legacy servers.json migration failed", "error", err)
-	}
-
-	state := NewServerState(srv)
-
-	ds := &DashboardServer{
-		state:                state,
-		cfg:                  cfg,
-		sessionStore:         NewSessionStore(ctx),
-		broker:               NewBroker(),
-		ms:                   ms,
-		as:                   as,
-		mnt:                  mnt,
-		spikes:               sps,
-		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
-	}
-
-	ds.wireServerStateCallbacks()
-
-	mux := http.NewServeMux()
-	registerRoutes(ctx, ds, mux)
-
-	tlsCfg, fingerprint, err := setupTLS(cfg, dataDir)
-	if err != nil {
-		return nil, err
-	}
-	ds.fingerprint = fingerprint
-
-	addr := fmt.Sprintf(":%d", cfg.Port)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dashboard listen %s: %w", addr, err)
-	}
-	if tlsCfg != nil {
-		ln = tls.NewListener(ln, tlsCfg)
-	}
-
-	// Apply security headers to all responses.
-	// HSTS is additionally applied when TLS is active.
-	handler := securityMiddleware(mux)
-	if tlsCfg != nil {
-		handler = hstsMiddleware(handler)
-	}
-
-	ds.server = &http.Server{
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-		// Route http.Server internal errors (TLS handshake failures, etc.) through
-		// slog at DEBUG so they land in the DBG ETW channel (off by default) rather
-		// than flowing via log.Default() → slog.LevelInfo → Operational channel.
-		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
-	}
-
-	scheme := "http"
-	if tlsCfg != nil {
-		scheme = "https"
-	}
-	go func() {
-		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
-		if err := ds.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			slog.Error("dashboard server error", "error", err)
-		}
-	}()
-
-	// Graceful shutdown on context cancellation.
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := ds.server.Shutdown(shutCtx); err != nil {
-			slog.Warn("dashboard shutdown error", "error", err)
-		}
-		slog.Info("dashboard=stopped")
-	}()
-
-	return state, nil
 }
 
 // wireServerStateCallbacks installs the SSE/metrics/spike callbacks that bridge
