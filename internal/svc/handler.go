@@ -12,7 +12,6 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/selfmetrics"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/spikereport"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -79,24 +79,6 @@ const (
 	// Audit event IDs (5xxx) are in the root dc package.
 )
 
-// reportSpike is the indirection seam used by the spike-launch goroutine in
-// Execute. Production wires it to dashboard.ReportSpike; tests swap it to a
-// hook that observes ctx cancellation and waitgroup tracking without booting
-// the whole service.
-var reportSpike = dashboard.ReportSpike
-
-// startSpikeReport launches a tracked goroutine that forwards a spike to the
-// remote dashboard via reportSpike. It mirrors the production call site in
-// Execute so the lifecycle wiring (Add/Done + ctx propagation) is exercised
-// from tests without driving the full service loop.
-func startSpikeReport(ctx context.Context, wg *sync.WaitGroup, url string, spike *dc.SpikePayload) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		reportSpike(ctx, url, spike)
-	}()
-}
-
 // drainService implements svc.Handler.
 type drainService struct {
 	fileLevel *slog.LevelVar // min level for the file sink
@@ -132,6 +114,7 @@ type serviceHandler struct {
 	lastPerf     atomic.Pointer[dc.PerfSnapshot]
 	lastSessions atomic.Pointer[dc.SessionSummary]
 	evtSpikeSub  atomic.Pointer[evtspike.Subsystem] // nil while evtspike subsystem has not been constructed
+	registration *registrationSubsystem
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -346,7 +329,10 @@ func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, e
 	// SSPI/HTTP exchange cannot wedge the pipe handler indefinitely.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, err := dashboard.Register(ctx, dashboardURL)
+	if h.registration == nil {
+		return nil, fmt.Errorf("registration subsystem not running")
+	}
+	result, err := h.registration.Register(ctx, dashboardURL)
 	if err != nil {
 		return nil, err
 	}
@@ -537,11 +523,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		return false, 1
 	}
 
-	// Spike-report fan-out goroutines tracked separately from the
-	// aggregator/retention LCI subsystem (see B2 / commit 1bacf6a). The
-	// next strangler step extracts this into its own subsystem; for now
-	// it owns its own waitgroup so subsystem boundaries are clean.
-	var spikeReportWG sync.WaitGroup
+	// Spike-report fan-out lives in its own LCI subsystem. Forward()
+	// launches a tracked goroutine; Stop() drains them. The shared
+	// telemetryWG that used to back this (B2 / commit 1bacf6a) is gone.
+	spikeSub := spikereport.New(dashboard.ReportSpike)
+	if err := spikeSub.Start(ctx); err != nil {
+		slog.Warn("spike report subsystem failed to start", "error", err)
+	}
 
 	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
 	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
@@ -629,6 +617,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				ChangedBy:  row.ChangedBy,
 			})
 		}
+	}
+
+	registrationSub := newRegistrationSubsystem(dashboard.Register)
+	if err := registrationSub.Start(ctx); err != nil {
+		slog.Warn("dashboard registration subsystem failed to start", "error", err)
+	} else {
+		handler.registration = registrationSub
 	}
 
 	pipeSub := pipe.New(handler)
@@ -843,13 +838,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				selfMetricsSub.Stop()
 				pprofSub.Stop()
 				pipeSub.Stop()
+				registrationSub.Stop()
 				regSub.Stop()
 				configSub.Stop()
 				if dashSub != nil {
 					dashSub.Stop()
 				}
 				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
-				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
+				waitWithTimeout("spike_report", spikeSub.Stop, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
@@ -875,7 +871,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// subsystem fired OnSpike — reporting again would double-insert.
 			if dashState == nil && dashCfg.URL != "" && dashRegistered {
 				spikeCopy := spike
-				startSpikeReport(ctx, &spikeReportWG, dashCfg.URL, &spikeCopy)
+				spikeSub.Forward(dashCfg.URL, &spikeCopy)
 			}
 
 		case <-dashBootstrap:
@@ -1212,11 +1208,11 @@ func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings
 	}
 }
 
-// waitWithTimeout invokes wait (typically a Subsystem.Stop or
-// (*sync.WaitGroup).Wait) on a goroutine and blocks until either it
-// returns or timeout elapses. A log warning is emitted when the bound
-// is exceeded so operators see a stuck worker rather than a silent
-// service-stop hang. label distinguishes call sites in the warning.
+// waitWithTimeout invokes wait (typically a Subsystem.Stop) on a
+// goroutine and blocks until either it returns or timeout elapses. A log
+// warning is emitted when the bound is exceeded so operators see a stuck
+// worker rather than a silent service-stop hang. label distinguishes
+// call sites in the warning.
 func waitWithTimeout(label string, wait func(), timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
