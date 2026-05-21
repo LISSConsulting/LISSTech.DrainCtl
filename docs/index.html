@@ -840,7 +840,8 @@
             .install-cards {
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
-                gap: 18px;
+                gap: 22px;
+                align-items: stretch;
             }
             .release-grid {
                 display: grid;
@@ -880,7 +881,7 @@
             }
             .install-cta {
                 margin-top: auto;
-                padding-top: 16px;
+                padding-top: 18px;
             }
             .btn--block {
                 display: flex;
@@ -904,42 +905,81 @@
                 }
             }
             .install-card {
-                padding: 26px;
+                position: relative;
+                padding: 28px;
                 display: flex;
                 flex-direction: column;
+                min-height: 100%;
+                background: linear-gradient(180deg, var(--card), var(--bg));
             }
-            .install-card h3 {
-                font-size: 1rem;
-                font-weight: 800;
-                margin-bottom: 8px;
+            .install-card--featured {
+                background: linear-gradient(180deg, rgba(163, 71, 91, 0.08), transparent 42%), var(--card);
+            }
+            .install-kicker {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                justify-content: space-between;
+                gap: 10px;
+                margin-bottom: 14px;
+                font-size: 0.7rem;
+                font-weight: 800;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--accent);
+            }
+            .install-badge {
+                padding: 3px 9px;
+                border: 1px solid var(--border);
+                border-radius: 999px;
+                background: var(--accent);
+                color: #fff;
+                font-size: 0.62rem;
+                letter-spacing: 0.08em;
+            }
+            .install-card h3 {
+                font-family: "Fraunces", serif;
+                font-size: 1.45rem;
+                line-height: 1.15;
+                font-weight: 400;
+                margin-bottom: 12px;
             }
             .install-card .mono {
                 font-family: "JetBrains Mono", monospace;
-                font-size: 0.82rem;
+                font-size: 0.78rem;
                 background: var(--surface);
                 padding: 12px 16px;
                 border-radius: 6px;
                 border: 1px solid var(--border);
-                margin: 12px 0;
+                margin: 14px 0;
                 display: block;
-                white-space: pre;
+                white-space: nowrap;
                 overflow-x: auto;
             }
             .install-card p {
-                font-size: 0.88rem;
+                font-size: 0.9rem;
                 color: var(--muted);
             }
             .install-card ul {
-                font-size: 0.85rem;
+                font-size: 0.84rem;
                 color: var(--muted);
                 padding-left: 18px;
-                margin-top: 8px;
+                margin-top: 14px;
             }
             .install-card li {
-                margin-bottom: 4px;
+                margin-bottom: 6px;
+            }
+            @media (min-width: 901px) {
+                .install-card--featured {
+                    transform: translateY(-6px);
+                }
+            }
+            @media (max-width: 900px) {
+                .install-cards {
+                    grid-template-columns: 1fr;
+                }
+                .install-card {
+                    padding: 24px;
+                }
             }
 
             /* ── Sections ─────────────────────────────────────────── */
@@ -1872,8 +1912,12 @@
                     All roads lead to monitoring. <a href="guide.html">Full guide &rarr;</a>
                 </div>
                 <div class="install-cards">
-                    <div class="install-card card">
-                        <h3>&#128230; MSI Installer</h3>
+                    <div class="install-card install-card--featured card">
+                        <div class="install-kicker">
+                            <span>Interactive install</span>
+                            <span class="install-badge">Recommended</span>
+                        </div>
+                        <h3>MSI Installer</h3>
                         <p>
                             Setup wizard with license acceptance, install mode selection, and configuration options. The
                             recommended way to install interactively.
@@ -1893,7 +1937,8 @@
                         </div>
                     </div>
                     <div class="install-card card">
-                        <h3>&#9881; MSI (Silent)</h3>
+                        <div class="install-kicker"><span>Fleet deploy</span></div>
+                        <h3>Silent MSI</h3>
                         <p>
                             Same MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via
                             properties.
@@ -1914,8 +1959,12 @@
                         </div>
                     </div>
                     <div class="install-card card">
-                        <h3>&#128026; PowerShell Gallery</h3>
-                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting. Public builds are currently prerelease &mdash; use <code>-AllowPrerelease</code> when needed.</p>
+                        <div class="install-kicker"><span>Module only</span></div>
+                        <h3>PowerShell Gallery</h3>
+                        <p>
+                            Just the cmdlets &mdash; no service, no CLI. Good for quick checks and scripts. Public
+                            builds are currently prerelease; use <code>-AllowPrerelease</code> when needed.
+                        </p>
                         <code class="mono">Install-Module LISSTech.DrainCtl -AllowPrerelease</code>
                         <ul>
                             <li>12 cmdlets</li>
