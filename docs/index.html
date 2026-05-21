@@ -1314,8 +1314,8 @@
                     <div class="stat-label">Detection time</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">90d</div>
-                    <div class="stat-label">Audit retention</div>
+                    <div class="stat-value">365d</div>
+                    <div class="stat-label">Default audit retention</div>
                 </div>
                 <div class="stat">
                     <div class="stat-value">12</div>
@@ -1358,7 +1358,7 @@
                         <div class="why-problem"><i data-lucide="ban" width="12" height="12"></i> The old way</div>
                         <h3>Manual checking</h3>
                         <p>Log into each server. Run <code>chglogon /query</code>. Check 8 hosts. Repeat. You're always the last to know &mdash; and there's no record of how long the server was drained or who was responsible.</p>
-                        <div class="why-solution">One dashboard for your entire farm. Instant detection. 90-day audit trail with timestamps, durations, and who did it.</div>
+                        <div class="why-solution">One dashboard for your entire farm. Instant detection. SQLite-backed audit trail with timestamps, durations, and who did it.</div>
                     </div>
                     <div class="why-card card">
                         <i class="why-icon" data-lucide="gauge" width="32" height="32"></i>
@@ -1406,7 +1406,7 @@
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Performance Monitoring</div>
                             <div class="hero-feature-desc">
-                                CPU, memory, disk I/O, input delay, and RemoteFX &mdash; collected every poll cycle
+                                CPU, memory, disk I/O, input delay, and optional RemoteFX &mdash; collected on the configured sample interval
                                 through the Windows PDH API. Threshold alerts fire before users notice.
                             </div>
                         </div>
@@ -1436,8 +1436,8 @@
                         <div class="compact-card-icon">&#128276;</div>
                         <div class="compact-card-title">Smart Alerts</div>
                         <div class="compact-card-desc">
-                            12 trigger types across drain mode, sessions, CPU, memory, and input delay. Webhook, ntfy,
-                            and email (SMTP) with per-target intervals.
+                            13 trigger types across drain mode, sessions, CPU, memory, input delay, and event spikes.
+                            Webhook, ntfy, and email (SMTP) with per-target intervals.
                         </div>
                     </div>
                     <div class="compact-card">
@@ -1450,7 +1450,7 @@
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#128203;</div>
-                        <div class="compact-card-title">90-Day Audit Trail</div>
+                        <div class="compact-card-title">SQLite Audit Trail</div>
                         <div class="compact-card-desc">
                             Every state change logged with timestamps, durations, and attribution. CLI, PowerShell, or
                             dashboard.
@@ -1468,7 +1468,7 @@
                         <div class="compact-card-icon">&#128200;</div>
                         <div class="compact-card-title">Fleet &amp; Host Charts</div>
                         <div class="compact-card-desc">
-                            Dual-axis LOAD, Health Indicators, Sessions, and RemoteFX panels on Overview &mdash; plus
+                            Dual-axis LOAD, Health Indicators, Sessions, and optional RemoteFX panels on Overview &mdash; plus
                             a per-host LOAD chart on every Server Detail with shared zoom presets.
                         </div>
                     </div>
@@ -1484,8 +1484,8 @@
                         <div class="compact-card-icon">&#128274;</div>
                         <div class="compact-card-title">Enterprise Ready</div>
                         <div class="compact-card-desc">
-                            DNS SRV discovery, EV code-signed, Kerberos SSO, daily log rotation, 12 PowerShell
-                            cmdlets + CLI.
+                            DNS SRV discovery, EV code-signed installer, Kerberos SSO, daily log rotation, 12 PowerShell
+                            cmdlets, and CLI.
                         </div>
                     </div>
                 </div>
@@ -1578,8 +1578,8 @@
                             <div class="comic-icon">&#128200;</div>
                             <h3>Performance Monitoring</h3>
                             <p>
-                                CPU, memory, input delay, disk I/O, and RemoteFX &mdash; collected via PDH every poll
-                                cycle. Threshold alerts fire before users complain.
+                                CPU, memory, input delay, disk I/O, and optional RemoteFX &mdash; collected via PDH on the
+                                configured sample interval. Threshold alerts fire before users complain.
                             </p>
                         </div>
                     </div>
@@ -1603,7 +1603,7 @@
                                 <h3>MSI with Superpowers</h3>
                                 <p>
                                     Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>,
-                                    <code>WEBHOOK_URL=...</code> &mdash; configure everything from the command line.
+                                    <code>DASHBOARD_URL=...</code>, <code>ENABLE_PERF=1</code> &mdash; configure machine-owned settings from the command line.
                                     Upgrades skip config dialogs and preserve existing settings.
                                 </p>
                             </div>
@@ -1617,16 +1617,16 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">v26.119 &mdash; Sharper charts. Signed updates.</h2>
+                <h2 class="section-title">Current build &mdash; retained charts, signed updates, cleaner service lifetimes.</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.9;color:var(--fg)">
-                            <li><strong>Truthful fleet memory.</strong> Per-host pressure, averaged. Small hosts can't hide behind big ones.</li>
-                            <li><strong>Signed auto-updates.</strong> Ed25519 manifest verification, replay-protected.</li>
-                            <li><strong>12-hour clocks everywhere.</strong> <code>1:03pm</code> from footer to tooltip.</li>
-                            <li><strong>Tighter zoom presets.</strong> <code>1H / 1D / 3D / 5D</code> &mdash; the cadences operators actually use.</li>
-                            <li><strong>Cleaner installs.</strong> Every component, every host, first try.</li>
-                            <li><strong>Lifecycle-managed telemetry.</strong> Clean start. Clean stop. No orphans.</li>
+                            <li><strong>SQLite-backed dashboard history.</strong> Overview charts and per-host sparklines now cold-start from retained telemetry, not browser-local samples.</li>
+                            <li><strong>Signed auto-updates.</strong> The updater verifies the MSI signature and a release manifest bound to the MSI SHA-256.</li>
+                            <li><strong>Prerelease-safe installer.</strong> The one-line installer now falls back to the newest prerelease when no stable GitHub release exists.</li>
+                            <li><strong>LCI service migration.</strong> Dashboard, watchers, pipe server, logging, selfmetrics, pprof, spike forwarding, and registration workers now have bounded start/stop lifetimes.</li>
+                            <li><strong>Retained chart windows.</strong> Fleet LOAD, Health Indicators, Sessions, RemoteFX, host LOAD, and event-spike swimlanes share the 5M / 1H / 1D / 3D / 5D vocabulary.</li>
+                            <li><strong>Hardened secrets and access.</strong> DPAPI-protected notification secrets, stricter config ACLs, and admin-gated privileged pipe verbs.</li>
                         </ul>
                     </div>
                 </div>
@@ -1690,17 +1690,18 @@
                         <div class="icon">&#128200;</div>
                         <h3>Live Monitoring</h3>
                         <p>
-                            Real-time updates via Server-Sent Events. LOAD, Health Indicators, Session, and RemoteFX
-                            panels on Overview; dual-axis LOAD chart on every Server Detail &mdash; with shared zoom
-                            presets.
+                            Real-time updates via Server-Sent Events. LOAD, Health Indicators, Session, and optional
+                            RemoteFX panels query retained SQLite telemetry; every Server Detail has a durable host LOAD
+                            chart with shared zoom presets.
                         </p>
                     </div>
                     <div class="feature card">
                         <div class="icon">&#9881;&#65039;</div>
                         <h3>Edit Config in the UI</h3>
                         <p>
-                            Notification targets, grace periods, session thresholds, detector tuning &mdash; all edited
-                            from the dashboard. Changes propagate synchronously; agents pull on the next reload.
+                            Notification targets, grace periods, session thresholds, performance settings, and the
+                            evtspike enable switch are edited from the dashboard. Agents pull the authoritative config
+                            on their normal fetch cadence.
                         </p>
                     </div>
                 </div>
@@ -1740,8 +1741,8 @@
                     <div class="flow-step card">
                         <h3>Performance Counters</h3>
                         <p>
-                            CPU, memory, input delay, and RemoteFX metrics. Configurable sustain windows filter
-                            transient spikes.
+                            CPU, memory, input delay, disk queue, TCP retransmits, and optional RemoteFX metrics.
+                            Configurable sustain windows filter transient spikes.
                         </p>
                         <span class="tag">CPU + Mem + Delay</span>
                     </div>
@@ -1914,7 +1915,7 @@
                     </div>
                     <div class="install-card card">
                         <h3>&#128026; PowerShell Gallery</h3>
-                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting. <strong>Pre-release</strong> &mdash; <code>-AllowPrerelease</code> required.</p>
+                        <p>Just the cmdlets &mdash; no service, no CLI. Great for quick checks and scripting. Public builds are currently prerelease &mdash; use <code>-AllowPrerelease</code> when needed.</p>
                         <code class="mono">Install-Module LISSTech.DrainCtl -AllowPrerelease</code>
                         <ul>
                             <li>12 cmdlets</li>
