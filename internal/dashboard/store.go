@@ -18,7 +18,7 @@ import (
 
 // serverStoreOpTimeout bounds every underlying SQLite call so a pathological
 // lock or disk stall can't wedge an HTTP handler. Matches the 5 s envelope
-// used for metrics Append in StartDashboard.
+// used for metrics Append in Subsystem.Start.
 const serverStoreOpTimeout = 5 * time.Second
 
 // ServerInfo describes a registered server and its last known state. JSON
@@ -66,20 +66,20 @@ type ServerState struct {
 	OnMetrics func(result dc.CheckResult)
 	// OnEvtSpikeIngest, if non-nil, pushes a confirmed spike into the
 	// dashboard's per-host spike store and emits a recent_spike SSE event.
-	// Wired by StartDashboard; the evtspike subsystem calls it from its
+	// Wired by Subsystem.Start; the evtspike subsystem calls it from its
 	// OnSpike callback.
 	OnEvtSpikeIngest func(spike evtspike.SpikePayload) evtspike.RecentSpikeEntry
 	// OnEvtSpikeStatus, if non-nil, emits a detector_status SSE event. The
 	// dashboard's broker dedups same-state emissions, so callers may invoke
 	// this on every observation without flooding subscribers. Wired by
-	// StartDashboard.
+	// Subsystem.Start.
 	OnEvtSpikeStatus func(status evtspike.DetectorStatus)
 	// RegisterEvtSpikeStatusFunc, if non-nil, installs the pull-based status
-	// lookup that backs GET /api/evtspike/status. Wired by StartDashboard; the
+	// lookup that backs GET /api/evtspike/status. Wired by Subsystem.Start; the
 	// evtspike subsystem calls it once at Start with its Status method.
 	RegisterEvtSpikeStatusFunc func(f EvtSpikeStatusFunc)
 	// GetRemoteEvtSpikeStatus, if non-nil, returns the most recently reported
-	// DetectorStatus for a remote agent. Wired by StartDashboard to the
+	// DetectorStatus for a remote agent. Wired by Subsystem.Start to the
 	// DashboardServer's remote-status cache so the pull function can answer
 	// for non-local hosts. Zero value when the host has never reported.
 	GetRemoteEvtSpikeStatus func(host string) evtspike.DetectorStatus

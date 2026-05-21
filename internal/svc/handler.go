@@ -12,7 +12,6 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,9 +20,9 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/debugpprof"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/selfmetrics"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/spikereport"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -79,24 +78,6 @@ const (
 	// Audit event IDs (5xxx) are in the root dc package.
 )
 
-// reportSpike is the indirection seam used by the spike-launch goroutine in
-// Execute. Production wires it to dashboard.ReportSpike; tests swap it to a
-// hook that observes ctx cancellation and waitgroup tracking without booting
-// the whole service.
-var reportSpike = dashboard.ReportSpike
-
-// startSpikeReport launches a tracked goroutine that forwards a spike to the
-// remote dashboard via reportSpike. It mirrors the production call site in
-// Execute so the lifecycle wiring (Add/Done + ctx propagation) is exercised
-// from tests without driving the full service loop.
-func startSpikeReport(ctx context.Context, wg *sync.WaitGroup, url string, spike *dc.SpikePayload) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		reportSpike(ctx, url, spike)
-	}()
-}
-
 // drainService implements svc.Handler.
 type drainService struct {
 	fileLevel *slog.LevelVar // min level for the file sink
@@ -132,6 +113,7 @@ type serviceHandler struct {
 	lastPerf     atomic.Pointer[dc.PerfSnapshot]
 	lastSessions atomic.Pointer[dc.SessionSummary]
 	evtSpikeSub  atomic.Pointer[evtspike.Subsystem] // nil while evtspike subsystem has not been constructed
+	registration *registrationSubsystem
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -346,7 +328,10 @@ func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, e
 	// SSPI/HTTP exchange cannot wedge the pipe handler indefinitely.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, err := dashboard.Register(ctx, dashboardURL)
+	if h.registration == nil {
+		return nil, fmt.Errorf("registration subsystem not running")
+	}
+	result, err := h.registration.Register(ctx, dashboardURL)
 	if err != nil {
 		return nil, err
 	}
@@ -537,11 +522,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		return false, 1
 	}
 
-	// Spike-report fan-out goroutines tracked separately from the
-	// aggregator/retention LCI subsystem (see B2 / commit 1bacf6a). The
-	// next strangler step extracts this into its own subsystem; for now
-	// it owns its own waitgroup so subsystem boundaries are clean.
-	var spikeReportWG sync.WaitGroup
+	// Spike-report fan-out lives in its own LCI subsystem. Forward()
+	// launches a tracked goroutine; Stop() drains them. The shared
+	// telemetryWG that used to back this (B2 / commit 1bacf6a) is gone.
+	spikeSub := spikereport.New(dashboard.ReportSpike)
+	if err := spikeSub.Start(ctx); err != nil {
+		slog.Warn("spike report subsystem failed to start", "error", err)
+	}
 
 	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
 	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
@@ -586,33 +573,15 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		evtSub = sub
 	}
 
-	// Start performance monitoring if enabled.
-	var perfCollector *perfmon.Collector
-	var perfTriggerState *perfmon.PerfTriggerState
-	if cfg.Performance.Enabled {
-		pc, err := perfmon.Open(cfg.Performance)
-		if err != nil {
-			slog.Warn("performance monitoring failed to start", "error", err)
-		} else {
-			if err := pc.Prime(); err != nil {
-				slog.Warn("performance monitoring prime failed", "error", err)
-				pc.Close()
-			} else {
-				perfCollector = pc
-				perfTriggerState = &perfmon.PerfTriggerState{}
-				slog.Info("perfmon=started")
-			}
-		}
-	}
-	defer func() {
-		if perfCollector != nil {
-			perfCollector.Close()
-		}
-	}()
-
 	// Start pipe server.
 	handler := &serviceHandler{audit: auditStore, metrics: metricsStore}
 	handler.cfg.Store(&cfg)
+
+	// Performance monitoring subsystem owns PDH open/prime/close and hot reload.
+	perfSub := newPerformanceSubsystem(cfg.Performance, &handler.lastPerf)
+	if err := perfSub.Start(ctx); err != nil {
+		slog.Warn("performance monitoring failed to start", "error", err)
+	}
 
 	// Seed the in-memory observation from the latest audit row for this host
 	// so HandleStatus can report a state duration before the first poll tick
@@ -631,20 +600,30 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		}
 	}
 
+	registrationSub := newRegistrationSubsystem(dashboard.Register)
+	if err := registrationSub.Start(ctx); err != nil {
+		slog.Warn("dashboard registration subsystem failed to start", "error", err)
+	} else {
+		handler.registration = registrationSub
+	}
+
 	pipeSub := pipe.New(handler)
 	if err := pipeSub.Start(ctx); err != nil {
 		slog.Warn("pipe server failed to start", "error", err)
 	}
 
-	// Start dashboard if enabled.
+	// Start dashboard if enabled. The Subsystem owns the HTTP server,
+	// session/SSPI reapers, and broker; Stop drains them on SCM-stop.
 	var dashState *dashboard.ServerState
+	var dashSub *dashboard.Subsystem
 	if dashCfg.Enabled {
-		st, err := dashboard.StartDashboard(ctx, dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
-		if err != nil {
+		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
+		if err := sub.Start(ctx); err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
-			dashState = st
-			handler.dashState = st
+			dashSub = sub
+			dashState = sub.State()
+			handler.dashState = dashState
 			slog.Info("dashboard=started", "port", dashCfg.Port)
 		}
 	}
@@ -759,7 +738,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Run initial check (skip in dashboard-only mode).
 	if !cfg.DashboardOnly {
-		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
+		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub)
 	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
@@ -770,10 +749,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Fire dashboard registration + config fetch shortly after startup
 	// instead of waiting for the first full poll interval.
-	var dashBootstrap <-chan time.Time
-	if dashCfg.URL != "" && !dashRegistered {
-		dashBootstrap = time.After(5 * time.Second)
+	dashBootstrapSub := newDashboardBootstrapSubsystem(dashCfg.URL != "" && !dashRegistered, 5*time.Second)
+	if err := dashBootstrapSub.Start(ctx); err != nil {
+		slog.Warn("dashboard bootstrap subsystem failed to start", "error", err)
 	}
+	dashBootstrap := dashBootstrapSub.Events()
 
 	// fetchRemoteConfig pulls from the dashboard, applies results, and
 	// reconciles the evtspike/perf/ticker subsystems. Extracted so that both
@@ -807,12 +787,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		dashConfigFailures = 0
 		useRemoteConfig = true
 		lastRemote = cfgRemote
-		oldPerfCfg := cfg.Performance
 		oldPollInterval := cfg.PollInterval
 		effectiveEvtSpike := prevEvtSpikeCfg
 		applyRemoteConfig(cfgRemote, &cfg, &notifyTargets, &effectiveEvtSpike)
 		handler.cfg.Store(&cfg)
-		syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf)
+		perfSub.Reload(cfg.Performance)
 		if cfg.PollInterval != oldPollInterval {
 			pollTicker.Reset(cfg.PollInterval)
 			slog.Info("config=poll-interval-remote",
@@ -833,17 +812,23 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("service=stopping")
 				statusCh <- svc.Status{State: svc.StopPending, WaitHint: 10000}
 				cancel()
+				dashBootstrapSub.Stop()
 				if evtSpikeSub != nil {
 					evtSpikeSub.Stop()
 				}
 				updaterSub.Stop()
+				perfSub.Stop()
 				selfMetricsSub.Stop()
 				pprofSub.Stop()
 				pipeSub.Stop()
+				registrationSub.Stop()
 				regSub.Stop()
 				configSub.Stop()
+				if dashSub != nil {
+					dashSub.Stop()
+				}
 				waitWithTimeout("telemetry", telSub.Stop, 10*time.Second)
-				waitWithTimeout("spike_report", spikeReportWG.Wait, 10*time.Second)
+				waitWithTimeout("spike_report", spikeSub.Stop, 10*time.Second)
 				slog.Info("service=stopped", slog.Int("event_id", EvtServiceStopped))
 				return false, 0
 			case svc.Interrogate:
@@ -853,7 +838,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		case <-regCh:
 			if !cfg.DashboardOnly {
 				slog.Info("trigger=registry_change")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub)
 			}
 
 		case spike := <-spikeCh:
@@ -869,7 +854,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// subsystem fired OnSpike — reporting again would double-insert.
 			if dashState == nil && dashCfg.URL != "" && dashRegistered {
 				spikeCopy := spike
-				startSpikeReport(ctx, &spikeReportWG, dashCfg.URL, &spikeCopy)
+				spikeSub.Forward(dashCfg.URL, &spikeCopy)
 			}
 
 		case <-dashBootstrap:
@@ -906,7 +891,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			fetchRemoteConfig()
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub)
 			}
 
 		case <-configCh:
@@ -967,7 +952,6 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
-			oldPerfCfg := cfg.Performance
 			cfg = newCfg
 			handler.cfg.Store(&cfg)
 			// Push the new UpdateConfig into the running updater
@@ -1001,11 +985,13 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// Start dashboard on hot-reload if it was just enabled.
 			// Also self-register the local host if dashboard URL points here.
 			if newDashCfg.Enabled && !dashCfg.Enabled {
-				if st, err := dashboard.StartDashboard(ctx, newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore); err != nil {
+				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
+				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
-					dashState = st
-					handler.dashState = st
+					dashSub = sub
+					dashState = sub.State()
+					handler.dashState = dashState
 					slog.Info("dashboard=started", "port", newDashCfg.Port, "reason", "late start")
 					if isLocalDashboard(newDashCfg.URL) {
 						if h, _ := os.Hostname(); h != "" {
@@ -1044,8 +1030,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 			// Sync performance collector with new config. Placed after dashCfg
 			// update so the immediate svcRunCheck reports to the current URL.
-			if !cfg.DashboardOnly && syncPerfCollector(oldPerfCfg, cfg.Performance, &perfCollector, &perfTriggerState, &handler.lastPerf) {
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfCollector, perfTriggerState, evtSpikeSub)
+			if !cfg.DashboardOnly && perfSub.Reload(cfg.Performance) {
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub)
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 		}
@@ -1067,50 +1053,6 @@ func applyEvtSpikeConfigReload(sub *evtspike.Subsystem, oldCfg, newCfg dc.EvtSpi
 	}
 	slog.Info("config=reloaded-evtspike")
 	return sub.Reload(newCfg)
-}
-
-// syncPerfCollector reconciles the running performance collector with a config
-// change. It tears down the old collector (if any), clears the cached snapshot,
-// and starts a new collector when the new config enables perfmon.
-// Returns true if the config actually changed (and action was taken).
-func syncPerfCollector(
-	oldPerf, newPerf dc.PerformanceConfig,
-	perfCollector **perfmon.Collector,
-	perfTriggerState **perfmon.PerfTriggerState,
-	lastPerf *atomic.Pointer[dc.PerfSnapshot],
-) bool {
-	if oldPerf == newPerf {
-		return false
-	}
-
-	// Tear down old collector.
-	if *perfCollector != nil {
-		(*perfCollector).Close()
-		*perfCollector = nil
-		*perfTriggerState = nil
-	}
-
-	// Always clear cached snapshot so stale data is never served.
-	lastPerf.Store(nil)
-
-	if newPerf.Enabled {
-		pc, err := perfmon.Open(newPerf)
-		if err != nil {
-			slog.Warn("perfmon start failed on config change", "error", err)
-			return true
-		}
-		if err := pc.Prime(); err != nil {
-			slog.Warn("perfmon prime failed on config change", "error", err)
-			pc.Close()
-			return true
-		}
-		*perfCollector = pc
-		*perfTriggerState = &perfmon.PerfTriggerState{}
-		slog.Info("perfmon=restarted")
-	} else {
-		slog.Info("perfmon=stopped")
-	}
-	return true
 }
 
 // registerWithDashboard registers this host with the dashboard and performs
@@ -1204,11 +1146,11 @@ func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings
 	}
 }
 
-// waitWithTimeout invokes wait (typically a Subsystem.Stop or
-// (*sync.WaitGroup).Wait) on a goroutine and blocks until either it
-// returns or timeout elapses. A log warning is emitted when the bound
-// is exceeded so operators see a stuck worker rather than a silent
-// service-stop hang. label distinguishes call sites in the warning.
+// waitWithTimeout invokes wait (typically a Subsystem.Stop) on a
+// goroutine and blocks until either it returns or timeout elapses. A log
+// warning is emitted when the bound is exceeded so operators see a stuck
+// worker rather than a silent service-stop hang. label distinguishes
+// call sites in the warning.
 func waitWithTimeout(label string, wait func(), timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
