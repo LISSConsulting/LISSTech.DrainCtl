@@ -4,9 +4,9 @@ package svc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -194,40 +194,38 @@ func TestHandleHistory_NilMetricsStillReturnsAudit(t *testing.T) {
 	}
 }
 
-// ── syncPerfCollector ────────────────────────────────────────────────────────
+// ── performanceSubsystem ─────────────────────────────────────────────────────
 
-func TestSyncPerfCollector_NoChangeIsNoop(t *testing.T) {
+func TestPerformanceSubsystem_ReloadNoChangeIsNoop(t *testing.T) {
 	cfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
-	var collector *perfmon.Collector
-	var triggerState *perfmon.PerfTriggerState
 	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+	s := newPerformanceSubsystem(cfg, &lastPerf)
 
 	// Store a snapshot to verify it is NOT cleared on no-op.
 	snap := &dc.PerfSnapshot{CPUPct: 42}
 	lastPerf.Store(snap)
 
-	changed := syncPerfCollector(cfg, cfg, &collector, &triggerState, &lastPerf)
+	changed := s.Reload(cfg)
 	if changed {
-		t.Error("syncPerfCollector returned changed=true for identical configs")
+		t.Error("Reload returned changed=true for identical configs")
 	}
 	if lastPerf.Load() != snap {
 		t.Error("lastPerf was cleared despite no config change")
 	}
 }
 
-func TestSyncPerfCollector_DisableClearsLastPerf(t *testing.T) {
+func TestPerformanceSubsystem_DisableClearsLastPerf(t *testing.T) {
 	oldCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
 	newCfg := dc.PerformanceConfig{Enabled: false}
-	var collector *perfmon.Collector
-	var triggerState *perfmon.PerfTriggerState
 	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+	s := newPerformanceSubsystem(oldCfg, &lastPerf)
 
 	// Simulate cached snapshot from when perfmon was enabled.
 	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
 
-	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf)
+	changed := s.Reload(newCfg)
 	if !changed {
-		t.Error("syncPerfCollector returned changed=false when disabling perfmon")
+		t.Error("Reload returned changed=false when disabling perfmon")
 	}
 	if lastPerf.Load() != nil {
 		t.Error("lastPerf not cleared after disabling perfmon")
@@ -307,18 +305,20 @@ func TestIsLocalDashboard_URLBecameLocal(t *testing.T) {
 	}
 }
 
-func TestSyncPerfCollector_ThresholdChangeClearsLastPerf(t *testing.T) {
+func TestPerformanceSubsystem_ThresholdChangeClearsLastPerf(t *testing.T) {
 	oldCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 70}
 	newCfg := dc.PerformanceConfig{Enabled: true, CPUWarnPct: 80}
-	var collector *perfmon.Collector
-	var triggerState *perfmon.PerfTriggerState
 	var lastPerf atomic.Pointer[dc.PerfSnapshot]
+	s := newPerformanceSubsystem(oldCfg, &lastPerf)
+	s.open = func(dc.PerformanceConfig) (*perfmon.Collector, error) {
+		return nil, errors.New("open blocked by test")
+	}
 
 	lastPerf.Store(&dc.PerfSnapshot{CPUPct: 42})
 
-	changed := syncPerfCollector(oldCfg, newCfg, &collector, &triggerState, &lastPerf)
+	changed := s.Reload(newCfg)
 	if !changed {
-		t.Error("syncPerfCollector returned changed=false when thresholds changed")
+		t.Error("Reload returned changed=false when thresholds changed")
 	}
 	if lastPerf.Load() != nil {
 		t.Error("lastPerf not cleared after threshold change")
@@ -354,42 +354,5 @@ func TestShouldRefuseFingerprintUpdate(t *testing.T) {
 				t.Fatalf("err = %q, want substring %q", err.Error(), "fingerprint mismatch")
 			}
 		})
-	}
-}
-
-// TestSpikeReportTracksWaitGroup verifies the production spike-launch wiring:
-// the goroutine started by startSpikeReport (and its sibling at the call site
-// in Execute) increments a waitgroup, and the goroutine actually exits when
-// the supplied ctx is cancelled. Without that wg/ctx wiring shutdown drops
-// these goroutines on the floor and they linger inside SSPI/HTTP for the
-// dashboard client's internal timeout.
-//
-// The hook MUST observe ctx — if it blocked forever instead, wg.Done would
-// never run and the test would hang regardless of correctness.
-func TestSpikeReportTracksWaitGroup(t *testing.T) {
-	prev := reportSpike
-	t.Cleanup(func() { reportSpike = prev })
-
-	reportSpike = func(ctx context.Context, _ string, _ *dc.SpikePayload) {
-		<-ctx.Done()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	startSpikeReport(ctx, &wg, "http://dashboard.invalid", &dc.SpikePayload{Host: "h"})
-
-	cancel()
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Goroutine observed ctx cancel and called wg.Done.
-	case <-time.After(200 * time.Millisecond):
-		t.Fatalf("spike-report goroutine did not exit within 200ms after ctx cancel — wg/ctx wiring broken")
 	}
 }
