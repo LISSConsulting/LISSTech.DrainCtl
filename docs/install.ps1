@@ -10,11 +10,25 @@ $tmp = Join-Path $env:TEMP $asset
 Write-Host "`n  DrainCtl Installer" -ForegroundColor Cyan
 Write-Host "  Fetching latest release from GitHub...`n" -ForegroundColor DarkGray
 
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+try {
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+} catch {
+    $statusCode = $_.Exception.Response.StatusCode.value__
+    if ($statusCode -ne 404) { throw }
+
+    Write-Host "  No stable release found; using latest prerelease..." -ForegroundColor DarkGray
+    $releases = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1"
+    $release = @($releases)[0]
+}
+
+if (-not $release) {
+    throw "Could not find a GitHub release."
+}
+
 $url = ($release.assets | Where-Object name -eq $asset).browser_download_url
 
 if (-not $url) {
-    throw "Could not find $asset in the latest release."
+    throw "Could not find $asset in the latest release or prerelease."
 }
 
 Write-Host "  Version : $($release.tag_name)" -ForegroundColor White
