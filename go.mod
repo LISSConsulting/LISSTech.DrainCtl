@@ -7,7 +7,7 @@ toolchain go1.26.3
 require (
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.45.0
 	modernc.org/sqlite v1.49.0
 )
 
