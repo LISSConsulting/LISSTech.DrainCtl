@@ -2,7 +2,7 @@
     import { sendNotifyTest } from '../lib/api.js';
     import { toast } from '../lib/toast.svelte.js';
     import { ALL_TRIGGERS, TRIGGER_LABELS, REPEAT_OPTIONS, REPEAT_MAP } from '../lib/notify.js';
-    import { Bell } from 'lucide-svelte';
+    import { Bell } from '@lucide/svelte';
 
     let { target, isNew, saving = false, onsave, onclose } = $props();
 

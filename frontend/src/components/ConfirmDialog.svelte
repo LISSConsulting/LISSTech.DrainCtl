@@ -1,5 +1,5 @@
 <script>
-    import { OctagonAlert } from 'lucide-svelte';
+    import { OctagonAlert } from '@lucide/svelte';
 
     let {
         title = 'Are you sure?',

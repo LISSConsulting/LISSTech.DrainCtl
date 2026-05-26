@@ -1,6 +1,6 @@
 <script>
     import { TRIGGER_LABELS, repeatLabel } from '../lib/notify.js';
-    import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight, Search, Bell } from 'lucide-svelte';
+    import { Pencil, Trash2, Plus, ChevronLeft, ChevronRight, Search, Bell } from '@lucide/svelte';
 
     let {
         targets = $bindable([]),

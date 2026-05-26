@@ -1,5 +1,5 @@
 <script>
-    import { Trash2 } from 'lucide-svelte';
+    import { Trash2 } from '@lucide/svelte';
 
     let { target, deleting = false, onconfirm, oncancel } = $props();
 
