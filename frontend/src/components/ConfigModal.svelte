@@ -16,7 +16,7 @@
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor } from 'lucide-svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor } from '@lucide/svelte';
 
     let { onclose } = $props();
 

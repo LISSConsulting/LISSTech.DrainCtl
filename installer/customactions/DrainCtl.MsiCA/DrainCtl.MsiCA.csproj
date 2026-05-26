@@ -27,7 +27,7 @@
       path. Without it, $(Pkg…) is empty and SfxCADll resolves to just
       "\tools\x64\SfxCA.dll" — MakeSfxCA then fails with file-not-found.
     -->
-    <PackageReference Include="WixToolset.Dtf.CustomAction" Version="5.0.2" GeneratePathProperty="true" />
+    <PackageReference Include="WixToolset.Dtf.CustomAction" Version="7.0.0" GeneratePathProperty="true" />
   </ItemGroup>
 
   <!--

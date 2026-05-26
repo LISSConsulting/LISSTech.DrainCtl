@@ -13,7 +13,9 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     emptyOutDir: true,
-    checks: { pluginTimings: false },
+    rolldownOptions: {
+      checks: { pluginTimings: false },
+    },
   },
   base: '/',
   server: {

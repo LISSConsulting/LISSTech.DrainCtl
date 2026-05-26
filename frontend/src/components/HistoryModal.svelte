@@ -1,7 +1,7 @@
 <script>
     import { fetchHistory } from '../lib/api.js';
     import { formatTs, dur } from '../lib/utils.js';
-    import { Clock, X, ArrowRightLeft, CircleDot } from 'lucide-svelte';
+    import { Clock, X, ArrowRightLeft, CircleDot } from '@lucide/svelte';
 
     let { host, onclose } = $props();
 

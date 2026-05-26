@@ -1,6 +1,6 @@
 <script>
     import { toast } from '../lib/toast.svelte.js';
-    import { CheckCircle, XCircle, Info, Clipboard, ClipboardCheck, X } from 'lucide-svelte';
+    import { CheckCircle, XCircle, Info, Clipboard, ClipboardCheck, X } from '@lucide/svelte';
 
     /** @type {Set<string>} */
     let copiedIds = $state(new Set());

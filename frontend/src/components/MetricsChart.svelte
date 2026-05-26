@@ -20,7 +20,7 @@
         Grid2x2,
         Rows3,
         HelpCircle,
-    } from 'lucide-svelte';
+    } from '@lucide/svelte';
 
     // ── Help text visibility toggles (collapsed by default) ──────────────────
     let showLoadHelp = $state(false);

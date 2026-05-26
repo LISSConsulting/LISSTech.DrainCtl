@@ -2,7 +2,7 @@
     import { toast } from '../lib/toast.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
     import { authState, signInWithWindows, loginWithCredentials } from '../lib/auth.svelte.js';
-    import { KeyRound, Sun, Moon, Monitor } from 'lucide-svelte';
+    import { KeyRound, Sun, Moon, Monitor } from '@lucide/svelte';
 
     const pref = $derived(theme.preference);
     const themeLabel = $derived(
