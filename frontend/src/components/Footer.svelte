@@ -2,7 +2,7 @@
     import { appState } from '../lib/state.svelte.js';
     import { authState } from '../lib/auth.svelte.js';
     import { formatTime12 } from '../lib/utils.js';
-    import { Wifi, WifiOff, RefreshCw, Users, BookOpen, User } from 'lucide-svelte';
+    import { Wifi, WifiOff, RefreshCw, Users, BookOpen, User } from '@lucide/svelte';
 
     /** @type {{
      *   onrefresh?: () => void,

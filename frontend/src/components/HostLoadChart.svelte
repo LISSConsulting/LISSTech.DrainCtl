@@ -19,7 +19,7 @@
     import { resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
-    import { Cpu, MemoryStick, Users, Gauge } from 'lucide-svelte';
+    import { Cpu, MemoryStick, Users, Gauge } from '@lucide/svelte';
 
     /** @type {{ host: string }} */
     let { host } = $props();

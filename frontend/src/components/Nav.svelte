@@ -2,7 +2,7 @@
     import { appState } from '../lib/state.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
     import { authState, logout } from '../lib/auth.svelte.js';
-    import { LayoutDashboard, Server, ScrollText, Sun, Moon, Monitor } from 'lucide-svelte';
+    import { LayoutDashboard, Server, ScrollText, Sun, Moon, Monitor } from '@lucide/svelte';
 
     /** @type {{ onconfigopen: () => void }} */
     let { onconfigopen } = $props();
