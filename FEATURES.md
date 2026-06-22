@@ -51,9 +51,9 @@ Forward-looking list of features we're thinking about. Lives here until it eithe
 
 ### F5. Split `internal/svc/handler.go` into subsystem-named siblings
 
-**Status:** `scoped` — deferred from 009 (T084-T086 / FR-016)
+**Status:** `done` — split landed as a pure in-package refactor
 
-**Current state:** `internal/svc/handler.go` is 1138 lines mixing pipe RPC dispatch, dashboard registration + config pull, perf collector lifecycle, evtspike reload loop, and Windows service startup in one file. Codex 2026-04-24 flagged it as C-C3 (god-file). First attempt to split landed mid-009 produced tangled duplicate declarations (codex extracted partial content into siblings without removing originals from the keeper file); reverted cleanly, handler.go remains behavior-correct.
+**Current state:** `internal/svc/handler.go` has been split into subsystem-named siblings while staying in `package svc`. The service entrypoint lives in `service.go`; the SCM control loop lives in `service_loop.go`; pipe RPC dispatch and live status/history handlers live in `piperpc.go`; dashboard registration/config helpers live in `dashsync.go`; perf collector lifecycle lives in `perfsupervisor.go`; evtspike reload wiring lives in `spikesupervisor.go`.
 
 **Why:** the next bug fix in any one of those five subsystems currently touches three unrelated subsystems in the same file. Noise-to-signal ratio on every PR in this area is already bad; the 009 work surfaced it repeatedly.
 
@@ -67,7 +67,7 @@ Forward-looking list of features we're thinking about. Lives here until it eithe
 
 Naming rationale is captured in `specs/009-security-hardening/research.md` §Decision 8 — the `handler_<subsystem>.go` prefix was explicitly rejected (dead weight in-package), and `handler_lifecycle.go` was merged into `service.go` because the Windows service run loop *is* the service file.
 
-**Trigger to promote:** cut `010-handler-split` off `develop` after 009 lands. Pure cut-and-paste refactor; verify via `git diff --stat` showing near-zero net line delta and each sibling file under 400 lines.
+**Verification:** pure cut-and-paste refactor; behavior preserved by `go test ./...`, `go vet ./...`, and `golangci-lint run ./...`.
 
 ---
 
