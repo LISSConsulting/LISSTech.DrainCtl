@@ -820,6 +820,15 @@ Get-RDSHDrainMode | Format-List</code></pre>
                 longer read.
             </div>
 
+            <div class="callout">
+                <strong>&#x2699;&#xFE0F; Service lifecycle</strong>
+                Long-running workers are lifecycle-owned subsystems with bounded <code>Start</code>/<code>Stop</code>
+                behavior. Dashboard, telemetry, registry/config watchers, named pipe IPC, auto-update,
+                self-metrics, pprof, spike forwarding, registration, bootstrap, and performance collection each
+                own their goroutines and drain on service stop. The Windows service loop coordinates them instead
+                of owning their worker lifetimes directly.
+            </div>
+
             <!-- ── Audit Setup ───────────────────────────────────────────────────── -->
             <h2 id="audit-setup">4. Audit Setup (Change Attribution)</h2>
 

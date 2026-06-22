@@ -265,6 +265,12 @@ The `DrainCtl` service does the watching:
 - Auto-discovery — DNS SRV `_drainctl._tcp.<domain>` finds the dashboard with zero per-machine config
 - HTTPS by default — auto-generated self-signed cert or your own PEM files
 
+Internally the service is split into lifecycle-owned subsystems with bounded
+`Start`/`Stop` behavior: dashboard, telemetry, registry/config watchers, named
+pipe IPC, auto-update, self-metrics, pprof, spike forwarding, registration, and
+performance collection each own their workers and shutdown path. The remaining
+Windows service loop is wiring and dispatch only.
+
 ### Diagnostic profiling (opt-in, loopback-only)
 
 ```powershell
@@ -654,7 +660,8 @@ LISSTech.DrainCtl/
 ├── notify.go                multi-target webhook + ntfy + SMTP dispatch
 ├── sessions.go              WTS session enum via wtsapi32.dll
 ├── internal/
-│   ├── svc/                 Windows service handler + install/uninstall
+│   ├── svc/                 Windows service loop, pipe RPC, dashboard sync,
+│   │                        perf/evtspike supervisors, install/uninstall
 │   ├── pipe/                named-pipe IPC server + client
 │   ├── telemetry/           SQLite store: db, schema, audit, metrics,
 │   │                        aggregator, retention, maintenance,

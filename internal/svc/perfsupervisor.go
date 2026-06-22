@@ -12,6 +12,7 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/lifecycle"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 var _ lifecycle.Subsystem = (*performanceSubsystem)(nil)
@@ -120,5 +121,30 @@ func (s *performanceSubsystem) closeLocked() {
 		s.collector.Close()
 		s.collector = nil
 		s.triggerState = nil
+	}
+}
+
+// newRetentionProvider returns a closure the retention worker calls at the
+// start of every pass to fetch current per-tier retention windows. Reloading
+// config from disk keeps the worker honoring live edits to config.json
+// without a separate hot-reload path; if the reload fails the startup values
+// are reused so a transient disk error cannot widen retention.
+func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings {
+	startupMetrics := startup.Retention.MetricsDays
+	startupAudit := startup.Retention.AuditDays
+	return func() telemetry.RetentionSettings {
+		c, err := dc.LoadConfig()
+		if err != nil {
+			slog.Warn("telemetry: retention provider load config failed, using startup values",
+				"error", err, "metrics_days", startupMetrics, "audit_days", startupAudit)
+			return telemetry.RetentionSettings{
+				MetricsDays: startupMetrics,
+				AuditDays:   startupAudit,
+			}
+		}
+		return telemetry.RetentionSettings{
+			MetricsDays: c.Retention.MetricsDays,
+			AuditDays:   c.Retention.AuditDays,
+		}
 	}
 }

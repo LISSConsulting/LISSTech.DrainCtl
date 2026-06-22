@@ -1658,14 +1658,15 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">Current build &mdash; retained charts, signed updates, cleaner service lifetimes.</h2>
+                <h2 class="section-title">Current build &mdash; retained charts, signed updates, cleaner service internals.</h2>
                 <div style="max-width:640px">
                     <div class="card" style="padding:20px 24px">
                         <ul style="margin:0;padding-left:20px;line-height:1.9;color:var(--fg)">
                             <li><strong>SQLite-backed dashboard history.</strong> Overview charts and per-host sparklines now cold-start from retained telemetry, not browser-local samples.</li>
                             <li><strong>Signed auto-updates.</strong> The updater verifies the MSI signature and a release manifest bound to the MSI SHA-256.</li>
                             <li><strong>Prerelease-safe installer.</strong> The one-line installer now falls back to the newest prerelease when no stable GitHub release exists.</li>
-                            <li><strong>LCI service migration.</strong> Dashboard, watchers, pipe server, logging, selfmetrics, pprof, spike forwarding, and registration workers now have bounded start/stop lifetimes.</li>
+                            <li><strong>LCI service migration.</strong> Dashboard, telemetry, watchers, pipe server, logging, selfmetrics, pprof, updater, spike forwarding, registration, bootstrap, and perf workers now have bounded start/stop lifetimes.</li>
+                            <li><strong>Service split.</strong> The Windows service code is split into a small entrypoint, service loop, pipe RPC, dashboard sync, perf supervisor, and evtspike supervisor files for lower-risk maintenance.</li>
                             <li><strong>Retained chart windows.</strong> Fleet LOAD, Health Indicators, Sessions, RemoteFX, host LOAD, and event-spike swimlanes share the 5M / 1H / 1D / 3D / 5D vocabulary.</li>
                             <li><strong>Hardened secrets and access.</strong> DPAPI-protected notification secrets, stricter config ACLs, and admin-gated privileged pipe verbs.</li>
                         </ul>
