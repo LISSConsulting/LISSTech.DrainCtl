@@ -284,7 +284,7 @@ func (s *Subsystem) tick() {
 	// highest version we've ever seen. The carve-out for remote == highSeen
 	// lets a re-poll of the exact same legitimate release pass through;
 	// the up-to-date branch below catches the no-op case. Parsed version
-	// comparison (not String()) so "v26.116.17" and "26.116.17" are
+	// comparison (not String()) so "v26.6.17" and "26.6.17" are
 	// recognised as equal across the persisted-state and remote paths.
 	if state, _ := loadUpdateState(); state.HighestSeenVersion != "" {
 		if highSeen, err := parseVersion(state.HighestSeenVersion); err == nil {

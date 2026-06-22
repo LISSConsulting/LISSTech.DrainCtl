@@ -25,7 +25,7 @@ func withAPIBase(t *testing.T, base string) {
 }
 
 const stableFixtureBody = `{
-  "tag_name": "v26.116.17",
+  "tag_name": "v26.6.17",
   "assets": [
     {"name": "checksums.txt", "browser_download_url": "https://example.com/checksums.txt"},
     {"name": "LISSTech.DrainCtl.msi", "browser_download_url": "https://example.com/LISSTech.DrainCtl.msi"}
@@ -42,7 +42,7 @@ const prereleaseFixtureBody = `[
 ]`
 
 const missingAssetBody = `{
-  "tag_name": "v26.116.17",
+  "tag_name": "v26.6.17",
   "assets": [
     {"name": "something-else.zip", "browser_download_url": "https://example.com/x.zip"}
   ]
@@ -86,8 +86,8 @@ func TestFetchLatestRelease_StableOK(t *testing.T) {
 	if rel.notModified || rel.noReleases {
 		t.Fatalf("unexpected status flags: %+v", rel)
 	}
-	if rel.tag != "v26.116.17" {
-		t.Errorf("tag = %q, want v26.116.17", rel.tag)
+	if rel.tag != "v26.6.17" {
+		t.Errorf("tag = %q, want v26.6.17", rel.tag)
 	}
 	if rel.assetURL != "https://example.com/LISSTech.DrainCtl.msi" {
 		t.Errorf("assetURL = %q", rel.assetURL)

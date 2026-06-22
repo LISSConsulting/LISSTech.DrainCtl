@@ -6,17 +6,17 @@
 .DESCRIPTION
     Windows Installer upgrades depend on ProductVersion changing even when
     rebuilding the same commit. This script keeps the existing app/binary
-    CalVer (`YY.DOY.N`) as the first two fields and derives a monotonic third
+    CalVer (`YY.MM.N`) as the first two fields and derives a monotonic third
     field from the app build number plus an MSI revision counter.
 
-    Output format: `YY.DOY.BUILD`
+    Output format: `YY.MM.BUILD`
 
-    BUILD = (N * 1000) + R
+    BUILD = (N * 100) + R
       N = commit-derived app build number from scripts/version.ps1
-      R = MSI revision counter (1-999)
+      R = MSI revision counter (1-99)
 
-    N occupies the thousands place so BUILD reads as `N<RRR>` — e.g. app
-    v26.111.2 on the 5th local MSI build produces MSI v26.111.2005. R only
+    N occupies the hundreds place so BUILD reads as `N<RR>` — e.g. app
+    v26.4.2 on the 5th local MSI build produces MSI v26.4.205. R only
     bumps when the MSI is rebuilt on the same commit; a new commit advances
     N and resets R to 1, so `just all` never produces a stale (or
     downgrading) ProductVersion without touching the app CalVer.
@@ -33,11 +33,11 @@
     so `just version` can print it cleanly.
 
     Upper bound: MSI ProductVersion's build field is 16 bits (max 65535), so
-    N*1000 + R ≤ 65535 ⇒ N ≤ 64. Same-day commit counts never approach this.
+    N*100 + R ≤ 65535 ⇒ N ≤ 654. Monthly commit counts should not approach this.
 
 .EXAMPLE
     PS> scripts/msi-version.ps1 -Increment
-    26.111.2005
+    26.4.205
 #>
 
 [CmdletBinding()]
@@ -58,14 +58,14 @@ if ($parts.Length -ne 3) {
 }
 
 $yy = [int]$parts[0]
-$doy = [int]$parts[1]
+$month = [int]$parts[1]
 $n = [int]$parts[2]
 
 $revision = $env:MSI_REVISION
 if (-not $revision) {
     $run = $env:GITHUB_RUN_NUMBER
     if ($run) {
-        $revision = (([int]$run - 1) % 999) + 1
+        $revision = (([int]$run - 1) % 99) + 1
     }
 }
 
@@ -93,8 +93,8 @@ if (-not $revision) {
         } else {
             $revision = 1
         }
-        if ($revision -gt 999) {
-            throw "MSI revision for commit N=$n exceeded 999 local rebuilds — make a new commit or set `$env:MSI_REVISION"
+        if ($revision -gt 99) {
+            throw "MSI revision for commit N=$n exceeded 99 local rebuilds — make a new commit or set `$env:MSI_REVISION"
         }
         @{ n = $n; r = $revision } | ConvertTo-Json -Compress | Set-Content $stateFile -NoNewline
     } else {
@@ -109,13 +109,13 @@ if (-not $revision) {
 }
 
 $revision = [int]$revision
-if ($revision -lt 1 -or $revision -gt 999) {
-    throw "MSI revision must be between 1 and 999; got $revision"
+if ($revision -lt 1 -or $revision -gt 99) {
+    throw "MSI revision must be between 1 and 99; got $revision"
 }
 
-$build = ($n * 1000) + $revision
+$build = ($n * 100) + $revision
 if ($build -gt 65535) {
-    throw "MSI build component exceeds 65535: $build (N=$n * 1000 + R=$revision)"
+    throw "MSI build component exceeds 65535: $build (N=$n * 100 + R=$revision)"
 }
 
-"$yy.$doy.$build"
+"$yy.$month.$build"

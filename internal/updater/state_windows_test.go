@@ -51,7 +51,7 @@ func withRealStateFns(t *testing.T) {
 func TestStartSeedsHighestSeenFromVersion(t *testing.T) {
 	withTempStatePath(t)
 	withRealStateFns(t)
-	pinVersion(t, "26.116.50")
+	pinVersion(t, "26.6.50")
 
 	// Independently call seed (Start would call this).
 	seedHighestSeenFromVersion()
@@ -60,24 +60,24 @@ func TestStartSeedsHighestSeenFromVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if state.HighestSeenVersion != "26.116.50" {
-		t.Errorf("HighestSeenVersion = %q, want %q after seed", state.HighestSeenVersion, "26.116.50")
+	if state.HighestSeenVersion != "26.6.50" {
+		t.Errorf("HighestSeenVersion = %q, want %q after seed", state.HighestSeenVersion, "26.6.50")
 	}
 }
 
 // TestUpdateState_RejectsReplayBelowHighestSeen proves the gate fires
 // when remote < highSeen. Install seam never runs.
 func TestUpdateState_RejectsReplayBelowHighestSeen(t *testing.T) {
-	pinVersion(t, "26.116.20")
+	pinVersion(t, "26.6.20")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 
 	var spawned atomic.Int32
 	f := fakes{
-		initialState: updateState{HighestSeenVersion: "26.116.50"},
+		initialState: updateState{HighestSeenVersion: "26.6.50"},
 		decodeKeys:   func() ([]ed25519.PublicKey, error) { return nil, nil },
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
 			// Attacker replays a signed-but-stale older release.
-			return release{tag: "26.116.10", assetURL: "https://test/msi", etag: "e"}, nil
+			return release{tag: "26.6.10", assetURL: "https://test/msi", etag: "e"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -106,15 +106,15 @@ func TestUpdateState_RejectsReplayBelowHighestSeen(t *testing.T) {
 // greater than highSeen is accepted, the install path runs, and the
 // new highest-seen is persisted.
 func TestUpdateState_AcceptsForwardProgress(t *testing.T) {
-	pinVersion(t, "26.116.20")
+	pinVersion(t, "26.6.20")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 
 	var spawned atomic.Int32
 	f := fakes{
-		initialState: updateState{HighestSeenVersion: "26.116.20"},
+		initialState: updateState{HighestSeenVersion: "26.6.20"},
 		decodeKeys:   func() ([]ed25519.PublicKey, error) { return nil, nil },
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
-			return release{tag: "26.116.50", assetURL: "https://test/msi", etag: "e"}, nil
+			return release{tag: "26.6.50", assetURL: "https://test/msi", etag: "e"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -138,22 +138,22 @@ func TestUpdateState_AcceptsForwardProgress(t *testing.T) {
 	}
 
 	final, _ := loadUpdateState()
-	if final.HighestSeenVersion != "26.116.50" {
-		t.Errorf("HighestSeenVersion = %q, want %q after install", final.HighestSeenVersion, "26.116.50")
+	if final.HighestSeenVersion != "26.6.50" {
+		t.Errorf("HighestSeenVersion = %q, want %q after install", final.HighestSeenVersion, "26.6.50")
 	}
 }
 
 // TestUpdateState_DoesNotPersistOnSpawnFailure proves a failed spawn
 // does not advance the highest-seen pin.
 func TestUpdateState_DoesNotPersistOnSpawnFailure(t *testing.T) {
-	pinVersion(t, "26.116.20")
+	pinVersion(t, "26.6.20")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 
 	f := fakes{
-		initialState: updateState{HighestSeenVersion: "26.116.20"},
+		initialState: updateState{HighestSeenVersion: "26.6.20"},
 		decodeKeys:   func() ([]ed25519.PublicKey, error) { return nil, nil },
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
-			return release{tag: "26.116.50", assetURL: "https://test/msi", etag: "e"}, nil
+			return release{tag: "26.6.50", assetURL: "https://test/msi", etag: "e"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -167,16 +167,16 @@ func TestUpdateState_DoesNotPersistOnSpawnFailure(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	final, _ := loadUpdateState()
-	if final.HighestSeenVersion != "26.116.20" {
-		t.Errorf("HighestSeenVersion advanced to %q despite spawn failure; want unchanged 26.116.20", final.HighestSeenVersion)
+	if final.HighestSeenVersion != "26.6.20" {
+		t.Errorf("HighestSeenVersion advanced to %q despite spawn failure; want unchanged 26.6.20", final.HighestSeenVersion)
 	}
 }
 
 // TestUpdateState_VersionComparisonHandlesPrefixForms proves the gate
-// uses parsed comparison so "v26.116.50" persisted equals "26.116.50"
+// uses parsed comparison so "v26.6.50" persisted equals "26.6.50"
 // observed remote (no false-positive replay refusal).
 func TestUpdateState_VersionComparisonHandlesPrefixForms(t *testing.T) {
-	pinVersion(t, "26.116.20")
+	pinVersion(t, "26.6.20")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 
 	var spawned atomic.Int32
@@ -184,10 +184,10 @@ func TestUpdateState_VersionComparisonHandlesPrefixForms(t *testing.T) {
 		// Persisted highest uses "v" prefix. Remote omits it. The gate
 		// must parse both before comparing, otherwise a no-op re-poll
 		// would be falsely refused as replay.
-		initialState: updateState{HighestSeenVersion: "v26.116.50"},
+		initialState: updateState{HighestSeenVersion: "v26.6.50"},
 		decodeKeys:   func() ([]ed25519.PublicKey, error) { return nil, nil },
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
-			return release{tag: "26.116.50", assetURL: "https://test/msi", etag: "e"}, nil
+			return release{tag: "26.6.50", assetURL: "https://test/msi", etag: "e"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -202,12 +202,12 @@ func TestUpdateState_VersionComparisonHandlesPrefixForms(t *testing.T) {
 	t.Cleanup(s.Stop)
 
 	// remote.equals(highSeen) → carve-out passes through. current is
-	// 26.116.20 < remote 26.116.50, so install would proceed if the
+	// 26.6.20 < remote 26.6.50, so install would proceed if the
 	// gate didn't refuse. The point is the gate must NOT flag
-	// "v26.116.50" vs "26.116.50" as a replay (false positive).
+	// "v26.6.50" vs "26.6.50" as a replay (false positive).
 	time.Sleep(300 * time.Millisecond)
 	if spawned.Load() == 0 {
-		t.Errorf("spawnMSI never called; gate likely flagged 'v26.116.50' as different from '26.116.50'")
+		t.Errorf("spawnMSI never called; gate likely flagged 'v26.6.50' as different from '26.6.50'")
 	}
 }
 
@@ -231,7 +231,7 @@ func TestUpdateState_CorruptFileFailsOpen(t *testing.T) {
 	}
 
 	// Next save must overwrite the garbage with valid JSON.
-	if err := saveUpdateState(updateState{HighestSeenVersion: "26.116.50"}); err != nil {
+	if err := saveUpdateState(updateState{HighestSeenVersion: "26.6.50"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	body, err := os.ReadFile(path)
@@ -242,8 +242,8 @@ func TestUpdateState_CorruptFileFailsOpen(t *testing.T) {
 	if err := json.Unmarshal(body, &s); err != nil {
 		t.Fatalf("rewritten file not valid JSON: %v\ncontent: %s", err, body)
 	}
-	if s.HighestSeenVersion != "26.116.50" {
-		t.Errorf("rewritten HighestSeenVersion = %q, want 26.116.50", s.HighestSeenVersion)
+	if s.HighestSeenVersion != "26.6.50" {
+		t.Errorf("rewritten HighestSeenVersion = %q, want 26.6.50", s.HighestSeenVersion)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestUpdateState_ConcurrentSaves_NoTornWrite(t *testing.T) {
 	inputs := make([]string, N)
 	var wg sync.WaitGroup
 	for i := range N {
-		v := "26.116." + itoa(i+1)
+		v := "26.6." + itoa(i+1)
 		inputs[i] = v
 		wg.Add(1)
 		go func(version string) {

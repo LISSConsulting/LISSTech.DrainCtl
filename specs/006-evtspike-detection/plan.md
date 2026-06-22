@@ -11,7 +11,7 @@ The POC on `feat/evtspike-poc` already validates the detection algorithm. The re
 
 ## Technical Context
 
-**Language/Version**: Go 1.26+ (`//go:build windows` on every file; CalVer `YY.DOY.patch` versioning updated in seven places per CLAUDE.md).
+**Language/Version**: Go 1.26+ (`//go:build windows` on every file; git-derived CalVer `YY.MM.BUILD` per CLAUDE.md).
 **Primary Dependencies**:
 - `golang.org/x/sys/windows` — `wevtapi.dll` (`EvtSubscribe`, `EvtNext`, `EvtClose`) already wired in POC; `AdjustTokenPrivileges` / `LookupPrivilegeValue` for enabling `SeSecurityPrivilege` on the service's own token when Security monitoring is opted in.
 - Existing DrainCtl packages: `notify.go`, `config.go` (for new `EvtSpike` config block and `event_spike` trigger), `internal/dashboard` (for status + recent-spikes broker events), `internal/svc` (for service lifecycle).

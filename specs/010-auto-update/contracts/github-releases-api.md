@@ -34,11 +34,11 @@ The contract surface is two fields:
 
 ```json
 {
-  "tag_name": "v26.116.17",
+  "tag_name": "v26.6.17",
   "assets": [
     {
       "name": "LISSTech.DrainCtl.msi",
-      "browser_download_url": "https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/download/v26.116.17/LISSTech.DrainCtl.msi",
+      "browser_download_url": "https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/download/v26.6.17/LISSTech.DrainCtl.msi",
       "...": "..."
     }
   ],

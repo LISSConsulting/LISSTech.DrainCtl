@@ -54,7 +54,7 @@ func TestVerifyManifestRemote_HappyPath(t *testing.T) {
 	}
 	sum := sha256.Sum256(body)
 	manifest := ReleaseManifest{
-		Version: "26.116.34",
+		Version: "26.6.34",
 		Asset:   ManifestAsset{Name: msiAssetName, SHA256: hex.EncodeToString(sum[:])},
 	}
 	manifestBytes, err := json.Marshal(manifest)

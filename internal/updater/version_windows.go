@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-// version is a parsed CalVer tag (YY.DOY.N). Comparison is component-wise
-// and numeric, so 26.99.21 < 26.116.5 (the literal-string comparison would
+// version is a parsed CalVer tag (YY.MM.N). Comparison is component-wise
+// and numeric, so 26.9.21 < 26.10.5 (the literal-string comparison would
 // flip that pair).
 type version struct {
-	year int
-	doy  int
-	n    int
+	year  int
+	month int
+	n     int
 }
 
-// parseVersion accepts both `vYY.DOY.N` and `YY.DOY.N`. Any other shape
+// parseVersion accepts both `vYY.MM.N` and `YY.MM.N`. Any other shape
 // (extra components, non-numeric components, leading/trailing junk) is
 // rejected with an error so the caller can fall through to the
 // "older than current" handling per FR-005.
@@ -25,24 +25,24 @@ func parseVersion(s string) (version, error) {
 	s = strings.TrimPrefix(s, "v")
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
-		return version{}, fmt.Errorf("version: %q is not YY.DOY.N", s)
+		return version{}, fmt.Errorf("version: %q is not YY.MM.N", s)
 	}
 	year, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return version{}, fmt.Errorf("version: year %q: %w", parts[0], err)
 	}
-	doy, err := strconv.Atoi(parts[1])
+	month, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return version{}, fmt.Errorf("version: doy %q: %w", parts[1], err)
+		return version{}, fmt.Errorf("version: month %q: %w", parts[1], err)
 	}
 	n, err := strconv.Atoi(parts[2])
 	if err != nil {
 		return version{}, fmt.Errorf("version: n %q: %w", parts[2], err)
 	}
-	if year < 0 || doy < 0 || n < 0 {
-		return version{}, fmt.Errorf("version: %q has negative component", s)
+	if year < 0 || month < 1 || month > 12 || n < 0 {
+		return version{}, fmt.Errorf("version: %q has invalid component", s)
 	}
-	return version{year: year, doy: doy, n: n}, nil
+	return version{year: year, month: month, n: n}, nil
 }
 
 // less reports whether a < b. Equality is "not less"; the updater treats
@@ -51,8 +51,8 @@ func (a version) less(b version) bool {
 	if a.year != b.year {
 		return a.year < b.year
 	}
-	if a.doy != b.doy {
-		return a.doy < b.doy
+	if a.month != b.month {
+		return a.month < b.month
 	}
 	return a.n < b.n
 }
@@ -61,13 +61,13 @@ func (a version) less(b version) bool {
 // the parsed-comparison primitive the replay-defense gate uses to allow
 // re-polling the same legitimate release through (the "not below
 // highest_seen" carve-out). Compares parsed fields rather than String()
-// output so "v26.116.17" and "26.116.17" are correctly recognised as
+// output so "v26.6.17" and "26.6.17" are correctly recognised as
 // equal across the persisted-state and remote-fetched paths.
 func (a version) equals(b version) bool {
-	return a.year == b.year && a.doy == b.doy && a.n == b.n
+	return a.year == b.year && a.month == b.month && a.n == b.n
 }
 
-// String renders back to canonical "YY.DOY.N" form (no leading "v").
+// String renders back to canonical "YY.MM.N" form (no leading "v").
 func (a version) String() string {
-	return fmt.Sprintf("%d.%d.%d", a.year, a.doy, a.n)
+	return fmt.Sprintf("%d.%d.%d", a.year, a.month, a.n)
 }

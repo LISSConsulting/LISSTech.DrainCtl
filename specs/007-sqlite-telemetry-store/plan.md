@@ -23,7 +23,7 @@ Technical approach in one sentence: pure-Go SQLite driver (`modernc.org/sqlite`)
 - No system-level DB engine or extra runtime installer (rules out PostgreSQL/TimescaleDB, MySQL, sqld).
 - Must coexist with the existing `config.json` named mutex without conflating the two locking mechanisms.
 - Must preserve the existing dashboard Kerberos SSO / negotiate middleware semantics.
-- CalVer `YY.DOY.patch` version must advance in all 7 places on every commit per CLAUDE.md.
+- CalVer is git-derived as `YY.MM.BUILD` per CLAUDE.md; do not edit version strings by hand.
 **Scale/Scope**: 7 functional areas touched (audit write, metrics write, aggregation worker, retention worker, migration importer, dashboard HTTP, dashboard SPA); roughly a dozen new Go files; deletions across `internal/store/memstore.go`, `internal/dashboard/store.go`, and CLI/DLL history paths.
 
 ## Constitution Check

@@ -11,7 +11,7 @@
 //
 //	release-sign sign --key path\to\release-signing.key \
 //	                  --msi path\to\LISSTech.DrainCtl.msi \
-//	                  --version 26.116.34 \
+//	                  --version 26.6.34 \
 //	                  --out-dir path\to\release-assets
 //	    Hashes --msi, writes release.json + release.json.sig into
 //	    --out-dir. Both files are uploaded as GitHub release assets
@@ -292,7 +292,7 @@ func sign(args []string) error {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	keyPath := fs.String("key", "", "path to the Ed25519 private key (base64)")
 	msiPath := fs.String("msi", "", "path to the MSI to sign")
-	version := fs.String("version", "", "release version (e.g. 26.116.33)")
+	version := fs.String("version", "", "release version (e.g. 26.6.33)")
 	outDir := fs.String("out-dir", "", "directory to write release.json + release.json.sig")
 	assetName := fs.String("asset-name", "LISSTech.DrainCtl.msi", "asset filename as published on GitHub")
 	if err := fs.Parse(args); err != nil {

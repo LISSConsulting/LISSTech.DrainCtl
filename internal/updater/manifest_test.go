@@ -34,7 +34,7 @@ func TestVerifyReleaseManifest_RoundTrip(t *testing.T) {
 	pub, priv := mustGenKey(t)
 
 	m := ReleaseManifest{
-		Version:  "26.116.33",
+		Version:  "26.6.33",
 		Asset:    ManifestAsset{Name: "LISSTech.DrainCtl.msi", SHA256: hex.EncodeToString(make([]byte, 32))},
 		SignedAt: "2026-04-27T12:00:00Z",
 	}
