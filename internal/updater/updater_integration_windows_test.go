@@ -204,7 +204,7 @@ func waitFor(timeout time.Duration, cond func() bool) bool {
 func TestUpdater_SteadyState_StableChannel_NoNewerVersion(t *testing.T) {
 	var verifyCalls, spawnCalls, downloadCalls atomic.Int32
 
-	pinVersion(t, "26.116.17")
+	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 	s, _ := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
@@ -245,11 +245,11 @@ func TestUpdater_NewerVersion_StableChannel_SpawnsInstaller(t *testing.T) {
 	var spawnCalls atomic.Int32
 	buf := captureSlog(t)
 
-	pinVersion(t, "26.116.17")
+	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 	s, shutdownFired := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
-			return release{tag: "v99.99.99", assetURL: "https://test/msi", etag: "new-etag"}, nil
+			return release{tag: "v99.12.99", assetURL: "https://test/msi", etag: "new-etag"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -282,7 +282,7 @@ func TestUpdater_NewerVersion_PrereleaseChannel_HitsPrereleaseEndpoint(t *testin
 	var spawnCalls atomic.Int32
 	channelSeen := make(chan string, 1)
 
-	pinVersion(t, "26.116.17")
+	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelPrerelease, PollInterval: dc.Duration(time.Hour)}
 	s, shutdownFired := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, channel, _ string) (release, error) {
@@ -290,7 +290,7 @@ func TestUpdater_NewerVersion_PrereleaseChannel_HitsPrereleaseEndpoint(t *testin
 			case channelSeen <- channel:
 			default:
 			}
-			return release{tag: "v99.99.99", assetURL: "https://test/msi", etag: "new-etag"}, nil
+			return release{tag: "v99.12.99", assetURL: "https://test/msi", etag: "new-etag"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			return fakeMSI(t), nil
@@ -480,11 +480,11 @@ func TestUpdater_Refusal_VerifyFailureDoesNotEscalate(t *testing.T) {
 	var spawnCalls atomic.Int32
 	tempPathCh := make(chan string, 1)
 
-	pinVersion(t, "26.116.17")
+	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 	s, _ := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
-			return release{tag: "v99.99.99", assetURL: "https://test/msi", etag: "etag"}, nil
+			return release{tag: "v99.12.99", assetURL: "https://test/msi", etag: "etag"}, nil
 		},
 		downloadMSI: func(_ context.Context, _ *http.Client, _ string) (string, error) {
 			f, err := os.CreateTemp("", "drainctl-fake-update-*.msi")
@@ -629,7 +629,7 @@ func runKeysOnOrderingTest(t *testing.T, useRealVerifier bool) {
 
 	manifest := ReleaseManifest{
 		SchemaVersion: ManifestSchemaVersion,
-		Version:       "99.99.99",
+		Version:       "99.12.99",
 		Asset:         ManifestAsset{Name: msiAssetName, SHA256: hex.EncodeToString(sum[:])},
 	}
 	manifestBytes, err := json.Marshal(manifest)
@@ -653,14 +653,14 @@ func runKeysOnOrderingTest(t *testing.T, useRealVerifier bool) {
 	var order atomic.Int32
 	var manifestOrder, msiOrder int32
 
-	pinVersion(t, "26.116.17")
+	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
 
 	f := fakes{
 		decodeKeys: func() ([]ed25519.PublicKey, error) { return []ed25519.PublicKey{pub}, nil },
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
 			return release{
-				tag:         "v99.99.99",
+				tag:         "v99.12.99",
 				assetURL:    srv.URL + "/msi",
 				manifestURL: srv.URL + "/manifest",
 				sigURL:      srv.URL + "/sig",

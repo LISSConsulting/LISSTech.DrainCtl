@@ -48,7 +48,7 @@ Goal: cheap second opinion on correctness, not a full review. One call, act on c
 
 ## 5. Commit
 
-18. Bump CalVer `YY.DOY.patch` with **`just bump`** **only if this commit changed build output** — any new/modified `*.go`, `*.rc`, `*.psd1`, `*.wixproj`, or `frontend/src/**`. Spec-kit artifacts, CHRONICLE entries, `docs/` prose, review notes, `BUGS.md` status updates, and edits to this `BUILD.md` file itself do NOT change build output and leave the version **unchanged**. `just bump` edits all 8 version-bearing files and recompiles `.syso` — never edit version strings by hand.
+18. CalVer is git-derived as `YY.MM.BUILD`; run **`just version`** to inspect what the next build will embed. Do not edit generated version strings by hand.
 19. Commit message format:
     ```
     <type>(<scope>): <imperative one-line summary>

@@ -10,17 +10,19 @@ func TestParseVersion(t *testing.T) {
 		want    version
 		wantErr bool
 	}{
-		{"v26.116.17", version{26, 116, 17}, false},
-		{"26.116.17", version{26, 116, 17}, false},
-		{"v26.99.0", version{26, 99, 0}, false},
-		{"v26.116", version{}, true},      // missing N
-		{"v26.116.17.1", version{}, true}, // extra component
-		{"v26.foo.17", version{}, true},   // non-numeric DOY
-		{"vfoo.116.17", version{}, true},  // non-numeric year
-		{"v26.116.foo", version{}, true},  // non-numeric N
-		{"", version{}, true},             // empty
-		{"banana", version{}, true},       // garbage
-		{"v26.-1.17", version{}, true},    // negative DOY
+		{"v26.6.17", version{26, 6, 17}, false},
+		{"26.6.17", version{26, 6, 17}, false},
+		{"v26.9.0", version{26, 9, 0}, false},
+		{"v26.6", version{}, true},      // missing N
+		{"v26.6.17.1", version{}, true}, // extra component
+		{"v26.foo.17", version{}, true}, // non-numeric month
+		{"vfoo.6.17", version{}, true},  // non-numeric year
+		{"v26.6.foo", version{}, true},  // non-numeric N
+		{"", version{}, true},           // empty
+		{"banana", version{}, true},     // garbage
+		{"v26.-1.17", version{}, true},  // negative month
+		{"v26.0.17", version{}, true},   // zero month
+		{"v26.13.17", version{}, true},  // month exceeds 12
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -41,14 +43,14 @@ func TestVersionLess(t *testing.T) {
 		want bool
 	}{
 		// String-comparison would flip these; numeric-comparison gets them right.
-		{"26.99.21", "26.116.5", true},   // doy: 99 < 116 numerically
-		{"26.116.5", "26.99.21", false},  // reverse
-		{"26.116.9", "26.116.10", true},  // n: 9 < 10 numerically
-		{"26.116.10", "26.116.9", false}, // reverse
+		{"26.9.21", "26.10.5", true},  // month: 9 < 10 numerically
+		{"26.10.5", "26.9.21", false}, // reverse
+		{"26.6.9", "26.6.10", true},   // n: 9 < 10 numerically
+		{"26.6.10", "26.6.9", false},  // reverse
 		// Year boundary.
-		{"25.365.99", "26.1.0", true},
+		{"25.12.99", "26.1.0", true},
 		// Equality is NOT less.
-		{"26.116.17", "26.116.17", false},
+		{"26.6.17", "26.6.17", false},
 		// Trivial ordering.
 		{"1.1.1", "1.1.2", true},
 		{"1.1.2", "1.1.1", false},
@@ -71,11 +73,11 @@ func TestVersionLess(t *testing.T) {
 }
 
 func TestVersionString(t *testing.T) {
-	v, err := parseVersion("v26.116.17")
+	v, err := parseVersion("v26.6.17")
 	if err != nil {
 		t.Fatalf("parseVersion: %v", err)
 	}
-	if got := v.String(); got != "26.116.17" {
-		t.Errorf("String() = %q, want %q", got, "26.116.17")
+	if got := v.String(); got != "26.6.17" {
+		t.Errorf("String() = %q, want %q", got, "26.6.17")
 	}
 }

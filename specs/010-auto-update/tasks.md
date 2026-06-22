@@ -30,7 +30,7 @@ Single PR. Internal commit order designed so each commit builds clean and is ind
 
 - New `internal/updater/version_windows.go` with:
   ```go
-  type version struct{ year, doy, n int }
+  type version struct{ year, month, n int }
   func parseVersion(s string) (version, error)
   func (a version) less(b version) bool
   ```
@@ -149,7 +149,7 @@ Single PR. Internal commit order designed so each commit builds clean and is ind
 ## Commit 13 — Manual smoke test (no code change; checklist) (M)
 
 Not a commit; a pre-merge gate. Run on one Windows VM:
-- Install the pre-merge release (e.g., `26.116.17` if not yet superseded).
+- Install the pre-merge release (e.g., `26.6.17` if not yet superseded).
 - Replace the binary with the 010-branch build via manual MSI install.
 - Verify the updater starts (file log shows `update=poll_start ...` between 5–15 min after service start).
 - Push a synthetic newer release (private staging repo or a forked build with bumped version) and observe the updater downloads, verifies, spawns msiexec, the service stops, and a new version is running 30–60s later.
