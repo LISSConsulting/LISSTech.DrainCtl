@@ -166,7 +166,7 @@ Before declaring the feature done, confirm none of the existing surfaces regress
 
 ## 9. Before committing
 
-- Bump CalVer `YY.DOY.patch` in all 7 places (see `CLAUDE.md`).
+- Confirm git-derived CalVer `YY.MM.BUILD` with `just version` (see `CLAUDE.md`).
 - `just resource` if you touched `.rc`.
 - `just lint` (gofmt + go vet + golangci-lint).
 - `prek run --all-files` (project pre-commit).

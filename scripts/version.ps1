@@ -4,11 +4,11 @@
     Emit the git-derived CalVer version string.
 
 .DESCRIPTION
-    The version is `YY.DOY.N` where:
+    The version is `YY.MM.N` where:
       YY  = last two digits of HEAD commit's committer-local date
-      DOY = day-of-year (1-366) of that date
+      MM  = month (1-12) of that date
       N   = count of commits in HEAD's ancestry sharing the same
-            committer-local date, 0-indexed (first commit of the day is 0)
+            committer-local year-month, 0-indexed (first commit of the month is 0)
 
     This is deterministic: the same commit always yields the same
     version, and each commit gets a distinct value because N advances.
@@ -20,7 +20,7 @@
     the clean 3-part form.
 
 .PARAMETER Csv
-    Emit comma-separated form `YY,DOY,N,0` suitable for the .rc
+    Emit comma-separated form `YY,MM,N,0` suitable for the .rc
     FILEVERSION / PRODUCTVERSION fields.
 
 .OUTPUTS
@@ -29,13 +29,13 @@
 
 .EXAMPLE
     PS> scripts/version.ps1
-    26.108.3
+    26.4.3
 
     PS> scripts/version.ps1 -Full
-    26.108.3-dirty+ga1b2c3d
+    26.4.3-dirty+ga1b2c3d
 
     PS> scripts/version.ps1 -Csv
-    26,108,3,0
+    26,4,3,0
 #>
 
 [CmdletBinding()]
@@ -53,18 +53,19 @@ if ($LASTEXITCODE -ne 0 -or -not $commitDateStr) {
 
 $dt = [DateTime]::ParseExact($commitDateStr, 'yyyy-MM-dd', $null)
 $yy = $dt.Year % 100
-$doy = $dt.DayOfYear
+$mm = $dt.Month
+$commitMonth = $dt.ToString('yyyy-MM')
 
-$sameDayCount = (& git log HEAD --format='%cs' |
-    Where-Object { $_ -eq $commitDateStr }).Count
-$n = [Math]::Max(0, $sameDayCount - 1)
+$sameMonthCount = (& git log HEAD --format='%cs' |
+    Where-Object { $_.StartsWith($commitMonth) }).Count
+$n = [Math]::Max(0, $sameMonthCount - 1)
 
 if ($Csv) {
-    "$yy,$doy,$n,0"
+    "$yy,$mm,$n,0"
     return
 }
 
-$version = "$yy.$doy.$n"
+$version = "$yy.$mm.$n"
 
 if ($Full) {
     $dirty = & git status --porcelain

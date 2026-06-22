@@ -639,7 +639,7 @@ cp .env.example .env
 
 `just release` signs in the right order: binaries + PS module → build MSI → sign MSI → sign the release manifest.
 
-**Versioning** — git-derived CalVer `YY.DOY.N` from `scripts/version.ps1`. Injected into Go via ldflags, into `drainctl.syso` via `just resource`, into the WiX project via `-p:ProductVersion=`, into the PS module via `.psd1.tmpl` rendering. Nothing to bump by hand.
+**Versioning** — git-derived CalVer `YY.MM.BUILD` from `scripts/version.ps1`. Injected into Go via ldflags, into `drainctl.syso` via `just resource`, into the WiX project via `-p:ProductVersion=`, into the PS module via `.psd1.tmpl` rendering. Nothing to bump by hand.
 
 ---
 

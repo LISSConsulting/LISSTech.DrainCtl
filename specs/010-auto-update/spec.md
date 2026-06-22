@@ -74,7 +74,7 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 - **FR-002**: The poll MUST query GitHub over HTTPS using Go's default system root store, with `User-Agent: drainctld/<version>` and `Accept: application/vnd.github+json`. Endpoint is selected by `channel` per FR-001a.
 - **FR-003**: The poll cadence is configurable via `update.poll_interval` (Go duration string, default `24h`). Each poll's actual delay is `interval ± rand([0, jitter])` where `jitter = interval/12` (so 24h ± 2h). Minimum permitted interval is `1h`; values below are clamped with a warning.
 - **FR-004**: First poll fires `rand(5m, 15m)` after Start, not immediately. This delay is fixed regardless of `poll_interval`.
-- **FR-005**: The version comparison MUST parse `vYY.DOY.N` numerically, component by component. A remote tag that does not match this pattern is treated as "older than current" (skip).
+- **FR-005**: The version comparison MUST parse `vYY.MM.BUILD` numerically, component by component. A remote tag that does not match this pattern is treated as "older than current" (skip).
 - **FR-006**: The downloader MUST stream the MSI to a temp path (`%TEMP%\drainctl-update-<random>.msi`), not buffer in memory. On any error, the temp file MUST be deleted.
 - **FR-007**: Before install, the verifier MUST call `WinVerifyTrust` on the temp MSI with `WINTRUST_ACTION_GENERIC_VERIFY_V2`. A non-zero return rejects the install.
 - **FR-008**: After `WinVerifyTrust` succeeds, the verifier MUST extract the signing cert via `CryptQueryObject` and assert the Subject CN equals exactly `LISS Consulting, Corp.`. A mismatch rejects the install.

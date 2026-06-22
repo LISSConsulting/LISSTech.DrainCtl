@@ -24,8 +24,8 @@ Run each step in order. If any step fails, diagnose and fix before continuing. D
 - `just gotest` — all Go tests must pass.
 - `just vulncheck` — no known vulnerabilities.
 
-### 4. Version bump
-- `just bump` — bumps CalVer across all version-bearing files + recompiles .syso.
+### 4. Version check
+- `just version` — confirm the git-derived `YY.MM.BUILD` app/MSI versions before release.
 
 ### 5. Build & sign
 - `just release` — builds CLI, DLL, PS module, MSI. Signs everything (binaries, MSI).

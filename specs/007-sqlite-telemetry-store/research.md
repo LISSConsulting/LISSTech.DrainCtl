@@ -332,7 +332,7 @@ with matching clamps in `ClampRetention()` (extended or renamed — pick one, do
 
 ## 16. Version bump
 
-**Decision**: CalVer `YY.DOY.patch` advances on every commit per CLAUDE.md. The /speckit-tasks phase will produce one task per commit boundary that reminds the implementer to run the version-bump ritual (7 places) before `just lint`.
+**Decision**: CalVer is git-derived as `YY.MM.BUILD` per CLAUDE.md. The /speckit-tasks phase will produce one task per commit boundary that reminds the implementer to confirm `just version` before `just lint`.
 
 **Rationale**: Non-negotiable project convention. Recording it in research to avoid a later "oops".
 
