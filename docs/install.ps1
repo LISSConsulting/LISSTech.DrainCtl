@@ -5,53 +5,59 @@ $ErrorActionPreference = 'Stop'
 
 $repo = 'LISSConsulting/LISSTech.DrainCtl'
 $asset = 'LISSTech.DrainCtl.msi'
-$tmp = Join-Path $env:TEMP $asset
+$tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "drainctl-install-$([System.Guid]::NewGuid().ToString('N'))"
+$tmp = Join-Path $tmpDir $asset
 
 Write-Host "`n  DrainCtl Installer" -ForegroundColor Cyan
 Write-Host "  Fetching latest release from GitHub...`n" -ForegroundColor DarkGray
 
 try {
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-} catch {
-    $statusCode = $_.Exception.Response.StatusCode.value__
-    if ($statusCode -ne 404) { throw }
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
-    Write-Host "  No stable release found; using latest prerelease..." -ForegroundColor DarkGray
-    $releases = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1"
-    $release = @($releases)[0]
-}
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+    } catch {
+        $statusCode = $_.Exception.Response.StatusCode.value__
+        if ($statusCode -ne 404) { throw }
 
-if (-not $release) {
-    throw "Could not find a GitHub release."
-}
+        Write-Host "  No stable release found; using latest prerelease..." -ForegroundColor DarkGray
+        $releases = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1"
+        $release = @($releases)[0]
+    }
 
-$url = ($release.assets | Where-Object name -eq $asset).browser_download_url
+    if (-not $release) {
+        throw "Could not find a GitHub release."
+    }
 
-if (-not $url) {
-    throw "Could not find $asset in the latest release or prerelease."
-}
+    $url = ($release.assets | Where-Object name -eq $asset).browser_download_url
 
-Write-Host "  Version : $($release.tag_name)" -ForegroundColor White
-Write-Host "  Download: $url" -ForegroundColor DarkGray
+    if (-not $url) {
+        throw "Could not find $asset in the latest release or prerelease."
+    }
 
-Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-Write-Host "  Installing..." -ForegroundColor DarkGray
+    Write-Host "  Version : $($release.tag_name)" -ForegroundColor White
+    Write-Host "  Download: $url" -ForegroundColor DarkGray
 
-$proc = Start-Process msiexec.exe -ArgumentList "/i `"$tmp`" /qn" -Wait -PassThru
-Remove-Item $tmp -ErrorAction SilentlyContinue
+    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+    Write-Host "  Installing..." -ForegroundColor DarkGray
 
-if ($proc.ExitCode -eq 0) {
-    Write-Host "`n  Done! DrainCtl is installed." -ForegroundColor Green
-    Write-Host "  Run 'drainctl check' to verify.`n" -ForegroundColor DarkGray
-} else {
-    throw "MSI install failed with exit code $($proc.ExitCode)"
+    $proc = Start-Process msiexec.exe -ArgumentList "/i `"$tmp`" /qn" -Wait -PassThru
+
+    if ($proc.ExitCode -eq 0) {
+        Write-Host "`n  Done! DrainCtl is installed." -ForegroundColor Green
+        Write-Host "  Run 'drainctl check' to verify.`n" -ForegroundColor DarkGray
+    } else {
+        throw "MSI install failed with exit code $($proc.ExitCode)"
+    }
+} finally {
+    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # SIG # Begin signature block
 # MIItnAYJKoZIhvcNAQcCoIItjTCCLYkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMYsSrONBtfolp
-# nAQUDhBZVl0wDGWPnPe/ma/ffyKQcaCCJp8wggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBJXv10wzRWjOK
+# ZD+/mfQ9Ck+R2dNgCHCAz30OJlOU9KCCJp8wggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -262,34 +268,34 @@ if ($proc.ExitCode -eq 0) {
 # RXh0ZW5kZWQgVmFsaWRhdGlvbiBDb2RlIFNpZ25pbmcgQ0EgLSBFVkNTMgIQVKoc
 # 5s3YbdlA6gHWisXPLTANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
 # CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAY8xYDCRrmJWinxKkj
-# VNzHQn9H0bGlGQvoDPA08fa7XjANBgkqhkiG9w0BAQEFAASCAgCMZvyrHY+1Et3P
-# gEc6Rx2/F1G95G2eJZnYMqfYMlHIjm+UcSwbo0Ozs3OtbE+IOYVn/el5+hCa81R+
-# ypMlR8nVOgFcqZsva19WLeTmHmhH+kyqnS+igOo6NDrlQOLbX5qitsEtq8H4OhCv
-# npDrFHOfxC5As+dfzJdowvZsu7WdfiQVmpatcn8wEMrly+MPfKfOKtZNgMyrJMnY
-# kAj95+wF+MAHDBqFLCmx0TzHRfTqC8prDzGkT9sBPRFeKrVAEwLwIU7+ZgS1R8N4
-# SRa7lGAvnx3m8u7xOOfN8CbUWiqYfkyyfdis1cP9EqUjIHThh+2tt33TDfIECWPi
-# /UWe3N53cczvc328tlYHJr+dEkbOU6k3tmfDnv4rX0TzFW3KTCuSu7h4KFhwm6w8
-# 50P3NQkTXC25rriYOrwzysliWKv33lIEUqwIdXmJswZUpBCEWTGlS/HmbkT+fiyp
-# JPq/Q/NFQnFpnHv8vzUsshQXyNrjmfgEC/YsNqCdgfQoRf+pli8ErqzNOhTJGHDf
-# UFLjCyrXKxbTGMT3Rzn/Am+av95Am6easRKvlgC05S0IOU7+6EfJ4KfFwTahQMV2
-# G6iu0k+BEx2yauNkluj68S7+t8FS+Ij+g0/KeJadFuOnvwYRGnp12VZjrYX1bCpd
-# JJk4z7mkYI0Bi+sa9pHxwMI/ZXTxBqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIID
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAGcUCzq+9+oNRGGlos
+# NEI0a8ZL3Up2hTY9nJN6GAWpaTANBgkqhkiG9w0BAQEFAASCAgBPx3j9l8URFP4h
+# mapt6iySQQTDucfIXJEVSqgDPU8ployWhMFjZoOSTNkh3nYmH97daT462WtsjnBl
+# YztpuyFvapTzGxbKVS6wBQRYmt3AlbPjwnLU0UfGrTDorqDaTJt+9SPygjrQWdrM
+# /0ZTARFUBf3woJYDS/c1+EOURm3B9LyaVmE7CzMOH/qY/8LIFCvEWcdFF1qoDeF8
+# I5S4SClCgZRBsG/bjkn/s65k8gf+8w8sqifgtcnGs6BvSXB9JcQCWwiZkFJFGcrJ
+# cbN/eTnuVDYLT3VzVCPTm4x0TjaBHcaBX+dNqV7BhwR7Qq2XMqWZKycfWN/cUBGH
+# NppgMFxuagNXbT/lHQ/XStnNU3+huW46Ic0iK3HXZvHoVFb8P/DwK0+6Jr5wleWO
+# QkfG+NVaYZ6zHw4SpoZ67YsOn0iofGOpkhhNFyJNwwl/aDEWWXPvmN9mtQAxVR0I
+# bTc1gR6LjvB7380YuRzemQiAp6PvvxwzMFRfQhTrYgQEBc57DPzMrEy6xsZd/FTW
+# Fr8jgsdL2Ljr5YnbIVc+ZJpXFRyQfbd1D1+3ANyjxEr+IhlOPjpIxDFxEpjFMr/R
+# z2RSD62ckkd4gxBmodE36qYoJ5eBTt1yMsHeF1Me5jNtghZfhKxLIMystQ4ox0DP
+# 1n8WITsOMzMBDrWjMXBGVfGnPtZqdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIID
 # DwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFB
 # MD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5
 # NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIB
 # BQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0y
-# NjA2MjIxNzI0MDNaMC8GCSqGSIb3DQEJBDEiBCDU/Euazxd8L5QMInpiksbZZr69
-# DEx+qakOtH6yQoi1+jANBgkqhkiG9w0BAQEFAASCAgAoGgF3QLV4abJq4JvmFCco
-# edEcQtjiWUVosddtXO2H2Pp/R1jEHA1AsGPCDL+kXB7Mz8bmMHlbIvrc6nJhJ23i
-# /ojvfr2D7hE7viy/P53YXIxqA0soGm56UJhqzAWRW0QJceqmUagCmjYDiYzFyRQS
-# nPkbpwjBh6LLOXV4AXkKkJeUKq6meiLJhRM6YorIXZ1to3ocpOeRzpIbZNv9e+N6
-# Gv3pgoKn//Ie6vZ4S8Br8BJsd9WUx0xUx51ERtv1DwJ4HTTbURCzYcWoB4SBeg7P
-# 16g6iYS6BjVBe3FLWPdzv5au/8KbKLQKaisL1GbHbAHl3TY0tVSC5JXYM0BEHHcB
-# u+crsIi1MbWmQzSX48zMEOwAFKlaxpy0fVsJVNimyx0m5GzCXDTGrr0vDkSzLTs8
-# DLSpHNH27Ik5ogd15ap173O3Ban82SjeKyjrLmIJJLAd1WtI1Y1t90tpqNltS8CS
-# Tav35oWQ5d3793q8f9XZ4nG67wzMG0BBUrEhCY79wh4x5yjDuDwLcsZfYt2GiWNx
-# Zz3K3zhl6+LpE+Ik4YvW151wlksxkAiRu7FlrC9+yEsEb2Vx55H2IEhbcXXMI93f
-# /hQF2x7cB1Jt7jicwpMya3Dj9Bgf/YrE0crfT/M5nGqKuTi0av64y53207ATie9Y
-# QIcdc/xKRIikFaYYTFcyyQ==
+# NjA2MjQwMjI4MTJaMC8GCSqGSIb3DQEJBDEiBCAcemoCdn847FOBFL7qefm51jVW
+# MBAcLNbGWDzAUEeYVzANBgkqhkiG9w0BAQEFAASCAgCKIpcfJ62TUzIympwY9mmK
+# B8CCH5f+6R4vZtzqTC8EwoqCm1hGOfK3kEjh8ZGtICkE96T+n1g6UWzv8r9qKh/3
+# NAG/hBezAoPX6vEDyHVUp1B09sPN5NGAxE8HF2D3rPAwFSUm/P6qao9nGIRzwO4n
+# 8FbQzQweBUvuK7XO0llBVRbxWOhzKd8jpMQr1eNoUBoJ7ocByIInNdexQSwkJOXT
+# 7Y/SSndVEYebEv+iy/hQPHBKNVLgNeJZnEr5OuzLOoC5E+QC3b/bp/b17TcdFnaZ
+# cGI7Q5l0teSboOujuvvLm2eop6R8GFPjBF+PMT6/a+UoRoVOh5vxfzB78ldevsuu
+# nXDPaIuqdgbehA+L9/rzFbugqpMXQKx7ePt/tagujQ7MuNLlYTX+/NGaQz2vrj3I
+# aKJUiSIRooIoMBym4+53NSp03pb50e7XrV0+gRGQzriOlkohDWDtqwGP1n61yL2/
+# jiVoowzPRQViuCLmLVK3JBJIMJ9n2zdIyZrOI0ykKeYIByQ7PIhF1M/rze7zMCNO
+# x6j+K+rv1NB/27KX5fg+8R8IlJ3ianclZzYVDfB0kATgYD62jG8T0Q36jB50T107
+# G4+Lgbi2I0dkcBvYW+vvbkICfNwCS8LYBD1Uu5qUodi0D7Jszz6t08gf8uidxxEp
+# s8j7qoGjt/eq6M2CWS5lVg==
 # SIG # End signature block
