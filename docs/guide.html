@@ -526,7 +526,7 @@
                 <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl">PSGallery</a>:
             </p>
 
-            <pre><code>Install-Module -Name LISSTech.DrainCtl -Scope AllUsers -AllowPrerelease</code></pre>
+            <pre><code>Install-Module -Name LISSTech.DrainCtl -Scope AllUsers</code></pre>
 
             <p>
                 This gives you Get-RDSHDrainMode, Test-RDSHDrainMode, and friends &mdash; but without the service,
@@ -2553,7 +2553,7 @@ if ($result.exit_code -ne 0) {
 
             <pre><code>"update": {
   "enabled": true,
-  "channel": "prerelease",
+  "channel": "stable",
   "poll_interval": "24h"
 }</code></pre>
 
@@ -2582,11 +2582,10 @@ if ($result.exit_code -ne 0) {
             </table>
 
             <div class="callout">
-                <strong>&#x26A0; Today, every release ships as &ldquo;prerelease&rdquo;</strong>
-                Until the project graduates a non-prerelease build, <code>channel: "stable"</code> finds nothing on
-                GitHub and the agent logs <code>update=no_stable_release</code> on each poll. To actually receive
-                updates today, both <code>"enabled": true</code> AND <code>"channel": "prerelease"</code> are required.
-                Once a stable release is published, <code>"channel": "stable"</code> becomes operationally useful.
+                <strong>&#x2705; Stable is the production channel.</strong>
+                Keep <code>channel: "stable"</code> to follow signed production releases. Operators who deliberately
+                want preview builds can opt into <code>channel: "prerelease"</code>; that channel accepts the newest
+                release regardless of its prerelease flag.
             </div>
 
             <h3>How an update lands</h3>

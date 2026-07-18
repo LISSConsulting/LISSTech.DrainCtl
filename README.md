@@ -7,27 +7,22 @@
 <p align="center"><strong>Real-time RDSH drain-mode monitoring for Windows Server.<br/>Knows what changed, who changed it, and when — instantly.</strong></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/STATUS-BETA-9e2a3b?style=for-the-badge&labelColor=2d1a1a" alt="Status" />
+  <img src="https://img.shields.io/badge/STATUS-STABLE-5d8a6e?style=for-the-badge&labelColor=2d1a1a" alt="Status: stable" />
   <img src="https://img.shields.io/badge/GO-1.26%2B-a3475b?style=for-the-badge&labelColor=2d1a1a&logo=go&logoColor=white" alt="Go" />
   <img src="https://img.shields.io/badge/WINDOWS-Server%202016%2B-2d1a1a?style=for-the-badge" alt="Windows" />
   <img src="https://img.shields.io/badge/LICENSE-Apache%202.0-5d8a6e?style=for-the-badge&labelColor=2d1a1a" alt="License" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases"><img src="https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?include_prereleases&style=for-the-badge&label=RELEASE&color=a3475b&labelColor=2d1a1a" alt="Release" /></a>
-  <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"><img src="https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?include_prereleases&style=for-the-badge&label=PSGALLERY&color=b87843&labelColor=2d1a1a" alt="PSGallery" /></a>
+  <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest"><img src="https://img.shields.io/github/v/release/LISSConsulting/LISSTech.DrainCtl?style=for-the-badge&label=RELEASE&color=a3475b&labelColor=2d1a1a" alt="Latest stable release" /></a>
+  <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"><img src="https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?style=for-the-badge&label=PSGALLERY&color=b87843&labelColor=2d1a1a" alt="Stable PSGallery release" /></a>
 </p>
 
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  BETA. EVERY RELEASE IS A RELEASE CANDIDATE.
-  PSGallery installs require -AllowPrerelease.
-  GitHub releases are flagged "Pre-release" — pick the URL deliberately.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+DrainCtl is stable for production deployment. Stable GitHub releases are signed, published as
+**Latest**, and tracked by the default auto-update channel.
 
 ```powershell
-Install-Module LISSTech.DrainCtl -AllowPrerelease
+Install-Module LISSTech.DrainCtl
 ```
 
 ---
@@ -149,7 +144,7 @@ msiexec /i LISSTech.DrainCtl.msi /qn `
 ### PowerShell Gallery (module only)
 
 ```powershell
-Install-Module -Name LISSTech.DrainCtl -Scope AllUsers -AllowPrerelease
+Install-Module -Name LISSTech.DrainCtl -Scope AllUsers
 ```
 
 Cmdlets only — no service, no CLI. Queries hit the registry directly. See [PSGallery](https://www.powershellgallery.com/packages/LISSTech.DrainCtl).

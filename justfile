@@ -450,12 +450,10 @@ publish: (header "publish")
     } else {
         $body = "Initial release"
     }
-    # Every release ships as pre-release / beta — CalVer means there is no
-    # 1.0 to graduate to; "stable" is owner-declared rather than a version
-    # threshold. The --prerelease flag drops the green "Latest" badge on the
-    # GitHub releases page so operators picking a download URL must opt in
-    # explicitly. Drop this flag when the project owner declares stable.
-    & gh release create $tag @assets --prerelease --title "LISSTech DrainCtl $version" --notes $body
+    # CalVer has no 1.0 threshold: release stability is owner-declared. Normal
+    # publishes are stable and become GitHub's Latest release; an exceptional
+    # preview must be created explicitly outside this recipe.
+    & gh release create $tag @assets --title "LISSTech DrainCtl $version" --notes $body
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit $LASTEXITCODE }
     Write-Host "   ✅ Release created with $($assets.Count) asset(s)" -ForegroundColor Green
     Write-Host "   https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/tag/$tag" -ForegroundColor DarkGray
