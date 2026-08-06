@@ -83,8 +83,9 @@ func acceptPipeConn(ctx context.Context) (net.Conn, error) {
 	defer func() { _ = windows.CloseHandle(ol.HEvent) }()
 
 	err = windows.ConnectNamedPipe(h, ol)
-	if err == nil {
-		// Client already connected before we called ConnectNamedPipe.
+	if err == nil || err == windows.ERROR_PIPE_CONNECTED {
+		// ERROR_PIPE_CONNECTED means the client won the race between
+		// CreateNamedPipe and ConnectNamedPipe; the connection is valid.
 		return newPipeConn(h, PipeName), nil
 	}
 	if err != windows.ERROR_IO_PENDING {
