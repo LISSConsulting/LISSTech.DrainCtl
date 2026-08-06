@@ -612,7 +612,7 @@ This configures:
 
 <h2 id="build">▎ Build</h2>
 
-**Tested build toolchain** — Go 1.26.5, Node.js 24 LTS, pnpm 11.20.0, MinGW (`scoop install mingw`), and .NET SDK 10. The project restores WiX 7.0.0 and its extensions from NuGet; `installer/LISSTech.DrainCtl.wixproj` records the accepted [`wix7` EULA](https://docs.firegiant.com/wix/osmf/).
+**Tested build toolchain** — Go 1.26.5, Node.js 24 LTS, pnpm 11.20.0, TypeScript 7.0.2, MinGW (`scoop install mingw`), and .NET SDK 10. The project restores WiX 7.0.0 and its extensions from NuGet; `installer/LISSTech.DrainCtl.wixproj` records the accepted [`wix7` EULA](https://docs.firegiant.com/wix/osmf/).
 
 ```bash
 cd frontend && pnpm install --frozen-lockfile
