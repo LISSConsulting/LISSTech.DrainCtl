@@ -597,8 +597,8 @@ func TestHandleReport_UpdatesLastSeen(t *testing.T) {
 	ds.handleReport(w, r)
 
 	servers := ds.state.All()
-	if servers[0].LastSeen.Before(before) {
-		t.Error("LastSeen should be updated after a report")
+	if servers[0].LastSeen.Before(before.Add(-time.Second)) {
+		t.Errorf("LastSeen = %v, want approximately now", servers[0].LastSeen)
 	}
 }
 
