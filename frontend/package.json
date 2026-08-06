@@ -3,20 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@11.20.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "prettier": "^3.8.4",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "prettier": "^3.9.6",
     "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "^5.56.3",
-    "vite": "^8.0.16"
+    "svelte": "^5.56.8",
+    "vite": "^8.2.0"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.21.0",
-    "layercake": "^10.0.2"
+    "@lucide/svelte": "^1.28.0",
+    "layercake": "^10.0.3"
   }
 }

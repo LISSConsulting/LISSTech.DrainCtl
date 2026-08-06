@@ -467,6 +467,8 @@ func (c *captureHandler) HandleBaselineReset() error {
 // that one case. If this wrap is ever removed a human register call would
 // silently retry under the operator's token on every service-side failure.
 func TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable(t *testing.T) {
+	uniquePipeName(t)
+
 	// No service / pipe listener is running in the test process, so dialPipe
 	// fails with ERROR_FILE_NOT_FOUND. That must come back wrapped.
 	_, err := RegisterViaPipe("https://dash.invalid")

@@ -24,15 +24,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/setup@v2
         with:
-          version: 10
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
+          version: 11.20.0
+          runtime: node@24
+          cache: true
           cache-dependency-path: frontend/pnpm-lock.yaml
+          package-json-file: frontend/package.json
+          install: false
 
       - name: Build frontend
         run: |

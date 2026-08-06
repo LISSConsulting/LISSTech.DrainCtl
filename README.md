@@ -612,9 +612,12 @@ This configures:
 
 <h2 id="build">▎ Build</h2>
 
-**Prereqs** — Go 1.26+, MinGW (`scoop install mingw`), WiX 5 (`dotnet tool install -g wix`), .NET SDK 8+.
+**Tested build toolchain** — Go 1.26.5, Node.js 24 LTS, pnpm 11.20.0, MinGW (`scoop install mingw`), and .NET SDK 10. The project restores WiX 7.0.0 and its extensions from NuGet; `installer/LISSTech.DrainCtl.wixproj` records the accepted [`wix7` EULA](https://docs.firegiant.com/wix/osmf/).
 
 ```bash
+cd frontend && pnpm install --frozen-lockfile
+cd ..
+
 just all          # CLI + DLL + PS module + MSI (unsigned)
 just release      # build + sign everything (needs CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env)
 just lint         # go vet + gofmt + golangci-lint
@@ -671,7 +674,7 @@ LISSTech.DrainCtl/
 │   ├── drainctl/            CLI entry point (cobra)
 │   └── cshared/             C-shared DLL exports
 ├── powershell/              PS module (.psd1, .psm1)
-├── installer/               WiX 5 MSI project + managed C# CA + PS scripts
+├── installer/               WiX 7 MSI project + managed C# CA + PS scripts
 ├── frontend/                Svelte 5 dashboard (LayerCake charts)
 ├── assets/                  icon, ETW manifest, message file
 ├── docs/                    landing page + guide (GitHub Pages)

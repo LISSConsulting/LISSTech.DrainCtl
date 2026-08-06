@@ -7,6 +7,22 @@ updates:
     commit-message:
       prefix: "deps"
 
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: nuget
+    directories:
+      - /installer
+      - /installer/customactions/DrainCtl.MsiCA
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
