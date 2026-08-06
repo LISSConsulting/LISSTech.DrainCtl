@@ -17,17 +17,12 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 )
 
-// writeEvtSpikeConfig marshals cfg as pretty JSON and replaces path, mirroring
-// what SaveConfig does in production. Used to drive the file watcher in
-// TestConfigWatcherTriggersEvtSpikeReload.
-func writeEvtSpikeConfig(t *testing.T, path string, cfg *dc.Config) {
+// writeEvtSpikeConfig uses the production atomic save path so the watcher
+// cannot observe a file after truncate but before the replacement is complete.
+func writeEvtSpikeConfig(t *testing.T, cfg *dc.Config) {
 	t.Helper()
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		t.Fatalf("json.MarshalIndent: %v", err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
 	}
 }
 
@@ -48,7 +43,8 @@ func writeEvtSpikeConfig(t *testing.T, path string, cfg *dc.Config) {
 // channel count without reaching into unexported Subsystem fields.
 func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
+	t.Setenv("ProgramData", dir)
+	configPath := dc.DefaultConfigPath()
 	baselinePath := filepath.Join(dir, "baseline.json")
 
 	initial := dc.DefaultConfig()
@@ -67,7 +63,7 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 		AddedChannels:            []string{},
 	}
 	dc.ClampEvtSpike(&initial.EvtSpike)
-	writeEvtSpikeConfig(t, configPath, initial)
+	writeEvtSpikeConfig(t, initial)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -125,7 +121,7 @@ func TestConfigWatcherTriggersEvtSpikeReload(t *testing.T) {
 
 	updated := *initial
 	updated.EvtSpike.AddedChannels = []string{"Contoso/AppLog"}
-	writeEvtSpikeConfig(t, configPath, &updated)
+	writeEvtSpikeConfig(t, &updated)
 
 	// Event-mode fires within ~100 ms; poll-fallback mode takes up to 5 s.
 	select {

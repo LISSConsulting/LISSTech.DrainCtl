@@ -22,10 +22,11 @@ var _ lifecycle.Subsystem = (*ConfigFileSubsystem)(nil)
 // permission anomalies). 5 s matches the prior standalone watcher.
 const configFilePollInterval = 5 * time.Second
 
-// ConfigFileSubsystem watches a single file for write changes. It prefers
-// FindFirstChangeNotification on the file's directory and only fires
-// Events when the target file's mtime advances, filtering out unrelated
-// writes in the same directory. If the directory watch cannot be set up,
+// ConfigFileSubsystem watches a single file for content or replacement
+// changes. It prefers FindFirstChangeNotification on the file's directory
+// and filters notifications by the target file's mtime. Watching both file
+// names and writes is required because SaveConfig atomically replaces the
+// file rather than modifying it in place. If the directory watch cannot be set up,
 // it falls back to a 5 s mtime-poll loop. Either way the surface is one
 // channel that ticks once per detected change.
 //
@@ -66,7 +67,7 @@ func (s *ConfigFileSubsystem) Start(ctx context.Context) error {
 	s.cancel = cancel
 
 	dir := filepath.Dir(s.path)
-	handle, err := windows.FindFirstChangeNotification(dir, false, windows.FILE_NOTIFY_CHANGE_LAST_WRITE)
+	handle, err := windows.FindFirstChangeNotification(dir, false, windows.FILE_NOTIFY_CHANGE_FILE_NAME|windows.FILE_NOTIFY_CHANGE_LAST_WRITE)
 	if err == nil && handle != windows.InvalidHandle {
 		cancelEvent, ceErr := windows.CreateEvent(nil, 1, 0, nil)
 		if ceErr == nil {
