@@ -482,14 +482,17 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
   "grace_period_minutes": 60,
   "retention_days": 90,
   "retention": { "metrics_days": 30, "audit_days": 365 },
-  "telemetry": { "aggregator_interval_seconds": 60, "retention_interval_minutes": 15 },
+  "telemetry": { "aggregator_interval_seconds": 300, "retention_interval_minutes": 60 },
   "poll_interval_seconds": 300,
+  "memory_limit_mb": 32,
   "session_warning_threshold": 80,
   "performance": {
     "enabled": true,
     "cpu_warn_pct": 70, "cpu_crit_pct": 85,
     "mem_warn_pct": 20, "mem_crit_pct": 10,
     "input_delay_warn_ms": 50, "input_delay_crit_ms": 100,
+    "sample_interval_sec": 60,
+    "load_alert_delay_sec": 120, "input_delay_alert_delay_sec": 180,
     "collect_remotefx": false, "collect_per_session": true
   },
   "dashboard": { "url": "" },
@@ -520,9 +523,10 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `retention_days` | int | `90` | Legacy audit-retention knob, preserved for pre-007 installs. New `retention.*` fields supersede. |
 | `retention.metrics_days` | int | `30` | Hourly rollup retention, 1–365. Raw + 5-min tiers have fixed retention (25 h and 6 d) — only hourly is operator-tunable. |
 | `retention.audit_days` | int | `365` | Audit-record retention, 1–3650. |
-| `telemetry.aggregator_interval_seconds` | int | `60` | Tick interval for 5-min and hourly rollups. |
-| `telemetry.retention_interval_minutes` | int | `15` | Cadence of the retention + WAL-checkpoint worker. |
-| `poll_interval_seconds` | int | `300` | Safety-net poll interval. |
+| `telemetry.aggregator_interval_seconds` | int | `300` | Tick interval for 5-min and hourly rollups. |
+| `telemetry.retention_interval_minutes` | int | `60` | Cadence of the retention + WAL-checkpoint worker. |
+| `poll_interval_seconds` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
+| `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
 | `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration; empty = SRV discovery. |
 | `dashboard.tls_cert` / `tls_key` | string | *(empty)* | PEM paths; auto-generated self-signed if empty. |
@@ -533,6 +537,9 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `performance.input_delay_warn_ms` / `input_delay_crit_ms` | int | `50` / `100` | Input delay P95 thresholds. |
 | `performance.collect_remotefx` | bool | `false` | RemoteFX Graphics + Network counters. |
 | `performance.collect_per_session` | bool | `true` | Per-session CPU, memory, input delay. |
+| `performance.sample_interval_sec` | int | `60` | PDH sampling cadence; range 10–300 seconds. |
+| `performance.load_alert_delay_sec` | int | `120` | CPU/memory threshold sustain window (two default samples). |
+| `performance.input_delay_alert_delay_sec` | int | `180` | Input-delay threshold sustain window (three default samples). |
 | `notifications` | array | `[]` | Notification targets — see below. |
 
 **Notification target fields**

@@ -24,10 +24,10 @@ import (
 // Compile-time assertion: *Subsystem satisfies lifecycle.Subsystem.
 var _ lifecycle.Subsystem = (*Subsystem)(nil)
 
-// DefaultInterval is the production tick cadence. ReadMemStats stops the
-// world for hundreds of microseconds on a healthy heap; at 60 s that's
-// ~1.7 ppm of CPU.
-const DefaultInterval = 60 * time.Second
+// DefaultInterval is the production tick cadence. Self-metrics are diagnostic,
+// not control-plane data; a five-minute cadence minimizes timer wakeups while
+// still showing useful trends when debug logging is enabled.
+const DefaultInterval = 5 * time.Minute
 
 // Subsystem owns the selfmetrics ticker goroutine. Construct via New,
 // register alongside other lifecycle.Subsystems, call Start with a
@@ -114,10 +114,14 @@ var (
 	procGetProcessMemoryInfo = psapi.NewProc("GetProcessMemoryInfo")
 )
 
-// emit writes one selfmetrics record at slog.Debug. Exposed within the
-// package so tests can drive it synchronously without standing up the
-// ticker.
+// emit writes one selfmetrics record at slog.Debug. It checks the active
+// handler before collecting because runtime.ReadMemStats briefly stops the
+// world and the process-memory syscall is wasted when debug logging is off.
+// Exposed within the package so tests can drive it synchronously.
 func emit() {
+	if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 

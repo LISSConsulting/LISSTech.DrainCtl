@@ -431,19 +431,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	dashBootstrap := dashBootstrapSub.Events()
 
 	// fetchRemoteConfig pulls from the dashboard, applies results, and
-	// reconciles the evtspike/perf/ticker subsystems. Extracted so that both
-	// the every-poll fetch AND inline-after-successful-registration paths
-	// exercise exactly the same code path. Returns early when no dashboard
-	// URL is configured or when we're still inside a failure-backoff window.
+	// reconciles the evtspike/perf/ticker subsystems. Successful fetches obey
+	// Dashboard.FetchInterval; failures use the existing exponential backoff.
+	// The registration and config-reload paths can force an immediate fetch by
+	// clearing lastConfigFetch before calling this closure.
 	fetchRemoteConfig := func() {
 		if dashCfg.URL == "" {
 			return
 		}
-		if dashConfigFailures > 0 &&
-			time.Since(lastConfigFetch) < backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
+		fetchStarted := time.Now()
+		if !remoteConfigFetchDue(fetchStarted, lastConfigFetch, dashConfigFailures, dashCfg.FetchInterval) {
 			return
 		}
-		lastConfigFetch = time.Now()
+		lastConfigFetch = fetchStarted
 		slog.Debug("dashboard config fetch", "url", dashCfg.URL)
 		var cfgRemote *dashboard.RemoteSettings
 		var cfgErr error
@@ -559,10 +559,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 
-			// Pull remote config on every poll (Option B). Cheap: one
-			// LoadConfig + JSON encode per agent per poll. Failures back off
-			// exponentially from FetchInterval inside fetchRemoteConfig so a
-			// downed dashboard doesn't spam warnings every tick.
+			// Check whether remote config is due. The closure returns without
+			// network or JSON work until FetchInterval elapses; failures retain
+			// exponential backoff.
 			fetchRemoteConfig()
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
