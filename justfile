@@ -255,6 +255,7 @@ sign-binaries:
     # Binaries (signtool)
     foreach ($file in @(
         (Join-Path $binDir "drainctl.exe"),
+        (Join-Path $binDir "drainctld.exe"),
         (Join-Path $binDir "drainctl.dll")
     )) {
         if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
