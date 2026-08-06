@@ -35,9 +35,9 @@ const (
 
 	DefaultMetricsDays               = 30
 	DefaultAuditDays                 = 365
-	DefaultAggregatorIntervalSeconds = 60
-	DefaultRetentionIntervalMinutes  = 15
-	DefaultPollInterval              = 60    // seconds
+	DefaultAggregatorIntervalSeconds = 300
+	DefaultRetentionIntervalMinutes  = 60
+	DefaultPollInterval              = 300   // seconds
 	MaxPollInterval                  = 86400 // seconds (1 day)
 	DefaultDashboardPort             = 49470
 	DefaultDashboardGroup            = "Domain Admins"
@@ -45,11 +45,11 @@ const (
 
 	DefaultSessionWarningThreshold = 80 // percent
 
-	DefaultSampleInterval          = 30 // seconds
-	DefaultLoadAlertDelaySec       = 60 // seconds — CPU/memory alert sustain window
-	DefaultInputDelayAlertDelaySec = 90 // seconds — input delay alert sustain window
+	DefaultSampleInterval          = 60  // seconds
+	DefaultLoadAlertDelaySec       = 120 // seconds — two samples before CPU/memory alert
+	DefaultInputDelayAlertDelaySec = 180 // seconds — three samples before input delay alert
 
-	DefaultMemoryLimitMB          = 256  // MiB — soft GOMEMLIMIT for the service process
+	DefaultMemoryLimitMB          = 32   // MiB — soft GOMEMLIMIT for lightweight agents
 	DefaultDashboardMemoryLimitMB = 512  // MiB — higher limit when running as dashboard server
 	MinMemoryLimitMB              = 32   // MiB — floor
 	MaxMemoryLimitMB              = 4096 // MiB — ceiling (4 GiB)
@@ -167,11 +167,11 @@ type PerformanceConfig struct {
 	InputDelayWarnMS        int    `json:"input_delay_warn_ms"`              // default: 50, -1=disabled
 	InputDelayCritMS        int    `json:"input_delay_crit_ms"`              // default: 100, -1=disabled
 	InputDelayPercentile    string `json:"input_delay_percentile,omitempty"` // "p50" or "p95" (default: "p95")
-	LoadAlertDelaySec       int    `json:"load_alert_delay_sec"`             // seconds before CPU/memory alert fires (default: 60)
-	InputDelayAlertDelaySec int    `json:"input_delay_alert_delay_sec"`      // seconds before input delay alert fires (default: 90)
+	LoadAlertDelaySec       int    `json:"load_alert_delay_sec"`             // seconds before CPU/memory alert fires (default: 120)
+	InputDelayAlertDelaySec int    `json:"input_delay_alert_delay_sec"`      // seconds before input delay alert fires (default: 180)
 	CollectRemoteFX         bool   `json:"collect_remotefx"`                 // default: false
 	CollectPerSession       bool   `json:"collect_per_session"`              // default: true
-	SampleIntervalSec       int    `json:"sample_interval_sec"`              // default: 30, range 10–300
+	SampleIntervalSec       int    `json:"sample_interval_sec"`              // default: 60, range 10–300
 }
 
 // RetentionConfig holds per-tier retention windows for the telemetry store.
@@ -182,8 +182,8 @@ type RetentionConfig struct {
 
 // TelemetryConfig holds background-worker cadence settings.
 type TelemetryConfig struct {
-	AggregatorIntervalSeconds int `json:"aggregator_interval_seconds"` // aggregator tick, default 60
-	RetentionIntervalMinutes  int `json:"retention_interval_minutes"`  // retention sweep cadence, default 15
+	AggregatorIntervalSeconds int `json:"aggregator_interval_seconds"` // aggregator tick, default 300
+	RetentionIntervalMinutes  int `json:"retention_interval_minutes"`  // retention sweep cadence, default 60
 }
 
 // EvtSpikeConfig holds event-log anomaly detection settings. Zero value is
