@@ -82,6 +82,19 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 	var status, message string
 	var exitCode int
 	status, message, exitCode = dc.ClassifyState(drainActive, stateDur, cfg.GracePeriod)
+	statusChanged := prev == nil || transition
+	if prev != nil && !transition {
+		previousDuration := prev.Timestamp.Sub(prev.StateSince)
+		if previousDuration < 0 {
+			previousDuration = 0
+		}
+		previousStatus, _, _ := dc.ClassifyState(
+			prev.DrainMode != dc.AllowAll,
+			previousDuration.Truncate(time.Second),
+			cfg.GracePeriod,
+		)
+		statusChanged = previousStatus != status
+	}
 
 	// Session tracking.
 	slog.Debug("diag: check=get_sessions")
@@ -161,11 +174,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 		}
 	}
 
-	if state.Mode == dc.AllowAll {
-		slog.Info("drain_mode", "mode", state.Mode, "exit", exitCode)
-	} else {
-		slog.Warn("drain_mode", "mode", state.Mode, "exit", exitCode)
-	}
+	slog.Debug("drain mode sampled", "mode", state.Mode, "exit", exitCode)
 
 	// Emit state-specific ETW events via slog with event_id attribute.
 	if transition {
@@ -178,24 +187,31 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 			slog.Int("event_id", EvtTransition))
 	}
 
-	switch status {
-	case "Alert":
-		cb := changedBy
-		if cb == "" {
-			cb = "unknown"
+	if !statusChanged {
+		slog.Debug("drain state unchanged",
+			"mode", state.Mode,
+			"status", status,
+			"duration", stateDur)
+	} else {
+		switch status {
+		case "Alert":
+			cb := changedBy
+			if cb == "" {
+				cb = "unknown"
+			}
+			slog.Error(fmt.Sprintf("ALERT: Drain mode active on %s for %s, exceeding grace period of %s. Mode: %s. Changed by: %s.",
+				state.Host, stateDur, cfg.GracePeriod, state.Mode, cb),
+				slog.Int("event_id", EvtCheckAlert))
+		case "Grace":
+			remaining := cfg.GracePeriod - stateDur
+			slog.Warn(fmt.Sprintf("Drain mode active on %s, within grace period (%s remaining). Mode: %s.",
+				state.Host, remaining.Truncate(time.Second), state.Mode),
+				slog.Int("event_id", EvtCheckGrace))
+		default:
+			slog.Info(fmt.Sprintf("Drain mode check: %s on %s. All connections allowed. State duration: %s.",
+				state.Mode, state.Host, stateDur),
+				slog.Int("event_id", EvtCheckHealthy))
 		}
-		slog.Error(fmt.Sprintf("ALERT: Drain mode active on %s for %s, exceeding grace period of %s. Mode: %s. Changed by: %s.",
-			state.Host, stateDur, cfg.GracePeriod, state.Mode, cb),
-			slog.Int("event_id", EvtCheckAlert))
-	case "Grace":
-		remaining := cfg.GracePeriod - stateDur
-		slog.Warn(fmt.Sprintf("Drain mode active on %s, within grace period (%s remaining). Mode: %s.",
-			state.Host, remaining.Truncate(time.Second), state.Mode),
-			slog.Int("event_id", EvtCheckGrace))
-	default:
-		slog.Info(fmt.Sprintf("Drain mode check: %s on %s. All connections allowed. State duration: %s.",
-			state.Mode, state.Host, stateDur),
-			slog.Int("event_id", EvtCheckHealthy))
 	}
 
 	// Build CheckResult for notifications and dashboard reporting.
@@ -268,7 +284,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 	// edge-detection bookkeeping — must run every tick or the next "enter"
 	// edge is lost after a targetless period.
 	if perfSnap != nil && perfTriggerState != nil {
-		perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
+		perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState, cfg.PollInterval)
 		triggers = append(triggers, perfTriggers...)
 	}
 

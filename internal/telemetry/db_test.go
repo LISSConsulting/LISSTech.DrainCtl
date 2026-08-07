@@ -133,8 +133,14 @@ func TestOpen_PragmasAppliedToEveryConnection(t *testing.T) {
 		if got := query("busy_timeout"); got != 5000 {
 			t.Errorf("%s: busy_timeout = %d, want 5000", connName, got)
 		}
-		if got := query("temp_store"); got != 2 {
-			t.Errorf("%s: temp_store = %d, want 2 (MEMORY)", connName, got)
+		if got := query("temp_store"); got != 1 {
+			t.Errorf("%s: temp_store = %d, want 1 (FILE)", connName, got)
+		}
+		if got := query("cache_size"); got != -2048 {
+			t.Errorf("%s: cache_size = %d, want -2048 (2 MiB)", connName, got)
+		}
+		if got := query("mmap_size"); got != 0 {
+			t.Errorf("%s: mmap_size = %d, want 0", connName, got)
 		}
 	}
 
@@ -435,15 +441,8 @@ func TestReaderPoolBounded(t *testing.T) {
 		if stats.OpenConnections > readerMaxOpenConns {
 			t.Errorf("OpenConnections = %d, want <= %d", stats.OpenConnections, readerMaxOpenConns)
 		}
-		// database/sql does not expose the configured MaxIdleConns directly.
-		// Assert it indirectly: with MaxIdleConns == MaxOpenConns, no idle
-		// connection should ever be closed by the idle cap (MaxIdleClosed > 0
-		// would mean MaxIdleConns < MaxOpenConns).
-		if stats.MaxIdleClosed != 0 {
-			t.Errorf("MaxIdleClosed = %d, want 0 (MaxIdleConns must equal MaxOpenConns)", stats.MaxIdleClosed)
-		}
-		if stats.Idle > readerMaxOpenConns {
-			t.Errorf("Idle = %d, want <= %d", stats.Idle, readerMaxOpenConns)
+		if stats.Idle > readerMaxIdleConns {
+			t.Errorf("Idle = %d, want <= %d", stats.Idle, readerMaxIdleConns)
 		}
 	}
 

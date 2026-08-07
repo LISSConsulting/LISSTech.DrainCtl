@@ -69,3 +69,28 @@ func TestBackoffDuration_ZeroBaseFallsBackToDefault(t *testing.T) {
 		t.Errorf("backoffDuration(0, 0) = %s, want configFetchBase %s", got, configFetchBase)
 	}
 }
+
+func TestRemoteConfigFetchDue(t *testing.T) {
+	now := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	interval := 5 * time.Minute
+	tests := []struct {
+		name     string
+		last     time.Time
+		failures int
+		want     bool
+	}{
+		{name: "bootstrap", want: true},
+		{name: "success before interval", last: now.Add(-interval + time.Second), want: false},
+		{name: "success at interval", last: now.Add(-interval), want: true},
+		{name: "failure before backoff", last: now.Add(-2*interval + time.Second), failures: 1, want: false},
+		{name: "failure at backoff", last: now.Add(-2 * interval), failures: 1, want: true},
+		{name: "clock moved backward", last: now.Add(time.Second), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := remoteConfigFetchDue(now, tt.last, tt.failures, interval); got != tt.want {
+				t.Errorf("remoteConfigFetchDue() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -185,13 +185,15 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
-	// Session revalidation: check the session store periodically so that a
-	// deleted or expired session terminates the stream within
-	// sseSessionCheckInterval rather than persisting until the TCP connection
-	// drops. The browser then reconnects and receives a 401 immediately.
-	// Skipped when sessionToken is empty (test requests, dev mode).
-	sessionCheck := time.NewTicker(sseSessionCheckInterval)
-	defer sessionCheck.Stop()
+	// Session revalidation is disabled entirely without a token (tests and
+	// development mode) so those streams do not retain an unused runtime timer.
+	var sessionCheck *time.Ticker
+	var sessionCheckC <-chan time.Time
+	if sessionToken != "" {
+		sessionCheck = time.NewTicker(sseSessionCheckInterval)
+		sessionCheckC = sessionCheck.C
+		defer sessionCheck.Stop()
+	}
 
 	for {
 		select {
@@ -199,7 +201,7 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-done:
 			return
-		case <-sessionCheck.C:
+		case <-sessionCheckC:
 			if sessionToken != "" && ds.sessionStore.Get(sessionToken) == nil {
 				slog.Info("sse: closing stream — session expired or deleted", "id", id)
 				return
