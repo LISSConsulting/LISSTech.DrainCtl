@@ -4,6 +4,7 @@ package perfmon
 
 import (
 	"testing"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
@@ -41,13 +42,13 @@ func TestCPUWarning_RequiresConsecutivePolls(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{CPUPct: 75, MemTotalMB: 16000, MemAvailMB: 10000}
 	for i := 0; i < defaultLoadPolls-1; i++ {
-		triggers := EvaluateThresholds(snap, cfg, state)
+		triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 		if hasTrigger(triggers, dc.TriggerCPUWarning) {
 			t.Errorf("CPU warning should not fire on poll %d (threshold=%d)", i+1, defaultLoadPolls)
 		}
 	}
 
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	if !hasTrigger(triggers, dc.TriggerCPUWarning) {
 		t.Errorf("CPU warning should fire on poll %d", defaultLoadPolls)
 	}
@@ -58,13 +59,13 @@ func TestCPUWarning_ResetsOnDrop(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{CPUPct: 75, MemTotalMB: 16000, MemAvailMB: 10000}
-	EvaluateThresholds(snap, cfg, state)
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	snap.CPUPct = 50
-	EvaluateThresholds(snap, cfg, state)
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	snap.CPUPct = 75
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	if hasTrigger(triggers, dc.TriggerCPUWarning) {
 		t.Error("CPU warning should not fire after reset")
 	}
@@ -76,9 +77,9 @@ func TestCPUCritical_OverridesWarning(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{CPUPct: 90, MemTotalMB: 16000, MemAvailMB: 10000}
 	for i := 0; i < defaultLoadPolls-1; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if hasTrigger(triggers, dc.TriggerCPUWarning) {
 		t.Error("CPU warning should not fire when critical is active")
@@ -96,13 +97,13 @@ func TestMemoryWarning_RequiresConsecutivePolls(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{MemTotalMB: 16000, MemAvailMB: 2400}
 	for i := 0; i < defaultLoadPolls-1; i++ {
-		triggers := EvaluateThresholds(snap, cfg, state)
+		triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 		if hasTrigger(triggers, dc.TriggerMemoryWarning) {
 			t.Errorf("Memory warning should not fire on poll %d (threshold=%d)", i+1, defaultLoadPolls)
 		}
 	}
 
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	if !hasTrigger(triggers, dc.TriggerMemoryWarning) {
 		t.Errorf("Memory warning should fire on poll %d", defaultLoadPolls)
 	}
@@ -114,9 +115,9 @@ func TestMemoryCritical_FivePercentFree(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{MemTotalMB: 16000, MemAvailMB: 800}
 	for i := 0; i < defaultLoadPolls-1; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if !hasTrigger(triggers, dc.TriggerMemoryCritical) {
 		t.Error("Memory critical should fire at 5% free")
@@ -128,8 +129,8 @@ func TestMemory_HealthyDoesNotFire(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{MemTotalMB: 16000, MemAvailMB: 8000}
-	EvaluateThresholds(snap, cfg, state)
-	triggers := EvaluateThresholds(snap, cfg, state)
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if hasTrigger(triggers, dc.TriggerMemoryWarning) || hasTrigger(triggers, dc.TriggerMemoryCritical) {
 		t.Error("No memory trigger should fire at 50% free")
@@ -146,14 +147,14 @@ func TestInputDelayWarning_RequiresConsecutivePolls(t *testing.T) {
 
 	// Should NOT fire before reaching defaultDelayPolls.
 	for i := 0; i < defaultDelayPolls-1; i++ {
-		triggers := EvaluateThresholds(snap, cfg, state)
+		triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 		if hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 			t.Errorf("Input delay warning should not fire on poll %d (threshold=%d)", i+1, defaultDelayPolls)
 		}
 	}
 
 	// Should fire on the Nth consecutive poll.
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	if !hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 		t.Errorf("Input delay warning should fire on poll %d", defaultDelayPolls)
 	}
@@ -164,13 +165,13 @@ func TestInputDelayWarning_ResetsOnDrop(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{InputDelayP95: 60, MemTotalMB: 16000, MemAvailMB: 10000}
-	EvaluateThresholds(snap, cfg, state) // count=1
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second) // count=1
 
-	snap.InputDelayP95 = 10              // drop below threshold
-	EvaluateThresholds(snap, cfg, state) // count reset to 0
+	snap.InputDelayP95 = 10                                                                // drop below threshold
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second) // count reset to 0
 
 	snap.InputDelayP95 = 60
-	triggers := EvaluateThresholds(snap, cfg, state) // count=1 again
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second) // count=1 again
 	if hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 		t.Error("Input delay warning should not fire after reset")
 	}
@@ -182,9 +183,9 @@ func TestInputDelayCritical_OverridesWarning(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{InputDelayP95: 120, MemTotalMB: 16000, MemAvailMB: 10000}
 	for i := 0; i < defaultDelayPolls-1; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state) // Nth poll — fires
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second) // Nth poll — fires
 
 	if hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 		t.Error("Input delay warning should not fire when critical is active")
@@ -199,8 +200,8 @@ func TestInputDelay_BelowThreshold(t *testing.T) {
 	state := &PerfTriggerState{}
 
 	snap := &dc.PerfSnapshot{InputDelayP95: 30, MemTotalMB: 16000, MemAvailMB: 10000}
-	EvaluateThresholds(snap, cfg, state)
-	triggers := EvaluateThresholds(snap, cfg, state)
+	EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if hasTrigger(triggers, dc.TriggerInputDelayWarning) || hasTrigger(triggers, dc.TriggerInputDelayCritical) {
 		t.Error("No input delay trigger should fire below threshold")
@@ -219,9 +220,9 @@ func TestInputDelay_P50Evaluation(t *testing.T) {
 		MemAvailMB:    10000,
 	}
 	for i := 0; i < defaultDelayPolls; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if !hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 		t.Error("Input delay warning should fire based on P50 when configured")
@@ -240,9 +241,9 @@ func TestInputDelay_P95IsDefault(t *testing.T) {
 		MemAvailMB:    10000,
 	}
 	for i := 0; i < defaultDelayPolls; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if hasTrigger(triggers, dc.TriggerInputDelayWarning) {
 		t.Error("Input delay warning should evaluate P95 by default, not P50")
@@ -259,9 +260,9 @@ func TestDisabledThreshold_NegativeOne(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{CPUPct: 99, MemTotalMB: 16000, MemAvailMB: 10000}
 	for i := 0; i < defaultLoadPolls; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if hasTrigger(triggers, dc.TriggerCPUWarning) || hasTrigger(triggers, dc.TriggerCPUCritical) {
 		t.Error("CPU triggers should not fire when disabled (-1)")
@@ -278,12 +279,22 @@ func TestCustomThresholds(t *testing.T) {
 
 	snap := &dc.PerfSnapshot{CPUPct: 55, MemTotalMB: 16000, MemAvailMB: 10000}
 	for i := 0; i < defaultLoadPolls-1; i++ {
-		EvaluateThresholds(snap, cfg, state)
+		EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	}
-	triggers := EvaluateThresholds(snap, cfg, state)
+	triggers := EvaluateThresholds(snap, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 
 	if !hasTrigger(triggers, dc.TriggerCPUWarning) {
 		t.Error("CPU warning should fire with custom 50% threshold at 55% CPU")
+	}
+}
+func TestEvaluateThresholds_UsesEvaluationCadence(t *testing.T) {
+	cfg := defaultPerfCfg()
+	state := &PerfTriggerState{}
+	snap := &dc.PerfSnapshot{CPUPct: 75, MemTotalMB: 16000, MemAvailMB: 10000}
+
+	triggers := EvaluateThresholds(snap, cfg, state, 300*time.Second)
+	if !hasTrigger(triggers, dc.TriggerCPUWarning) {
+		t.Error("120-second sustain window should fire on a 300-second evaluation cadence")
 	}
 }
 
@@ -293,7 +304,7 @@ func TestEvaluateThresholds_NilSnapshot(t *testing.T) {
 	cfg := defaultPerfCfg()
 	state := &PerfTriggerState{}
 
-	triggers := EvaluateThresholds(nil, cfg, state)
+	triggers := EvaluateThresholds(nil, cfg, state, time.Duration(cfg.SampleIntervalSec)*time.Second)
 	if len(triggers) != 0 {
 		t.Error("nil snapshot should return no triggers")
 	}

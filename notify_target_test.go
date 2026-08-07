@@ -3,6 +3,7 @@
 package drainctl
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -233,9 +234,8 @@ func TestAppendNotifyTarget_EmailFields(t *testing.T) {
 	}
 }
 
-// TestAppendNotifyTarget_DPAPIRoundTrip verifies that a plaintext secret set
-// via the shared API gets DPAPI-encrypted on SaveConfig and decrypts back to
-// the original value.
+// TestAppendNotifyTarget_DPAPIRoundTrip verifies that SaveConfig encrypts the
+// persisted copy without replacing the runtime plaintext credential.
 func TestAppendNotifyTarget_DPAPIRoundTrip(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 	cfg := DefaultConfig()
@@ -251,12 +251,25 @@ func TestAppendNotifyTarget_DPAPIRoundTrip(t *testing.T) {
 	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
-	if !strings.HasPrefix(cfg.Notifications[0].Secret, dpapiPrefix) {
-		t.Fatalf("Secret should be DPAPI-encrypted after Save, got %q", cfg.Notifications[0].Secret)
-	}
-	cfg.DecryptSecrets()
 	if cfg.Notifications[0].Secret != "hunter2" {
-		t.Errorf("decrypted secret = %q, want hunter2", cfg.Notifications[0].Secret)
+		t.Fatalf("runtime secret = %q after SaveConfig, want plaintext", cfg.Notifications[0].Secret)
+	}
+	data, err := os.ReadFile(DefaultConfigPath())
+	if err != nil {
+		t.Fatalf("ReadFile config: %v", err)
+	}
+	if strings.Contains(string(data), "hunter2") {
+		t.Fatal("persisted config contains plaintext secret")
+	}
+	if !strings.Contains(string(data), dpapiPrefix) {
+		t.Fatal("persisted config does not contain DPAPI ciphertext")
+	}
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.Notifications[0].Secret != "hunter2" {
+		t.Errorf("loaded secret = %q, want hunter2", loaded.Notifications[0].Secret)
 	}
 }
 

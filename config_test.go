@@ -1754,11 +1754,9 @@ func TestSaveConfig_RenameError(t *testing.T) {
 	}
 }
 
-// TestRestrictConfigACL_NonElevatedReturnsNil confirms that the new
-// error-returning signature still no-ops cleanly in non-elevated test/dev
-// contexts (icacls /inheritance:r would lock the current user out
-// otherwise). Locks in the non-elevated short-circuit so a future change
-// can't accidentally fail a unit test run on a developer workstation.
+// TestRestrictConfigACL_NonElevatedReturnsNil locks in the development
+// short-circuit: applying the production DACL without elevation would lock the
+// current user out of config.json.
 func TestRestrictConfigACL_NonElevatedReturnsNil(t *testing.T) {
 	if isElevated() {
 		t.Skip("test only meaningful when running non-elevated")

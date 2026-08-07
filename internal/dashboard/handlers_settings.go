@@ -112,6 +112,40 @@ func applySecretPolicy(newTarget *dc.NotificationTarget, existingSecret string, 
 		newTarget.Secret = existingSecret
 	}
 }
+func validatePerformanceConfig(p dc.PerformanceConfig) error {
+	percentages := []struct {
+		name  string
+		value int
+	}{
+		{"cpu_warn_pct", p.CPUWarnPct},
+		{"cpu_crit_pct", p.CPUCritPct},
+		{"mem_warn_pct", p.MemWarnPct},
+		{"mem_crit_pct", p.MemCritPct},
+	}
+	for _, field := range percentages {
+		if field.value < -1 || field.value > 100 {
+			return fmt.Errorf("%s must be -1 or 0–100", field.name)
+		}
+	}
+	if p.InputDelayWarnMS < -1 {
+		return fmt.Errorf("input_delay_warn_ms must be -1 or non-negative")
+	}
+	if p.InputDelayCritMS < -1 {
+		return fmt.Errorf("input_delay_crit_ms must be -1 or non-negative")
+	}
+	if p.CPUWarnPct > 0 && p.CPUCritPct > 0 && p.CPUWarnPct >= p.CPUCritPct {
+		return fmt.Errorf("cpu_warn_pct must be less than cpu_crit_pct")
+	}
+	// Memory is stored as percentage free, so the warning threshold must be
+	// higher than the critical threshold (for example 20% free, then 10%).
+	if p.MemWarnPct > 0 && p.MemCritPct > 0 && p.MemWarnPct <= p.MemCritPct {
+		return fmt.Errorf("mem_warn_pct must be greater than mem_crit_pct")
+	}
+	if p.InputDelayWarnMS > 0 && p.InputDelayCritMS > 0 && p.InputDelayWarnMS >= p.InputDelayCritMS {
+		return fmt.Errorf("input_delay_warn_ms must be less than input_delay_crit_ms")
+	}
+	return nil
+}
 
 // handleGetSettings returns the current dashboard settings as JSON.
 func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
@@ -237,6 +271,10 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 		if in.Performance.InputDelayAlertDelaySec < 0 {
 			http.Error(w, "input_delay_alert_delay_sec must be non-negative", http.StatusBadRequest)
+			return
+		}
+		if err := validatePerformanceConfig(*in.Performance); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
@@ -19,6 +20,31 @@ import (
 
 // Compile-time guarantee: serviceHandler satisfies pipe.PipeHandler.
 var _ pipe.PipeHandler = (*serviceHandler)(nil)
+
+type dashboardStopRecorder struct {
+	stopped bool
+}
+
+func (s *dashboardStopRecorder) Stop() {
+	s.stopped = true
+}
+
+func TestDisableDashboardRuntimeStopsAndUnpublishesState(t *testing.T) {
+	cfg := dc.DefaultConfig().ToServiceConfig()
+	handler := &serviceHandler{}
+	handler.publish(cfg, &dashboard.ServerState{})
+	stop := &dashboardStopRecorder{}
+
+	disableDashboardRuntime(stop, handler, cfg)
+
+	if !stop.stopped {
+		t.Fatal("dashboard subsystem was not stopped")
+	}
+	snapshot := handler.state.Load()
+	if snapshot == nil || snapshot.dashState != nil {
+		t.Fatalf("published dashboard state = %v, want nil", snapshot)
+	}
+}
 
 // newHandlerStore opens a telemetry.DB backed by a fresh drainctl.db in a
 // temp dir and returns a serviceHandler bound to its AuditStore. Caller
@@ -38,7 +64,7 @@ func newHandlerStore(t *testing.T) (*serviceHandler, *telemetry.AuditStore, func
 	}
 	h := &serviceHandler{audit: audit}
 	cfg := dc.DefaultConfig().ToServiceConfig()
-	h.cfg.Store(&cfg)
+	h.publish(cfg, nil)
 	cleanup := func() {
 		_ = audit.Close()
 		_ = db.Close()
@@ -139,7 +165,7 @@ func TestHandleHistory_EnrichesFromMetrics(t *testing.T) {
 
 	h := &serviceHandler{audit: audit, metrics: ms}
 	cfg := dc.DefaultConfig().ToServiceConfig()
-	h.cfg.Store(&cfg)
+	h.publish(cfg, nil)
 
 	transitionTs := time.Now().UTC().Truncate(time.Millisecond)
 	host := "SRV01"

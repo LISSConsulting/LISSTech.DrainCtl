@@ -492,27 +492,23 @@ func summableCase(sumExpr, avgExpr string) string {
 const MinRawFleetBucketMs = 30_000
 
 // DefaultRawFleetBucketMs is used when a caller doesn't have — or can't
-// pass — the live sample_interval_sec from config. Matches the default
-// sample_interval_sec doubled (60 s). Handlers that own config should pass
-// 2 × sample_interval × 1000 directly so the bucket scales with operator
-// configuration; this constant is the safe fallback for tests and
-// bootstrap paths that run before config is loaded.
-const DefaultRawFleetBucketMs = 60_000
+// pass — the live sample_interval_sec from config. It is twice the default
+// 60-second sampling cadence so hosts at opposite poll phases still co-locate.
+// This constant is the safe fallback for tests and bootstrap paths that run
+// before config is loaded.
+const DefaultRawFleetBucketMs = 120_000
 
 // buildRawQueryFleet groups metrics_raw samples into cross-host buckets
 // sized to match the agent sample interval. Host agents poll every
-// sample_interval_sec (default 30, range 10–300) but clocks drift and
+// sample_interval_sec (default 60, range 10–300) but clocks drift and
 // pipelines stagger, so per-host samples for the same logical observation
 // land at different ts values. Grouping by raw ts produces one row per host
 // per instant, collapsing the fleet aggregate to a single host's value —
 // Sessions tile showed "1" when two servers each had one session, memory
 // zig-zagged between per-host values, etc.
 //
-// bucketMs should be the current sample_interval_sec × 1000 so every host's
-// samples for a given poll cycle fall into the same bucket. Passing the
-// configured interval (rather than a fixed default) means raising the
-// interval to 60s widens the bucket in lock-step; a fixed 30s bucket would
-// reintroduce per-host collapse at 60s intervals. Values below
+// bucketMs should be twice the current sample_interval_sec so hosts at
+// opposite poll phases still land together. Values below
 // MinRawFleetBucketMs are clamped up.
 func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string, bucketMs int64) (string, []any) {
 	if bucketMs < MinRawFleetBucketMs {
@@ -786,9 +782,9 @@ func (s *MetricsStore) BoundsForTierFleet(ctx context.Context, hosts []string, t
 // per time bucket across the fleet. Returns an empty Series when hosts is empty
 // or no data exists in the window — consistent with per-host QueryRange behaviour.
 //
-// rawBucketMs sizes the cross-host grouping window at the raw tier. Pass the
-// current sample_interval_sec × 1000 so per-host samples from the same poll
-// cycle co-locate. Zero or sub-minimum values are clamped up to
+// rawBucketMs sizes the cross-host grouping window at the raw tier. Pass twice
+// the current sample_interval_sec × 1000 so hosts at opposite poll phases
+// co-locate. Zero or sub-minimum values are clamped up to
 // MinRawFleetBucketMs by the underlying query builder. Ignored for non-raw
 // tiers (those use their own fixed bucketing: 1-min virtual groups on
 // metrics_raw, or the precomputed bucket_ts from metrics_5min/metrics_hourly).

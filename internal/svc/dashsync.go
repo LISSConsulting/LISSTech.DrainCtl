@@ -45,6 +45,23 @@ func backoffDuration(base time.Duration, failures int) time.Duration {
 	return d
 }
 
+// remoteConfigFetchDue reports whether a dashboard settings request should run.
+// Successful requests use the configured cadence; consecutive failures use the
+// exponential backoff. A zero last-fetch time forces bootstrap immediately.
+func remoteConfigFetchDue(now, lastFetch time.Time, failures int, interval time.Duration) bool {
+	if lastFetch.IsZero() {
+		return true
+	}
+	elapsed := now.Sub(lastFetch)
+	if elapsed < 0 {
+		return false
+	}
+	if failures > 0 {
+		return elapsed >= backoffDuration(interval, failures)
+	}
+	return elapsed >= backoffDuration(interval, 0)
+}
+
 // registerWithDashboard registers this host with the dashboard and performs
 // auto-pin if enabled. Returns true on success. Safe to call multiple times;
 // the dashboard treats re-registration as a no-op for already-known hosts.

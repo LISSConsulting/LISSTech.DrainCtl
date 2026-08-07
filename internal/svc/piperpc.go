@@ -32,20 +32,29 @@ type observation struct {
 	ChangedBy  string
 }
 
+// handlerSnapshot is immutable after publication. Config values are copied so
+// reloads cannot race pipe requests; dashboard state is replaced atomically
+// when the listener starts or stops.
+type handlerSnapshot struct {
+	cfg       dc.ServiceConfig
+	dashState *dashboard.ServerState
+}
+
 // serviceHandler is the pipe handler bridge between the service state
 // and the named pipe server.
-// cfg is accessed from two goroutines (Execute loop + pipe server) and
-// must be read/written via atomic.Pointer to avoid a data race.
 type serviceHandler struct {
 	audit        *telemetry.AuditStore
 	metrics      *telemetry.MetricsStore // nil is tolerated in tests; HandleHistory skips perf enrichment
 	observed     atomic.Pointer[observation]
-	cfg          atomic.Pointer[dc.ServiceConfig]
-	dashState    *dashboard.ServerState // nil if dashboard not enabled
+	state        atomic.Pointer[handlerSnapshot]
 	lastPerf     atomic.Pointer[dc.PerfSnapshot]
 	lastSessions atomic.Pointer[dc.SessionSummary]
 	evtSpikeSub  atomic.Pointer[evtspike.Subsystem] // nil while evtspike subsystem has not been constructed
 	registration *registrationSubsystem
+}
+
+func (h *serviceHandler) publish(cfg dc.ServiceConfig, dashState *dashboard.ServerState) {
+	h.state.Store(&handlerSnapshot{cfg: cfg, dashState: dashState})
 }
 
 func (h *serviceHandler) HandleStatus() *dc.CheckResult {
@@ -60,7 +69,17 @@ func (h *serviceHandler) HandleStatus() *dc.CheckResult {
 		}
 	}
 
-	gp := h.cfg.Load().GracePeriod
+	snapshot := h.state.Load()
+	if snapshot == nil {
+		return &dc.CheckResult{
+			Version:   dc.Version,
+			Timestamp: time.Now(),
+			Status:    "Error",
+			Message:   "service configuration unavailable",
+			ExitCode:  2,
+		}
+	}
+	gp := snapshot.cfg.GracePeriod
 
 	res := &dc.CheckResult{
 		Version:            dc.Version,
@@ -230,19 +249,21 @@ func auditFromTelemetry(r telemetry.AuditRecord) dc.AuditRecord {
 }
 
 func (h *serviceHandler) HandleServers() json.RawMessage {
-	if h.dashState == nil {
+	snapshot := h.state.Load()
+	if snapshot == nil || snapshot.dashState == nil {
 		return nil
 	}
-	all := h.dashState.All()
+	all := snapshot.dashState.All()
 	raw, _ := json.Marshal(all)
 	return raw
 }
 
 func (h *serviceHandler) HandleRemoveServer(hostname string) error {
-	if h.dashState == nil {
+	snapshot := h.state.Load()
+	if snapshot == nil || snapshot.dashState == nil {
 		return fmt.Errorf("dashboard not enabled")
 	}
-	if !h.dashState.Remove(hostname) {
+	if !snapshot.dashState.Remove(hostname) {
 		return fmt.Errorf("host not found: %s", hostname)
 	}
 	return nil
