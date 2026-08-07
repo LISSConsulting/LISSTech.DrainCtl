@@ -52,7 +52,8 @@ version:
 [extension('.ps1')]
 dev: (header "dev")
     Write-Host "`n⚠️  Building DEV mode (auth bypassed)" -ForegroundColor Yellow
-    & go build -trimpath -buildvcs=false -tags devmode -ldflags "-s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    $env:CGO_ENABLED = "1"
+    & go build -trimpath -buildvcs=false -tags devmode -ldflags "-linkmode=external -s -w" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — SSPI auth DISABLED" -ForegroundColor Yellow
@@ -135,7 +136,8 @@ cli: frontend-copy resource
     Write-Host "`n🔨 Building CLI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    $env:CGO_ENABLED = "1"
+    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
@@ -148,7 +150,8 @@ daemon: frontend-copy
     Write-Host "`n🔨 Building service host  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctld.exe" ./cmd/drainctld/
+    $env:CGO_ENABLED = "1"
+    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctld.exe" ./cmd/drainctld/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctld.exe").Length / 1MB)
     Write-Host "   drainctld.exe ($size) — v$ver" -ForegroundColor DarkGray
@@ -168,11 +171,26 @@ dll:
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.dll").Length / 1MB)
     Write-Host "   drainctl.dll ($size) — v$ver" -ForegroundColor DarkGray
 
+# Verify PE hardening before binaries enter the PowerShell module or MSI.
+# External linking keeps the IAT in a read-only section; the Go linker does
+# not currently emit Control Flow Guard instrumentation (golang/go#35940).
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+pecheck: cli daemon dll
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🛡️ Verifying PE hardening  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    & "{{justfile_directory()}}/scripts/check-pe-hardening.ps1" @(
+        "{{bin_dir}}/drainctl.exe",
+        "{{bin_dir}}/drainctld.exe",
+        "{{bin_dir}}/drainctl.dll"
+    )
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Render the PS module manifest from its template and copy the .psm1.
 # ModuleVersion is injected from scripts/version.ps1.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-psmodule: cli daemon dll
+psmodule: pecheck
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n📦 Copying PowerShell module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1"
@@ -380,12 +398,14 @@ release-preflight:
 [extension('.ps1')]
 release: (header "release") release-preflight gotest psmodule sign-binaries msi sign-msi sign-release-manifest
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
+    $daemon = Get-Item "{{bin_dir}}/drainctld.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
     $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
     Write-Host ""
     Write-Host "🚀 Release complete" -ForegroundColor Green
     Write-Host ("   drainctl.exe  {0,5:N1} MB" -f ($exe.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   drainctld.exe {0,5:N1} MB" -f ($daemon.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   drainctl.dll  {0,5:N1} MB" -f ($dll.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   MSI           {0,5:N1} MB" -f ($msi.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host "   Version       $($vi.FileVersion)" -ForegroundColor DarkGray

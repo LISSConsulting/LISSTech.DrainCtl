@@ -13,7 +13,7 @@
         appendRecentSpike,
         removeEvtSpikeState,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics } from './lib/api.js';
+    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, settingsFromWire } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
     import { formatTime12 } from './lib/utils.js';
@@ -240,9 +240,7 @@
                 const cur = {
                     cpu: colorToLevel(getThresholdColor(sv.perf.cpu_pct, cpuTh.warn, cpuTh.crit)),
                     mem: colorToLevel(getThresholdColor(memUsedPct, memTh.warn, memTh.crit)),
-                    delay: colorToLevel(
-                        getThresholdColor(sv.perf.input_delay_p95_ms, delayTh.warn, delayTh.crit),
-                    ),
+                    delay: colorToLevel(getThresholdColor(sv.perf.input_delay_p95_ms, delayTh.warn, delayTh.crit)),
                 };
                 const prev = prevAlerts.get(sv.host) ?? { cpu: 'ok', mem: 'ok', delay: 'ok' };
 
@@ -255,13 +253,9 @@
                 for (const [key, label, val, unit] of checks) {
                     if (cur[key] === prev[key]) continue;
                     if (cur[key] === 'crit') {
-                        addEvent(
-                            serverEvent(evtTime, sv, `${label} critical — ${val.toFixed(1)}${unit}`, 'alert'),
-                        );
+                        addEvent(serverEvent(evtTime, sv, `${label} critical — ${val.toFixed(1)}${unit}`, 'alert'));
                     } else if (cur[key] === 'warn') {
-                        addEvent(
-                            serverEvent(evtTime, sv, `${label} warning — ${val.toFixed(1)}${unit}`, 'grace'),
-                        );
+                        addEvent(serverEvent(evtTime, sv, `${label} warning — ${val.toFixed(1)}${unit}`, 'grace'));
                     } else if (prev[key] !== 'ok') {
                         addEvent(serverEvent(evtTime, sv, `${label} recovered`, 'ok'));
                     }
@@ -289,7 +283,6 @@
                     });
                 }
             }
-
         } catch (e) {
             appState.connected = false;
             addEvent({
@@ -338,7 +331,9 @@
         if (!authState.username) return;
         untrack(() => refresh());
         const interval = setInterval(refresh, 30_000);
-        const onVisible = () => { if (!document.hidden) untrack(() => refresh()); };
+        const onVisible = () => {
+            if (!document.hidden) untrack(() => refresh());
+        };
         document.addEventListener('visibilitychange', onVisible);
         return () => {
             clearInterval(interval);
@@ -393,10 +388,7 @@
                             host: sv.host,
                             time: Date.now(),
                             cpu: sv.perf.cpu_pct,
-                            mem:
-                                sv.perf.mem_total_mb > 0
-                                    ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100
-                                    : 0,
+                            mem: sv.perf.mem_total_mb > 0 ? (1 - sv.perf.mem_avail_mb / sv.perf.mem_total_mb) * 100 : 0,
                             inputDelay: sv.perf.input_delay_p95_ms,
                             sessions: sv.sessions ?? 0,
                             diskQueue: sv.perf.disk_queue ?? 0,
@@ -426,13 +418,9 @@
                 } else if (event.type === 'recent_spike' && event.host && event.data) {
                     appendRecentSpike(event.host, event.data);
                 } else if (event.type === 'settings_update' && event.data) {
-                    // Go stores memory thresholds as % free; UI works in % used —
-                    // apply the same inversion that fetchSettings() does on REST load.
-                    const cfg = event.data;
-                    if (cfg.performance) {
-                        cfg.performance.mem_warn_pct = 100 - (cfg.performance.mem_warn_pct ?? 0);
-                        cfg.performance.mem_crit_pct = 100 - (cfg.performance.mem_crit_pct ?? 0);
-                    }
+                    // REST and SSE share one sentinel-aware conversion from Go's
+                    // % free memory thresholds to the UI's % used values.
+                    const cfg = settingsFromWire(event.data);
                     appState.config = cfg;
                     addEvent({
                         time: formatTime12(new Date(), { seconds: true }),
@@ -442,7 +430,9 @@
                         transition: false,
                     });
                 }
-            } catch (e) { console.warn('[SSE] malformed event, ignored:', e); }
+            } catch (e) {
+                console.warn('[SSE] malformed event, ignored:', e);
+            }
         };
 
         es.onerror = () => {
@@ -535,7 +525,8 @@
     }
 
     @keyframes spin {
-        to { transform: rotate(360deg); }
+        to {
+            transform: rotate(360deg);
+        }
     }
-
 </style>

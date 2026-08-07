@@ -329,38 +329,37 @@ func readPipeMessage(r io.Reader, initialBufSize int) ([]byte, error) {
 	if initialBufSize <= 0 {
 		initialBufSize = 4096
 	}
+	if initialBufSize > pipeMessageCap {
+		initialBufSize = pipeMessageCap
+	}
 
-	out := make([]byte, 0, initialBufSize)
-	chunkSize := initialBufSize
-
+	buf := make([]byte, initialBufSize)
+	used := 0
 	for {
-		if len(out) >= pipeMessageCap {
-			return nil, fmt.Errorf("pipe: message exceeds 1 MiB cap")
-		}
-		remaining := pipeMessageCap - len(out)
-		if chunkSize > remaining {
-			chunkSize = remaining
-		}
-		chunk := make([]byte, chunkSize)
-
-		n, err := r.Read(chunk)
-		if n > 0 {
-			out = append(out, chunk[:n]...)
-		}
-		switch {
-		case err == nil:
-			return out, nil
-		case errors.Is(err, io.EOF):
-			return out, nil
-		case errors.Is(err, windows.ERROR_MORE_DATA):
-			if len(out) >= pipeMessageCap {
+		if used == len(buf) {
+			if used >= pipeMessageCap {
 				return nil, fmt.Errorf("pipe: message exceeds 1 MiB cap")
 			}
-			if chunkSize < 32*1024 {
-				chunkSize *= 2
-				if chunkSize > 32*1024 {
-					chunkSize = 32 * 1024
-				}
+			growBy := len(buf)
+			if growBy > 32*1024 {
+				growBy = 32 * 1024
+			}
+			if growBy > pipeMessageCap-len(buf) {
+				growBy = pipeMessageCap - len(buf)
+			}
+			buf = append(buf, make([]byte, growBy)...)
+		}
+
+		n, err := r.Read(buf[used:])
+		used += n
+		switch {
+		case err == nil:
+			return buf[:used], nil
+		case errors.Is(err, io.EOF):
+			return buf[:used], nil
+		case errors.Is(err, windows.ERROR_MORE_DATA):
+			if used >= pipeMessageCap {
+				return nil, fmt.Errorf("pipe: message exceeds 1 MiB cap")
 			}
 			continue
 		default:

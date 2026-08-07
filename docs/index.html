@@ -844,41 +844,84 @@
                 gap: 22px;
                 align-items: stretch;
             }
+            .release-lede {
+                max-width: 720px;
+                margin: -8px 0 32px;
+                color: var(--muted);
+                font-size: 1.02rem;
+                line-height: 1.75;
+            }
             .release-grid {
                 display: grid;
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 18px;
+            }
+            .release-card {
+                position: relative;
+                min-height: 190px;
+                padding: 28px;
+                overflow: hidden;
+            }
+            .release-card::after {
+                content: attr(data-number);
+                position: absolute;
+                right: 18px;
+                bottom: -16px;
+                color: color-mix(in srgb, var(--accent) 12%, transparent);
+                font-family: 'Work Sans', sans-serif;
+                font-size: 6rem;
+                font-weight: 900;
+                line-height: 1;
+                pointer-events: none;
+            }
+            .release-card h3 {
+                position: relative;
+                z-index: 1;
+                max-width: 85%;
+                margin: 0 0 10px;
+                font-family: 'Work Sans', sans-serif;
+                font-size: 1.2rem;
+            }
+            .release-card p {
+                position: relative;
+                z-index: 1;
+                max-width: 88%;
+                margin: 0;
+                color: var(--muted);
+                font-size: 0.9rem;
+                line-height: 1.65;
+            }
+            .release-tag {
+                display: inline-block;
+                margin-bottom: 14px;
+                padding: 4px 10px;
+                border: 1px solid var(--accent);
+                border-radius: 999px;
+                color: var(--accent);
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.68rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+            .release-footer {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 14px;
+                margin-top: 28px;
+            }
+            .release-note {
+                color: var(--muted);
+                font-size: 0.82rem;
             }
             @media (max-width: 700px) {
                 .release-grid {
                     grid-template-columns: 1fr;
                 }
-            }
-            .release-card {
-                padding: 24px 28px;
-            }
-            .release-card h3 {
-                font-family: 'Work Sans', sans-serif;
-                font-size: 1.05rem;
-                margin: 0 0 12px;
-            }
-            .release-card ul {
-                margin: 0;
-                padding-left: 18px;
-                font-size: 0.88rem;
-                line-height: 1.7;
-            }
-            .release-tag {
-                display: inline-block;
-                font-family: 'JetBrains Mono', monospace;
-                font-size: 0.7rem;
-                font-weight: 700;
-                padding: 3px 10px;
-                margin-bottom: 10px;
-                background: var(--color-accent);
-                color: #fff;
-                border-radius: 4px;
-                letter-spacing: 0.04em;
+                .release-card {
+                    min-height: 0;
+                }
             }
             .install-cta {
                 margin-top: auto;
@@ -1653,23 +1696,49 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title">Current build &mdash; current dependencies, signed delivery, retained telemetry.</h2>
-                <div style="max-width:640px">
-                    <div class="card" style="padding:20px 24px">
-                        <ul style="margin:0;padding-left:20px;line-height:1.9;color:var(--fg)">
-                            <li><strong>Current supported toolchain.</strong> Go 1.26.5 and SQLite 1.56 power the service; WiX 7 packages the signed MSI; Node 24 LTS, pnpm 11, TypeScript 7, Svelte 5, and Vite 8 build the dashboard.</li>
-                            <li><strong>SQLite-backed dashboard history.</strong> Overview charts and per-host sparklines now cold-start from retained telemetry, not browser-local samples.</li>
-                            <li><strong>Signed auto-updates.</strong> The updater verifies the MSI signature and a release manifest bound to the MSI SHA-256.</li>
-                            <li><strong>Production-ready release channel.</strong> Signed stable builds are now GitHub&rsquo;s Latest release and the default target for installs and auto-updates.</li>
-                            <li><strong>LCI service migration.</strong> Dashboard, telemetry, watchers, pipe server, logging, selfmetrics, pprof, updater, spike forwarding, registration, bootstrap, and perf workers now have bounded start/stop lifetimes.</li>
-                            <li><strong>Service split.</strong> The Windows service code is split into a small entrypoint, service loop, pipe RPC, dashboard sync, perf supervisor, and evtspike supervisor files for lower-risk maintenance.</li>
-                            <li><strong>Retained chart windows.</strong> Fleet LOAD, Health Indicators, Sessions, RemoteFX, host LOAD, and event-spike swimlanes share the 5M / 1H / 1D / 3D / 5D vocabulary.</li>
-                            <li><strong>Hardened secrets and access.</strong> DPAPI-protected notification secrets, stricter config ACLs, and admin-gated privileged pipe verbs.</li>
-                        </ul>
-                    </div>
+                <h2 class="section-title serif section-title--italic">A quieter, safer release for every host.</h2>
+                <p class="release-lede">
+                    This release is about the work you do every day: keeping the farm visible, responding before users
+                    feel an issue, and changing settings without a maintenance window.
+                </p>
+                <div class="release-grid">
+                    <article class="card release-card" data-number="01">
+                        <span class="release-tag">Less overhead</span>
+                        <h3>Stay informed without taxing the server.</h3>
+                        <p>
+                            DrainCtl does less background work while idle, while drain-state changes still reach the
+                            audit trail immediately.
+                        </p>
+                    </article>
+                    <article class="card release-card" data-number="02">
+                        <span class="release-tag">Live control</span>
+                        <h3>Change monitoring without reinstalling.</h3>
+                        <p>
+                            Turn the dashboard on or off and tune alert thresholds live. Disabled alerts stay off, and
+                            sensible defaults remain intact.
+                        </p>
+                    </article>
+                    <article class="card release-card" data-number="03">
+                        <span class="release-tag">Reliable alerts</span>
+                        <h3>Trust the signal when pressure lasts.</h3>
+                        <p>
+                            CPU, memory, and input-delay alerts now honor the service&rsquo;s actual check cadence, so
+                            sustained conditions are evaluated when you expect.
+                        </p>
+                    </article>
+                    <article class="card release-card" data-number="04">
+                        <span class="release-tag">Safe upgrades</span>
+                        <h3>Keep your settings and history.</h3>
+                        <p>
+                            Signed in-place upgrades preserve notification targets, registered servers, dashboard
+                            history, and protected credentials.
+                        </p>
+                    </article>
                 </div>
-                <div style="margin-top:20px">
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">All releases &rarr;</a>
+                <div class="release-footer">
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill">Download latest release &rarr;</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">See all releases</a>
+                    <span class="release-note">Stable channel &middot; signed MSI &middot; in-place upgrade</span>
                 </div>
             </div>
         </section>

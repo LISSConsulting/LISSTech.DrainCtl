@@ -2,9 +2,9 @@
   "grace_period": 60,
   "retention_days": 90,
   "poll_interval": 300,
-  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\audit.jsonl",
-  "memory_limit_mb": 256,
-  "log_file_level": "debug",
+  "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\drainctl.db",
+  "memory_limit_mb": 32,
+  "log_file_level": "info",
   "log_event_level": "info",
   "notifications": [],
   "dashboard": {

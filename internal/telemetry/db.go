@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winacl"
 	"golang.org/x/sys/windows"
 	sqlite "modernc.org/sqlite"
 )
@@ -29,8 +29,11 @@ const (
 	walTruncateHoldoff   = time.Hour        // minimum gap between TRUNCATE escalations
 	readerMaxLifetime    = 60 * time.Second // max read-transaction lifetime (WAL pin guard)
 	checkpointDeadline   = 5 * time.Second  // per-checkpoint call budget
-	// readerMaxOpenConns bounds the dashboard reader pool — see docs/reviews/codex-2026-04-26-leak-perf-synthesis.md C1.
+	// Keep burst concurrency but retain one idle reader. Each modernc SQLite
+	// connection owns native state and a page cache; holding four idle readers
+	// wastes memory on agents between rare CLI/dashboard queries.
 	readerMaxOpenConns = 4
+	readerMaxIdleConns = 1
 )
 
 // DB holds the writer, reader, audit, and checkpoint sql.DB pools for drainctl.db.
@@ -53,9 +56,9 @@ var connectionPragmas = []string{
 	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 5000",
 	"PRAGMA wal_autocheckpoint = 1000",
-	"PRAGMA cache_size = -20480",
-	"PRAGMA temp_store = MEMORY",
-	"PRAGMA mmap_size = 67108864",
+	"PRAGMA cache_size = -2048",
+	"PRAGMA temp_store = FILE",
+	"PRAGMA mmap_size = 0",
 	"PRAGMA auto_vacuum = INCREMENTAL",
 }
 
@@ -66,7 +69,7 @@ var checkpointPragmas = []string{
 	"PRAGMA synchronous = NORMAL",
 	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 0",
-	"PRAGMA temp_store = MEMORY",
+	"PRAGMA temp_store = FILE",
 }
 
 // auditPragmas upgrades the audit write path to synchronous=FULL so that
@@ -78,7 +81,7 @@ var auditPragmas = []string{
 	"PRAGMA synchronous = FULL",
 	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 5000",
-	"PRAGMA temp_store = MEMORY",
+	"PRAGMA temp_store = FILE",
 }
 
 // readOnlyPragmas is applied on CLI fallback reads (tasks.md T028a,
@@ -89,9 +92,9 @@ var auditPragmas = []string{
 var readOnlyPragmas = []string{
 	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 5000",
-	"PRAGMA temp_store = MEMORY",
-	"PRAGMA cache_size = -20480",
-	"PRAGMA mmap_size = 67108864",
+	"PRAGMA temp_store = FILE",
+	"PRAGMA cache_size = -2048",
+	"PRAGMA mmap_size = 0",
 }
 
 // pragmaConnector implements driver.Connector so that every connection obtained
@@ -176,7 +179,7 @@ func Open(dataDir string) (*DB, error) {
 	reader := sql.OpenDB(connector)
 	reader.SetConnMaxLifetime(readerMaxLifetime)
 	reader.SetMaxOpenConns(readerMaxOpenConns)
-	reader.SetMaxIdleConns(readerMaxOpenConns)
+	reader.SetMaxIdleConns(readerMaxIdleConns)
 
 	auditConnector := &pragmaConnector{dsn: path, drv: drv, pragmas: auditPragmas}
 	auditDB := sql.OpenDB(auditConnector)
@@ -213,7 +216,10 @@ func Open(dataDir string) (*DB, error) {
 	db := &DB{writer: writer, reader: reader, auditDB: auditDB, checkpointDB: checkpointDB, path: path}
 
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		restrictFileACL(path + suffix)
+		if err := restrictFileACL(path + suffix); err != nil {
+			closeAll()
+			return nil, fmt.Errorf("telemetry: restrict ACL %s: %w", path+suffix, err)
+		}
 	}
 	return db, nil
 }
@@ -289,7 +295,7 @@ func OpenReadOnly(dataDir string) (*DB, error) {
 	reader := sql.OpenDB(connector)
 	reader.SetConnMaxLifetime(readerMaxLifetime)
 	reader.SetMaxOpenConns(readerMaxOpenConns)
-	reader.SetMaxIdleConns(readerMaxOpenConns)
+	reader.SetMaxIdleConns(readerMaxIdleConns)
 
 	// Force an actual connection so pragma failures and SQLite-level errors
 	// (e.g. a malformed -shm header that slipped past the stat check) surface
@@ -512,19 +518,22 @@ func seedMeta(db *sql.DB) error {
 	return nil
 }
 
-func restrictFileACL(path string) {
+func restrictFileACL(path string) error {
 	if !isElevated() {
-		return
+		return nil
 	}
-	cmds := [][]string{
-		{"icacls", path, "/inheritance:r"},
-		{"icacls", path, "/grant", "SYSTEM:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-6:(M)"},
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	for _, args := range cmds {
-		_ = winexec.Command(args[0], args[1:]...).Run()
-	}
+	serviceModify := windows.ACCESS_MASK(windows.GENERIC_READ | windows.GENERIC_WRITE | windows.GENERIC_EXECUTE | windows.DELETE)
+	return winacl.RestrictFile(path,
+		winacl.Grant{SIDType: windows.WinLocalSystemSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinBuiltinAdministratorsSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinServiceSid, Permissions: serviceModify},
+	)
 }
 
 func isElevated() bool {

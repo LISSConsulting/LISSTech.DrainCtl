@@ -370,6 +370,20 @@ func TestReadPipeMessage_HandlesServerSideMoreData(t *testing.T) {
 	}
 }
 
+func TestReadPipeMessage_SingleBufferForTypicalRequest(t *testing.T) {
+	var r strings.Reader
+	allocs := testing.AllocsPerRun(100, func() {
+		r.Reset(`{"cmd":"status"}`)
+		got, err := readPipeMessage(&r, 4096)
+		if err != nil || len(got) == 0 {
+			panic("readPipeMessage failed")
+		}
+	})
+	if allocs > 1 {
+		t.Errorf("allocations = %.0f, want at most one message buffer", allocs)
+	}
+}
+
 func TestReadPipeMessage_EnforcesOneMiBCap(t *testing.T) {
 	chunk := make([]byte, 300*1024)
 	for i := range chunk {
