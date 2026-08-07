@@ -284,7 +284,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 	// edge-detection bookkeeping — must run every tick or the next "enter"
 	// edge is lost after a targetless period.
 	if perfSnap != nil && perfTriggerState != nil {
-		perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState)
+		perfTriggers := perfmon.EvaluateThresholds(perfSnap, cfg.Performance, perfTriggerState, cfg.PollInterval)
 		triggers = append(triggers, perfTriggers...)
 	}
 

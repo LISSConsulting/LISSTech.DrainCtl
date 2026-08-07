@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winacl"
 	"golang.org/x/sys/windows"
 	sqlite "modernc.org/sqlite"
 )
@@ -216,7 +216,10 @@ func Open(dataDir string) (*DB, error) {
 	db := &DB{writer: writer, reader: reader, auditDB: auditDB, checkpointDB: checkpointDB, path: path}
 
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		restrictFileACL(path + suffix)
+		if err := restrictFileACL(path + suffix); err != nil {
+			closeAll()
+			return nil, fmt.Errorf("telemetry: restrict ACL %s: %w", path+suffix, err)
+		}
 	}
 	return db, nil
 }
@@ -515,19 +518,22 @@ func seedMeta(db *sql.DB) error {
 	return nil
 }
 
-func restrictFileACL(path string) {
+func restrictFileACL(path string) error {
 	if !isElevated() {
-		return
+		return nil
 	}
-	cmds := [][]string{
-		{"icacls", path, "/inheritance:r"},
-		{"icacls", path, "/grant", "SYSTEM:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-6:(M)"},
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	for _, args := range cmds {
-		_ = winexec.Command(args[0], args[1:]...).Run()
-	}
+	serviceModify := windows.ACCESS_MASK(windows.GENERIC_READ | windows.GENERIC_WRITE | windows.GENERIC_EXECUTE | windows.DELETE)
+	return winacl.RestrictFile(path,
+		winacl.Grant{SIDType: windows.WinLocalSystemSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinBuiltinAdministratorsSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinServiceSid, Permissions: serviceModify},
+	)
 }
 
 func isElevated() bool {

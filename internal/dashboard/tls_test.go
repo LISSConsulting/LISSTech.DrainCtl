@@ -23,8 +23,6 @@ import (
 
 // isElevated returns true when the current process token has the Administrators
 // group enabled — i.e. it is running in an elevated context.
-// writeRestrictedFile uses icacls to restrict the key file to SYSTEM +
-// Administrators; a non-elevated process cannot re-read the file afterwards.
 func isElevated() bool {
 	var tok windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok); err != nil {
@@ -323,12 +321,10 @@ func TestCertFingerprint_ValidCert(t *testing.T) {
 	}
 }
 
-// TestWriteRestrictedFile_HappyPath verifies that writeRestrictedFile writes the
-// file and applies the three icacls ACL commands without returning an error.
-// No elevation is required — the test creates a file in t.TempDir() which is
-// owned by the current user, so icacls can set permissions on it.
-// The file is NOT read back after the call because the restricted ACL (SYSTEM +
-// Administrators only) leaves the non-elevated test process without read access.
+// TestWriteRestrictedFile_HappyPath verifies that writeRestrictedFile writes
+// the file and applies its DACL without launching an external command. The
+// file is not read back because the restricted ACL may exclude the unelevated
+// test process.
 func TestWriteRestrictedFile_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "restricted.key")
@@ -340,9 +336,7 @@ func TestWriteRestrictedFile_HappyPath(t *testing.T) {
 }
 
 // TestWriteRestrictedFile_WriteError verifies that writeRestrictedFile returns
-// an error immediately when os.WriteFile fails — the icacls commands are never
-// reached. Blocking the path with a directory triggers "is a directory" from
-// os.WriteFile on both Windows and Unix.
+// before attempting to apply a DACL when the initial file write fails.
 func TestWriteRestrictedFile_WriteError(t *testing.T) {
 	dir := t.TempDir()
 	// Place a directory where the file should be created.
@@ -356,24 +350,15 @@ func TestWriteRestrictedFile_WriteError(t *testing.T) {
 	}
 }
 
-// TestWriteRestrictedFile_IcaclsCommandError verifies that writeRestrictedFile
-// returns an error (containing "icacls") when the icacls executable cannot be
-// found. The file is written successfully first (os.WriteFile uses Win32 APIs
-// directly, not PATH), then the first icacls invocation fails because PATH is
-// redirected to an empty directory.
-func TestWriteRestrictedFile_IcaclsCommandError(t *testing.T) {
+// TestWriteRestrictedFile_DoesNotDependOnPATH verifies that ACL application is
+// in-process rather than delegated to icacls.exe.
+func TestWriteRestrictedFile_DoesNotDependOnPATH(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.key")
-
-	// Redirect PATH to an empty temp directory — icacls is not present there.
 	t.Setenv("PATH", t.TempDir())
 
-	err := writeRestrictedFile(path, []byte("test key data"))
-	if err == nil {
-		t.Fatal("expected error when icacls cannot be found, got nil")
-	}
-	if !strings.Contains(err.Error(), "icacls") {
-		t.Errorf("error = %q, want 'icacls' in message", err.Error())
+	if err := writeRestrictedFile(path, []byte("test key data")); err != nil {
+		t.Fatalf("writeRestrictedFile with empty PATH: %v", err)
 	}
 }
 

@@ -389,10 +389,14 @@
             </p>
             <p>
                 Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">current stable MSI</a>.
-                Release installers are Authenticode-signed and accompanied by an Ed25519-signed manifest that binds the
-                release version to the MSI SHA-256. Existing installations upgrade in place; service configuration,
-                registered servers, and retained telemetry are preserved.
+                Every release is signed, upgrades in place, and keeps your service configuration, registered servers,
+                notification targets, and retained telemetry.
             </p>
+            <div class="callout">
+                <strong>What the current release improves:</strong> lower background overhead, live dashboard controls,
+                alert thresholds that preserve disabled and default states, more reliable local status requests, and
+                safer handling of saved credentials. No configuration migration is required.
+            </div>
 
             <h3>Interactive install</h3>
             <p>
@@ -2547,10 +2551,10 @@ if ($result.exit_code -ne 0) {
             <h2 id="auto-update">13. Auto-update</h2>
 
             <p>
-                The agent can self-update by polling GitHub releases on a daily cadence, verifying the release manifest,
-                verifying the MSI Authenticode signature against the LISS code-signing certificate, and running
-                <code>msiexec</code> silently. Auto-update is <strong>off by default</strong> &mdash; it does not contact
-                GitHub at all until the operator opts in.
+                DrainCtl can keep itself current on the stable release channel. When enabled, it checks once a day,
+                accepts only releases signed by LISS Consulting, upgrades silently, and keeps your configuration and
+                history. Auto-update is <strong>off by default</strong> &mdash; the service does not contact GitHub until
+                an operator opts in.
             </p>
 
             <h3>Enabling auto-update</h3>

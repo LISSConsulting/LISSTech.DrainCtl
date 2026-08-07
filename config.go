@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winacl"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -560,20 +560,9 @@ func (c *Config) Validate() {
 		}
 	}
 
-	// DPAPI-encrypt any plaintext secrets before writing to disk.
-	for i := range c.Notifications {
-		s := c.Notifications[i].Secret
-		if s == "" || strings.HasPrefix(s, dpapiPrefix) {
-			continue
-		}
-		ct, err := DPAPIEncrypt([]byte(s))
-		if err != nil {
-			slog.Default().Error("DPAPI encryption failed, secret will not be saved", "error", err)
-			c.Notifications[i].Secret = ""
-			continue
-		}
-		c.Notifications[i].Secret = dpapiPrefix + base64.StdEncoding.EncodeToString(ct)
-	}
+	// Secrets remain plaintext in runtime Config values. Persistence encrypts a
+	// private copy so saving cannot corrupt notification credentials still in
+	// use by the service.
 
 	// UpdateConfig: clamp Channel and PollInterval per spec 010 FR-001a / FR-003.
 	switch c.Update.Channel {
@@ -747,6 +736,41 @@ func loadConfigLocked() (*Config, error) {
 	slog.Default().Info("default config written", "path", path)
 	return cfg, nil
 }
+func cloneConfig(cfg *Config) *Config {
+	clone := *cfg
+	clone.Notifications = slices.Clone(cfg.Notifications)
+	for i := range clone.Notifications {
+		clone.Notifications[i].Triggers = slices.Clone(cfg.Notifications[i].Triggers)
+		clone.Notifications[i].To = slices.Clone(cfg.Notifications[i].To)
+		if enabled := cfg.Notifications[i].Enabled; enabled != nil {
+			value := *enabled
+			clone.Notifications[i].Enabled = &value
+		}
+	}
+	clone.EvtSpike.DisabledChannels = slices.Clone(cfg.EvtSpike.DisabledChannels)
+	clone.EvtSpike.AddedChannels = slices.Clone(cfg.EvtSpike.AddedChannels)
+	if autoPin := cfg.Dashboard.AutoPin; autoPin != nil {
+		value := *autoPin
+		clone.Dashboard.AutoPin = &value
+	}
+	return &clone
+}
+
+func configForPersistence(cfg *Config) (*Config, error) {
+	persisted := cloneConfig(cfg)
+	for i := range persisted.Notifications {
+		secret := persisted.Notifications[i].Secret
+		if secret == "" || strings.HasPrefix(secret, dpapiPrefix) {
+			continue
+		}
+		ciphertext, err := DPAPIEncrypt([]byte(secret))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt notification secret %d: %w", i, err)
+		}
+		persisted.Notifications[i].Secret = dpapiPrefix + base64.StdEncoding.EncodeToString(ciphertext)
+	}
+	return persisted, nil
+}
 
 // SaveConfig writes the full config to disk. Only admin/CLI/service callers
 // should use this. Dashboard API should use scoped updaters instead.
@@ -772,8 +796,13 @@ func saveConfigToFileLocked(cfg *Config) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	// Marshal with indentation for human readability.
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	// Marshal an encrypted copy. Runtime callers keep normalized plaintext
+	// credentials after SaveConfig returns.
+	persisted, err := configForPersistence(cfg)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -882,43 +911,17 @@ func readModifyWrite(f func(*Config) error) error {
 	})
 }
 
-// restrictConfigACL sets the ACL on a config file to SYSTEM + Administrators.
-// Returns nil in non-elevated contexts (tests, dev) without modifying the
-// file — icacls /inheritance:r would otherwise lock out the current user
-// and break the dev loop. Returns an error in elevated contexts when
-// icacls fails twice (one retry to ride past transient sharing-violation
-// races against AV / Windows Defender / search indexer briefly opening
-// the file).
-//
-// Errors propagate to SaveConfig so a config.json with notification
-// secrets cannot silently land on disk with %ProgramData%-inherited ACLs
-// (which grant Users read+execute). Pre-009: errors were swallowed and a
-// failed icacls call left the file world-readable forever.
+// restrictConfigACL limits config files to SYSTEM and Administrators. Runtime
+// callers skip this when not elevated so local development does not lock the
+// developer out of config.json.
 func restrictConfigACL(path string) error {
-	// Only restrict ACLs when running as SYSTEM or an elevated admin.
-	// In non-elevated contexts (tests, dev), icacls /inheritance:r would
-	// lock out the current user.
 	if !isElevated() {
 		return nil
 	}
-	cmds := [][]string{
-		{"icacls", path, "/inheritance:r"},
-		{"icacls", path, "/remove", "*S-1-5-6"},
-		{"icacls", path, "/grant", "SYSTEM:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators
-	}
-	for _, args := range cmds {
-		if err := winexec.Command(args[0], args[1:]...).Run(); err != nil {
-			// One retry — icacls can hit a transient sharing-violation
-			// when AV/indexer briefly opens the file behind us.
-			if retryErr := winexec.Command(args[0], args[1:]...).Run(); retryErr != nil {
-				slog.Error("config: icacls failed", "args", args[1:], "err", err, "retry_err", retryErr)
-				return fmt.Errorf("icacls %v: %w", args[1:], retryErr)
-			}
-			slog.Warn("config: icacls succeeded on retry", "args", args[1:], "first_err", err)
-		}
-	}
-	return nil
+	return winacl.RestrictFile(path,
+		winacl.Grant{SIDType: windows.WinLocalSystemSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinBuiltinAdministratorsSid, Permissions: windows.GENERIC_ALL},
+	)
 }
 
 // isElevated returns true if the current process token is a member of the
