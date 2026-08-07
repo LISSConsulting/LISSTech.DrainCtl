@@ -4,18 +4,19 @@ package perfmon
 
 import (
 	"fmt"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
-// PerfTriggerState tracks consecutive-poll state for performance triggers.
+// PerfTriggerState tracks consecutive-evaluation state for performance triggers.
 type PerfTriggerState struct {
-	CPUWarnCount        int // consecutive polls CPU >= warn threshold
-	CPUCritCount        int // consecutive polls CPU >= crit threshold
-	MemWarnCount        int // consecutive polls mem <= warn threshold
-	MemCritCount        int // consecutive polls mem <= crit threshold
-	InputDelayWarnCount int // consecutive polls input delay >= warn threshold
-	InputDelayCritCount int // consecutive polls input delay >= crit threshold
+	CPUWarnCount        int // consecutive evaluations CPU >= warn threshold
+	CPUCritCount        int // consecutive evaluations CPU >= crit threshold
+	MemWarnCount        int // consecutive evaluations mem <= warn threshold
+	MemCritCount        int // consecutive evaluations mem <= crit threshold
+	InputDelayWarnCount int // consecutive evaluations input delay >= warn threshold
+	InputDelayCritCount int // consecutive evaluations input delay >= crit threshold
 }
 
 // ceilDiv returns ⌈a/b⌉ for positive integers.
@@ -27,20 +28,29 @@ func ceilDiv(a, b int) int {
 }
 
 // EvaluateThresholds checks the PerfSnapshot against configured thresholds
-// and returns the set of triggers that should fire.
+// and returns the set of triggers that should fire. evaluationInterval is the
+// cadence at which this function is called, not the collector's sampling
+// cadence; the collector may aggregate several samples into one evaluation.
 // triggerState is updated in-place to track consecutive breaches.
-func EvaluateThresholds(snap *dc.PerfSnapshot, cfg dc.PerformanceConfig, state *PerfTriggerState) []dc.Trigger {
+func EvaluateThresholds(
+	snap *dc.PerfSnapshot,
+	cfg dc.PerformanceConfig,
+	state *PerfTriggerState,
+	evaluationInterval time.Duration,
+) []dc.Trigger {
 	if snap == nil {
 		return nil
 	}
 
-	// Compute consecutive poll counts from duration / interval.
-	interval := cfg.SampleIntervalSec
-	if interval <= 0 {
-		interval = dc.DefaultSampleInterval
+	intervalSeconds := int(evaluationInterval / time.Second)
+	if intervalSeconds <= 0 {
+		intervalSeconds = cfg.SampleIntervalSec
 	}
-	cpuMemPolls := ceilDiv(resolveThreshold(cfg.LoadAlertDelaySec, dc.DefaultLoadAlertDelaySec), interval)
-	idPolls := ceilDiv(resolveThreshold(cfg.InputDelayAlertDelaySec, dc.DefaultInputDelayAlertDelaySec), interval)
+	if intervalSeconds <= 0 {
+		intervalSeconds = dc.DefaultSampleInterval
+	}
+	cpuMemPolls := ceilDiv(resolveThreshold(cfg.LoadAlertDelaySec, dc.DefaultLoadAlertDelaySec), intervalSeconds)
+	idPolls := ceilDiv(resolveThreshold(cfg.InputDelayAlertDelaySec, dc.DefaultInputDelayAlertDelaySec), intervalSeconds)
 
 	var triggers []dc.Trigger
 

@@ -1,5 +1,13 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Runtime correctness hardening — 2026-08-06
+
+- Named-pipe accepts now treat `ERROR_PIPE_CONNECTED` as success, closing the client-before-accept race reproduced by the race suite.
+- `SaveConfig` encrypts a private deep copy; live notification targets retain plaintext credentials. Pipe handlers now consume immutable atomic snapshots of service config and dashboard state.
+- Dashboard config reloads stop as well as start the listener. Memory-threshold REST/SSE conversion preserves the `-1` disabled sentinel, and the backend rejects invalid ranges and threshold ordering.
+- Performance sustain windows use the service's actual evaluation cadence rather than the collector's internal sampling cadence.
+- Config, dashboard TLS key, and SQLite DACLs are applied through `x/sys/windows` in-process APIs instead of spawning `icacls.exe`.
+
 ## 009 security + correctness hardening — shipped (2026-04-24)
 
 Remediates 16 confirmed items from the 2026-04-24 codex full-codebase review (scope-pruned; plan at `docs/reviews/codex-2026-04-24-fullcodebase-remediation-plan.md`). Five user stories landed; one task deferred.

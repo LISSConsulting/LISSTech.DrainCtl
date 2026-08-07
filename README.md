@@ -18,8 +18,9 @@
   <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"><img src="https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?style=for-the-badge&label=PSGALLERY&color=b87843&labelColor=2d1a1a" alt="Stable PSGallery release" /></a>
 </p>
 
-DrainCtl is stable for production deployment. Stable GitHub releases are signed, published as
-**Latest**, and tracked by the default auto-update channel.
+DrainCtl is stable for production deployment. Install one lightweight Windows service to see drain state, session
+pressure, performance health, and change attribution across an RDSH farm. Signed upgrades preserve your configuration,
+registered servers, and history.
 
 ```powershell
 Install-Module LISSTech.DrainCtl
@@ -38,11 +39,26 @@ A Windows service that watches `TSServerDrainMode` on RDSH hosts and tells you:
 
 Query from CLI, PowerShell, or your RMM. Answers come from a named pipe in under 1 ms. No agents, no cloud — and zero per-host config once a host is pointed at a dashboard.
 
+
+---
+
+<h2 id="latest-release">▎ Latest release</h2>
+
+The current release focuses on a quieter, safer day-to-day experience:
+
+- **Lower background overhead** — less idle work on every monitored host, without slowing drain-state detection.
+- **Live dashboard controls** — enable or disable the dashboard and adjust alert thresholds without reinstalling the service.
+- **Settings that stay correct** — disabled alerts remain disabled, defaults remain sensible, and saved notification credentials remain protected.
+- **More dependable monitoring** — local status requests handle edge-case connections reliably, and sustained alerts follow the service's real evaluation cadence.
+- **Safe in-place upgrades** — signed releases retain configuration, registered hosts, and telemetry history.
+
+[Download the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) or install the
+[PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl).
 ---
 
 <h2 id="toc">▎ Table of contents</h2>
 
-[Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Notifications](#notifications) · [evtspike](#evtspike) · [Configuration](#configuration) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
+[Latest release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Notifications](#notifications) · [evtspike](#evtspike) · [Configuration](#configuration) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
 
 ---
 
