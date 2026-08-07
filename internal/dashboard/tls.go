@@ -20,7 +20,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winexec"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/winacl"
+	"golang.org/x/sys/windows"
 )
 
 // loadOrGenerateTLS returns a tls.Config for the dashboard.
@@ -167,26 +168,16 @@ func generateSelfSigned(certPath, keyPath string) (tls.Certificate, error) {
 	return tls.LoadX509KeyPair(certPath, keyPath)
 }
 
-// writeRestrictedFile writes data to path with ACLs that grant access
-// only to SYSTEM and the built-in Administrators group.
+// writeRestrictedFile grants full control to SYSTEM and Administrators and
+// read access to service identities. It applies the DACL in-process so key
+// generation never launches icacls.exe.
 func writeRestrictedFile(path string, data []byte) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return err
 	}
-
-	// Reset ACL: disable inheritance, remove all inherited ACEs,
-	// then grant only SYSTEM and Administrators full control.
-	cmds := [][]string{
-		{"icacls", path, "/inheritance:r"},
-		{"icacls", path, "/grant", "SYSTEM:(F)"},
-		{"icacls", path, "/grant", "*S-1-5-32-544:(F)"}, // Administrators by SID (locale-independent)
-		{"icacls", path, "/grant", "*S-1-5-6:(R)"},      // SERVICE group (virtual service accounts) — read only
-	}
-	for _, args := range cmds {
-		if out, err := winexec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
-			return fmt.Errorf("%s: %w (%s)", args[0], err, string(out))
-		}
-	}
-
-	return nil
+	return winacl.RestrictFile(path,
+		winacl.Grant{SIDType: windows.WinLocalSystemSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinBuiltinAdministratorsSid, Permissions: windows.GENERIC_ALL},
+		winacl.Grant{SIDType: windows.WinServiceSid, Permissions: windows.GENERIC_READ},
+	)
 }

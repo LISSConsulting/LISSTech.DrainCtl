@@ -1401,6 +1401,53 @@ func TestHandlePutSettings_PartialUpdate_ThresholdAndGraceOmitted(t *testing.T) 
 		t.Errorf("capturedGrace = %v, want nil (field omitted from request)", capturedGrace)
 	}
 }
+func TestHandlePutSettings_RejectsInvalidPerformanceThresholds(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"cpu below sentinel", `{"performance":{"cpu_warn_pct":-2}}`},
+		{"memory above percentage", `{"performance":{"mem_warn_pct":101}}`},
+		{"delay below sentinel", `{"performance":{"input_delay_warn_ms":-2}}`},
+		{"cpu order", `{"performance":{"cpu_warn_pct":90,"cpu_crit_pct":80}}`},
+		{"memory free order", `{"performance":{"mem_warn_pct":10,"mem_crit_pct":20}}`},
+		{"delay order", `{"performance":{"input_delay_warn_ms":100,"input_delay_crit_ms":50}}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := newTestServer(t)
+			ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
+				t.Fatal("invalid performance settings reached persistence")
+				return nil
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(tc.body))
+			ds.handlePutSettings(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlePutSettings_AcceptsDisabledThresholdSentinels(t *testing.T) {
+	ds := newTestServer(t)
+	var captured *dc.PerformanceConfig
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, performance *dc.PerformanceConfig) error {
+		captured = performance
+		return nil
+	}
+	body := `{"performance":{"cpu_warn_pct":-1,"cpu_crit_pct":-1,"mem_warn_pct":-1,"mem_crit_pct":-1,"input_delay_warn_ms":-1,"input_delay_crit_ms":-1}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if captured == nil || captured.MemWarnPct != -1 || captured.MemCritPct != -1 {
+		t.Fatalf("captured performance = %+v, want disabled memory thresholds", captured)
+	}
+}
 
 func TestHandlePutSettings_WebhookSecretPreserved(t *testing.T) {
 	ds := newTestServer(t)

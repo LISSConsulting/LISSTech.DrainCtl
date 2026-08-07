@@ -25,6 +25,15 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
+type dashboardStopper interface {
+	Stop()
+}
+
+func disableDashboardRuntime(sub dashboardStopper, handler *serviceHandler, cfg dc.ServiceConfig) {
+	sub.Stop()
+	handler.publish(cfg, nil)
+}
+
 // Execute is the Windows service main loop.
 func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, statusCh chan<- svc.Status) (bool, uint32) {
 	statusCh <- svc.Status{State: svc.StartPending, WaitHint: 10000}
@@ -250,7 +259,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Start pipe server.
 	handler := &serviceHandler{audit: auditStore, metrics: metricsStore}
-	handler.cfg.Store(&cfg)
+	handler.publish(cfg, nil)
 
 	// Performance monitoring subsystem owns PDH open/prime/close and hot reload.
 	perfSub := newPerformanceSubsystem(cfg.Performance, &handler.lastPerf)
@@ -298,7 +307,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		} else {
 			dashSub = sub
 			dashState = sub.State()
-			handler.dashState = dashState
+			handler.publish(cfg, dashState)
 			slog.Info("dashboard=started", "port", dashCfg.Port)
 		}
 	}
@@ -431,19 +440,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	dashBootstrap := dashBootstrapSub.Events()
 
 	// fetchRemoteConfig pulls from the dashboard, applies results, and
-	// reconciles the evtspike/perf/ticker subsystems. Extracted so that both
-	// the every-poll fetch AND inline-after-successful-registration paths
-	// exercise exactly the same code path. Returns early when no dashboard
-	// URL is configured or when we're still inside a failure-backoff window.
+	// reconciles the evtspike/perf/ticker subsystems. Successful fetches obey
+	// Dashboard.FetchInterval; failures use the existing exponential backoff.
+	// The registration and config-reload paths can force an immediate fetch by
+	// clearing lastConfigFetch before calling this closure.
 	fetchRemoteConfig := func() {
 		if dashCfg.URL == "" {
 			return
 		}
-		if dashConfigFailures > 0 &&
-			time.Since(lastConfigFetch) < backoffDuration(dashCfg.FetchInterval, dashConfigFailures) {
+		fetchStarted := time.Now()
+		if !remoteConfigFetchDue(fetchStarted, lastConfigFetch, dashConfigFailures, dashCfg.FetchInterval) {
 			return
 		}
-		lastConfigFetch = time.Now()
+		lastConfigFetch = fetchStarted
 		slog.Debug("dashboard config fetch", "url", dashCfg.URL)
 		var cfgRemote *dashboard.RemoteSettings
 		var cfgErr error
@@ -465,7 +474,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		oldPollInterval := cfg.PollInterval
 		effectiveEvtSpike := prevEvtSpikeCfg
 		applyRemoteConfig(cfgRemote, &cfg, &notifyTargets, &effectiveEvtSpike)
-		handler.cfg.Store(&cfg)
+		handler.publish(cfg, dashState)
 		perfSub.Reload(cfg.Performance)
 		if cfg.PollInterval != oldPollInterval {
 			pollTicker.Reset(cfg.PollInterval)
@@ -559,10 +568,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				}
 			}
 
-			// Pull remote config on every poll (Option B). Cheap: one
-			// LoadConfig + JSON encode per agent per poll. Failures back off
-			// exponentially from FetchInterval inside fetchRemoteConfig so a
-			// downed dashboard doesn't spam warnings every tick.
+			// Check whether remote config is due. The closure returns without
+			// network or JSON work until FetchInterval elapses; failures retain
+			// exponential backoff.
 			fetchRemoteConfig()
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
@@ -628,7 +636,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
-			handler.cfg.Store(&cfg)
+			handler.publish(cfg, dashState)
 			// Push the new UpdateConfig into the running updater
 			// subsystem so an operator's enabled / channel flip is
 			// honored within seconds (the wakeCh interrupts the
@@ -657,16 +665,23 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				pruneNotifyState(notifyState, notifyTargets)
 			}
 
-			// Start dashboard on hot-reload if it was just enabled.
-			// Also self-register the local host if dashboard URL points here.
-			if newDashCfg.Enabled && !dashCfg.Enabled {
+			// Reconcile the dashboard listener in both directions. A failed
+			// enable is retried on the next config event because runtime state,
+			// not the previous requested value, decides whether Start is needed.
+			if !newDashCfg.Enabled && dashState != nil {
+				disableDashboardRuntime(dashSub, handler, cfg)
+				dashSub = nil
+				dashState = nil
+				dashRegistered = false
+				slog.Info("dashboard=stopped", "reason", "config reload")
+			} else if newDashCfg.Enabled && dashState == nil {
 				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore)
 				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
 					dashSub = sub
 					dashState = sub.State()
-					handler.dashState = dashState
+					handler.publish(cfg, dashState)
 					slog.Info("dashboard=started", "port", newDashCfg.Port, "reason", "late start")
 					if isLocalDashboard(newDashCfg.URL) {
 						if h, _ := os.Hostname(); h != "" {

@@ -24,8 +24,8 @@ import (
 // The 1-minute tier is a virtual GROUP BY on metrics_raw — the 1H dashboard
 // pill maps to 60 buckets. Auto never picks raw because at the validator's
 // minimum sample_interval_sec (10 s) raw-tier resolution is at most 6×
-// finer than 1-minute, and at the default 30 s only 2× finer; both ratios
-// don't justify the per-second visual noise on a fleet chart.
+// finer than 1-minute, while the default 60-second cadence already matches
+// it; neither case justifies per-sample visual noise on a fleet chart.
 func (ds *DashboardServer) resolveMetricsTier(
 	ctx context.Context,
 	host string,
@@ -321,11 +321,9 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 	}
 
 	// Raw-fleet bucketing only matters for explicit ?resolution=raw — auto
-	// never picks raw for fleet (≤1h → 1min, …). DefaultRawFleetBucketMs
-	// (60 s) is wide enough to absorb staggered per-host poll phases at
-	// the default 30 s sample_interval; explicit-raw API consumers tuning
-	// for a different cadence get clamped up to MinRawFleetBucketMs (30 s)
-	// by the query builder.
+	// never picks raw for fleet (≤1h → 1min, …). The 120-second default is
+	// twice the 60-second sampling cadence, co-locating hosts at opposite poll
+	// phases while reducing result cardinality.
 	rawBucketMs := int64(telemetry.DefaultRawFleetBucketMs)
 
 	sr, err := ds.ms.QueryRangeFleet(ctx, hosts, from, to, tier, counters, rawBucketMs)

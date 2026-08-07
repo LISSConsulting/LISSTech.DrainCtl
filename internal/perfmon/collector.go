@@ -83,7 +83,7 @@ type Collector struct {
 	primed          bool
 	skipNextCollect bool
 
-	sampleInterval time.Duration     // how often the sampler collects (default 30s)
+	sampleInterval time.Duration     // how often the sampler collects (default 60s)
 	accum          []dc.PerfSnapshot // samples accumulated between Collect() calls
 
 	loggedErrors map[string]bool
@@ -121,7 +121,7 @@ func startWorker() chan request {
 func Open(cfg dc.PerformanceConfig) (*Collector, error) {
 	sampleInterval := time.Duration(cfg.SampleIntervalSec) * time.Second
 	if sampleInterval < 10*time.Second || sampleInterval > 300*time.Second {
-		sampleInterval = 30 * time.Second
+		sampleInterval = time.Duration(dc.DefaultSampleInterval) * time.Second
 	}
 	c := &Collector{
 		collectPerSession: cfg.CollectPerSession,

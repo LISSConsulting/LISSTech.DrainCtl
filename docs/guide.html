@@ -389,10 +389,14 @@
             </p>
             <p>
                 Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">current stable MSI</a>.
-                Release installers are Authenticode-signed and accompanied by an Ed25519-signed manifest that binds the
-                release version to the MSI SHA-256. Existing installations upgrade in place; service configuration,
-                registered servers, and retained telemetry are preserved.
+                Every release is signed, upgrades in place, and keeps your service configuration, registered servers,
+                notification targets, and retained telemetry.
             </p>
+            <div class="callout">
+                <strong>What the current release improves:</strong> lower background overhead, live dashboard controls,
+                alert thresholds that preserve disabled and default states, more reliable local status requests, and
+                safer handling of saved credentials. No configuration migration is required.
+            </div>
 
             <h3>Interactive install</h3>
             <p>
@@ -608,9 +612,9 @@ Get-RDSHDrainMode | Format-List</code></pre>
             <pre><code>{
   "grace_period": 60,
   "retention_days": 90,
-  "poll_interval": 60,
+  "poll_interval": 300,
   "audit_path": "C:\\ProgramData\\LISS Technologies\\LISSTech DrainCtl\\drainctl.db",
-  "memory_limit_mb": 256,
+  "memory_limit_mb": 32,
   "log_file_level": "info",
   "log_event_level": "info",
   "notifications": [
@@ -644,7 +648,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
   "session_warning_threshold": 80,
   "performance": {
     "enabled": true,
-    "sample_interval_sec": 30,
+    "sample_interval_sec": 60,
     "cpu_warn_pct": 70,
     "cpu_crit_pct": 85,
     "mem_warn_pct": 20,
@@ -652,8 +656,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "input_delay_warn_ms": 50,
     "input_delay_crit_ms": 100,
     "input_delay_percentile": "p95",
-    "load_alert_delay_sec": 60,
-    "input_delay_alert_delay_sec": 90,
+    "load_alert_delay_sec": 120,
+    "input_delay_alert_delay_sec": 180,
     "collect_remotefx": false,
     "collect_per_session": true
   },
@@ -665,8 +669,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
     "audit_days": 365
   },
   "telemetry": {
-    "aggregator_interval_seconds": 60,
-    "retention_interval_minutes": 15
+    "aggregator_interval_seconds": 300,
+    "retention_interval_minutes": 60
   },
   "update": {
     "enabled": false,
@@ -725,7 +729,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     </tr>
                     <tr>
                         <td><code>memory_limit_mb</code></td>
-                        <td>256</td>
+                        <td>32</td>
                         <td>
                             Go runtime soft memory limit for the service process. Dashboard installs raise this to
                             512 MB unless explicitly configured. Valid range: 32&ndash;4096 MB.
@@ -769,13 +773,13 @@ Get-RDSHDrainMode | Format-List</code></pre>
                             I/O, input delay, and optional RemoteFX metrics on each sample tick. Thresholds default to industry
                             baselines (CPU 70/85%, memory 20/10% free, input delay 50/100ms). Set any threshold to
                             <code>-1</code> to disable it. Additional fields:
-                            <code>sample_interval_sec</code> (collection interval, default 30, range 10&ndash;300),
+                            <code>sample_interval_sec</code> (collection interval, default 60, range 10&ndash;300),
                             <code>input_delay_percentile</code> (<code>"p50"</code> or <code>"p95"</code>, default
                             <code>"p95"</code>),
                             <code>load_alert_delay_sec</code> (seconds CPU/memory must breach before firing, default
-                            60),
+                            120),
                             <code>input_delay_alert_delay_sec</code> (seconds input-delay must breach before firing,
-                            default 90).
+                            default 180).
                         </td>
                     </tr>
                     <tr>
@@ -1932,42 +1936,42 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td><code>cpu_warning</code></td>
                         <td>70%</td>
-                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
+                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 120s)</td>
                     </tr>
                     <tr>
                         <td><code>cpu_critical</code></td>
                         <td>85%</td>
-                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
+                        <td>CPU &ge; threshold, sustained for <code>load_alert_delay_sec</code> (default 120s)</td>
                     </tr>
                     <tr>
                         <td><code>memory_warning</code></td>
                         <td>20% free</td>
-                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
+                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 120s)</td>
                     </tr>
                     <tr>
                         <td><code>memory_critical</code></td>
                         <td>10% free</td>
-                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 60s)</td>
+                        <td>Available memory &le; threshold, sustained for <code>load_alert_delay_sec</code> (default 120s)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_warning</code></td>
                         <td>50ms</td>
-                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 90s)</td>
+                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 180s)</td>
                     </tr>
                     <tr>
                         <td><code>input_delay_critical</code></td>
                         <td>100ms</td>
-                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 90s)</td>
+                        <td>Input delay &ge; threshold, sustained for <code>input_delay_alert_delay_sec</code> (default 180s)</td>
                     </tr>
                 </tbody>
             </table>
             <p>
                 All performance triggers require a <em>sustained</em> breach before firing, eliminating flap noise from
-                transient spikes. CPU and memory default to a 60-second sustain window
-                (<code>load_alert_delay_sec</code>); input delay defaults to 90 seconds
+                transient spikes. CPU and memory default to a 120-second sustain window
+                (<code>load_alert_delay_sec</code>); input delay defaults to 180 seconds
                 (<code>input_delay_alert_delay_sec</code>) because it is inherently volatile. Both windows are expressed
                 in seconds and translate to a whole number of polls internally based on
-                <code>sample_interval_sec</code> (default 30). Input delay is evaluated against the P95 percentile by
+                <code>sample_interval_sec</code> (default 60). Input delay is evaluated against the P95 percentile by
                 default; set <code>"input_delay_percentile": "p50"</code> for median-based thresholds.
             </p>
             <p>Set any threshold to <code>0</code> for the default, or <code>-1</code> to disable.</p>
@@ -2547,10 +2551,10 @@ if ($result.exit_code -ne 0) {
             <h2 id="auto-update">13. Auto-update</h2>
 
             <p>
-                The agent can self-update by polling GitHub releases on a daily cadence, verifying the release manifest,
-                verifying the MSI Authenticode signature against the LISS code-signing certificate, and running
-                <code>msiexec</code> silently. Auto-update is <strong>off by default</strong> &mdash; it does not contact
-                GitHub at all until the operator opts in.
+                DrainCtl can keep itself current on the stable release channel. When enabled, it checks once a day,
+                accepts only releases signed by LISS Consulting, upgrades silently, and keeps your configuration and
+                history. Auto-update is <strong>off by default</strong> &mdash; the service does not contact GitHub until
+                an operator opts in.
             </p>
 
             <h3>Enabling auto-update</h3>

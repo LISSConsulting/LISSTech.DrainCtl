@@ -165,9 +165,7 @@ async function apiFetch(path, options = {}) {
     const timer = setTimeout(() => timeoutController.abort(), FETCH_TIMEOUT_MS);
 
     const { signal: callerSignal, ...rest } = options;
-    const signal = callerSignal
-        ? AbortSignal.any([timeoutController.signal, callerSignal])
-        : timeoutController.signal;
+    const signal = callerSignal ? AbortSignal.any([timeoutController.signal, callerSignal]) : timeoutController.signal;
 
     const url = path.startsWith('/api/') ? path : `${BASE}${path}`;
 
@@ -405,6 +403,49 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+const DEFAULT_MEMORY_WARN_USED_PCT = 80;
+const DEFAULT_MEMORY_CRIT_USED_PCT = 90;
+
+/**
+ * Convert Go's memory threshold (% free) to the dashboard's % used without
+ * transforming the -1 disabled sentinel into an impossible 101% threshold.
+ * @param {number|null|undefined} value
+ * @param {number} defaultUsed
+ */
+function memoryFreeToUsed(value, defaultUsed) {
+    if (value === -1) return -1;
+    if (value == null || value === 0) return defaultUsed;
+    return 100 - value;
+}
+
+/**
+ * Convert a dashboard memory threshold (% used) to Go's % free wire format.
+ * @param {number|null|undefined} value
+ */
+function memoryUsedToFree(value) {
+    if (value === -1) return -1;
+    if (value == null || value === 0) return 0;
+    return 100 - value;
+}
+
+/**
+ * Normalize a freshly decoded REST or SSE settings payload for UI use.
+ * @param {Settings} config
+ * @returns {Settings}
+ */
+export function settingsFromWire(config) {
+    if (config.performance) {
+        config.performance.mem_warn_pct = memoryFreeToUsed(
+            config.performance.mem_warn_pct,
+            DEFAULT_MEMORY_WARN_USED_PCT,
+        );
+        config.performance.mem_crit_pct = memoryFreeToUsed(
+            config.performance.mem_crit_pct,
+            DEFAULT_MEMORY_CRIT_USED_PCT,
+        );
+    }
+    return config;
+}
 
 /**
  * GET /api/v1/settings
@@ -412,15 +453,7 @@ export async function fetchHistory(host, limit = 50, changesOnly = false) {
  */
 export async function fetchSettings() {
     const res = await apiFetch('/settings');
-    const cfg = /** @type {Settings} */ (await res.json());
-    // Go stores memory thresholds as % free; UI works in % used — always invert on load.
-    // 0 means "use default" in Go; inverting it to 100 is harmless (resolveThresholds
-    // checks > 0 and falls back to the default, which matches Go's behavior).
-    if (cfg.performance) {
-        cfg.performance.mem_warn_pct = 100 - (cfg.performance.mem_warn_pct ?? 0);
-        cfg.performance.mem_crit_pct = 100 - (cfg.performance.mem_crit_pct ?? 0);
-    }
-    return cfg;
+    return settingsFromWire(/** @type {Settings} */ (await res.json()));
 }
 
 /**
@@ -440,8 +473,8 @@ export async function saveSettings(config) {
     // Deep-clone to avoid mutating the UI state, then invert mem % used → % free for Go.
     const payload = JSON.parse(JSON.stringify(config));
     if (payload.performance) {
-        payload.performance.mem_warn_pct = 100 - (payload.performance.mem_warn_pct ?? 0);
-        payload.performance.mem_crit_pct = 100 - (payload.performance.mem_crit_pct ?? 0);
+        payload.performance.mem_warn_pct = memoryUsedToFree(payload.performance.mem_warn_pct);
+        payload.performance.mem_crit_pct = memoryUsedToFree(payload.performance.mem_crit_pct);
     }
     // Backend treats absent `notifications` as "no change", so omitting it
     // keeps targets entirely in the per-target endpoints' lane.
