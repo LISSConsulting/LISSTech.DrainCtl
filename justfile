@@ -7,6 +7,7 @@ module_dir   := dist_dir / "LISSTech.DrainCtl"
 bin_dir      := module_dir / "bin"
 ca_dir       := dist_dir / "customactions"
 installer_dir := justfile_directory() / "installer"
+op_runner    := justfile_directory() / "scripts" / "op-with-service-account.ps1"
 
 # Code signing (set CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env or environment)
 signing_thumbprint := env("CODE_SIGNING_CERTIFICATE_THUMBPRINT", "")
@@ -499,8 +500,8 @@ publish: (header "publish")
     $moduleDir = "{{module_dir}}"
     if ($psKey) {
         if ($psKey -like 'op://*') {
-            $resolved = & op read $psKey 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey (1Password desktop integration not signed in?)"; exit $LASTEXITCODE }
+            $resolved = & "{{op_runner}}" read $psKey 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey with the drainctl-build-agent service account"; exit $LASTEXITCODE }
             $psKey = $resolved
         }
         Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
@@ -519,8 +520,8 @@ publish-psgallery:
     $moduleDir = "{{module_dir}}"
     if (-not $psKey) { Write-Error "PSGALLERY_API_KEY not set in .env"; exit 1 }
     if ($psKey -like 'op://*') {
-        $resolved = & op read $psKey 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey (1Password desktop integration not signed in?)"; exit $LASTEXITCODE }
+        $resolved = & "{{op_runner}}" read $psKey 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey with the drainctl-build-agent service account"; exit $LASTEXITCODE }
         $psKey = $resolved
     }
     if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first"; exit 1 }
