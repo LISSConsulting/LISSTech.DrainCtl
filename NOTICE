@@ -1,0 +1,100 @@
+LISSTech DrainCtl
+Copyright 2026 LISS Consulting, Corp.
+
+This product includes software developed by third parties. The following
+attributions are reproduced here to satisfy the license terms of those
+components. Full license texts are available in the upstream repositories
+linked below and in the LICENSE file in the project root.
+
+================================================================================
+
+github.com/alexbrainman/sspi
+Copyright (c) 2012 The Go Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://github.com/alexbrainman/sspi
+
+================================================================================
+
+github.com/dustin/go-humanize
+Copyright (c) 2005-2008 Dustin Sallings <dustin@spy.net>
+License: MIT License
+Source: https://github.com/dustin/go-humanize
+
+================================================================================
+
+github.com/google/uuid
+Copyright (c) 2013 Google Inc. All rights reserved.
+Copyright (c) 2009-2010 Google Inc.
+Copyright (c) 2009-2010 Stuart Carnie
+License: BSD 3-Clause License
+Source: https://github.com/google/uuid
+
+================================================================================
+
+github.com/inconshreveable/mousetrap
+Copyright (c) 2014 Alan Shreve
+License: MIT License
+Source: https://github.com/inconshreveable/mousetrap
+
+================================================================================
+
+github.com/mattn/go-isatty
+Copyright (c) 2014 Mitchell Hashimoto
+Copyright (c) 2016 Yasuhiro Matsumoto
+License: MIT License
+Source: https://github.com/mattn/go-isatty
+
+================================================================================
+
+github.com/ncruces/go-strftime
+Copyright (c) 2022 Nicolas Carlier
+License: MIT License
+Source: https://github.com/ncruces/go-strftime
+
+================================================================================
+
+github.com/remyoudompheng/bigfft
+Copyright (c) 2019 Remy Oudompheng
+License: BSD 3-Clause License
+Source: https://github.com/remyoudompheng/bigfft
+
+================================================================================
+
+github.com/spf13/pflag
+Copyright (c) 2012 Alex Ogier. All rights reserved.
+Copyright (c) 2012 The Go Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://github.com/spf13/pflag
+
+================================================================================
+
+modernc.org/libc
+Copyright (c) 2017 The Libc Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://gitlab.com/cznic/libc
+
+================================================================================
+
+modernc.org/mathutil
+Copyright (c) 2017 The Mathutil Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://gitlab.com/cznic/mathutil
+
+================================================================================
+
+modernc.org/memory
+Copyright (c) 2017 The Memory Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://gitlab.com/cznic/memory
+
+================================================================================
+
+modernc.org/sqlite
+Copyright (c) 2017 The Sqlite Authors. All rights reserved.
+License: BSD 3-Clause License
+Source: https://gitlab.com/cznic/sqlite
+
+This component includes a derived implementation of the SQLite library, which
+is in the public domain. The public-domain status of the SQLite library is
+not affected by the BSD 3-Clause license covering the modernc.org/sqlite
+wrapper code.
