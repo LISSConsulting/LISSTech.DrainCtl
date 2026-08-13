@@ -483,6 +483,11 @@ publish: (header "publish")
     $psKey = "{{psgallery_key}}"
     $moduleDir = "{{module_dir}}"
     if ($psKey) {
+        if ($psKey -like 'op://*') {
+            $resolved = & op read $psKey 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey (1Password desktop integration not signed in?)"; exit $LASTEXITCODE }
+            $psKey = $resolved
+        }
         Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
         Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
         Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green
@@ -498,7 +503,12 @@ publish-psgallery:
     $psKey = "{{psgallery_key}}"
     $moduleDir = "{{module_dir}}"
     if (-not $psKey) { Write-Error "PSGALLERY_API_KEY not set in .env"; exit 1 }
-    if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first."; exit 1 }
+    if ($psKey -like 'op://*') {
+        $resolved = & op read $psKey 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey (1Password desktop integration not signed in?)"; exit $LASTEXITCODE }
+        $psKey = $resolved
+    }
+    if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first"; exit 1 }
     Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
     Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
     Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green
