@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
+    <TargetFramework>net462</TargetFramework>
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>LISSTech.DrainCtl.MsiCA</RootNamespace>
     <AssemblyName>DrainCtl.MsiCA</AssemblyName>
@@ -28,10 +28,11 @@
       "\tools\x64\SfxCA.dll" — MakeSfxCA then fails with file-not-found.
     -->
     <PackageReference Include="WixToolset.Dtf.CustomAction" Version="7.0.0" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
 
   <!--
-    SFXCA's host loads the v2 CLR by default and faceplants on net472
+    SFXCA's host loads the v2 CLR by default and faceplants on net462
     assemblies with BadImageFormatException. Declaring CustomAction.config
     as Content makes the DTF PackCustomAction target pass it to MakeSfxCA,
     which bundles it next to the CA assembly so SFXCA picks up the

@@ -301,9 +301,7 @@ let overviewSubTab = $state('performance');
 let overviewWindow = $state(lsGetOverviewWindow());
 
 /** Milliseconds for the active Overview window preset. Read-only derived; set `overviewWindow` to change. */
-const overviewWindowMs = $derived(
-    OVERVIEW_WINDOW_PRESETS.find((p) => p.key === overviewWindow)?.ms ?? 60 * 60 * 1000
-);
+const overviewWindowMs = $derived(OVERVIEW_WINDOW_PRESETS.find((p) => p.key === overviewWindow)?.ms ?? 60 * 60 * 1000);
 
 /**
  * Tracks whether the current Overview time window was set by a preset pill ('preset')
@@ -379,7 +377,7 @@ const counters = $derived.by(() => {
         off = 0,
         sessions = 0;
     for (const s of servers) {
-        sessions += s.sessions ?? 0;
+        if (s.status !== 'off') sessions += s.sessions ?? 0;
         switch (s.status) {
             case 'ok':
                 ok++;

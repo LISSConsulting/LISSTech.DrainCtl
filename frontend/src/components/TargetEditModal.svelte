@@ -4,12 +4,13 @@
     import { ALL_TRIGGERS, TRIGGER_LABELS, REPEAT_OPTIONS, REPEAT_MAP } from '../lib/notify.js';
     import { Bell } from '@lucide/svelte';
 
-    let { target, isNew, saving = false, onsave, onclose } = $props();
+    let { target, servers = [], isNew, saving = false, onsave, onclose } = $props();
 
     // Local working copy — snapshot taken at open time; later mutations only touch `t`.
     // Use JSON round-trip instead of structuredClone to avoid Svelte 5 proxy issues.
     // svelte-ignore state_referenced_locally
     let t = $state(JSON.parse(JSON.stringify(target)));
+    if (!Array.isArray(t.server_exclusions)) t.server_exclusions = [];
 
     // Secrets are write-only — the API returns has_secret but never the actual value.
     // Track whether a secret existed so we can show the right placeholder.
@@ -32,9 +33,42 @@
     function toggleTrigger(tr) {
         if (t.triggers.includes(tr)) {
             t.triggers = t.triggers.filter((x) => x !== tr);
+            t.server_exclusions = t.server_exclusions
+                .map((exclusion) => ({
+                    ...exclusion,
+                    triggers: exclusion.triggers.filter((x) => x !== tr),
+                }))
+                .filter((exclusion) => exclusion.triggers.length > 0);
         } else {
             t.triggers = [...t.triggers, tr];
         }
+    }
+
+    function addServerExclusion() {
+        const used = new Set(t.server_exclusions.map((exclusion) => exclusion.server.toLowerCase()));
+        const server = servers.map((item) => item.host).find((host) => !used.has(host.toLowerCase())) ?? '';
+        const trigger = t.triggers.includes('alert') ? 'alert' : t.triggers[0];
+        t.server_exclusions = [...t.server_exclusions, { server, triggers: trigger ? [trigger] : [] }];
+    }
+
+    function updateExclusionServer(index, server) {
+        t.server_exclusions = t.server_exclusions.map((exclusion, i) =>
+            i === index ? { ...exclusion, server } : exclusion,
+        );
+    }
+
+    function toggleExclusionTrigger(index, trigger) {
+        t.server_exclusions = t.server_exclusions.map((exclusion, i) => {
+            if (i !== index) return exclusion;
+            const triggers = exclusion.triggers.includes(trigger)
+                ? exclusion.triggers.filter((item) => item !== trigger)
+                : [...exclusion.triggers, trigger];
+            return { ...exclusion, triggers };
+        });
+    }
+
+    function removeServerExclusion(index) {
+        t.server_exclusions = t.server_exclusions.filter((_, i) => i !== index);
     }
 
     /**
@@ -63,6 +97,15 @@
             }
         }
         if (!t.triggers?.length) return 'At least one trigger must be selected';
+        const seenServers = new Set();
+        for (const exclusion of t.server_exclusions) {
+            const server = exclusion.server?.trim();
+            if (!server) return 'Every server exclusion requires a server name';
+            const key = server.replace(/\.$/, '').toLowerCase();
+            if (seenServers.has(key)) return `Server exclusion is duplicated: ${server}`;
+            seenServers.add(key);
+            if (!exclusion.triggers?.length) return `${server} requires at least one excluded trigger`;
+        }
         return null;
     }
 
@@ -251,6 +294,53 @@
                 </div>
             </div>
 
+            <!-- Per-server trigger exclusions -->
+            <div class="tgt-form-row">
+                <div class="tgt-form-label">Server Exclusions</div>
+                <div class="tgt-form-hint">Suppress selected triggers from specific servers for this target.</div>
+                <datalist id="notification-server-options">
+                    {#each servers as server}
+                        <option value={server.host}></option>
+                    {/each}
+                </datalist>
+                <div class="tgt-exclusions">
+                    {#each t.server_exclusions as exclusion, index}
+                        <div class="tgt-exclusion">
+                            <div class="tgt-exclusion-head">
+                                <input
+                                    class="tgt-form-input"
+                                    list="notification-server-options"
+                                    value={exclusion.server}
+                                    placeholder="SERVER01"
+                                    oninput={(event) => updateExclusionServer(index, event.currentTarget.value)}
+                                />
+                                <button
+                                    type="button"
+                                    class="tgt-exclusion-remove"
+                                    aria-label={`Remove ${exclusion.server || 'server'} exclusion`}
+                                    onclick={() => removeServerExclusion(index)}>Remove</button
+                                >
+                            </div>
+                            <div class="tgt-exclusion-triggers">
+                                {#each t.triggers as tr}
+                                    <label class="tgt-trigger-check {exclusion.triggers.includes(tr) ? 'checked' : ''}">
+                                        <input
+                                            type="checkbox"
+                                            checked={exclusion.triggers.includes(tr)}
+                                            onchange={() => toggleExclusionTrigger(index, tr)}
+                                        />
+                                        {TRIGGER_LABELS[tr]}
+                                    </label>
+                                {/each}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+                <button type="button" class="tgt-add-exclusion" onclick={addServerExclusion}>
+                    Add server exclusion
+                </button>
+            </div>
+
             <hr class="tgt-form-divider" />
 
             <!-- Repeat interval -->
@@ -374,6 +464,12 @@
         background: var(--color-bg);
         color: var(--color-fg);
         box-sizing: border-box;
+    }
+    .tgt-form-hint {
+        margin-bottom: 8px;
+        color: var(--color-subtle);
+        font-size: 0.72rem;
+        line-height: 1.35;
     }
     .tgt-form-input:disabled {
         opacity: 0.6;
@@ -502,6 +598,59 @@
         border: solid #fff;
         border-width: 0 2px 2px 0;
         transform: rotate(45deg);
+    }
+    .tgt-exclusions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .tgt-exclusion {
+        padding: 10px;
+        background: var(--color-bg);
+        border: 1.5px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+        border-radius: 6px;
+    }
+    .tgt-exclusion-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .tgt-exclusion-head .tgt-form-input {
+        flex: 1;
+    }
+    .tgt-exclusion-remove,
+    .tgt-add-exclusion {
+        padding: 7px 10px;
+        border: 1.5px solid var(--color-border);
+        border-radius: 5px;
+        background: var(--color-card);
+        color: var(--color-fg);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .tgt-exclusion-remove:hover {
+        color: var(--color-red);
+        border-color: var(--color-red);
+    }
+    .tgt-add-exclusion {
+        margin-top: 8px;
+    }
+    .tgt-add-exclusion:hover {
+        color: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+    .tgt-exclusion-triggers {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+    }
+    .tgt-exclusion-triggers .tgt-trigger-check {
+        padding: 4px 7px;
+        font-size: 10px;
+        box-shadow: 1px 1px 0 var(--color-shadow);
     }
     .tgt-repeat-pills {
         display: flex;

@@ -119,7 +119,7 @@ func SendNotification(targets []NotificationTarget, state *NotifyState, result *
 		if target.Enabled != nil && !*target.Enabled {
 			continue
 		}
-		if target.URL == "" || !target.HasTrigger(trigger) {
+		if target.URL == "" || !target.HasTrigger(trigger) || target.ExcludesServer(result.Host, trigger) {
 			continue
 		}
 
