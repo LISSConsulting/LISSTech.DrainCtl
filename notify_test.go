@@ -188,6 +188,35 @@ func TestSendNotification_SkipsWrongTrigger(t *testing.T) {
 	}
 }
 
+func TestSendNotification_SkipsExcludedServerTriggerOnly(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{{
+		Type:     "webhook",
+		URL:      srv.URL,
+		Triggers: []Trigger{TriggerAlert, TriggerHealthy},
+		ServerExclusions: []NotificationServerExclusion{{
+			Server:   "RDS01",
+			Triggers: []Trigger{TriggerAlert},
+		}},
+	}}
+
+	SendNotification(targets, &NotifyState{}, newTestResult("rds01.example.test", "Alert"), TriggerAlert, "")
+	if got := atomic.LoadInt32(&count); got != 0 {
+		t.Fatalf("excluded alert sent %d times, want 0", got)
+	}
+
+	SendNotification(targets, &NotifyState{}, newTestResult("rds01.example.test", "Healthy"), TriggerHealthy, "")
+	if got := atomic.LoadInt32(&count); got != 1 {
+		t.Errorf("non-excluded healthy notification sent %d times, want 1", got)
+	}
+}
+
 func TestSendNotification_RepeatOnce(t *testing.T) {
 	var count int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

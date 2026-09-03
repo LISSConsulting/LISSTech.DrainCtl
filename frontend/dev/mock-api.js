@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
 /**
  * mock-api.js — Vite plugin that serves realistic mock data for the
  * DrainCtl dashboard API during local development.
@@ -14,6 +17,25 @@
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
 export const MOCK_VERSION = '3.7';
+
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+function currentAppVersion() {
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+    const commitDate = git('show', '-s', '--format=%cs', 'HEAD');
+    const [year, month] = commitDate.split('-');
+    const commitMonth = `${year}-${month}`;
+    const monthCommitCount = git('log', 'HEAD', '--format=%cs')
+      .split(/\r?\n/)
+      .filter((date) => date.startsWith(commitMonth)).length;
+    return `${Number(year) % 100}.${Number(month)}.${Math.max(0, monthCommitCount - 1)}`;
+  } catch {
+    return 'dev';
+  }
+}
+
+const APP_VERSION = currentAppVersion();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -425,7 +447,7 @@ function seedHistory(host, currentStatus) {
       transition,
       transition_from: transition ? prevStatus : undefined,
       changed_by: transition && s !== 'ok' && s !== 'warning' ? pick(ADMINS) : undefined,
-      version: '26.103.4',
+      version: APP_VERSION,
       message: transition
         ? `Status changed: ${prevStatus} → ${s}`
         : `Check-in: ${s}`,
@@ -572,7 +594,7 @@ function startEvolution() {
           transition: true,
           transition_from: prev,
           changed_by: s.changedBy,
-          version: '26.103.4',
+          version: APP_VERSION,
           message: `Status changed: ${prev} → ${s.status}`,
         });
         // Cap at 100 entries
@@ -612,7 +634,7 @@ function serverView(host) {
     utilization_pct: maxSessions > 0 ? Math.round(sessTotal / maxSessions * 100) : 0,
     state_duration_seconds: stateDurationSeconds,
     state_changed_at: s.stateChangedAt,
-    version: s.status === 'off' ? '' : '26.103.4',
+    version: s.status === 'off' ? '' : APP_VERSION,
     registered_at: s.registeredAt,
     last_seen: s.status === 'off' ? isoAgo(10) : isoNow(),
     changed_by: s.changedBy,
@@ -631,7 +653,7 @@ function healthResponse() {
   for (const s of servers) {
     if (s.status in counts) counts[s.status]++;
   }
-  return { version: '26.103.4', servers: counts };
+  return { version: APP_VERSION, servers: counts };
 }
 
 // ---------------------------------------------------------------------------
