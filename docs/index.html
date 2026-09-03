@@ -1696,42 +1696,42 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Release</div>
-                <h2 class="section-title serif section-title--italic">A quieter, safer release for every host.</h2>
+                <h2 class="section-title serif section-title--italic">A current foundation for every host.</h2>
                 <p class="release-lede">
-                    This release is about the work you do every day: keeping the farm visible, responding before users
-                    feel an issue, and changing settings without a maintenance window.
+                    This maintenance release refreshes the service, telemetry, dashboard, and delivery toolchains while
+                    keeping operator workflows and in-place upgrade behavior unchanged.
                 </p>
                 <div class="release-grid">
                     <article class="card release-card" data-number="01">
-                        <span class="release-tag">Less overhead</span>
-                        <h3>Stay informed without taxing the server.</h3>
+                        <span class="release-tag">Current runtime</span>
+                        <h3>Build on the latest stable Go toolchain.</h3>
                         <p>
-                            DrainCtl does less background work while idle, while drain-state changes still reach the
-                            audit trail immediately.
+                            DrainCtl now builds and tests with Go 1.27.1, carrying current compiler and standard-library
+                            fixes into every service binary.
                         </p>
                     </article>
                     <article class="card release-card" data-number="02">
-                        <span class="release-tag">Live control</span>
-                        <h3>Change monitoring without reinstalling.</h3>
+                        <span class="release-tag">Telemetry storage</span>
+                        <h3>Keep retained metrics on a maintained SQLite stack.</h3>
                         <p>
-                            Turn the dashboard on or off and tune alert thresholds live. Disabled alerts stay off, and
-                            sensible defaults remain intact.
+                            The embedded SQLite engine moves to 1.58.0 together with its maintained runtime
+                            dependencies. Existing databases and retention behavior remain unchanged.
                         </p>
                     </article>
                     <article class="card release-card" data-number="03">
-                        <span class="release-tag">Reliable alerts</span>
-                        <h3>Trust the signal when pressure lasts.</h3>
+                        <span class="release-tag">Dashboard stack</span>
+                        <h3>Refresh the embedded dashboard foundation.</h3>
                         <p>
-                            CPU, memory, and input-delay alerts now honor the service&rsquo;s actual check cadence, so
-                            sustained conditions are evaluated when you expect.
+                            Svelte 5.57.0, Vite 8.2.2, Lucide 1.39.0, and the latest compatible Svelte tooling keep the
+                            dashboard build current without changing its operator-facing controls.
                         </p>
                     </article>
                     <article class="card release-card" data-number="04">
-                        <span class="release-tag">Safe upgrades</span>
-                        <h3>Keep your settings and history.</h3>
+                        <span class="release-tag">Delivery tooling</span>
+                        <h3>Reproduce builds with current package tooling.</h3>
                         <p>
-                            Signed in-place upgrades preserve notification targets, registered servers, dashboard
-                            history, and protected credentials.
+                            pnpm 11.25.0 is aligned across local builds and CI. GitHub Actions, pre-commit hooks, and WiX
+                            packages remain on their latest maintained releases.
                         </p>
                     </article>
                 </div>
