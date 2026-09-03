@@ -44,12 +44,12 @@ Query from CLI, PowerShell, or your RMM. Answers come from a named pipe in under
 
 <h2 id="latest-release">▎ Latest release</h2>
 
-The current release focuses on a quieter, safer day-to-day experience:
+The current release refreshes the supported build and runtime stack without changing operator workflows:
 
-- **Lower background overhead** — less idle work on every monitored host, without slowing drain-state detection.
-- **Live dashboard controls** — enable or disable the dashboard and adjust alert thresholds without reinstalling the service.
-- **Settings that stay correct** — disabled alerts remain disabled, defaults remain sensible, and saved notification credentials remain protected.
-- **More dependable monitoring** — local status requests handle edge-case connections reliably, and sustained alerts follow the service's real evaluation cadence.
+- **Current Go runtime** — built and tested with Go 1.27.1.
+- **Updated telemetry storage** — SQLite 1.58.0 plus its maintained runtime dependencies.
+- **Current dashboard stack** — Svelte 5.57.0, Vite 8.2.2, Lucide 1.39.0, and pnpm 11.25.0.
+- **Maintained delivery tooling** — current GitHub Actions, pre-commit hooks, WiX 7 packages, and .NET SDK compatibility.
 - **Safe in-place upgrades** — signed releases retain configuration, registered hosts, and telemetry history.
 
 [Download the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) or install the
@@ -635,7 +635,7 @@ This configures:
 
 <h2 id="build">▎ Build</h2>
 
-**Tested build toolchain** — Go 1.26.5, Node.js 24 LTS, pnpm 11.20.0, TypeScript 7.0.2, MinGW (`scoop install mingw`), and .NET SDK 10. The project restores WiX 7.0.0 and its extensions from NuGet; `installer/LISSTech.DrainCtl.wixproj` records the accepted [`wix7` EULA](https://docs.firegiant.com/wix/osmf/).
+**Tested build toolchain** — Go 1.27.1, Node.js 24 LTS, pnpm 11.25.0, TypeScript 7.0.2, MinGW (`scoop install mingw`), and .NET SDK 10. The project restores WiX 7.0.0 and its extensions from NuGet; both installer projects record the accepted [`wix7` EULA](https://docs.firegiant.com/wix/osmf/). DrainCtl ships native Windows artifacts; the repository has no Docker image or container manifest to maintain.
 
 ```bash
 cd frontend && pnpm install --frozen-lockfile
