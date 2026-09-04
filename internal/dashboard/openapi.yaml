@@ -668,6 +668,20 @@ components:
           maximum: 300
           description: "Default 30."
 
+    UpdateConfig:
+      type: object
+      required: [enabled, channel, poll_interval]
+      properties:
+        enabled:
+          type: boolean
+          description: "Whether connected agents automatically install signed releases."
+        channel:
+          type: string
+          enum: [stable, prerelease]
+        poll_interval:
+          type: string
+          description: "Go duration string. Minimum 1h; default 24h."
+
     SettingsResponse:
       type: object
       properties:
@@ -686,6 +700,8 @@ components:
           description: "Minutes."
         performance:
           $ref: "#/components/schemas/PerformanceConfig"
+        update:
+          $ref: "#/components/schemas/UpdateConfig"
 
     SettingsUpdate:
       type: object
@@ -713,6 +729,9 @@ components:
           nullable: true
         performance:
           $ref: "#/components/schemas/PerformanceConfig"
+          nullable: true
+        update:
+          $ref: "#/components/schemas/UpdateConfig"
           nullable: true
 
 paths:
@@ -1041,7 +1060,7 @@ paths:
     get:
       tags: [settings]
       summary: Get dashboard settings
-      description: Returns notification targets, thresholds, and performance config.
+      description: Returns notification targets, thresholds, performance, and automatic-update policy.
       operationId: getSettings
       security:
         - session: []
@@ -1062,7 +1081,8 @@ paths:
       summary: Update dashboard settings
       description: |
         Atomic update. Absent fields are left unchanged. Empty notifications
-        array clears all targets. Max body 8 KB.
+        array clears all targets. The update block, when present, must contain
+        enabled, channel, and poll_interval. Max body 8 KB.
       operationId: updateSettings
       security:
         - session: []

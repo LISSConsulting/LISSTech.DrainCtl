@@ -413,3 +413,13 @@ func applyRemoteConfig(
 		evtSpike.Enabled = remote.EvtSpike.Enabled
 	}
 }
+
+// effectiveUpdateConfig overlays the dashboard-managed self-update block on
+// the locally configured fallback. Older dashboards omit Update, in which
+// case the agent must preserve its local policy.
+func effectiveUpdateConfig(local dc.UpdateConfig, remote *dashboard.RemoteSettings) dc.UpdateConfig {
+	if remote != nil && remote.Update != nil {
+		return *remote.Update
+	}
+	return local
+}

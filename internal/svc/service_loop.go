@@ -68,6 +68,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	cfg := fullCfg.ToServiceConfig()
 	dashCfg := fullCfg.ToDashboardConfig()
 	prevEvtSpikeCfg := fullCfg.EvtSpike
+	localUpdateCfg := fullCfg.Update
 
 	// Apply Go runtime soft memory limit. Makes the GC more aggressive about
 	// returning pages to the OS, which matters on memory-constrained RDS hosts.
@@ -474,6 +475,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		oldPollInterval := cfg.PollInterval
 		effectiveEvtSpike := prevEvtSpikeCfg
 		applyRemoteConfig(cfgRemote, &cfg, &notifyTargets, &effectiveEvtSpike)
+		updaterSub.UpdateConfig(effectiveUpdateConfig(localUpdateCfg, cfgRemote))
 		handler.publish(cfg, dashState)
 		perfSub.Reload(cfg.Performance)
 		if cfg.PollInterval != oldPollInterval {
@@ -597,6 +599,8 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 			newCfg := newFullCfg.ToServiceConfig()
 			effectiveEvtSpike := newFullCfg.EvtSpike
+			localUpdateCfg = newFullCfg.Update
+			effectiveUpdateCfg := localUpdateCfg
 			// Synchronously refresh the dashboard-authoritative snapshot before
 			// merging. The cached `lastRemote` is populated on the next poll
 			// tick (up to one PollInterval away), so without this refresh the
@@ -631,18 +635,18 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// window; no worse than the previous behavior).
 			if useRemoteConfig && lastRemote != nil && newFullCfg.Dashboard.URL != "" {
 				applyRemoteConfig(lastRemote, &newCfg, &notifyTargets, &effectiveEvtSpike)
+				effectiveUpdateCfg = effectiveUpdateConfig(localUpdateCfg, lastRemote)
 			}
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
 			handler.publish(cfg, dashState)
-			// Push the new UpdateConfig into the running updater
-			// subsystem so an operator's enabled / channel flip is
-			// honored within seconds (the wakeCh interrupts the
-			// poll-loop's current sleep). Without this call the
-			// updater's view of cfg stays frozen at service start.
-			updaterSub.UpdateConfig(newFullCfg.Update)
+			// Push the effective local-or-dashboard update policy into the
+			// running updater. UpdateConfig wakes the poll loop only when the
+			// policy changed, so regular dashboard refreshes do not cause extra
+			// GitHub polls.
+			updaterSub.UpdateConfig(effectiveUpdateCfg)
 			newDashCfg := newFullCfg.ToDashboardConfig()
 
 			// Handle dashboard URL or TLS fingerprint changes.
