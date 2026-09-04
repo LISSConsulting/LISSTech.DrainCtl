@@ -193,6 +193,11 @@ let mockSettings = {
     // evtspike fields live in config.json and are not surfaced in the mock.
     enabled: false,
   },
+  update: {
+    enabled: false,
+    channel: 'stable',
+    poll_interval: '24h0m0s',
+  },
 };
 
 /**

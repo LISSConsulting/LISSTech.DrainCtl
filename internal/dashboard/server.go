@@ -60,6 +60,10 @@ type DashboardServer struct {
 	// enabled means the field was absent from the request body (no-op).
 	testPutEvtSpikeEnabledFunc func(enabled *bool) error
 
+	// testPutUpdateConfigFunc, if non-nil, is called by handlePutSettings
+	// instead of dc.UpdateUpdateConfig for the automatic-update block.
+	testPutUpdateConfigFunc func(update *dc.UpdateConfig) error
+
 	// evtspikeStatus returns the current detector status for a host. Set by
 	// the evtspike subsystem at Start; nil when the feature is off or not yet
 	// wired. See evtspike.go handleEvtSpikeStatus for nil semantics.
