@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
@@ -202,6 +203,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		PollInterval            int                  `json:"poll_interval"`
 		Performance             dc.PerformanceConfig `json:"performance"`
 		EvtSpike                evtspikeView         `json:"evtspike"`
+		Update                  dc.UpdateConfig      `json:"update"`
 	}{
 		Notifications:           views,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
@@ -209,6 +211,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		PollInterval:            cfg.PollInterval,
 		Performance:             cfg.Performance,
 		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
+		Update:                  cfg.Update,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -243,6 +246,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		PollInterval            *int                  `json:"poll_interval,omitempty"`
 		Performance             *dc.PerformanceConfig `json:"performance,omitempty"`
 		EvtSpike                *evtspikeInput        `json:"evtspike,omitempty"`
+		Update                  *dc.UpdateConfig      `json:"update,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -304,6 +308,17 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	if in.Update != nil {
+		if in.Update.Channel != dc.ChannelStable && in.Update.Channel != dc.ChannelPrerelease {
+			http.Error(w, `update.channel must be "stable" or "prerelease"`, http.StatusBadRequest)
+			return
+		}
+		if interval := time.Duration(in.Update.PollInterval); interval < dc.MinUpdatePollInterval {
+			http.Error(w, fmt.Sprintf("update.poll_interval must be at least %s", dc.MinUpdatePollInterval), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Apply the three-mode secret policy. Bulk PUT keys lookups by Type+URL,
 	// which is fragile across renames — the per-target endpoints below address
 	// this by index instead.
@@ -349,6 +364,20 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	} else {
 		if err := dc.UpdateEvtSpikeEnabled(evtspikeEnabled); err != nil {
 			slog.Error("update evtspike enabled failed", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if ds.testPutUpdateConfigFunc != nil {
+		if err := ds.testPutUpdateConfigFunc(in.Update); err != nil {
+			slog.Error("update automatic-update config failed (test hook)", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := dc.UpdateUpdateConfig(in.Update); err != nil {
+			slog.Error("update automatic-update settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

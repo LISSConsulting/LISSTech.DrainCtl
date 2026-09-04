@@ -1107,6 +1107,11 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 		}}
 		cfg.SessionWarningThreshold = 75
 		cfg.GracePeriod = 45
+		cfg.Update = dc.UpdateConfig{
+			Enabled:      true,
+			Channel:      dc.ChannelPrerelease,
+			PollInterval: dc.Duration(6 * time.Hour),
+		}
 		return cfg, nil
 	}
 
@@ -1125,6 +1130,7 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
+		Update                  dc.UpdateConfig         `json:"update"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -1145,6 +1151,10 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 	}
 	if resp.GracePeriod != 45 {
 		t.Errorf("grace_period = %d, want 45", resp.GracePeriod)
+	}
+	if !resp.Update.Enabled || resp.Update.Channel != dc.ChannelPrerelease ||
+		time.Duration(resp.Update.PollInterval) != 6*time.Hour {
+		t.Errorf("update = %+v, want enabled prerelease at 6h", resp.Update)
 	}
 }
 
@@ -1307,6 +1317,56 @@ func TestHandlePutSettings_Success_Returns200(t *testing.T) {
 	}
 	if !resp.OK {
 		t.Error("ok = false, want true")
+	}
+}
+
+func TestHandlePutSettings_UpdatesAutomaticPolicy(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
+		return nil
+	}
+	var captured *dc.UpdateConfig
+	ds.testPutUpdateConfigFunc = func(update *dc.UpdateConfig) error {
+		captured = update
+		return nil
+	}
+
+	body := `{"update":{"enabled":true,"channel":"prerelease","poll_interval":"6h"}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if captured == nil || !captured.Enabled || captured.Channel != dc.ChannelPrerelease ||
+		time.Duration(captured.PollInterval) != 6*time.Hour {
+		t.Errorf("captured update = %+v, want enabled prerelease at 6h", captured)
+	}
+}
+
+func TestHandlePutSettings_RejectsInvalidAutomaticPolicy(t *testing.T) {
+	tests := []string{
+		`{"update":{"enabled":true,"channel":"beta","poll_interval":"6h"}}`,
+		`{"update":{"enabled":true,"channel":"stable","poll_interval":"30m"}}`,
+	}
+	for _, body := range tests {
+		t.Run(body, func(t *testing.T) {
+			ds := newTestServer(t)
+			ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error {
+				return nil
+			}
+			ds.testPutUpdateConfigFunc = func(_ *dc.UpdateConfig) error {
+				t.Fatal("invalid automatic-update policy reached persistence")
+				return nil
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+			ds.handlePutSettings(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
@@ -2574,6 +2634,11 @@ func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
 			GracePeriod:             10,
 			SessionWarningThreshold: 80,
 			Notifications:           []dc.NotificationTarget{},
+			Update: dc.UpdateConfig{
+				Enabled:      true,
+				Channel:      dc.ChannelStable,
+				PollInterval: dc.Duration(24 * time.Hour),
+			},
 		}, nil
 	}
 
@@ -2596,6 +2661,9 @@ func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
 	case msg := <-ch:
 		if !bytes.Contains(msg, []byte(`"settings_update"`)) {
 			t.Errorf("broadcast missing settings_update type: %s", msg)
+		}
+		if !bytes.Contains(msg, []byte(`"update":{"enabled":true,"channel":"stable","poll_interval":"24h0m0s"}`)) {
+			t.Errorf("broadcast missing automatic-update policy: %s", msg)
 		}
 	case <-done:
 		t.Fatal("subscriber evicted unexpectedly")

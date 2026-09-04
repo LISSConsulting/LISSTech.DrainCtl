@@ -331,6 +331,7 @@ func GetSettings() (*RemoteSettings, error) {
 		PollInterval:            cfg.PollInterval,
 		Performance:             &cfg.Performance,
 		EvtSpike:                &RemoteEvtSpike{Enabled: cfg.EvtSpike.Enabled},
+		Update:                  &cfg.Update,
 	}, nil
 }
 
