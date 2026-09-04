@@ -12,7 +12,7 @@ Requires: Go 1.26+, MinGW, WiX 5, .NET SDK 8+.
 
 ## Key Rules
 - Every `.go` file needs `//go:build windows`
-- Version is git-derived CalVer `YY.MM.BUILD` via `scripts/version.ps1` — injected into Go at build time (ldflags), into `drainctl.rc`/`drainctl.syso` via `just resource`, into `.wixproj` via `-p:ProductVersion=`, into the PS module via `.psd1.tmpl` rendering. Nothing to bump by hand.
+- App version is git-derived CalVer `YY.MM.BUILD` via `scripts/version.ps1` and is injected into Go, PE resources, package naming, and the PS module. MSI `ProductVersion` is separately generated as `(100 + YY).MM.BUILD` by `scripts/msi-version.ps1`; the schema epoch prevents legacy `YY.DOY.N` installers from replacing current packages. Nothing is bumped by hand.
 - The only version strings still stored in git are `docs/index.html` release-notes content, which updates manually on release refreshes (not per commit).
 - Company: "LISS Consulting, Corp." (legal), "LISS Technologies" (d/b/a)
 - No viper — config lives in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json` (encoding/json)

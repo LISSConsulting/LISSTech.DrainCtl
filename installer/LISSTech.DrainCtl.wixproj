@@ -10,10 +10,11 @@
     <SuppressPdbOutput>true</SuppressPdbOutput>
   </PropertyGroup>
   <PropertyGroup>
-    <!-- ProductVersion is MSI-specific and monotonic across repeated installer
-         builds from the same commit. AppVersion remains the git-derived CalVer
-         shown to users in package naming. Defaults keep bare dotnet builds
-         obviously non-release. -->
+    <!-- ProductVersion is MSI-specific: scripts/msi-version.ps1 adds a
+         major-version epoch so legacy YY.DOY.N packages cannot replace the
+         current YY.MM.N line, then adds a per-build revision. AppVersion is
+         the git-derived CalVer shown to users in package naming. Defaults
+         keep bare dotnet builds obviously non-release. -->
     <ProductVersion Condition="'$(ProductVersion)'==''">0.0.0</ProductVersion>
     <AppVersion Condition="'$(AppVersion)'==''">0.0.0</AppVersion>
     <DefineConstants>ProductVersion=$(ProductVersion);AppVersion=$(AppVersion)</DefineConstants>
