@@ -116,12 +116,14 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		GracePeriod             int                     `json:"grace_period"`
 		Performance             dc.PerformanceConfig    `json:"performance"`
 		EvtSpike                evtspikeView            `json:"evtspike"`
+		Update                  dc.UpdateConfig         `json:"update"`
 	}{
 		Notifications:           redacted,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		Performance:             cfg.Performance,
 		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
+		Update:                  cfg.Update,
 	}
 	if resp.Notifications == nil {
 		resp.Notifications = []dc.NotificationTarget{}

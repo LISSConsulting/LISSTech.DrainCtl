@@ -109,6 +109,36 @@ func TestUpdateConfig_WakesPolledLoop(t *testing.T) {
 	}
 }
 
+func TestUpdateConfig_UnchangedPolicyDoesNotWakePollLoop(t *testing.T) {
+	var fetchCalls atomic.Int32
+	prevFetch := fetchRelease
+	t.Cleanup(func() { fetchRelease = prevFetch })
+	fetchRelease = func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
+		fetchCalls.Add(1)
+		return release{notModified: true}, nil
+	}
+	prevDelay := initialPollDelay
+	t.Cleanup(func() { initialPollDelay = prevDelay })
+	initialPollDelay = func() time.Duration { return time.Hour }
+
+	cfg := dc.UpdateConfig{
+		Enabled:      true,
+		Channel:      dc.ChannelStable,
+		PollInterval: dc.Duration(time.Hour),
+	}
+	s := New(cfg, nil)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(s.Stop)
+
+	s.UpdateConfig(cfg)
+	time.Sleep(100 * time.Millisecond)
+	if got := fetchCalls.Load(); got != 0 {
+		t.Errorf("unchanged UpdateConfig woke poll loop: fetchRelease called %d times", got)
+	}
+}
+
 // TestSubsystem_StopReturnsBeforeFirstPoll asserts the LCI Stop contract
 // under load: an enabled Subsystem mid-initial-delay must drain within
 // the bounded window when ctx is cancelled. We use a long initial-delay

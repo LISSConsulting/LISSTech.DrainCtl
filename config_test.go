@@ -1214,6 +1214,42 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	}
 }
 
+func TestUpdateUpdateConfig_PersistsPolicy(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	want := UpdateConfig{
+		Enabled:      true,
+		Channel:      ChannelPrerelease,
+		PollInterval: Duration(6 * time.Hour),
+	}
+	if err := UpdateUpdateConfig(&want); err != nil {
+		t.Fatalf("UpdateUpdateConfig: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Update != want {
+		t.Errorf("Update = %+v, want %+v", got.Update, want)
+	}
+}
+
+func TestUpdateUpdateConfig_RejectsInvalidPolicy(t *testing.T) {
+	tests := []UpdateConfig{
+		{Channel: "beta", PollInterval: Duration(time.Hour)},
+		{Channel: ChannelStable, PollInterval: Duration(time.Minute)},
+	}
+	for _, policy := range tests {
+		if err := UpdateUpdateConfig(&policy); err == nil {
+			t.Errorf("UpdateUpdateConfig(%+v) succeeded, want validation error", policy)
+		}
+	}
+}
+
 func TestConfigRMW_NoInterleave(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 	if err := SaveConfig(DefaultConfig()); err != nil {
