@@ -16,7 +16,7 @@
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor } from '@lucide/svelte';
+    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor, RefreshCw } from '@lucide/svelte';
 
     let { onclose } = $props();
 
@@ -274,6 +274,13 @@
 
     const POLL_INTERVAL_PRESETS = [15, 30, 60];
     const SUSTAIN_PRESETS = [30, 60, 120, 300]; // seconds
+    const UPDATE_INTERVAL_PRESETS = [
+        { value: '1h0m0s', label: '1 hour' },
+        { value: '6h0m0s', label: '6 hours' },
+        { value: '12h0m0s', label: '12 hours' },
+        { value: '24h0m0s', label: 'Daily' },
+        { value: '72h0m0s', label: '3 days' },
+    ];
 
     // ---------------------------------------------------------------------------
     // Sustain window — bound directly to config.performance.load_alert_delay_sec
@@ -875,6 +882,62 @@
                             <input type="checkbox" bind:checked={config.evtspike.enabled} />
                             Enable detector
                         </label>
+                    </div>
+                {/if}
+
+                <!-- Automatic Updates -->
+                {#if config.update}
+                    <div class="settings-group">
+                        <div class="section-header"><RefreshCw size={14} strokeWidth={2.5} /> Automatic Updates</div>
+                        <div class="settings-hint">
+                            Keep connected agents on a signed DrainCtl release. Enabling or changing this policy is
+                            applied without restarting the service.
+                        </div>
+                        <label class="settings-check">
+                            <input type="checkbox" bind:checked={config.update.enabled} />
+                            Automatically install updates
+                        </label>
+                        {#if config.update.enabled}
+                            <div class="subsection" style="margin-top:12px">
+                                <div class="settings-label">Release Channel</div>
+                                <div class="repeat-pills">
+                                    <button
+                                        type="button"
+                                        class="btn-brutal gp-pill"
+                                        class:active={config.update.channel === 'stable'}
+                                        onclick={() => (config.update.channel = 'stable')}>Stable</button
+                                    >
+                                    <button
+                                        type="button"
+                                        class="btn-brutal gp-pill"
+                                        class:active={config.update.channel === 'prerelease'}
+                                        onclick={() => (config.update.channel = 'prerelease')}>Prerelease</button
+                                    >
+                                </div>
+                                <div class="settings-label">Check Frequency</div>
+                                <div class="repeat-pills">
+                                    {#each UPDATE_INTERVAL_PRESETS as preset}
+                                        <button
+                                            type="button"
+                                            class="btn-brutal gp-pill"
+                                            class:active={config.update.poll_interval === preset.value}
+                                            onclick={() => (config.update.poll_interval = preset.value)}
+                                            >{preset.label}</button
+                                        >
+                                    {/each}
+                                    {#if !UPDATE_INTERVAL_PRESETS.some((preset) => preset.value === config.update.poll_interval)}
+                                        <button type="button" class="btn-brutal gp-pill active" disabled>
+                                            {config.update.poll_interval}
+                                        </button>
+                                    {/if}
+                                </div>
+                                {#if config.update.channel === 'prerelease'}
+                                    <div class="settings-hint">
+                                        Prerelease may install preview builds. Use Stable for production servers.
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
                     </div>
                 {/if}
 

@@ -165,6 +165,35 @@ func TestApplyRemoteConfig_EvtSpikePropagation_WireFormat(t *testing.T) {
 	}
 }
 
+func TestEffectiveUpdateConfig_DashboardOverridesLocalPolicy(t *testing.T) {
+	local := dc.UpdateConfig{
+		Enabled:      false,
+		Channel:      dc.ChannelStable,
+		PollInterval: dc.Duration(24 * time.Hour),
+	}
+	remotePolicy := dc.UpdateConfig{
+		Enabled:      true,
+		Channel:      dc.ChannelPrerelease,
+		PollInterval: dc.Duration(6 * time.Hour),
+	}
+	remote := &dashboard.RemoteSettings{Update: &remotePolicy}
+
+	if got := effectiveUpdateConfig(local, remote); got != remotePolicy {
+		t.Errorf("effectiveUpdateConfig = %+v, want dashboard policy %+v", got, remotePolicy)
+	}
+}
+
+func TestEffectiveUpdateConfig_MissingDashboardPolicyPreservesLocal(t *testing.T) {
+	local := dc.UpdateConfig{
+		Enabled:      true,
+		Channel:      dc.ChannelStable,
+		PollInterval: dc.Duration(12 * time.Hour),
+	}
+	if got := effectiveUpdateConfig(local, &dashboard.RemoteSettings{}); got != local {
+		t.Errorf("effectiveUpdateConfig = %+v, want local policy %+v", got, local)
+	}
+}
+
 // ── pruneNotifyState ──────────────────────────────────────────────────────────
 
 func TestPruneNotifyState_RemovesStaleAlertEntry(t *testing.T) {

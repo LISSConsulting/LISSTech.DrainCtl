@@ -1033,6 +1033,24 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 	})
 }
 
+// UpdateUpdateConfig atomically replaces the self-update settings. A nil
+// argument is a no-op so dashboard PATCH-like requests can omit the block.
+func UpdateUpdateConfig(update *UpdateConfig) error {
+	if update == nil {
+		return nil
+	}
+	if update.Channel != ChannelStable && update.Channel != ChannelPrerelease {
+		return fmt.Errorf("update channel must be %q or %q, got %q", ChannelStable, ChannelPrerelease, update.Channel)
+	}
+	if interval := time.Duration(update.PollInterval); interval < MinUpdatePollInterval {
+		return fmt.Errorf("update poll interval must be at least %s, got %s", MinUpdatePollInterval, interval)
+	}
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Update = *update
+		return nil
+	})
+}
+
 // ReadModifyWriteNotifications atomically modifies the notifications slice
 // under the same cross-process config lock used by every other config writer.
 // The mutate callback receives a copy of the current targets and returns the

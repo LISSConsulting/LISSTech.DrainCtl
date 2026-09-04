@@ -344,6 +344,7 @@ type RemoteSettings struct {
 	PollInterval            int                     `json:"poll_interval,omitempty"`
 	Performance             *dc.PerformanceConfig   `json:"performance,omitempty"`
 	EvtSpike                *RemoteEvtSpike         `json:"evtspike,omitempty"`
+	Update                  *dc.UpdateConfig        `json:"update,omitempty"`
 }
 
 // FetchSettings retrieves dashboard settings via the agent config endpoint.

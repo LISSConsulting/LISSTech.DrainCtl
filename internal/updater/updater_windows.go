@@ -124,17 +124,17 @@ func New(cfg dc.UpdateConfig, shutdownService context.CancelFunc) *Subsystem {
 	}
 }
 
-// UpdateConfig replaces the in-memory cfg with a new one. Called by the
-// config-watcher path on a config.json change so an operator can flip
-// Enabled or change Channel without a service restart.
-//
-// Enabled and Channel changes take effect within seconds: the poll
-// goroutine's sleep is interrupted via wakeCh, and the next tick reads
-// the new cfg. PollInterval changes do NOT interrupt the current sleep
-// (the sleep was sized at the OLD interval); the new interval applies
-// to the NEXT sleep, so worst-case lag is one old-interval cycle.
+// UpdateConfig replaces the in-memory cfg when the policy changed. Called by
+// local config reloads and dashboard settings refreshes. A real change wakes
+// the poll loop so enabled, channel, and cadence updates take effect promptly;
+// an identical dashboard refresh is a no-op and does not cause an extra GitHub
+// poll.
 func (s *Subsystem) UpdateConfig(cfg dc.UpdateConfig) {
 	s.cfgMu.Lock()
+	if s.cfg == cfg {
+		s.cfgMu.Unlock()
+		return
+	}
 	s.cfg = cfg
 	s.cfgMu.Unlock()
 	// Non-blocking send: if the goroutine is mid-tick or already has a
