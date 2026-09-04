@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net462</TargetFramework>
+    <AcceptEula>wix7</AcceptEula>
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>LISSTech.DrainCtl.MsiCA</RootNamespace>
     <AssemblyName>DrainCtl.MsiCA</AssemblyName>
