@@ -131,12 +131,20 @@ const BASE = '/api/v1';
  */
 
 /**
+ * @typedef {Object} UpdateSettings
+ * @property {boolean} enabled
+ * @property {'stable'|'prerelease'} channel
+ * @property {string} poll_interval - Go duration string, minimum 1h
+ */
+
+/**
  * @typedef {Object} Settings
  * @property {number} grace_period              - grace period in minutes
  * @property {number} session_warning_threshold
  * @property {PerfMonitoringConfig} performance
  * @property {NotifyTarget[]} notifications
  * @property {EvtSpikeSettings} [evtspike]
+ * @property {UpdateSettings} [update]
  */
 
 /**
@@ -444,6 +452,9 @@ export function settingsFromWire(config) {
             config.performance.mem_crit_pct,
             DEFAULT_MEMORY_CRIT_USED_PCT,
         );
+    }
+    if (!config.update) {
+        config.update = { enabled: false, channel: 'stable', poll_interval: '24h0m0s' };
     }
     return config;
 }
