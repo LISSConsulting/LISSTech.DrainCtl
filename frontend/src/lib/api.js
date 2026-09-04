@@ -117,6 +117,7 @@ const BASE = '/api/v1';
  * @property {string[]} triggers
  * @property {number} repeat_minutes   - 0 = once only
  * @property {boolean} [enabled]       - false = skip this target; absent/true = send (default)
+ * @property {{server:string,triggers:string[]}[]} [server_exclusions] - Per-server trigger suppressions
  */
 
 /**

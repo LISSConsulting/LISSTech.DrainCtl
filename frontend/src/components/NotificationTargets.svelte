@@ -54,6 +54,7 @@
                       triggers: ['drain_on', 'drain_off', 'alert', 'healthy'],
                       repeat_minutes: 0,
                       enabled: true,
+                      server_exclusions: [],
                   };
         if (editTarget.enabled == null) editTarget.enabled = true;
     }
@@ -61,7 +62,9 @@
 
 <div class="settings-group">
     <div class="tgt-header">
-        <div class="section-header" style="margin-bottom:0"><Bell size={14} strokeWidth={2.5} /> Notification Targets</div>
+        <div class="section-header" style="margin-bottom:0">
+            <Bell size={14} strokeWidth={2.5} /> Notification Targets
+        </div>
         <div class="tgt-search-wrap" style={targets?.length > PAGE_SIZE ? '' : 'visibility:hidden'}>
             <Search size={13} />
             <input class="tgt-search" type="search" placeholder="Filter targets..." bind:value={search} />

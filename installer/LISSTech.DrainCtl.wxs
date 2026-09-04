@@ -8,7 +8,7 @@
         Scope="perMachine">
 
         <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"
-            Schedule="afterInstallExecute" />
+            Schedule="afterInstallInitialize" />
 
         <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />

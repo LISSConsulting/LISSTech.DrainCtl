@@ -127,17 +127,26 @@ var ValidTriggers = map[Trigger]bool{
 
 // ── NotificationTarget ───────────────────────────────────────────────────
 
+// NotificationServerExclusion suppresses selected triggers for one server on
+// one notification target. Server matching is case-insensitive and accepts a
+// short hostname for a reported FQDN.
+type NotificationServerExclusion struct {
+	Server   string    `json:"server"`
+	Triggers []Trigger `json:"triggers"`
+}
+
 // NotificationTarget describes a single notification endpoint.
 type NotificationTarget struct {
-	Type          string    `json:"type"` // "webhook", "ntfy", or "email"
-	URL           string    `json:"url"`
-	Triggers      []Trigger `json:"triggers"`                 // empty = DefaultTriggers
-	RepeatMinutes int       `json:"repeat_minutes,omitempty"` // 0 = once only
-	Secret        string    `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks; SMTP password for email
-	To            []string  `json:"to,omitempty"`             // email recipients
-	From          string    `json:"from,omitempty"`           // email sender
-	Enabled       *bool     `json:"enabled,omitempty"`        // nil or true = enabled (default); false = disabled
-	Severity      string    `json:"severity,omitempty"`       // "warning" or "alert" — event_spike target wiring (FR-011a); empty defaults to "warning"
+	Type             string                        `json:"type"` // "webhook", "ntfy", or "email"
+	URL              string                        `json:"url"`
+	Triggers         []Trigger                     `json:"triggers"`                 // empty = DefaultTriggers
+	RepeatMinutes    int                           `json:"repeat_minutes,omitempty"` // 0 = once only
+	Secret           string                        `json:"secret,omitempty"`         // HMAC-SHA256 signing secret for webhooks; SMTP password for email
+	To               []string                      `json:"to,omitempty"`             // email recipients
+	From             string                        `json:"from,omitempty"`           // email sender
+	Enabled          *bool                         `json:"enabled,omitempty"`        // nil or true = enabled (default); false = disabled
+	Severity         string                        `json:"severity,omitempty"`       // "warning" or "alert" — event_spike target wiring (FR-011a); empty defaults to "warning"
+	ServerExclusions []NotificationServerExclusion `json:"server_exclusions,omitempty"`
 }
 
 // HasTrigger returns true if the target subscribes to the given trigger.
@@ -149,6 +158,28 @@ func (t NotificationTarget) HasTrigger(trigger Trigger) bool {
 	for _, tr := range triggers {
 		if tr == trigger {
 			return true
+		}
+	}
+	return false
+}
+
+// ExcludesServer reports whether this target suppresses trigger for server.
+func (t NotificationTarget) ExcludesServer(server string, trigger Trigger) bool {
+	server = strings.TrimSuffix(strings.TrimSpace(server), ".")
+	serverShort, _, _ := strings.Cut(server, ".")
+	for _, exclusion := range t.ServerExclusions {
+		excluded := strings.TrimSuffix(strings.TrimSpace(exclusion.Server), ".")
+		excludedShort, _, _ := strings.Cut(excluded, ".")
+		sameServer := strings.EqualFold(excluded, server) ||
+			((!strings.Contains(excluded, ".") || !strings.Contains(server, ".")) &&
+				strings.EqualFold(excludedShort, serverShort))
+		if !sameServer {
+			continue
+		}
+		for _, excludedTrigger := range exclusion.Triggers {
+			if excludedTrigger == trigger {
+				return true
+			}
 		}
 	}
 	return false
@@ -523,6 +554,27 @@ func (c *Config) Validate() {
 				return false
 			})
 		}
+		normalizedExclusions := make([]NotificationServerExclusion, 0, len(c.Notifications[i].ServerExclusions))
+		for _, exclusion := range c.Notifications[i].ServerExclusions {
+			exclusion.Server = strings.TrimSuffix(strings.TrimSpace(exclusion.Server), ".")
+			if exclusion.Server == "" {
+				slog.Default().Warn("notification server exclusion with empty server ignored", "url", c.Notifications[i].URL)
+				continue
+			}
+			exclusion.Triggers = slices.DeleteFunc(exclusion.Triggers, func(tr Trigger) bool {
+				if !ValidTriggers[tr] || !c.Notifications[i].HasTrigger(tr) {
+					slog.Default().Warn("notification server exclusion trigger ignored",
+						"server", exclusion.Server, "trigger", tr, "url", c.Notifications[i].URL)
+					return true
+				}
+				return false
+			})
+			if len(exclusion.Triggers) == 0 {
+				continue
+			}
+			normalizedExclusions = append(normalizedExclusions, exclusion)
+		}
+		c.Notifications[i].ServerExclusions = normalizedExclusions
 		if c.Notifications[i].RepeatMinutes < 0 {
 			c.Notifications[i].RepeatMinutes = 0
 		}
