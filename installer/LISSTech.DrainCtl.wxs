@@ -8,7 +8,7 @@
         Scope="perMachine">
 
         <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"
-            Schedule="afterInstallExecute" />
+            Schedule="afterInstallInitialize" />
 
         <Icon Id="AppIcon.ico" SourceFile="resources\appicon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
@@ -382,6 +382,23 @@
             <ComponentRef Id="DiagsCollectScript" />
             <ComponentRef Id="DiagsInstallTaskScript" />
             <ComponentRef Id="DiagsTaskXml" />
+            <ComponentRef Id="LicenseDocs" />
         </ComponentGroup>
     </Fragment>
+
+    <!-- ── License documentation: NOTICE + LICENSE in the install root.
+         Binary redistributors need NOTICE to satisfy MIT/BSD-3 attribution
+         requirements for the embedded third-party components, and the full
+         Apache 2.0 LICENSE text for Apache-licensed portions. -->
+    <Fragment>
+        <Component Id="LicenseDocs" Directory="INSTALLFOLDER"
+            Guid="c1d2e3f4-5a6b-7c8d-9e0f-1a2b3c4d5e6f">
+            <File Id="LICENSE_txt"
+                Source="..\LICENSE"
+                KeyPath="yes" />
+            <File Id="NOTICE_txt"
+                Source="..\NOTICE" />
+        </Component>
+    </Fragment>
+
 </Wix>

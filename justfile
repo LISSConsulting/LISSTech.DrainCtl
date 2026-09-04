@@ -7,6 +7,7 @@ module_dir   := dist_dir / "LISSTech.DrainCtl"
 bin_dir      := module_dir / "bin"
 ca_dir       := dist_dir / "customactions"
 installer_dir := justfile_directory() / "installer"
+op_runner    := justfile_directory() / "scripts" / "op-with-service-account.ps1"
 
 # Code signing (set CODE_SIGNING_CERTIFICATE_THUMBPRINT in .env or environment)
 signing_thumbprint := env("CODE_SIGNING_CERTIFICATE_THUMBPRINT", "")
@@ -257,7 +258,12 @@ sign-binaries:
     Write-Host "   Certificate: $cn" -ForegroundColor DarkGray
     Write-Host "   Thumbprint:  $($thumbprint.Substring(0,8))..." -ForegroundColor DarkGray
 
-    # PowerShell files (Authenticode)
+    # PowerShell files (Authenticode). Skip the re-sign when the existing
+    # signature is still Valid against the current bytes — the file is only
+    # ever dirty because of an in-place re-sign, not because of clock drift
+    # or content change without a resign. Avoiding the redundant sign keeps
+    # the working tree clean on the happy path and prevents -dirty version
+    # suffixes from a prior release's sign-but-no-commit failure mode.
     foreach ($file in @(
         (Join-Path $moduleDir "LISSTech.DrainCtl.psm1"),
         (Join-Path $moduleDir "LISSTech.DrainCtl.psd1"),
@@ -265,6 +271,11 @@ sign-binaries:
     )) {
         if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
         $name = [System.IO.Path]::GetFileName($file)
+        $existing = Get-AuthenticodeSignature $file
+        if ($existing.Status -eq 'Valid' -and $existing.SignerCertificate.Thumbprint -eq $cert.Thumbprint) {
+            Write-Host "   ✅ $name (already valid)" -ForegroundColor DarkGray
+            continue
+        }
         Set-AuthenticodeSignature -FilePath $file -Certificate $cert -TimestampServer $timestampUrl -HashAlgorithm SHA256 | Out-Null
         if ((Get-AuthenticodeSignature $file).Status -ne 'Valid') { Write-Error "Failed: $name"; exit 1 }
         Write-Host "   ✅ $name" -ForegroundColor Green
@@ -370,18 +381,23 @@ all: (header "all") msi
 
 # Reset version-bearing files to HEAD before a release rebuild.
 #
-# Why this exists: sign-binaries re-signs docs/install.ps1 in place mid-build.
-# If a release fails partway through (e.g. sign-release-manifest aborts on a
-# missing env var), docs/install.ps1 is left modified. The NEXT release run's
-# `psmodule -> cli` then builds Go binaries against a dirty working tree, and
-# scripts/version.ps1 embeds a "-dirty+gSHA" suffix into the binary's
-# --version output. That contaminated string then propagates into the GitHub
-# release tag and the PSGallery prerelease entry — both of which require
-# manual cleanup (see v26.117.13/14 incident).
+# Why this still exists: sign-binaries re-signs docs/install.ps1 whenever
+# the file's content changes or its existing Authenticode signature is not
+# Valid against the current bytes. If a release fails partway through
+# (e.g. sign-release-manifest aborts on a missing env var) after the sign
+# but before the commit, docs/install.ps1 is left modified. The NEXT
+# release run's `psmodule -> cli` would then build Go binaries against a
+# dirty working tree, and scripts/version.ps1 would embed a "-dirty+gSHA"
+# suffix into the binary's --version output. That contaminated string
+# then propagates into the GitHub release tag and the PSGallery
+# prerelease entry — both of which require manual cleanup (see
+# v26.117.13/14 incident). With the skip-if-valid optimization in
+# sign-binaries, this preflight is the backstop for the unhappy path
+# only; the happy path leaves the working tree clean.
 #
-# Reset is scoped to docs/install.ps1 (the file sign-binaries mutates) plus
-# any other tracked file the build chain re-signs in place. Untracked files
-# and unrelated working-tree changes are not touched.
+# Reset is scoped to docs/install.ps1 (the file sign-binaries mutates)
+# plus any other tracked file the build chain re-signs in place.
+# Untracked files and unrelated working-tree changes are not touched.
 [private]
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
@@ -483,6 +499,11 @@ publish: (header "publish")
     $psKey = "{{psgallery_key}}"
     $moduleDir = "{{module_dir}}"
     if ($psKey) {
+        if ($psKey -like 'op://*') {
+            $resolved = & "{{op_runner}}" read $psKey 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey with the drainctl-build-agent service account"; exit $LASTEXITCODE }
+            $psKey = $resolved
+        }
         Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
         Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
         Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green
@@ -498,7 +519,12 @@ publish-psgallery:
     $psKey = "{{psgallery_key}}"
     $moduleDir = "{{module_dir}}"
     if (-not $psKey) { Write-Error "PSGALLERY_API_KEY not set in .env"; exit 1 }
-    if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first."; exit 1 }
+    if ($psKey -like 'op://*') {
+        $resolved = & "{{op_runner}}" read $psKey 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $resolved) { Write-Error "Failed to resolve $psKey with the drainctl-build-agent service account"; exit $LASTEXITCODE }
+        $psKey = $resolved
+    }
+    if (-not (Test-Path "$moduleDir/LISSTech.DrainCtl.psd1")) { Write-Error "Module not built. Run 'just release' first"; exit 1 }
     Write-Host "`n📤 Publishing to PSGallery" -ForegroundColor Cyan
     Publish-Module -Path $moduleDir -NuGetApiKey $psKey -ErrorAction Stop
     Write-Host "   ✅ LISSTech.DrainCtl published to PSGallery" -ForegroundColor Green

@@ -1096,9 +1096,15 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 	ds := newTestServer(t)
 	ds.testLoadConfigFunc = func() (*dc.Config, error) {
 		cfg := dc.DefaultConfig()
-		cfg.Notifications = []dc.NotificationTarget{
-			{Type: "webhook", URL: "https://hooks.example.com/abc", Triggers: dc.DefaultTriggers},
-		}
+		cfg.Notifications = []dc.NotificationTarget{{
+			Type:     "webhook",
+			URL:      "https://hooks.example.com/abc",
+			Triggers: dc.DefaultTriggers,
+			ServerExclusions: []dc.NotificationServerExclusion{{
+				Server:   "RDS01",
+				Triggers: []dc.Trigger{dc.TriggerAlert},
+			}},
+		}}
 		cfg.SessionWarningThreshold = 75
 		cfg.GracePeriod = 45
 		return cfg, nil
@@ -1128,6 +1134,11 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 	}
 	if resp.Notifications[0].URL != "https://hooks.example.com/abc" {
 		t.Errorf("notifications[0].URL = %q, want https://hooks.example.com/abc", resp.Notifications[0].URL)
+	}
+	if exclusions := resp.Notifications[0].ServerExclusions; len(exclusions) != 1 ||
+		exclusions[0].Server != "RDS01" || len(exclusions[0].Triggers) != 1 ||
+		exclusions[0].Triggers[0] != dc.TriggerAlert {
+		t.Errorf("notifications[0].ServerExclusions = %#v, want RDS01 alert exclusion", exclusions)
 	}
 	if resp.SessionWarningThreshold != 75 {
 		t.Errorf("session_warning_threshold = %d, want 75", resp.SessionWarningThreshold)
@@ -5023,7 +5034,7 @@ func TestHandleAddNotificationTarget_AppendsAndReturnsList(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 	ds := newTestServer(t)
 
-	body := `{"type":"webhook","url":"https://hooks.example.com/1","secret":"hmac-1","triggers":["alert"]}`
+	body := `{"type":"webhook","url":"https://hooks.example.com/1","secret":"hmac-1","triggers":["alert"],"server_exclusions":[{"server":"RDS01","triggers":["alert"]}]}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notifications", strings.NewReader(body))
 	ds.handleAddNotificationTarget(w, r)
@@ -5041,6 +5052,9 @@ func TestHandleAddNotificationTarget_AppendsAndReturnsList(t *testing.T) {
 	if !got[0].HasSecret {
 		t.Error("has_secret = false, want true (we set a secret)")
 	}
+	if len(got[0].ServerExclusions) != 1 || got[0].ServerExclusions[0].Server != "RDS01" {
+		t.Errorf("ServerExclusions = %#v, want RDS01", got[0].ServerExclusions)
+	}
 
 	// Disk should reflect the change — and the secret is on disk under DPAPI.
 	cfg, err := dc.LoadConfig()
@@ -5053,6 +5067,10 @@ func TestHandleAddNotificationTarget_AppendsAndReturnsList(t *testing.T) {
 	if cfg.Notifications[0].Secret == "" {
 		t.Error("on-disk secret empty; expected DPAPI-encrypted value")
 	}
+	if len(cfg.Notifications[0].ServerExclusions) != 1 ||
+		cfg.Notifications[0].ServerExclusions[0].Triggers[0] != dc.TriggerAlert {
+		t.Errorf("on-disk ServerExclusions = %#v, want RDS01 alert exclusion", cfg.Notifications[0].ServerExclusions)
+	}
 }
 
 func TestHandleAddNotificationTarget_RejectsInvalidType(t *testing.T) {
@@ -5060,6 +5078,20 @@ func TestHandleAddNotificationTarget_RejectsInvalidType(t *testing.T) {
 	ds := newTestServer(t)
 
 	body := `{"type":"slack","url":"https://hooks.example.com/1","triggers":["alert"]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notifications", strings.NewReader(body))
+	ds.handleAddNotificationTarget(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAddNotificationTarget_RejectsInvalidServerExclusion(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	ds := newTestServer(t)
+
+	body := `{"type":"webhook","url":"https://hooks.example.com/1","triggers":["alert"],"server_exclusions":[{"server":"RDS01","triggers":["healthy"]}]}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notifications", strings.NewReader(body))
 	ds.handleAddNotificationTarget(w, r)

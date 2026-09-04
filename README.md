@@ -517,6 +517,9 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
       "type": "webhook",
       "url": "https://hooks.slack.com/services/T.../B.../xxx",
       "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+      "server_exclusions": [
+        { "server": "RDSH01", "triggers": ["alert", "healthy"] }
+      ],
       "repeat_minutes": 30
     },
     {
@@ -568,6 +571,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `from` | string | email | Sender address |
 | `secret` | string | no | HMAC-SHA256 signing secret (webhook) or SMTP password (email) |
 | `triggers` | string[] | no | Event types to notify on (omit for all) |
+| `server_exclusions` | object[] | no | Per-server trigger suppressions. Each entry has a `server` hostname and `triggers` array; matching is case-insensitive and a short name matches its reported FQDN. |
 | `repeat_minutes` | int | no | Re-alert interval while condition persists (`0` = once) |
 
 > SMTP transport: authenticated send (`secret` set) requires STARTTLS or implicit TLS (`smtps://`). DrainCtl refuses to transmit `AUTH` over cleartext — the error names the offending host.
@@ -660,7 +664,7 @@ cp .env.example .env
 
 `just release` signs in the right order: binaries + PS module → build MSI → sign MSI → sign the release manifest.
 
-**Versioning** — git-derived CalVer `YY.MM.BUILD` from `scripts/version.ps1`. Injected into Go via ldflags, into `drainctl.syso` via `just resource`, into the WiX project via `-p:ProductVersion=`, into the PS module via `.psd1.tmpl` rendering. Nothing to bump by hand.
+**Versioning** — the user-facing version is git-derived CalVer `YY.MM.BUILD` from `scripts/version.ps1`, injected into Go, PE resources, package naming, and the PowerShell module. MSI `ProductVersion` uses a separate `(100 + YY).MM.BUILD` schema from `scripts/msi-version.ps1`; the `100` epoch ensures legacy `YY.DOY.N` installers compare older and cannot replace current packages. Nothing is bumped by hand.
 
 ---
 

@@ -20,14 +20,15 @@ import (
 // the dashboard. Secrets are stripped — only a has_secret boolean is exposed
 // so the UI can tell whether a saved credential exists.
 type notifyTargetView struct {
-	Type          string       `json:"type"`
-	URL           string       `json:"url"`
-	Triggers      []dc.Trigger `json:"triggers"`
-	RepeatMinutes int          `json:"repeat_minutes,omitempty"`
-	HasSecret     bool         `json:"has_secret"`
-	To            []string     `json:"to,omitempty"`
-	From          string       `json:"from,omitempty"`
-	Enabled       *bool        `json:"enabled,omitempty"`
+	Type             string                           `json:"type"`
+	URL              string                           `json:"url"`
+	Triggers         []dc.Trigger                     `json:"triggers"`
+	RepeatMinutes    int                              `json:"repeat_minutes,omitempty"`
+	HasSecret        bool                             `json:"has_secret"`
+	To               []string                         `json:"to,omitempty"`
+	From             string                           `json:"from,omitempty"`
+	Enabled          *bool                            `json:"enabled,omitempty"`
+	ServerExclusions []dc.NotificationServerExclusion `json:"server_exclusions,omitempty"`
 }
 
 // notifyTargetWire is the inbound shape used by both the bulk PUT /settings and
@@ -42,14 +43,15 @@ type notifyTargetWire struct {
 // makeNotifyTargetView projects an on-disk target into the redacted view.
 func makeNotifyTargetView(t dc.NotificationTarget) notifyTargetView {
 	return notifyTargetView{
-		Type:          t.Type,
-		URL:           t.URL,
-		Triggers:      t.Triggers,
-		RepeatMinutes: t.RepeatMinutes,
-		HasSecret:     t.Secret != "",
-		To:            t.To,
-		From:          t.From,
-		Enabled:       t.Enabled,
+		Type:             t.Type,
+		URL:              t.URL,
+		Triggers:         t.Triggers,
+		RepeatMinutes:    t.RepeatMinutes,
+		HasSecret:        t.Secret != "",
+		To:               t.To,
+		From:             t.From,
+		Enabled:          t.Enabled,
+		ServerExclusions: t.ServerExclusions,
 	}
 }
 
@@ -86,6 +88,29 @@ func validateNotificationTarget(t dc.NotificationTarget, idx int) error {
 	for _, tr := range t.Triggers {
 		if !dc.ValidTriggers[tr] {
 			return fmt.Errorf("%sunknown trigger %q", prefix, tr)
+		}
+	}
+	seenServers := make(map[string]bool, len(t.ServerExclusions))
+	for _, exclusion := range t.ServerExclusions {
+		server := strings.TrimSpace(exclusion.Server)
+		if server == "" {
+			return fmt.Errorf("%sserver exclusion requires a server name", prefix)
+		}
+		serverKey := strings.ToLower(strings.TrimSuffix(server, "."))
+		if seenServers[serverKey] {
+			return fmt.Errorf("%sserver exclusion %q is duplicated", prefix, server)
+		}
+		seenServers[serverKey] = true
+		if len(exclusion.Triggers) == 0 {
+			return fmt.Errorf("%sserver exclusion %q requires at least one trigger", prefix, server)
+		}
+		for _, tr := range exclusion.Triggers {
+			if !dc.ValidTriggers[tr] {
+				return fmt.Errorf("%sserver exclusion %q has unknown trigger %q", prefix, server, tr)
+			}
+			if !t.HasTrigger(tr) {
+				return fmt.Errorf("%sserver exclusion %q uses trigger %q not enabled for this target", prefix, server, tr)
+			}
 		}
 	}
 	if t.RepeatMinutes < 0 || t.RepeatMinutes > dc.MaxRepeatMinutes {
