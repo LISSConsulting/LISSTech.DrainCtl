@@ -984,6 +984,7 @@
 {#if editTarget !== null}
     <TargetEditModal
         target={editTarget}
+        servers={appState.servers}
         isNew={editIdx < 0}
         saving={targetSaving}
         onsave={saveTarget}

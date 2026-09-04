@@ -288,6 +288,35 @@ func TestHasTrigger_EmptyTriggersExcludesNonDefault(t *testing.T) {
 	}
 }
 
+func TestExcludesServerMatchesServerAndTrigger(t *testing.T) {
+	target := NotificationTarget{
+		ServerExclusions: []NotificationServerExclusion{
+			{Server: "RDS01", Triggers: []Trigger{TriggerAlert, TriggerSessionWarning}},
+			{Server: "rds02.example.test.", Triggers: []Trigger{TriggerCPUWarning}},
+		},
+	}
+	tests := []struct {
+		name    string
+		server  string
+		trigger Trigger
+		want    bool
+	}{
+		{"exact", "RDS01", TriggerAlert, true},
+		{"case insensitive", "rds01", TriggerSessionWarning, true},
+		{"short name matches fqdn", "RDS01.example.test", TriggerAlert, true},
+		{"fqdn trailing dot", "RDS02.EXAMPLE.TEST", TriggerCPUWarning, true},
+		{"different trigger", "RDS01", TriggerDrainOn, false},
+		{"different server", "RDS03", TriggerAlert, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := target.ExcludesServer(tc.server, tc.trigger); got != tc.want {
+				t.Errorf("ExcludesServer(%q, %q) = %v, want %v", tc.server, tc.trigger, got, tc.want)
+			}
+		})
+	}
+}
+
 // ── ParseFormat ───────────────────────────────────────────────────────────────
 
 func TestParseFormat_Valid(t *testing.T) {

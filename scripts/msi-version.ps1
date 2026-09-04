@@ -4,26 +4,34 @@
     Emit a monotonic MSI ProductVersion.
 
 .DESCRIPTION
-    Windows Installer upgrades depend on ProductVersion changing even when
-    rebuilding the same commit. This script keeps the existing app/binary
-    CalVer (`YY.MM.N`) as the first two fields and derives a monotonic third
-    field from the app build number plus an MSI revision counter.
+    Windows Installer compares ProductVersion numerically when deciding whether
+    one package may replace another. The user-facing app CalVer changed from
+    legacy `YY.DOY.N` to `YY.MM.N` in June 2026, so an old `26.117.*` package
+    otherwise outranks every new `26.9.*` package.
 
-    Output format: `YY.MM.BUILD`
+    MSI versions therefore use a new schema epoch in the major component while
+    app, binary, and package names keep the normal CalVer:
 
-    BUILD = (N * 100) + R
+      App version: `YY.MM.N`
+      MSI version: `(100 + YY).MM.BUILD`
+      BUILD = (N * 100) + R
+
       N = commit-derived app build number from scripts/version.ps1
       R = MSI revision counter (1-99)
 
+    The epoch makes every monthly-CalVer MSI newer than every legacy
+    day-of-year MSI from the same app year. It also causes a legacy package's
+    own MajorUpgrade downgrade check to reject replay after the epoch package
+    has been installed.
+
     N occupies the hundreds place so BUILD reads as `N<RR>` — e.g. app
-    v26.4.2 on the 5th local MSI build produces MSI v26.4.205. R only
+    v26.4.2 on the 5th local MSI build produces MSI v126.4.205. R only
     bumps when the MSI is rebuilt on the same commit; a new commit advances
-    N and resets R to 1, so `just all` never produces a stale (or
-    downgrading) ProductVersion without touching the app CalVer.
+    N and resets R to 1, so `just all` never produces a stale ProductVersion.
 
     Sources for R, in priority order:
       1. MSI_REVISION environment variable (explicit override, any origin)
-      2. GITHUB_RUN_NUMBER modulo 999 + 1 (CI builds)
+      2. GITHUB_RUN_NUMBER modulo 99 + 1 (CI builds)
       3. Local per-commit counter file `.msi-revision.json` at repo root
          — bumped by `-Increment`, rolls back to 1 when commit N changes.
 
@@ -32,12 +40,13 @@
     `-Increment` the script reads the current value without mutating state
     so `just version` can print it cleanly.
 
-    Upper bound: MSI ProductVersion's build field is 16 bits (max 65535), so
-    N*100 + R ≤ 65535 ⇒ N ≤ 654. Monthly commit counts should not approach this.
+    Upper bounds: MSI ProductVersion's major/minor fields are 8 bits and its
+    build field is 16 bits. `100 + YY` tops out at 199; N*100 + R must stay
+    within 65535, so N ≤ 654.
 
 .EXAMPLE
     PS> scripts/msi-version.ps1 -Increment
-    26.4.205
+    126.4.205
 #>
 
 [CmdletBinding()]
@@ -60,6 +69,11 @@ if ($parts.Length -ne 3) {
 $yy = [int]$parts[0]
 $month = [int]$parts[1]
 $n = [int]$parts[2]
+
+$msiMajor = 100 + $yy
+if ($msiMajor -gt 255) {
+    throw "MSI major component exceeds 255: $msiMajor"
+}
 
 $revision = $env:MSI_REVISION
 if (-not $revision) {
@@ -118,4 +132,4 @@ if ($build -gt 65535) {
     throw "MSI build component exceeds 65535: $build (N=$n * 100 + R=$revision)"
 }
 
-"$yy.$month.$build"
+"$msiMajor.$month.$build"
