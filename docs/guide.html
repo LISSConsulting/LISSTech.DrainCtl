@@ -622,6 +622,9 @@ Get-RDSHDrainMode | Format-List</code></pre>
       "type": "webhook",
       "url": "https://hooks.example.com/drainctl",
       "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+      "server_exclusions": [
+        { "server": "RDSH01", "triggers": ["alert", "healthy"] }
+      ],
       "repeat_minutes": 30
     },
     {
@@ -1314,6 +1317,11 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
             <p>
                 Each target also has a <code>repeat_minutes</code> setting &mdash; set it to re-send alerts periodically
                 while the condition persists (0 = notify once).
+            </p>
+            <p>
+                A target can also define <code>server_exclusions</code> to suppress selected triggers for specific
+                servers. Each entry names a server and the target's triggers to suppress. Hostname matching is
+                case-insensitive, and a short name such as <code>RDSH01</code> matches its reported FQDN.
             </p>
 
             <h3>Webhook payload</h3>
