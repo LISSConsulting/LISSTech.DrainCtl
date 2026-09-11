@@ -19,6 +19,6 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.39.0",
-    "layercake": "^10.0.3"
+    "layercake": "^11.0.0"
   }
 }
