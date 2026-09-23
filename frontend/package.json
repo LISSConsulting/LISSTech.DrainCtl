@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@12.6.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -13,12 +13,12 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "prettier": "^3.9.6",
     "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "^5.57.0",
+    "svelte": "^5.57.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.3.0"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.39.0",
+    "@lucide/svelte": "^1.47.0",
     "layercake": "^10.0.3"
   }
 }
