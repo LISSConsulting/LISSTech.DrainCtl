@@ -18,6 +18,7 @@
     import { fetchMetrics } from '../lib/api.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
+    import { THRESHOLD_WARN_OPACITY, THRESHOLD_CRIT_OPACITY } from '../lib/chart/theme.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import { Cpu, MemoryStick, Users, Gauge } from '@lucide/svelte';
 
@@ -370,10 +371,10 @@
                             SERIES={LOAD_SERIES}
                             {rightTicks}
                             thresholds={[
-                                { pct: cpuThresh.warn, opacity: 0.25, label: 'CPU WARN', show: () => showCpu },
-                                { pct: cpuThresh.crit, opacity: 0.35, label: 'CPU CRIT', show: () => showCpu },
-                                { pct: memThresh.warn, opacity: 0.25, label: 'MEM WARN', show: () => showMem },
-                                { pct: memThresh.crit, opacity: 0.35, label: 'MEM CRIT', show: () => showMem },
+                                { pct: cpuThresh.warn, opacity: THRESHOLD_WARN_OPACITY, label: 'CPU WARN', show: () => showCpu },
+                                { pct: cpuThresh.crit, opacity: THRESHOLD_CRIT_OPACITY, label: 'CPU CRIT', show: () => showCpu },
+                                { pct: memThresh.warn, opacity: THRESHOLD_WARN_OPACITY, label: 'MEM WARN', show: () => showMem },
+                                { pct: memThresh.crit, opacity: THRESHOLD_CRIT_OPACITY, label: 'MEM CRIT', show: () => showMem },
                             ]}
                             {history}
                             visible={loadVisible}

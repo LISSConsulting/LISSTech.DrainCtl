@@ -9,6 +9,7 @@
         adaptFleetToSessionSamples,
         adaptFleetToRfxSamples,
     } from '../lib/chart/adapters.js';
+    import { THRESHOLD_WARN_OPACITY, THRESHOLD_CRIT_OPACITY } from '../lib/chart/theme.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
     import {
@@ -745,25 +746,25 @@
                                             thresholds={[
                                                 {
                                                     pct: cpuThresh.warn,
-                                                    opacity: 0.25,
+                                                    opacity: THRESHOLD_WARN_OPACITY,
                                                     label: 'CPU WARN',
                                                     show: () => showCpu,
                                                 },
                                                 {
                                                     pct: cpuThresh.crit,
-                                                    opacity: 0.35,
+                                                    opacity: THRESHOLD_CRIT_OPACITY,
                                                     label: 'CPU CRIT',
                                                     show: () => showCpu,
                                                 },
                                                 {
                                                     pct: memThresh.warn,
-                                                    opacity: 0.25,
+                                                    opacity: THRESHOLD_WARN_OPACITY,
                                                     label: 'MEM WARN',
                                                     show: () => showMem,
                                                 },
                                                 {
                                                     pct: memThresh.crit,
-                                                    opacity: 0.35,
+                                                    opacity: THRESHOLD_CRIT_OPACITY,
                                                     label: 'MEM CRIT',
                                                     show: () => showMem,
                                                 },
