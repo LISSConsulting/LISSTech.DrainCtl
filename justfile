@@ -252,6 +252,14 @@ sign-binaries:
     if (-not $cert) { $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumbprint }
     if (-not $cert) { Write-Error "Certificate with thumbprint $thumbprint not found"; exit 1 }
 
+    $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+    if (-not $signtool) {
+        $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $signtool = Get-ChildItem "$sdkBin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) { Write-Error "signtool.exe not found in PATH or the Windows 10 SDK"; exit 1 }
+
     $cn = $cert.Subject -replace '^CN=', '' -replace ',.*', ''
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔏 Signing binaries and module  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
@@ -289,7 +297,7 @@ sign-binaries:
     )) {
         if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
         $name = [System.IO.Path]::GetFileName($file)
-        $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $file 2>&1
+        $out = & $signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $file 2>&1
         if ($LASTEXITCODE -ne 0) { Write-Error "Failed: $name`n$out"; exit $LASTEXITCODE }
         Write-Host "   ✅ $name" -ForegroundColor Green
     }
@@ -310,9 +318,17 @@ sign-msi:
 
     if (-not (Test-Path $msiPath)) { Write-Error "MSI not found: $msiPath"; exit 1 }
 
+    $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+    if (-not $signtool) {
+        $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $signtool = Get-ChildItem "$sdkBin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) { Write-Error "signtool.exe not found in PATH or the Windows 10 SDK"; exit 1 }
+
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔏 Signing MSI  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
-    $out = & signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $msiPath 2>&1
+    $out = & $signtool sign /sha1 $thumbprint /d $description /fd sha256 /tr $timestampUrl /td sha256 /a /ph $msiPath 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed: LISSTech.DrainCtl.msi`n$out"; exit $LASTEXITCODE }
     Write-Host "   ✅ LISSTech.DrainCtl.msi" -ForegroundColor Green
 
