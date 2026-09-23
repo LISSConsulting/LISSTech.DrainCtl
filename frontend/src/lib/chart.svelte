@@ -30,6 +30,12 @@
     import InteractiveTimeChart from '../components/chart/InteractiveTimeChart.svelte';
     import { fetchMetrics } from './api.js';
     import { counterLabel, isPercentCounter } from './utils.js';
+    import {
+        PER_HOST_PRESETS,
+        findPreset,
+        readStoredZoomPresetMs,
+        writeStoredZoomPresetMs,
+    } from './chart/presets.js';
 
     /** @type {{
      *   host: string,
@@ -54,24 +60,7 @@
     // across page reloads and server-card switches so they don't have to re-pick
     // their preferred zoom every time. Manual wheel/drag zooms are intentionally
     // not persisted — those are transient inspection gestures.
-    const ZOOM_PRESET_STORAGE_KEY = 'drainctl.chart.zoomPillMs';
-    function readStoredPresetMs() {
-        try {
-            const raw = localStorage.getItem(ZOOM_PRESET_STORAGE_KEY);
-            if (!raw) return null;
-            const n = Number(raw);
-            return Number.isFinite(n) && n > 0 ? n : null;
-        } catch {
-            return null;
-        }
-    }
-    function writeStoredPresetMs(ms) {
-        try {
-            localStorage.setItem(ZOOM_PRESET_STORAGE_KEY, String(ms));
-        } catch {
-            /* localStorage disabled / full — preset just won't persist */
-        }
-    }
+    // Moved to ./chart/presets.js (commit 3 of the chart-library-migration PR).
 
     /** @type {import('./api.js').MetricsResponse | null} */
     let response = $state(null);
@@ -152,8 +141,8 @@
         // current PRESETS so a stale/renamed value falls back cleanly) over the
         // prop default. Without this, flipping between server cards would reset
         // the zoom every time.
-        const stored = readStoredPresetMs();
-        const span = stored != null && PRESETS.some((p) => p.ms === stored) ? stored : windowMs;
+        const stored = readStoredZoomPresetMs();
+        const span = stored != null && findPreset(PER_HOST_PRESETS, stored) != null ? stored : windowMs;
         const to = new Date();
         const from = new Date(to.getTime() - span);
         viewFrom = from;
@@ -255,15 +244,10 @@
 
     // ── Zoom preset pills ────────────────────────────────────────────────
     // Operators rarely know to scroll-wheel a chart — surface the common
-    // windows as clickable affordances. Tolerance when matching current span
-    // to a preset is 1 % to account for float drift from wheel zoom.
-    const PRESETS = [
-        { label: '15M', ms: 15 * 60 * 1000 },
-        { label: '1H', ms: 60 * 60 * 1000 },
-        { label: '1D', ms: 24 * 60 * 60 * 1000 },
-        { label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
-        { label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
-    ];
+    // windows as clickable affordances. Presets imported from
+    // ./chart/presets.js (PER_HOST_PRESETS) in commit 3 of the
+    // chart-library-migration PR.
+    const PRESETS = PER_HOST_PRESETS;
 
     /** @param {number} spanMs */
     function applyPreset(spanMs) {
@@ -275,7 +259,7 @@
             clearTimeout(debounceTimer);
             debounceTimer = null;
         }
-        writeStoredPresetMs(spanMs);
+        writeStoredZoomPresetMs(spanMs);
         load(from, to);
     }
 
