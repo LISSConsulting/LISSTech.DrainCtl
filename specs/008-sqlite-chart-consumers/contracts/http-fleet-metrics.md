@@ -55,7 +55,7 @@ non-null when retained data exists; null when the retained store has no rows for
 |---|---|
 | LOAD | `cpu_pct`, `mem_avail_mb`, `mem_total_mb`, `sessions_total`, `input_delay_p95_ms` |
 | HIC | `cpu_pct`, `input_delay_p95_ms`, `pages_sec`, `tcp_retrans_sec`, `disk_queue`, `mem_avail_mb`, `mem_total_mb` |
-| SESSIONS | `sessions_total`, `sessions_active`, `sessions_disconnected`, `sessions_max`, `session_cpu_p95_pct`, `session_mem_p95_bytes` |
+| SESSIONS | `sessions_total`, `sessions_active`, `sessions_disconnected`, `sessions_max`, `session_cpu_p95_pct`, `session_cpu_p50_pct`, `session_mem_p95_bytes`, `session_mem_p50_bytes` |
 | REMOTEFX | `rfx_fps_out`, `rfx_fps_out_p50`, `rfx_encode_ms`, `rfx_quality_pct`, `rfx_skip_server_sec`, `rfx_skip_net_sec`, `rfx_rtt_ms`, `rfx_loss_pct` |
 
 RFX counters are only present in the response when RemoteFX data has been collected.

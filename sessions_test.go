@@ -37,6 +37,30 @@ func TestWtsStateName_Unknown(t *testing.T) {
 	}
 }
 
+func TestNormalizeSessionLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		value uint64
+		want  int
+		ok    bool
+	}{
+		{name: "finite", value: 250, want: 250, ok: true},
+		{name: "unset", value: 0},
+		{name: "DWORD unlimited", value: unlimitedDWORDSessionLimit},
+		{name: "policy unlimited", value: unlimitedPolicySessionLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := normalizeSessionLimit(tt.value)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("normalizeSessionLimit(%d) = (%d, %t), want (%d, %t)",
+					tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 // ── ComputeSessionSummary ────────────────────────────────────────────────────
 
 func TestComputeSessionSummary_Empty(t *testing.T) {
