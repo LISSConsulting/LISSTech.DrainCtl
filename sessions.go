@@ -161,23 +161,48 @@ func querySessionString(sessionID uint32, infoClass uint32) string {
 	return windows.UTF16PtrToString(buf)
 }
 
-// ReadMaxSessions reads the MaxInstanceCount from the Terminal Server
-// registry key. Returns 0 if the key is not found or not set (unlimited).
-func ReadMaxSessions() int {
-	key, err := registry.OpenKey(registry.LOCAL_MACHINE,
-		`SYSTEM\CurrentControlSet\Control\Terminal Server`,
-		registry.QUERY_VALUE)
-	if err != nil {
-		return 0
-	}
-	defer func() { _ = key.Close() }()
+const (
+	unlimitedDWORDSessionLimit  = uint64(1<<32 - 1)
+	unlimitedPolicySessionLimit = uint64(999999)
+)
 
-	if v, _, err := key.GetIntegerValue("MaxInstanceCount"); err == nil && v > 0 {
-		return int(v)
+var sessionLimitLocations = [...]struct {
+	path string
+	name string
+}{
+	{`SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services`, "MaxInstanceCount"},
+	{`SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp`, "MaxInstanceCount"},
+	{`SYSTEM\CurrentControlSet\Control\Terminal Server`, "MaxInstanceCount"},
+	{`SYSTEM\CurrentControlSet\Control\Terminal Server`, "UserSessionLimit"},
+}
+
+// normalizeSessionLimit rejects the sentinel values Windows uses for an
+// unlimited RD Session Host connection policy.
+func normalizeSessionLimit(v uint64) (int, bool) {
+	if v == 0 || v == unlimitedDWORDSessionLimit || v == unlimitedPolicySessionLimit {
+		return 0, false
 	}
-	// Fall back to UserSessionLimit (RD Session Host session cap).
-	if v, _, err := key.GetIntegerValue("UserSessionLimit"); err == nil && v > 0 {
-		return int(v)
+	return int(v), true
+}
+
+// ReadMaxSessions reads the effective finite RD Session Host connection limit.
+// Policy is authoritative, followed by the listener's runtime configuration,
+// the legacy root MaxInstanceCount, and UserSessionLimit. Returns 0 when no
+// finite limit is configured.
+func ReadMaxSessions() int {
+	for _, location := range sessionLimitLocations {
+		key, err := registry.OpenKey(registry.LOCAL_MACHINE, location.path, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		value, _, valueErr := key.GetIntegerValue(location.name)
+		_ = key.Close()
+		if valueErr != nil {
+			continue
+		}
+		if limit, ok := normalizeSessionLimit(value); ok {
+			return limit
+		}
 	}
 	return 0
 }
