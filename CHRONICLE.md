@@ -1,5 +1,10 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Session metrics correctness — 2026-09-23
+
+- Per-session CPU and working-set collection now carries both P50 and P95 through sampler aggregation, retained telemetry, fleet queries, and the Overview tooltip instead of hard-coding P50 to zero.
+- Session capacity discovery now reads the policy and `RDP-Tcp` listener `MaxInstanceCount` locations before the legacy `UserSessionLimit`, and treats Windows' `0xffffffff` and `999999` unlimited sentinels as unknown capacity. Fleet utilization therefore uses the configured finite capacity instead of silently dividing by an unlimited sentinel or missing the listener value.
+
 ## Runtime correctness hardening — 2026-08-06
 
 - Named-pipe accepts now treat `ERROR_PIPE_CONNECTED` as success, closing the client-before-accept race reproduced by the race suite.

@@ -442,6 +442,8 @@
         const maxMap = tsMap(series['sessions_max']);
         const scpuMap = tsMap(series['session_cpu_p95_pct'], 'max');
         const smemMap = tsMap(series['session_mem_p95_bytes'], 'max');
+        const scpuP50Map = tsMap(series['session_cpu_p50_pct']);
+        const smemP50Map = tsMap(series['session_mem_p50_bytes']);
         return tot.t.map((ts) => {
             const a = Math.round(activeMap.get(ts) ?? 0);
             const d = Math.round(discMap.get(ts) ?? 0);
@@ -452,11 +454,11 @@
                 active: a,
                 disconnected: d,
                 total: t,
-                utilization: mx > 0 ? Math.round((t / mx) * 100) : 0,
+                utilization: mx > 0 ? Math.min((t / mx) * 100, 100) : 0,
                 sessionCpuP95: scpuMap.get(ts) ?? 0,
                 sessionMemP95: smemMap.get(ts) ?? 0,
-                sessionCpuP50: 0,
-                sessionMemP50: 0,
+                sessionCpuP50: scpuP50Map.get(ts) ?? 0,
+                sessionMemP50: smemP50Map.get(ts) ?? 0,
             };
         });
     }
