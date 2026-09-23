@@ -5,6 +5,8 @@ package perfmon
 import (
 	"math"
 	"testing"
+
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
 func TestPercentile_Empty(t *testing.T) {
@@ -68,6 +70,22 @@ func TestAggregateValues_Unsorted(t *testing.T) {
 	}
 	if max != 90 {
 		t.Errorf("max = %v, want 90", max)
+	}
+}
+
+func TestAggregate_PreservesSessionPercentiles(t *testing.T) {
+	got := aggregate([]dc.PerfSnapshot{
+		{SessionCPUP50: 2.1, SessionCPUP95: 8.4, SessionMemP50: 100, SessionMemP95: 400},
+		{SessionCPUP50: 3.2, SessionCPUP95: 7.5, SessionMemP50: 150, SessionMemP95: 350},
+	})
+
+	if got.SessionCPUP50 != 3.2 || got.SessionCPUP95 != 8.4 {
+		t.Errorf("session CPU percentiles = (P50 %v, P95 %v), want (P50 3.2, P95 8.4)",
+			got.SessionCPUP50, got.SessionCPUP95)
+	}
+	if got.SessionMemP50 != 150 || got.SessionMemP95 != 400 {
+		t.Errorf("session memory percentiles = (P50 %v, P95 %v), want (P50 150, P95 400)",
+			got.SessionMemP50, got.SessionMemP95)
 	}
 }
 

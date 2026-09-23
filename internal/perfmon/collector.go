@@ -356,13 +356,15 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 		}
 		if c.sessCPUH != 0 {
 			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil && len(vals) > 0 {
-				_, p95, _ := AggregateValues(vals)
+				p50, p95, _ := AggregateValues(vals)
+				snap.SessionCPUP50 = RoundTo(p50, 1)
 				snap.SessionCPUP95 = RoundTo(p95, 1)
 			}
 		}
 		if c.sessMemH != 0 {
 			if vals, err := pdhGetDoubleArray(c.sessMemH); err == nil && len(vals) > 0 {
-				_, p95, _ := AggregateValues(vals)
+				p50, p95, _ := AggregateValues(vals)
+				snap.SessionMemP50 = RoundTo(p50, 0)
 				snap.SessionMemP95 = RoundTo(p95, 0)
 			}
 		}
@@ -431,6 +433,12 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 		}
 		if s.SessionMemP95 > agg.SessionMemP95 {
 			agg.SessionMemP95 = s.SessionMemP95
+		}
+		if s.SessionCPUP50 > agg.SessionCPUP50 {
+			agg.SessionCPUP50 = s.SessionCPUP50
+		}
+		if s.SessionMemP50 > agg.SessionMemP50 {
+			agg.SessionMemP50 = s.SessionMemP50
 		}
 		if s.RFXFPSOut > agg.RFXFPSOut {
 			agg.RFXFPSOut = s.RFXFPSOut
