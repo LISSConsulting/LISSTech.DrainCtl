@@ -24,9 +24,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: pnpm/setup@v2.1.0
+      - uses: pnpm/setup@v3.0.0
         with:
-          version: 11.25.0
+          version: 12.6.0
           runtime: node@24
           cache: true
           working-directory: frontend
