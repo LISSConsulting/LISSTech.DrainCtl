@@ -4,6 +4,11 @@
     import { appState, OVERVIEW_WINDOW_PRESETS } from '../lib/state.svelte.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { fetchFleetMetrics } from '../lib/api.js';
+    import {
+        adaptFleetToMetricsSamples,
+        adaptFleetToSessionSamples,
+        adaptFleetToRfxSamples,
+    } from '../lib/chart/adapters.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
     import {
@@ -290,66 +295,9 @@
         return () => el.removeEventListener('click', handler, { capture: true });
     });
 
-    /**
-     * Build a Map<ts, value> from a counter series so adapters can join
-     * sibling counters by timestamp rather than array index. Different
-     * counters can have different T arrays when individual samples are
-     * missing, so positional indexing mispairs them.
-     * @param {{t: number[], avg: number[], min: number[], max: number[]}|undefined} s
-     * @param {'avg'|'min'|'max'} [field]
-     * @returns {Map<number, number>}
-     */
-    function tsMap(s, field = 'avg') {
-        const m = new Map();
-        if (!s) return m;
-        const t = s.t || [];
-        const v = s[field] || [];
-        for (let i = 0; i < t.length; i++) m.set(t[i], v[i]);
-        return m;
-    }
-
-    /**
-     * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').MetricsSample[]}
-     */
-    function adaptFleetToMetricsSamples(series) {
-        const cpu = series['cpu_pct'];
-        if (!cpu || cpu.t.length === 0) return [];
-        const cpuAvg = tsMap(cpu, 'avg');
-        const cpuMax = tsMap(cpu, 'max');
-        // mem_used_pct is a server-computed virtual counter: per-host
-        // (1-avail/total)*100 first, then averaged across hosts. Replaces the
-        // older avg(avail)/avg(total) ratio that was total-weighted and
-        // diluted small-RAM hosts' near-OOM into the noise.
-        const memPctMap = tsMap(series['mem_used_pct']);
-        const sessMap = tsMap(series['sessions_total']);
-        const idMap = tsMap(series['input_delay_p95_ms']);
-        const psMap = tsMap(series['pages_sec']);
-        const trMap = tsMap(series['tcp_retrans_sec']);
-        const dqMap = tsMap(series['disk_queue']);
-        return cpu.t.map((ts) => {
-            const cpuV = cpuAvg.get(ts) ?? 0;
-            const cpuP95V = cpuMax.get(ts);
-            const memV = memPctMap.get(ts);
-            const sV = sessMap.get(ts);
-            return {
-                time: ts,
-                cpu: cpuV,
-                cpuP95: cpuP95V != null && cpuP95V > 0 ? cpuP95V : cpuV,
-                mem: memV ?? 0,
-                sessions: sV != null ? Math.round(sV) : 0,
-                inputDelay: idMap.get(ts) ?? 0,
-                pagesPerSec: psMap.get(ts) ?? 0,
-                tcpRetrans: trMap.get(ts) ?? 0,
-                diskQueue: dqMap.get(ts) ?? 0,
-                p50InputDelay: 0,
-                p50PagesPerSec: 0,
-                p50TcpRetrans: 0,
-                p50DiskQueue: 0,
-            };
-        });
-    }
+    // Adapters extracted to ../lib/chart/adapters.js (commit 2 of the
+    // chart-library-migration PR). The local copies here were the original
+    // home of `tsMap` and the three adapt* functions before extraction.
 
     let history = $derived(adaptFleetToMetricsSamples(fleetResponse?.series ?? {}));
     let sessionMax = $derived(Math.max(...history.map((h) => h.sessions ?? 0), 1));
@@ -427,78 +375,13 @@
     ]);
 
     // ── Session Metrics charts ────────────────────────────────────────────────
-
-    /**
-     * Adapt fleet series to SessionSample[] for the SESSIONS sub-tab.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').SessionSample[]}
-     */
-    function adaptFleetToSessionSamples(series) {
-        const tot = series['sessions_total'];
-        if (!tot || tot.t.length === 0) return [];
-        const totAvg = tsMap(tot, 'avg');
-        const activeMap = tsMap(series['sessions_active']);
-        const discMap = tsMap(series['sessions_disconnected']);
-        const maxMap = tsMap(series['sessions_max']);
-        const scpuMap = tsMap(series['session_cpu_p95_pct'], 'max');
-        const smemMap = tsMap(series['session_mem_p95_bytes'], 'max');
-        return tot.t.map((ts) => {
-            const a = Math.round(activeMap.get(ts) ?? 0);
-            const d = Math.round(discMap.get(ts) ?? 0);
-            const t = Math.round(totAvg.get(ts) ?? 0);
-            const mx = Math.round(maxMap.get(ts) ?? 0);
-            return {
-                ts,
-                active: a,
-                disconnected: d,
-                total: t,
-                utilization: mx > 0 ? Math.round((t / mx) * 100) : 0,
-                sessionCpuP95: scpuMap.get(ts) ?? 0,
-                sessionMemP95: smemMap.get(ts) ?? 0,
-                sessionCpuP50: 0,
-                sessionMemP50: 0,
-            };
-        });
-    }
+    // Adapter imported from ../lib/chart/adapters.js.
 
     let sessionHistory = $derived(adaptFleetToSessionSamples(fleetResponse?.series ?? {}));
 
-    /**
-     * Adapt fleet series to RfxSample[] for the REMOTEFX sub-tab.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').RfxSample[]}
-     */
-    function adaptFleetToRfxSamples(series) {
-        const fps = series['rfx_fps_out'];
-        if (!fps || fps.t.length === 0) return [];
-        const fpsAvg = tsMap(fps, 'avg');
-        const fpsP50Map = tsMap(series['rfx_fps_out_p50']);
-        const encMap = tsMap(series['rfx_encode_ms']);
-        const qualMap = tsMap(series['rfx_quality_pct']);
-        const skipSrvMap = tsMap(series['rfx_skip_server_sec']);
-        const skipNetMap = tsMap(series['rfx_skip_net_sec']);
-        const rttMap = tsMap(series['rfx_rtt_ms']);
-        const lossMap = tsMap(series['rfx_loss_pct']);
-        return fps.t.map((ts) => ({
-            ts,
-            fpsOut: fpsAvg.get(ts) ?? 0,
-            fpsOutP50: fpsP50Map.get(ts) ?? 0,
-            encodeMs: encMap.get(ts) ?? 0,
-            encodeMsP50: 0,
-            quality: qualMap.get(ts) ?? 0,
-            qualityP50: 0,
-            skipServer: skipSrvMap.get(ts) ?? 0,
-            skipServerP50: 0,
-            skipNet: skipNetMap.get(ts) ?? 0,
-            skipNetP50: 0,
-            rtt: rttMap.get(ts) ?? 0,
-            rttP50: 0,
-            loss: lossMap.get(ts) ?? 0,
-            lossP50: 0,
-        }));
-    }
-
     // ── RemoteFX charts ───────────────────────────────────────────────────────
+    // Adapter imported from ../lib/chart/adapters.js.
+
     let rfxHistory = $derived(adaptFleetToRfxSamples(fleetResponse?.series ?? {}));
     // Sticky flag: once we've seen RemoteFX data in this session we keep the
     // tab visible even when the user pans into a window with no RFX samples.
