@@ -84,8 +84,7 @@ var initialPollDelay = func() time.Duration {
 // config edit can re-enable a disabled updater or change channel without
 // restart.
 type Subsystem struct {
-	shutdownService context.CancelFunc
-	client          *http.Client
+	client *http.Client
 
 	cfgMu sync.RWMutex
 	cfg   dc.UpdateConfig
@@ -115,12 +114,11 @@ type Subsystem struct {
 
 // New constructs the Subsystem. Does not launch any goroutines —
 // goroutines are owned by Start per the LCI contract.
-func New(cfg dc.UpdateConfig, shutdownService context.CancelFunc) *Subsystem {
+func New(cfg dc.UpdateConfig) *Subsystem {
 	return &Subsystem{
-		cfg:             cfg,
-		shutdownService: shutdownService,
-		client:          &http.Client{Timeout: httpClientTimeout},
-		wakeCh:          make(chan struct{}, 1),
+		cfg:    cfg,
+		client: &http.Client{Timeout: httpClientTimeout},
+		wakeCh: make(chan struct{}, 1),
 	}
 }
 
@@ -305,7 +303,7 @@ func (s *Subsystem) tick() {
 		return
 	}
 
-	// Newer available. Download → verify → spawn → shutdown.
+	// Newer available. Download → verify → spawn. The MSI owns service restart.
 	tempPath, err := downloadMSI(s.ctx, s.client, rel.assetURL)
 	if err != nil {
 		delay := s.backoff.recordFailure()
@@ -343,34 +341,12 @@ func (s *Subsystem) tick() {
 		return
 	}
 
-	// Persist highest-seen ONLY now: manifest + authenticode + spawn all
-	// succeeded. Persisting earlier (at fetch or post-verify) would let a
-	// failed install permanently block a future legitimate release with
-	// the same tag. Failure to save is logged and ignored — replay
-	// defense is best-effort, not a service-block.
-	if state, _ := loadUpdateState(); state.HighestSeenVersion == "" || mustParseLessThan(state.HighestSeenVersion, remote) {
-		state.HighestSeenVersion = remote.String()
-		if err := saveUpdateState(state); err != nil {
-			slog.Warn("update=state_save_failed", "error", err.Error())
-		}
-	}
-
-	slog.Info("update=installed_pending_restart", "new", remote.String())
-	triggerSelfShutdown(s.shutdownService)
-	// Don't return from run() here — Stop() will drain when the service
-	// ctx fires. The loop's next sleepCtx will see ctx.Done() and exit.
-}
-
-// mustParseLessThan reports whether the persisted highest-seen string,
-// when parsed, is strictly less than v. Returns true if parsing fails
-// (treat unparseable persisted state as "should be replaced") so the
-// post-install save path always advances on a successful install.
-func mustParseLessThan(persisted string, v version) bool {
-	hs, err := parseVersion(persisted)
-	if err != nil {
-		return true
-	}
-	return hs.less(v)
+	// A successful process spawn is not a successful installation. Keep the
+	// replay-defense pin at the running binary's version and clear the ETag so
+	// a still-running old service can fetch and retry this release later.
+	s.etag = ""
+	s.backoff.recordSuccess()
+	slog.Info("update=installer_spawned", "new", remote.String())
 }
 
 // verifyManifestRemote enforces Ed25519-signed manifest + SHA-256 hash

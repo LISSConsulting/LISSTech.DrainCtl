@@ -4,6 +4,8 @@
 
 - Per-session CPU and working-set collection now carries both P50 and P95 through sampler aggregation, retained telemetry, fleet queries, and the Overview tooltip instead of hard-coding P50 to zero.
 - Session capacity discovery now reads the policy and `RDP-Tcp` listener `MaxInstanceCount` locations before the legacy `UserSessionLimit`, and treats Windows' `0xffffffff` and `999999` unlimited sentinels as unknown capacity. Fleet utilization therefore uses the configured finite capacity instead of silently dividing by an unlimited sentinel or missing the listener value.
+- A configured limit of `9999` is also an unlimited sentinel in the deployed farm. It is normalized on local collection and remote report ingestion, and excluded at every fleet query tier so retained rows cannot poison the utilization denominator.
+- Auto-update no longer cancels the service immediately after `cmd.Start`. Installer spawn is not install success; MSI `ServiceControl` now exclusively owns stop/install/start, and the updater clears its ETag without advancing `highest_seen` so a later msiexec failure leaves the dashboard available and the same release retryable.
 
 ## Runtime correctness hardening — 2026-08-06
 

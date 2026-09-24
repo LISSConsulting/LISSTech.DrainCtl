@@ -32,14 +32,14 @@ This file captures the design decisions whose alternatives the spec FRs already 
   - **Pinning the public key (not the Subject CN)**: rejected for v1 — Subject CN is what operators see in the cert dialog and what shows up in `signtool verify` output. Public-key pinning is more correct cryptographically (immune to CA reissue with the same Subject) but ties us to a single signing key and breaks if we ever rotate. A future hardening can move to pubkey pinning if a renewal incident motivates it.
   - **Skip the Subject CN check** (rely on Authenticode trust alone): rejected — see rationale above. Any public CA could issue a cert with `CN=LISS Consulting, Corp.` only via a fraudulent EV-validation event; relying on chain validity alone trusts every CA in the system store.
 
-## Decision 4: Detached msiexec spawn + self-triggered shutdown (not msiexec-driven service stop)
+## Decision 4: Detached msiexec spawn + MSI-driven service lifecycle
 
-- **Decision**: Spawn `msiexec /i <msi> /quiet /norestart` with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`. Call `cmd.Process.Release()` immediately (no Wait). Then trigger our own clean shutdown via the service's existing ctx cancel path. The MSI custom action restarts the service after replacing files.
-- **Rationale**: The race we want to avoid is "msiexec asks SCM to stop the service while the service is mid-write." By initiating our own shutdown right after spawning msiexec, we deterministically reach a quiesced state before msiexec's `ControlService(STOP)` arrives. msiexec's stop is then a no-op (service already stopped) and file replacement proceeds without a sharing violation. Detached process + Release ensures msiexec survives our process exit.
+- **Decision**: Spawn `msiexec /i <msi> /quiet /norestart` with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`, call `cmd.Process.Release()` immediately, and leave the current service running. Windows Installer stops and restarts the service through the MSI's existing `ServiceControl` and custom actions.
+- **Rationale**: `cmd.Start()` proves only that the client process launched, not that Windows Installer accepted or completed the package. Cancelling the service immediately after spawn created a permanent outage whenever msiexec later failed or did not survive the parent transition. SCM-delivered stop follows the service's normal cleanup path. The updater also clears the release ETag and leaves `highest_seen` pinned to the running binary so a failed installation can retry the same release.
 - **Alternatives considered**:
-  - **Let msiexec drive the stop, don't trigger our own**: rejected — the in-flight `Execute` goroutine is mid-loop when msiexec asks SCM to stop us. We've added cleanup hooks (defer ms.Close(), defer etwH.Close(), evtSpikeSub.Stop, telemetryWG drain) that need our own shutdown path to run; relying on SCM hard-stop bypasses them.
-  - **Don't detach; Wait on msiexec**: rejected — Wait blocks until msiexec finishes, but msiexec wants to stop us as part of finishing. Deadlock.
-  - **Re-exec ourselves to a temp binary that runs the install**: rejected — clever, but adds a binary-on-disk shuffle and a second process to harden. The detached msiexec pattern is well-trodden on Windows.
+  - **Self-trigger shutdown after spawn**: rejected after production showed the dashboard host remaining offline when installer progress failed after `Start`.
+  - **Wait on msiexec**: rejected — Wait can block while Windows Installer asks SCM to stop the calling service.
+  - **Re-exec from a temporary helper**: unnecessary while the MSI already owns a correct transactional service lifecycle.
 
 ## Decision 5: No persisted state across runs
 

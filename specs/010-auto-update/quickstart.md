@@ -90,10 +90,10 @@ Either way, the expected sequence in the log is:
 update=poll_start url=...
 update=installing remote=v99.99.99
 update=verified subject=LISS Consulting, Corp.
-update=installed_pending_restart remote=v99.99.99
+update=installer_spawned remote=v99.99.99
 ```
 
-Then the service stops (its own ctx cancel), msiexec runs, and within ~30-60s the service is restarted by the MSI custom action at the new version.
+The service remains available until Windows Installer reaches `StopServices`; MSI then performs the transactional stop/install/start sequence. Within roughly 30–60 seconds the service should be running at the new version.
 
 ### Step 4: confirm the version transition is durable
 

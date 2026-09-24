@@ -51,12 +51,12 @@ type fakes struct {
 }
 
 // runUpdater wires the fakes in, drives initialPollDelay near zero, and
-// returns a started Subsystem along with the shutdownFired channel that
-// the test can wait on (closed by the wired shutdownService cancel func).
-// Tests must call s.Stop themselves — runUpdater intentionally does not
-// because several scenarios assert on Stop timing.
-func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, shutdownFired chan struct{}) {
+// returns a started Subsystem plus a channel closed after a successful
+// installer spawn. Tests must call s.Stop themselves.
+func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, installFired chan struct{}) {
 	t.Helper()
+	installFired = make(chan struct{})
+	var installOnce sync.Once
 
 	if f.fetchRelease != nil {
 		orig := fetchRelease
@@ -71,7 +71,13 @@ func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, shutd
 	if f.spawnMSI != nil {
 		orig := spawnMSI
 		t.Cleanup(func() { spawnMSI = orig })
-		spawnMSI = f.spawnMSI
+		spawnMSI = func(path string) error {
+			err := f.spawnMSI(path)
+			if err == nil {
+				installOnce.Do(func() { close(installFired) })
+			}
+			return err
+		}
 	}
 	if f.downloadMSI != nil {
 		orig := downloadMSI
@@ -118,17 +124,11 @@ func runUpdater(t *testing.T, cfg dc.UpdateConfig, f fakes) (s *Subsystem, shutd
 		return nil
 	}
 
-	shutdownFired = make(chan struct{}, 1)
-	var once sync.Once
-	cancel := context.CancelFunc(func() {
-		once.Do(func() { close(shutdownFired) })
-	})
-
-	s = New(cfg, cancel)
+	s = New(cfg)
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	return s, shutdownFired
+	return s, installFired
 }
 
 // pinVersion forces dc.Version to a parseable CalVer tag for the test's
@@ -239,15 +239,15 @@ func TestUpdater_SteadyState_StableChannel_NoNewerVersion(t *testing.T) {
 }
 
 // 2. Newer version on the stable channel: full happy path runs through
-// download → verify → spawn → shutdown. We assert the spawn count, the
-// shutdownService cancel firing, and the slog "update=installing" line.
+// download → verify → spawn while the service remains running until MSI
+// ServiceControl owns the stop/start transition.
 func TestUpdater_NewerVersion_StableChannel_SpawnsInstaller(t *testing.T) {
 	var spawnCalls atomic.Int32
 	buf := captureSlog(t)
 
 	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
-	s, shutdownFired := runUpdater(t, cfg, fakes{
+	s, installFired := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
 			return release{tag: "v99.12.99", assetURL: "https://test/msi", etag: "new-etag"}, nil
 		},
@@ -262,14 +262,17 @@ func TestUpdater_NewerVersion_StableChannel_SpawnsInstaller(t *testing.T) {
 	})
 
 	select {
-	case <-shutdownFired:
+	case <-installFired:
 	case <-time.After(2 * time.Second):
-		t.Fatal("shutdownService cancel did not fire after install")
+		t.Fatal("installer was not spawned")
 	}
 	s.Stop()
 
 	if v := spawnCalls.Load(); v != 1 {
 		t.Errorf("spawnMSI called %d times, want 1", v)
+	}
+	if s.etag != "" {
+		t.Errorf("etag = %q after installer spawn, want empty so a failed install can retry", s.etag)
 	}
 	if !strings.Contains(buf.String(), "update=installing") {
 		t.Errorf("missing slog line update=installing; got:\n%s", buf.String())
@@ -284,7 +287,7 @@ func TestUpdater_NewerVersion_PrereleaseChannel_HitsPrereleaseEndpoint(t *testin
 
 	pinVersion(t, "26.6.17")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelPrerelease, PollInterval: dc.Duration(time.Hour)}
-	s, shutdownFired := runUpdater(t, cfg, fakes{
+	s, installFired := runUpdater(t, cfg, fakes{
 		fetchRelease: func(_ context.Context, _ *http.Client, channel, _ string) (release, error) {
 			select {
 			case channelSeen <- channel:
@@ -311,9 +314,9 @@ func TestUpdater_NewerVersion_PrereleaseChannel_HitsPrereleaseEndpoint(t *testin
 		t.Fatal("fetchRelease was not called")
 	}
 	select {
-	case <-shutdownFired:
+	case <-installFired:
 	case <-time.After(2 * time.Second):
-		t.Fatal("shutdownService cancel did not fire on prerelease install")
+		t.Fatal("installer was not spawned on prerelease update")
 	}
 	s.Stop()
 
@@ -699,10 +702,10 @@ func runKeysOnOrderingTest(t *testing.T, useRealVerifier bool) {
 		manifestOrder = 1 // placeholder for the assertion below
 	}
 
-	s, shutdownFired := runUpdater(t, cfg, f)
+	s, installFired := runUpdater(t, cfg, f)
 
 	select {
-	case <-shutdownFired:
+	case <-installFired:
 	case <-time.After(2 * time.Second):
 		t.Fatal("install didn't fire — keys-on path didn't reach spawnMSI; verifyManifest probably refused")
 	}

@@ -583,6 +583,52 @@ func TestHandleReport_StoresLastResult(t *testing.T) {
 	}
 }
 
+func TestHandleReport_NormalizesUnlimitedSessionCapacity(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	result := dc.CheckResult{
+		Host:   "SRV01",
+		Status: "Healthy",
+		Sessions: &dc.SessionSummary{
+			ActiveSessions: 10,
+			TotalSessions:  10,
+			MaxSessions:    9999,
+			UtilizationPct: 1,
+		},
+	}
+	body, _ := json.Marshal(result)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+
+	ds.handleReport(w, r)
+
+	stored := ds.state.All()[0].LastResult.Sessions
+	if stored.MaxSessions != 0 {
+		t.Errorf("MaxSessions = %d, want 0 for unlimited capacity", stored.MaxSessions)
+	}
+	if stored.UtilizationPct != 0 {
+		t.Errorf("UtilizationPct = %d, want 0 for unlimited capacity", stored.UtilizationPct)
+	}
+}
+
+func TestCheckResultSamples_OmitsUnlimitedSessionCapacity(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Sessions: &dc.SessionSummary{
+			TotalSessions: 10,
+			MaxSessions:   0,
+		},
+	})
+
+	for _, sample := range samples {
+		if sample.Counter == "sessions_max" {
+			t.Fatalf("unexpected sessions_max sample for unlimited capacity: %+v", sample)
+		}
+	}
+}
+
 func TestHandleReport_UpdatesLastSeen(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")

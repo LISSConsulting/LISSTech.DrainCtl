@@ -58,6 +58,9 @@ non-null when retained data exists; null when the retained store has no rows for
 | SESSIONS | `sessions_total`, `sessions_active`, `sessions_disconnected`, `sessions_max`, `session_cpu_p95_pct`, `session_cpu_p50_pct`, `session_mem_p95_bytes`, `session_mem_p50_bytes` |
 | REMOTEFX | `rfx_fps_out`, `rfx_fps_out_p50`, `rfx_encode_ms`, `rfx_quality_pct`, `rfx_skip_server_sec`, `rfx_skip_net_sec`, `rfx_rtt_ms`, `rfx_loss_pct` |
 
+For `sessions_max`, values greater than or equal to `9999` represent unlimited
+capacity and are excluded from the fleet utilization denominator at every tier.
+
 RFX counters are only present in the response when RemoteFX data has been collected.
 The frontend detects RFX availability by checking whether `rfx_fps_out` has a non-empty
 `t` array; the REMOTEFX sub-tab is hidden when absent.

@@ -216,13 +216,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	}
 
 	// Auto-update subsystem (010). Opt-in via config; Start is a no-op when
-	// cfg.Update.Enabled=false. The shutdown callback is the same `cancel`
-	// the SCM-stop branch invokes; when the updater decides to install,
-	// it triggers our own clean shutdown so msiexec can replace files
-	// before SCM forces a stop. Stop is called from the SCM-stop branch
-	// alongside evtSpikeSub.Stop / waitTelemetryWorkers; the LCI Stop is
-	// idempotent so a defer-based fallback isn't needed.
-	updaterSub := updater.New(fullCfg.Update, cancel)
+	// cfg.Update.Enabled=false. Windows Installer owns the service stop/start
+	// transition after the updater launches the verified MSI. Stop is called
+	// from the SCM-stop branch alongside evtSpikeSub.Stop /
+	// waitTelemetryWorkers; the LCI Stop is idempotent so a defer-based
+	// fallback isn't needed.
+	updaterSub := updater.New(fullCfg.Update)
 	if err := updaterSub.Start(ctx); err != nil {
 		slog.Warn("updater failed to start", "error", err)
 	}
