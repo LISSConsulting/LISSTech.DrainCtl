@@ -37,27 +37,21 @@ func TestWtsStateName_Unknown(t *testing.T) {
 	}
 }
 
-func TestNormalizeSessionLimit(t *testing.T) {
-	tests := []struct {
-		name  string
-		value uint64
-		want  int
-		ok    bool
-	}{
-		{name: "finite", value: 250, want: 250, ok: true},
-		{name: "unset", value: 0},
-		{name: "DWORD unlimited", value: unlimitedDWORDSessionLimit},
-		{name: "policy unlimited", value: unlimitedPolicySessionLimit},
+func TestComputeSessionSummary_UnlimitedConfiguredLimit(t *testing.T) {
+	sessions := []SessionInfo{
+		{SessionID: 1, StateValue: wtsActive},
+		{SessionID: 2, StateValue: wtsDisconnected},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := normalizeSessionLimit(tt.value)
-			if got != tt.want || ok != tt.ok {
-				t.Errorf("normalizeSessionLimit(%d) = (%d, %t), want (%d, %t)",
-					tt.value, got, ok, tt.want, tt.ok)
-			}
-		})
+	summary := ComputeSessionSummary(sessions, 9999)
+	if summary.TotalSessions != 2 {
+		t.Errorf("TotalSessions = %d, want 2", summary.TotalSessions)
+	}
+	if summary.MaxSessions != 0 {
+		t.Errorf("MaxSessions = %d, want 0 for unlimited capacity", summary.MaxSessions)
+	}
+	if summary.UtilizationPct != 0 {
+		t.Errorf("UtilizationPct = %d, want 0 when capacity is unlimited", summary.UtilizationPct)
 	}
 }
 

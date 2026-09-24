@@ -88,11 +88,11 @@ func TestUpdateState_RejectsReplayBelowHighestSeen(t *testing.T) {
 			return nil
 		},
 	}
-	s, shutdownFired := runUpdater(t, cfg, f)
+	s, installFired := runUpdater(t, cfg, f)
 	t.Cleanup(s.Stop)
 
 	select {
-	case <-shutdownFired:
+	case <-installFired:
 		t.Fatal("install fired despite replay refusal")
 	case <-time.After(150 * time.Millisecond):
 		// Expected: gate refused, no install.
@@ -102,9 +102,8 @@ func TestUpdateState_RejectsReplayBelowHighestSeen(t *testing.T) {
 	}
 }
 
-// TestUpdateState_AcceptsForwardProgress proves a remote strictly
-// greater than highSeen is accepted, the install path runs, and the
-// new highest-seen is persisted.
+// TestUpdateState_AcceptsForwardProgress proves a remote strictly greater
+// than highSeen is accepted without pinning it before installation succeeds.
 func TestUpdateState_AcceptsForwardProgress(t *testing.T) {
 	pinVersion(t, "26.6.20")
 	cfg := dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}
@@ -125,11 +124,11 @@ func TestUpdateState_AcceptsForwardProgress(t *testing.T) {
 			return nil
 		},
 	}
-	s, shutdownFired := runUpdater(t, cfg, f)
+	s, installFired := runUpdater(t, cfg, f)
 	t.Cleanup(s.Stop)
 
 	select {
-	case <-shutdownFired:
+	case <-installFired:
 	case <-time.After(2 * time.Second):
 		t.Fatal("install never fired on forward-progress remote")
 	}
@@ -138,8 +137,8 @@ func TestUpdateState_AcceptsForwardProgress(t *testing.T) {
 	}
 
 	final, _ := loadUpdateState()
-	if final.HighestSeenVersion != "26.6.50" {
-		t.Errorf("HighestSeenVersion = %q, want %q after install", final.HighestSeenVersion, "26.6.50")
+	if final.HighestSeenVersion != "26.6.20" {
+		t.Errorf("HighestSeenVersion = %q, want running version %q until restart", final.HighestSeenVersion, "26.6.20")
 	}
 }
 

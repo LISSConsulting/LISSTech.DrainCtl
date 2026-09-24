@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessionlimit"
+
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -161,11 +163,6 @@ func querySessionString(sessionID uint32, infoClass uint32) string {
 	return windows.UTF16PtrToString(buf)
 }
 
-const (
-	unlimitedDWORDSessionLimit  = uint64(1<<32 - 1)
-	unlimitedPolicySessionLimit = uint64(999999)
-)
-
 var sessionLimitLocations = [...]struct {
 	path string
 	name string
@@ -174,15 +171,6 @@ var sessionLimitLocations = [...]struct {
 	{`SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp`, "MaxInstanceCount"},
 	{`SYSTEM\CurrentControlSet\Control\Terminal Server`, "MaxInstanceCount"},
 	{`SYSTEM\CurrentControlSet\Control\Terminal Server`, "UserSessionLimit"},
-}
-
-// normalizeSessionLimit rejects the sentinel values Windows uses for an
-// unlimited RD Session Host connection policy.
-func normalizeSessionLimit(v uint64) (int, bool) {
-	if v == 0 || v == unlimitedDWORDSessionLimit || v == unlimitedPolicySessionLimit {
-		return 0, false
-	}
-	return int(v), true
 }
 
 // ReadMaxSessions reads the effective finite RD Session Host connection limit.
@@ -200,7 +188,7 @@ func ReadMaxSessions() int {
 		if valueErr != nil {
 			continue
 		}
-		if limit, ok := normalizeSessionLimit(value); ok {
+		if limit, ok := sessionlimit.Normalize(value); ok {
 			return limit
 		}
 	}
@@ -212,9 +200,8 @@ func ReadMaxSessions() int {
 // session list should use this instead of GetSessionSummary to avoid a second
 // WTS API call.
 func ComputeSessionSummary(sessions []SessionInfo, maxSessions int) *SessionSummary {
-	summary := &SessionSummary{
-		MaxSessions: maxSessions,
-	}
+	maxSessions, _ = sessionlimit.Normalize(uint64(maxSessions))
+	summary := &SessionSummary{MaxSessions: maxSessions}
 	for _, s := range sessions {
 		switch s.StateValue {
 		case wtsActive:

@@ -17,7 +17,7 @@ import (
 // the assertion fails the build before this test runs; this test is
 // just a documented sanity check.
 func TestSubsystemImplementsLifecycle(t *testing.T) {
-	s := New(dc.UpdateConfig{}, nil)
+	s := New(dc.UpdateConfig{})
 	_ = s.Start
 	_ = s.Stop
 }
@@ -40,7 +40,7 @@ func TestStart_DisabledLaunchesGoroutineButSkipsFetch(t *testing.T) {
 	t.Cleanup(func() { initialPollDelay = prevDelay })
 	initialPollDelay = func() time.Duration { return time.Millisecond }
 
-	s := New(dc.UpdateConfig{Enabled: false, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}, nil)
+	s := New(dc.UpdateConfig{Enabled: false, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestUpdateConfig_WakesPolledLoop(t *testing.T) {
 
 	// Start disabled with a large poll_interval. If wakeCh weren't
 	// wired, this test would hang waiting for the next sleep (1 hour).
-	s := New(dc.UpdateConfig{Enabled: false, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}, nil)
+	s := New(dc.UpdateConfig{Enabled: false, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestUpdateConfig_UnchangedPolicyDoesNotWakePollLoop(t *testing.T) {
 		Channel:      dc.ChannelStable,
 		PollInterval: dc.Duration(time.Hour),
 	}
-	s := New(cfg, nil)
+	s := New(cfg)
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestSubsystem_StopReturnsBeforeFirstPoll(t *testing.T) {
 		return release{}, nil
 	}
 
-	s := New(dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}, nil)
+	s := New(dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSubsystem_StopIsIdempotent(t *testing.T) {
 	t.Cleanup(func() { initialPollDelay = prev })
 	initialPollDelay = func() time.Duration { return time.Hour }
 
-	s := New(dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)}, nil)
+	s := New(dc.UpdateConfig{Enabled: true, Channel: dc.ChannelStable, PollInterval: dc.Duration(time.Hour)})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestSubsystem_StopIsIdempotent(t *testing.T) {
 // Stop after a disabled-Start must return cleanly even though no
 // goroutine was launched.
 func TestSubsystem_StopToleratesDisabledStart(t *testing.T) {
-	s := New(dc.UpdateConfig{Enabled: false}, nil)
+	s := New(dc.UpdateConfig{Enabled: false})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
