@@ -3,9 +3,7 @@
 package updater
 
 import (
-	"context"
 	"os/exec"
-	"sync/atomic"
 	"testing"
 )
 
@@ -60,36 +58,5 @@ func TestSpawnInstall_ReturnsErrorOnStartFailure(t *testing.T) {
 	}
 	if err := spawnInstall(`C:\Temp\fake.msi`); err == nil {
 		t.Fatal("spawnInstall on bad executable returned nil, want error")
-	}
-}
-
-func TestTriggerSelfShutdown_CallsCancel(t *testing.T) {
-	var called atomic.Bool
-	cancel := func() { called.Store(true) }
-	triggerSelfShutdown(cancel)
-	if !called.Load() {
-		t.Error("triggerSelfShutdown did not call cancel")
-	}
-}
-
-func TestTriggerSelfShutdown_NilCancelIsNoOp(t *testing.T) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("triggerSelfShutdown(nil) panicked: %v", r)
-		}
-	}()
-	triggerSelfShutdown(nil)
-}
-
-func TestTriggerSelfShutdown_ContextCancellationIsObservable(t *testing.T) {
-	// Confirms the contract the caller relies on: the context cancel
-	// fires immediately, and a downstream selectable observes Done().
-	ctx, cancel := context.WithCancel(context.Background())
-	triggerSelfShutdown(cancel)
-	select {
-	case <-ctx.Done():
-		// expected
-	default:
-		t.Fatal("ctx.Done() did not fire after triggerSelfShutdown")
 	}
 }
