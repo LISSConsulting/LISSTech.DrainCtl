@@ -131,7 +131,7 @@ func TestStart_DecodeKeysFailureBlocksGoroutine(t *testing.T) {
 		return nil, wantErr
 	}
 
-	s := New(dc.UpdateConfig{}, func() {})
+	s := New(dc.UpdateConfig{})
 	err := s.Start(context.Background())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Start: got err=%v, want wrap of %v", err, wantErr)

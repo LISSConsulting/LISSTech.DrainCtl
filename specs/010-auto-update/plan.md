@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add a small `internal/updater` subsystem that polls GitHub's releases API on a 24h-ish jittered cadence, downloads the signed MSI when there's a newer version, verifies its Authenticode signature against `LISS Consulting, Corp.`, spawns msiexec detached, and triggers the service's own clean shutdown so msiexec can replace files. The PR also lands the **first migration to the LCI**: a new `internal/lifecycle` package with the `Subsystem` interface, plus a compile-time conformance assertion for `internal/evtspike` (which already matches the shape) and for the new `updater.Subsystem`.
+Add a small `internal/updater` subsystem that polls GitHub's releases API on a 24h-ish jittered cadence, downloads the signed MSI when there's a newer version, verifies its Authenticode signature against `LISS Consulting, Corp.`, and spawns msiexec detached. Windows Installer owns the service stop/install/start transition so a later installer failure cannot strand the existing service offline. The PR also lands the **first migration to the LCI**: a new `internal/lifecycle` package with the `Subsystem` interface, plus a compile-time conformance assertion for `internal/evtspike` (which already matches the shape) and for the new `updater.Subsystem`.
 
 Technical approach in one sentence: ship a leak-proof leak-free goroutine + http.Client + WinVerifyTrust trio behind one public `Subsystem` type, wired into `Execute` via the same call-site pattern the LCI mandates, with the entire feature gated on `config.Update.Enabled` so operators who don't want it can disable in one config flip.
 
@@ -42,7 +42,7 @@ Technical approach in one sentence: ship a leak-proof leak-free goroutine + http
   - `slog.Info  "update=up_to_date current=…"` (200, no newer).
   - `slog.Info  "update=installing remote=…"` (decision to install).
   - `slog.Warn  "update=refused reason=…"` (signature failures, network failures).
-  - `slog.Info  "update=installed_pending_restart remote=…"` (msiexec spawned, service shutting down).
+  - `slog.Info  "update=installer_spawned remote=…"` (msiexec successfully spawned; MSI now owns service lifecycle).
   - The `slog.Info "update=installing old=… new=…"` line IS the v1 record of the version transition (file log keeps 7 days). Durable audit-row persistence is deferred — see research.md Decision 10. No silent-failure paths; every refusal emits a structured log naming the reason.
 
 **Gate result**: Pass.
@@ -57,7 +57,7 @@ internal/updater/
     updater_windows.go        // Subsystem struct, Start/Stop, poll loop. ~150 LoC.
     github_windows.go         // GitHub releases API client (single function). ~60 LoC.
     verify_windows.go         // WinVerifyTrust + Subject CN check. ~80 LoC.
-    install_windows.go        // Detached msiexec spawn + service shutdown trigger. ~40 LoC.
+    install_windows.go        // Detached msiexec spawn. ~40 LoC.
     version_windows.go        // Parse + compare CalVer tags. ~30 LoC.
     backoff_windows.go        // Exponential backoff state machine. ~30 LoC.
     *_test.go                 // Unit tests; integration test in updater_integration_windows_test.go.
@@ -85,10 +85,10 @@ Phase 4 of the STP migration order (registry watcher, config-file watcher, named
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | WinVerifyTrust integration is fiddly; signature checks pass when they shouldn't or fail when they should | Medium | Three-case unit test in `verify_windows_test.go` using fixture MSIs (real-signed, unsigned, self-signed) checked into the repo or generated in `TestMain`. CI runs them on every build. |
-| Detached msiexec spawn doesn't actually survive service exit; the upgrade hangs | Medium | Integration test in a Windows VM via the existing manual smoke test (quickstart.md). Single-host validation before any release that ships the feature. |
+| Detached msiexec spawn fails after process creation and the updater strands the host offline | Medium | Keep the old service running until MSI `ServiceControl` issues the transactional stop; never infer install success from `cmd.Start()`. |
 | The 5-15 min initial-poll delay accidentally races with config reload (operator flips `enabled=false` between Start and first poll) | Low | The poll loop reads `enabled` fresh each tick, not at Start. If it's been flipped off, the tick is a no-op. Documented in updater_windows.go. |
 | GitHub API rate-limit (60/h unauthenticated) trips on a fleet of 100+ agents polling the same repo | Low | Per-host 24h ± 2h jitter spreads the load. 100 agents × 1 call/day = ~4 calls/h average against the unauth limit. Anything more is a fleet size we'd want a proper distribution channel for. |
-| MSI install fails (disk full on system drive, AV interference) and the host is bricked | Low | Install runs `msiexec /norestart`; failures leave the OLD service intact. SCM keeps the old service running because we only triggered our own ctx cancel — if the new install fails, the old binary is still on disk and can restart. |
+| MSI install fails (disk full on system drive, AV interference) and the host is bricked | Low | Install runs `msiexec /norestart`; failures leave the OLD service running because Windows Installer, not the updater, owns the stop/install/start boundary. |
 | Auto-update interacts badly with config.json migration on a future release | Medium | Treat `update.enabled=true` as the default in every future release. Operators who explicitly set `false` keep that setting through upgrades. Standard JSON-merge semantics. |
 
 ## Out-of-scope items (NOT in this plan)

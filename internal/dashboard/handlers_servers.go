@@ -14,6 +14,7 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessionlimit"
 )
 
 // hostnameRE matches RFC 1123 hostnames: labels of alphanumerics and hyphens
@@ -214,6 +215,15 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 			slog.Int("event_id", etwids.EvtAccessDenied), "user", auth.Username, "claimed_host", result.Host)
 		http.Error(w, "identity does not match claimed hostname", http.StatusForbidden)
 		return
+	}
+
+	if result.Sessions != nil {
+		if limit, ok := sessionlimit.Normalize(uint64(result.Sessions.MaxSessions)); ok {
+			result.Sessions.MaxSessions = limit
+		} else {
+			result.Sessions.MaxSessions = 0
+			result.Sessions.UtilizationPct = 0
+		}
 	}
 
 	ds.state.Update(result.Host, &result)

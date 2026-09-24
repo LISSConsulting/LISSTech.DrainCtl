@@ -90,6 +90,74 @@ func TestAppend_BatchRoundTrips(t *testing.T) {
 	}
 }
 
+func TestQueryRangeFleet_ExcludesUnlimitedSessionCapacity(t *testing.T) {
+	ms, db := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	hosts := []string{"FINITE", "UNLIMITED"}
+
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base, Host: hosts[0], Counter: "sessions_max", Value: 100},
+		{Ts: base, Host: hosts[1], Counter: "sessions_max", Value: 9999},
+		{Ts: base.Add(30 * time.Second), Host: hosts[1], Counter: "sessions_max", Value: 0},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	aggregateInserts := []string{
+		`INSERT INTO metrics_5min(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, 'sessions_max', ?, ?, ?, ?)`,
+		`INSERT INTO metrics_hourly(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, 'sessions_max', ?, ?, ?, ?)`,
+	}
+	aggregated := []struct {
+		avg, min, max float64
+		count         int
+	}{
+		{avg: 100, min: 100, max: 100, count: 1},
+		{avg: 4999.5, min: 0, max: 9999, count: 2},
+	}
+	for _, query := range aggregateInserts {
+		for i, values := range aggregated {
+			if _, err := db.writer.Exec(
+				query,
+				base.UnixMilli(),
+				hosts[i],
+				values.avg,
+				values.min,
+				values.max,
+				values.count,
+			); err != nil {
+				t.Fatalf("insert aggregated capacity: %v", err)
+			}
+		}
+	}
+
+	for _, tier := range []Tier{TierRaw, TierOneMin, TierFiveMin, TierHourly} {
+		t.Run(tier.TierName(), func(t *testing.T) {
+			series, err := ms.QueryRangeFleet(
+				ctx,
+				hosts,
+				base,
+				base.Add(time.Hour),
+				tier,
+				[]string{"sessions_max"},
+				60_000,
+			)
+			if err != nil {
+				t.Fatalf("QueryRangeFleet: %v", err)
+			}
+			capacity := series.Data["sessions_max"]
+			if capacity == nil || len(capacity.Avg) != 1 {
+				t.Fatalf("sessions_max series = %+v, want one bucket", capacity)
+			}
+			if capacity.Avg[0] != 100 {
+				t.Errorf("fleet capacity = %v, want 100; unlimited host must not enter denominator", capacity.Avg[0])
+			}
+		})
+	}
+}
+
 func TestQueryRange_RawTier(t *testing.T) {
 	ms, _ := newMetricsStore(t)
 

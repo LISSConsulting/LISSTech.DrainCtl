@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessionlimit"
 )
 
 // futureSkewThreshold is the maximum permitted clock skew into the future
@@ -454,7 +456,6 @@ var summableFleetCounters = []string{
 	"sessions_total",
 	"sessions_active",
 	"sessions_disconnected",
-	"sessions_max",
 }
 
 // MemUsedPctCounter is the synthetic fleet-only counter name for memory
@@ -471,15 +472,23 @@ var summableFleetCounters = []string{
 // each host contributes equally to the displayed fleet pressure.
 const MemUsedPctCounter = "mem_used_pct"
 
-// summableCase returns a SQLite CASE expression that evaluates sumExpr when
-// the `counter` column matches one of summableFleetCounters, otherwise avgExpr.
-// Counter names are compile-time constants — safe to inline as string literals.
-func summableCase(sumExpr, avgExpr string) string {
+// summableCase returns a SQLite CASE expression that sums fleet counters,
+// averages gauge counters, and discards any per-host capacity bucket that
+// contains an unlimited session-limit sentinel.
+func summableCase(sumExpr, avgExpr, capacityValueExpr, capacityMaxExpr string) string {
 	quoted := make([]string, len(summableFleetCounters))
 	for i, c := range summableFleetCounters {
 		quoted[i] = "'" + c + "'"
 	}
-	return "CASE WHEN counter IN (" + strings.Join(quoted, ",") + ") THEN " + sumExpr + " ELSE " + avgExpr + " END"
+	capacityExpr := fmt.Sprintf(
+		"SUM(CASE WHEN %s >= %d THEN 0 ELSE %s END)",
+		capacityMaxExpr,
+		sessionlimit.Unlimited,
+		capacityValueExpr,
+	)
+	return "CASE WHEN counter = 'sessions_max' THEN " + capacityExpr +
+		" WHEN counter IN (" + strings.Join(quoted, ",") + ") THEN " + sumExpr +
+		" ELSE " + avgExpr + " END"
 }
 
 // MinRawFleetBucketMs is the lower bound for raw-fleet bucketing. Set to
@@ -533,9 +542,9 @@ func buildRawQueryFleet(hosts []string, fromMs, toMs int64, counters []string, b
 	// variance rather than single-sample noise.
 	bucket := fmt.Sprintf("%d", bucketMs)
 	q := `SELECT bucket_ts, counter, ` +
-		summableCase("SUM(v_avg)", "AVG(v_avg)") + `, ` +
-		summableCase("SUM(v_avg)", "MIN(v_min)") + `, ` +
-		summableCase("SUM(v_avg)", "MAX(v_max)") + `
+		summableCase("SUM(v_avg)", "AVG(v_avg)", "v_avg", "v_max") + `, ` +
+		summableCase("SUM(v_avg)", "MIN(v_min)", "v_avg", "v_max") + `, ` +
+		summableCase("SUM(v_avg)", "MAX(v_max)", "v_avg", "v_max") + `
 	      FROM (
 	          SELECT (ts / ` + bucket + `) * ` + bucket + ` AS bucket_ts, counter, host,
 	                 AVG(value) AS v_avg, MIN(value) AS v_min, MAX(value) AS v_max
@@ -570,9 +579,9 @@ func buildOneMinQueryFleet(hosts []string, fromMs, toMs int64, counters []string
 	}
 	args = append(args, fromMs, toMs)
 	q := `SELECT bucket_ts, counter, ` +
-		summableCase("SUM(v_avg)", "AVG(v_avg)") + `, ` +
-		summableCase("SUM(v_avg)", "MIN(v_min)") + `, ` +
-		summableCase("SUM(v_avg)", "MAX(v_max)") + `
+		summableCase("SUM(v_avg)", "AVG(v_avg)", "v_avg", "v_max") + `, ` +
+		summableCase("SUM(v_avg)", "MIN(v_min)", "v_avg", "v_max") + `, ` +
+		summableCase("SUM(v_avg)", "MAX(v_max)", "v_avg", "v_max") + `
 	      FROM (
 	          SELECT (ts / 60000) * 60000 AS bucket_ts, counter, host,
 	                 AVG(value) AS v_avg, MIN(value) AS v_min, MAX(value) AS v_max
@@ -602,9 +611,9 @@ func buildAggQueryFleet(table string, hosts []string, fromMs, toMs int64, counte
 	// totals. Other counters: sample-count-weighted average matches rollHourly
 	// weighting so buckets with fewer raw samples don't skew the fleet mean.
 	q := fmt.Sprintf(`SELECT bucket_ts, counter, `+
-		summableCase("SUM(avg_value)", "SUM(avg_value * sample_count) / NULLIF(SUM(sample_count), 0)")+`, `+
-		summableCase("SUM(min_value)", "MIN(min_value)")+`, `+
-		summableCase("SUM(max_value)", "MAX(max_value)")+` FROM %s
+		summableCase("SUM(avg_value)", "SUM(avg_value * sample_count) / NULLIF(SUM(sample_count), 0)", "avg_value", "max_value")+`, `+
+		summableCase("SUM(min_value)", "MIN(min_value)", "min_value", "max_value")+`, `+
+		summableCase("SUM(max_value)", "MAX(max_value)", "max_value", "max_value")+` FROM %s
 	      WHERE host IN (`+placeholders(len(hosts))+`) AND bucket_ts >= ? AND bucket_ts < ?`, table)
 	if len(counters) > 0 {
 		q += " AND counter IN (" + placeholders(len(counters)) + ")"

@@ -58,7 +58,9 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 		add("sessions_total", float64(s.TotalSessions))
 		add("sessions_active", float64(s.ActiveSessions))
 		add("sessions_disconnected", float64(s.DisconnectedSessions))
-		add("sessions_max", float64(s.MaxSessions))
+		if s.MaxSessions > 0 {
+			add("sessions_max", float64(s.MaxSessions))
+		}
 	}
 
 	return out
