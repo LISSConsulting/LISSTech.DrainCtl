@@ -1635,7 +1635,7 @@
                 <!-- Actions bar -->
                 <div class="settings-actions-wrap">
                     <div class="settings-actions">
-                        <div style="display:flex;gap:8px">
+                        <div class="settings-actions-context">
                             <button
                                 type="button"
                                 class="btn-brutal btn-secondary"
@@ -1653,6 +1653,8 @@
                                     {testing ? 'Sending...' : 'Send Test'}
                                 </button>
                             {/if}
+                        </div>
+                        <div class="settings-actions-primary">
                             <button class="btn-brutal btn-save" onclick={save} disabled={saving || !dirty}>
                                 <Save size={14} />
                                 {saving ? 'Saving...' : 'Save'}
@@ -2215,6 +2217,15 @@
         justify-content: space-between;
         flex-wrap: wrap;
         gap: 12px;
+    }
+    .settings-actions-context,
+    .settings-actions-primary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .settings-actions-primary {
+        margin-left: auto;
     }
     .repeat-pills {
         display: flex;
