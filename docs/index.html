@@ -5,24 +5,24 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="favicon.ico" type="image/x-icon" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-        <title>DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins</title>
+        <title>DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins</title>
         <meta
             name="description"
-            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay across your farm — instant detection, change attribution, centralized dashboard."
+            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry with DrainCtl v26.9.36."
         />
         <meta
             name="keywords"
-            content="Remote Desktop Services monitoring, RDS drain mode, RDSH monitoring, managed service provider RDS, MSP monitoring tool, session host monitor, Windows Server RDS, terminal services monitoring, drain mode alerting"
+            content="Remote Desktop Services monitoring, RDS drain mode, RDSH monitoring, managed service provider RDS, MSP monitoring tool, session host monitor, Windows Server RDS, terminal services monitoring, drain mode alerting, RDS fleet dashboard"
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins" />
+        <meta property="og:title" content="DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
         <meta
             property="og:description"
-            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay — instant detection, change attribution, centralized dashboard."
+            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry."
         />
         <meta property="og:url" content="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
         <meta
@@ -33,10 +33,10 @@
 
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DrainCtl — Remote Desktop Services Monitoring for MSPs & RDSH Admins" />
+        <meta name="twitter:title" content="DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
         <meta
             name="twitter:description"
-            content="Remote Desktop Services monitoring for MSPs and RDSH admins. Track drain mode, sessions, CPU, and input delay — instant detection, change attribution, centralized dashboard."
+            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry."
         />
         <meta
             name="twitter:image"
@@ -51,7 +51,8 @@
             "name": "DrainCtl",
             "applicationCategory": "BusinessApplication",
             "operatingSystem": "Windows Server",
-            "description": "Remote Desktop Services monitoring for MSPs and RDSH admins. Real-time drain mode detection, session tracking, CPU and input delay alerting — centralized dashboard for your entire farm.",
+            "description": "RDS farm monitoring for MSPs and RDSH admins. Detect drain changes, track sessions and performance, investigate EventSpike anomalies, and manage the fleet from a secure dashboard.",
+            "softwareVersion": "26.9.36",
             "url": "https://lissconsulting.github.io/LISSTech.DrainCtl/",
             "screenshot": "https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png",
             "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -1343,9 +1344,8 @@
                 <img src="logo.png" alt="DrainCtl" width="72" height="72" style="display: block; margin: 0 auto 12px" />
                 <h1>Someone disabled new connections<br />at 2 AM. <em>You'll know who.</em></h1>
                 <p class="hero-sub">
-                    DrainCtl monitors every session host in your RDS farm &mdash; drain mode changes, active sessions,
-                    CPU, memory, input delay. One service, one dashboard, instant alerts. The change, who made it,
-                    and how long ago.
+                    DrainCtl watches the RDS signals that matter: drain changes, sessions, performance, and unusual event
+                    volume. Investigate from one secure dashboard, act on durable history, and keep the whole farm in view.
                 </p>
                 <div class="hero-buttons">
                     <a
@@ -1454,10 +1454,10 @@
         <section class="section" id="features">
             <div class="wrap">
                 <div class="section-label">Capabilities</div>
-                <h2 class="section-title">Complete visibility for your RDS farm.</h2>
+                <h2 class="section-title">Complete visibility. Deliberate control.</h2>
                 <div class="section-desc">
-                    Drain mode, sessions, CPU, memory, input delay &mdash; one service monitors everything. One
-                    dashboard shows it all. Alerts reach you by webhook, ntfy, or email before users notice.
+                    Detect drain changes, follow sessions and performance, and investigate event anomalies across the farm.
+                    The dashboard turns retained telemetry and live status into operator-ready decisions.
                 </div>
                 <div class="hero-features">
                     <div class="hero-feature">
@@ -1483,10 +1483,10 @@
                     <div class="hero-feature">
                         <div class="hero-feature-icon">&#128200;</div>
                         <div class="hero-feature-body">
-                            <div class="hero-feature-title">Performance Monitoring</div>
+                            <div class="hero-feature-title">Performance That Reads Clearly</div>
                             <div class="hero-feature-desc">
-                                CPU, memory, disk I/O, input delay, and optional RemoteFX &mdash; collected on the configured sample interval
-                                through the Windows PDH API. Threshold alerts fire before users notice.
+                                CPU, memory, disk I/O, input delay, and optional RemoteFX come from Windows PDH. Fleet
+                                indicators show P50 plus the right tail; FPS and frame quality show P95 as a service floor.
                             </div>
                         </div>
                     </div>
@@ -1495,8 +1495,8 @@
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Farm Dashboard</div>
                             <div class="hero-feature-desc">
-                                One page for your entire RDSH farm. Live status, session gauges, state history chart,
-                                and event log &mdash; secured with Kerberos SSO.
+                                Live status, session capacity, durable charts, events, and server controls for the whole
+                                RDSH farm — secured with Kerberos SSO or credential login.
                             </div>
                         </div>
                     </div>
@@ -1521,10 +1521,11 @@
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#127919;</div>
-                        <div class="compact-card-title">Anomaly Detection</div>
+                        <div class="compact-card-title">EventSpike Anomaly Detection</div>
                         <div class="compact-card-desc">
-                            Opt-in <code>evtspike</code> learns a per-channel baseline across 54 Windows event logs.
-                            Catches what fixed thresholds miss &mdash; without false-positive noise.
+                            Steady, Chill, and Vigilant presets enable a detector that learns each channel for seven durable
+                            days while still detecting. Steady begins at 10 / 1e-4 with a 60-minute cooldown; use
+                            <code>Channel=Minutes</code> when one channel needs a precise override. Retrying or failed channels never mature its baseline.
                         </div>
                     </div>
                     <div class="compact-card">
@@ -1547,16 +1548,16 @@
                         <div class="compact-card-icon">&#128200;</div>
                         <div class="compact-card-title">Fleet &amp; Host Charts</div>
                         <div class="compact-card-desc">
-                            Dual-axis LOAD, Health Indicators, Sessions, and optional RemoteFX panels on Overview &mdash; plus
-                            a per-host LOAD chart on every Server Detail with shared zoom presets.
+                            Explore fleet and host history at 5M, 15M where available, 1H, 1D, 3D, 5D, or 30D. LOAD,
+                            Health Indicators, Sessions, and optional RemoteFX all read from retained SQLite telemetry.
                         </div>
                     </div>
                     <div class="compact-card">
                         <div class="compact-card-icon">&#9881;&#65039;</div>
                         <div class="compact-card-title">Dashboard-Authoritative Config</div>
                         <div class="compact-card-desc">
-                            Configure thresholds and notifications once. Every agent pulls the same config &mdash; 50
-                            servers, one source of truth.
+                            Configure Alerts &amp; Performance, Event Spikes, Notifications, Servers, and System once.
+                            Operator-safe EventSpike settings propagate to connected agents; each agent keeps its baseline path local.
                         </div>
                     </div>
                     <div class="compact-card">
@@ -1575,30 +1576,30 @@
         <section class="section section--shaded" id="quickstart">
             <div class="wrap">
                 <div class="section-label">Quick Start</div>
-                <h2 class="section-title">From download to monitoring in under&nbsp;3&nbsp;minutes.</h2>
-                <div class="section-desc">Three steps on the dashboard server. Session hosts discover it automatically via DNS SRV &mdash; no per-machine config.</div>
+                <h2 class="section-title">Choose a dashboard host. Bring the farm online.</h2>
+                <div class="section-desc">Install the dashboard in dashboard-only mode, then let session hosts discover it through DNS SRV — no per-machine dashboard URL.</div>
                 <div class="quickstart-steps">
                     <div class="qs-step">
                         <div class="qs-num">01</div>
                         <div class="qs-info">
-                            <h3>Install</h3>
-                            <p>Run the MSI on your dashboard server with the interactive wizard, or use PowerShell for silent RMM deployment.</p>
+                            <h3>Install the dashboard</h3>
+                            <p>Use the MSI wizard or your deployment system. Dashboard-only mode runs the listener, authentication, SQLite, and retention without local drain monitoring, performance or EventSpike collection, registration/reporting, notifications, or updater activity.</p>
                         </div>
-                        <code class="qs-code">irm https://lissconsulting.github.io/LISSTech.DrainCtl/install.ps1 | iex</code>
+                        <code class="qs-code">INSTALL_MODE=dashboard DASHBOARD_ONLY=1</code>
                     </div>
                     <div class="qs-step">
                         <div class="qs-num">02</div>
                         <div class="qs-info">
                             <h3>Add one DNS SRV record</h3>
-                            <p>Point your internal DNS at the dashboard host. Every session host finds it on its own &mdash; no scripts, no URLs pushed to machines.</p>
+                            <p>Point internal DNS at the dashboard host. Session-host agents discover it themselves and connect securely.</p>
                         </div>
                         <code class="qs-code">_drainctl._tcp.contoso.com  →  your-dashboard-host:49470</code>
                     </div>
                     <div class="qs-step qs-done" style="grid-template-rows: auto;">
                         <div class="qs-num" style="grid-row: 1;">03</div>
                         <div class="qs-info">
-                            <h3>Done.</h3>
-                            <p>Agents self-register. The dashboard shows every server. Drain changes alert in under a second. Edit thresholds and notifications once in the UI &mdash; the dashboard is authoritative, every agent pulls the same config on reload.</p>
+                            <h3>Operate from one place.</h3>
+                            <p>Connected hosts register and report. Set fleet-safe alerts, performance thresholds, notification targets, and EventSpike controls in the dashboard; agents receive the authoritative configuration on their normal fetch cadence.</p>
                         </div>
                     </div>
                 </div>
@@ -1695,50 +1696,50 @@
         <!-- Release Notes -->
         <section class="section section--shaded" id="releases">
             <div class="wrap">
-                <div class="section-label">Latest Release</div>
-                <h2 class="section-title serif section-title--italic">A current foundation for every host.</h2>
+                <div class="section-label">Latest Stable Release</div>
+                <h2 class="section-title serif section-title--italic">v26.9.36 puts fleet operations in reach.</h2>
                 <p class="release-lede">
-                    This maintenance release refreshes the service, telemetry, dashboard, and delivery toolchains while
-                    keeping operator workflows and in-place upgrade behavior unchanged.
+                    The current stable release brings durable fleet management, clearer telemetry, and EventSpike controls
+                    together without sacrificing the in-place upgrade path.
                 </p>
                 <div class="release-grid">
                     <article class="card release-card" data-number="01">
-                        <span class="release-tag">Current runtime</span>
-                        <h3>Build on the latest stable Go toolchain.</h3>
+                        <span class="release-tag">Fleet management</span>
+                        <h3>Manage the Servers table as a real operating surface.</h3>
                         <p>
-                            DrainCtl now builds and tests with Go 1.27.1, carrying current compiler and standard-library
-                            fixes into every service binary.
+                            Keep a persistent multi-selection, mute or notify per server, Force Update supported agents,
+                            and permanently remove hosts. Removed hosts are durably tombstoned and restorable from Config → Servers.
                         </p>
                     </article>
                     <article class="card release-card" data-number="02">
-                        <span class="release-tag">Telemetry storage</span>
-                        <h3>Keep retained metrics on a maintained SQLite stack.</h3>
+                        <span class="release-tag">Reliable update delivery</span>
+                        <h3>Request updates that survive a missed connection.</h3>
                         <p>
-                            The embedded SQLite engine moves to 1.58.0 together with its maintained runtime
-                            dependencies. Existing databases and retention behavior remain unchanged.
+                            Force Update supports agents 26.9.17 and later. Each request is durable, retries until
+                            acknowledged, and reports its terminal outcome instead of disappearing into a best-effort queue.
                         </p>
                     </article>
                     <article class="card release-card" data-number="03">
-                        <span class="release-tag">Dashboard stack</span>
-                        <h3>Refresh the embedded dashboard foundation.</h3>
+                        <span class="release-tag">EventSpike maturity</span>
+                        <h3>Detect during warm-up, then keep learning.</h3>
                         <p>
-                            Svelte 5.57.0, Vite 8.2.2, Lucide 1.39.0, and the latest compatible Svelte tooling keep the
-                            dashboard build current without changing its operator-facing controls.
+                            EventSpike retains a seven-day warm-up while it continues to detect. Steady defaults balance
+                            sensitivity with persistence, and exact channel cooldowns can override the global setting.
                         </p>
                     </article>
                     <article class="card release-card" data-number="04">
-                        <span class="release-tag">Delivery tooling</span>
-                        <h3>Reproduce builds with current package tooling.</h3>
+                        <span class="release-tag">Safe upgrades</span>
+                        <h3>Keep the operational history you built.</h3>
                         <p>
-                            pnpm 11.25.0 is aligned across local builds and CI. GitHub Actions, pre-commit hooks, and WiX
-                            packages remain on their latest maintained releases.
+                            In-place upgrades preserve configuration, telemetry, removed-server tombstones, the Force
+                            Update outbox, and EventSpike baselines and warm-up state.
                         </p>
                     </article>
                 </div>
                 <div class="release-footer">
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill">Download latest release &rarr;</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill">Download v26.9.36 &rarr;</a>
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">See all releases</a>
-                    <span class="release-note">Stable channel &middot; signed MSI &middot; in-place upgrade</span>
+                    <span class="release-note">Stable channel &middot; signed MSI &middot; durable in-place upgrade</span>
                 </div>
             </div>
         </section>
@@ -1749,9 +1750,8 @@
                 <div class="section-label">Farm Monitoring</div>
                 <h2 class="section-title">One dashboard for your entire RDSH farm.</h2>
                 <div class="section-desc">
-                    See every server's drain state, session count, and alert history on a single page. Configure
-                    notifications and thresholds once &mdash; every agent in the farm inherits them. Enable the
-                    dashboard, add one DNS SRV record, done.
+                    Watch health and retained history, investigate events, and make fleet changes without losing context.
+                    Dashboard-only mode is purpose-built for the dashboard host; connected session-host agents do the local monitoring and reporting.
                 </div>
 
                 <div class="dash-gallery">
@@ -1778,14 +1778,15 @@
                         <img class="dash-img--dark" src="dashboard-screenshot-config-dark.png" alt="DrainCtl Dashboard — Config (dark)" />
                     </div>
                 </div>
+                <p class="section-desc">Overview turns live signals and durable SQLite history into fleet trends. Servers gives operators persistent multi-select, per-server Mute/Notify, Force Update, durable removal, and restoration from Config → Servers. Events keeps investigation close to the telemetry. Config organizes fleet settings into Alerts &amp; Performance, Event Spikes, Notifications, Servers, and System.</p>
 
                 <div class="features-grid features-grid--2col">
                     <div class="feature card">
                         <div class="icon">&#128268;</div>
-                        <h3>One Command Setup</h3>
+                        <h3>Dashboard-only when the host should stay focused</h3>
                         <p>
-                            <code>drainctl dashboard enable</code>, add one DNS SRV record, done. Agents discover and
-                            register themselves.
+                            Run the dashboard listener, authentication, SQLite, and retention without enabling local drain
+                            monitoring, performance/EventSpike collection, registration/reporting, notifications, or the updater.
                         </p>
                     </div>
                     <div class="feature card">
@@ -1795,20 +1796,18 @@
                     </div>
                     <div class="feature card">
                         <div class="icon">&#128200;</div>
-                        <h3>Live Monitoring</h3>
+                        <h3>Live Monitoring, Durable History</h3>
                         <p>
-                            Real-time updates via Server-Sent Events. LOAD, Health Indicators, Session, and optional
-                            RemoteFX panels query retained SQLite telemetry; every Server Detail has a durable host LOAD
-                            chart with shared zoom presets.
+                            Server-Sent Events deliver live changes while LOAD, Health Indicators, Sessions, and optional
+                            RemoteFX charts query retained SQLite telemetry across 5M through 30D views.
                         </p>
                     </div>
                     <div class="feature card">
                         <div class="icon">&#9881;&#65039;</div>
-                        <h3>Edit Config in the UI</h3>
+                        <h3>Configure and Control in the UI</h3>
                         <p>
-                            Notification targets, grace periods, session thresholds, performance settings, and the
-                            evtspike enable switch are edited from the dashboard. Agents pull the authoritative config
-                            on their normal fetch cadence.
+                            Manage alerts, performance, Event Spikes, notifications, Servers, and System settings in named
+                            tabs. Operator-safe EventSpike fields propagate to agents; <code>baseline_path</code> stays local-only.
                         </p>
                     </div>
                 </div>
@@ -1974,9 +1973,10 @@
         <section class="section section--shaded" id="install">
             <div class="wrap wrap--wide">
                 <div class="section-label">Installation Options</div>
-                <h2 class="section-title">Pick your path</h2>
+                <h2 class="section-title">Install for the role each machine has.</h2>
                 <div class="section-desc">
-                    All roads lead to monitoring. <a href="guide.html">Full guide &rarr;</a>
+                    Use a monitoring agent on session hosts, dashboard-only on the central dashboard host, or install the
+                    PowerShell module for scripts and checks. <a href="guide.html">Full guide &rarr;</a>
                 </div>
                 <div class="install-cards">
                     <div class="install-card install-card--featured card">
@@ -1986,12 +1986,12 @@
                         </div>
                         <h3>MSI Installer</h3>
                         <p>
-                            Setup wizard with license acceptance, install mode selection, and configuration options. The
-                            recommended way to install interactively.
+                            The interactive wizard lets you select the machine's role. Choose dashboard-only for the
+                            central dashboard, or the normal agent role for a session host that monitors and reports locally.
                         </p>
                         <ul>
                             <li>Install mode wizard</li>
-                            <li>License acceptance</li>
+                            <li>Dashboard-only or local monitoring role</li>
                             <li>Installs service + CLI + PS module</li>
                             <li>Also supports silent deploy</li>
                         </ul>
@@ -2007,14 +2007,16 @@
                         <div class="install-kicker"><span>Fleet deploy</span></div>
                         <h3>Silent MSI</h3>
                         <p>
-                            Same MSI for RMM, SCCM, Intune, or GPO deployment. No UI &mdash; configure everything via
-                            properties.
+                            Deploy the same signed MSI through RMM, SCCM, Intune, or GPO. <code>INSTALL_MODE=dashboard</code>
+                            enables the dashboard role; add <code>DASHBOARD_ONLY=1</code> when the coordinator must not
+                            monitor or report itself.
                         </p>
-                        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn</code>
+                        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=dashboard DASHBOARD_ONLY=1</code>
                         <ul>
-                            <li>Windows Service (auto-start)</li>
-                            <li>CLI on system PATH</li>
-                            <li>PowerShell module registered</li>
+                            <li>Dashboard-only listener, auth, SQLite, and retention</li>
+                            <li>Omit <code>DASHBOARD_ONLY=1</code> when the dashboard host should also monitor itself</li>
+                            <li>Use registration mode for session-host agents</li>
+                            <li>CLI on system PATH and PowerShell module registered</li>
                             <li><a href="guide.html#install">MSI property reference</a></li>
                         </ul>
                         <div class="install-cta">
