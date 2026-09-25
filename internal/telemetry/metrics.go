@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -94,13 +95,15 @@ type Sample struct {
 	Value   float64
 }
 
-// CounterSeries holds parallel time/avg/min/max arrays for one counter.
-// For TierRaw, Avg == Min == Max == the original value.
+// CounterSeries holds parallel time/avg/min/max/p50 arrays for one counter.
+// P50 is the exact median of participating host values for a fleet bucket.
+// For a single-host series, P50 == Avg.
 type CounterSeries struct {
 	T   []int64
 	Avg []float64
 	Min []float64
 	Max []float64
+	P50 []float64
 }
 
 // Series is the result of a QueryRange call.
@@ -291,6 +294,7 @@ func (s *MetricsStore) queryRaw(
 		cs.Avg = append(cs.Avg, value)
 		cs.Min = append(cs.Min, value)
 		cs.Max = append(cs.Max, value)
+		cs.P50 = append(cs.P50, value)
 	}
 	return rows.Err()
 }
@@ -324,6 +328,7 @@ func (s *MetricsStore) queryOneMin(
 		cs.Avg = append(cs.Avg, avg)
 		cs.Min = append(cs.Min, min)
 		cs.Max = append(cs.Max, max)
+		cs.P50 = append(cs.P50, avg)
 	}
 	return rows.Err()
 }
@@ -355,6 +360,7 @@ func (s *MetricsStore) queryAggregated(
 		cs.Avg = append(cs.Avg, avg)
 		cs.Min = append(cs.Min, min)
 		cs.Max = append(cs.Max, max)
+		cs.P50 = append(cs.P50, avg)
 	}
 	return rows.Err()
 }
@@ -872,6 +878,14 @@ func (s *MetricsStore) QueryRangeFleet(
 	default:
 		return nil, fmt.Errorf("telemetry: tier %q not available in this version", tier.TierName())
 	}
+	if err := s.populateFleetP50(ctx, sr, hosts, fromMs, toMs, tier, rest, rawBucketMs); err != nil {
+		return nil, err
+	}
+	if wantVirtual {
+		if err := s.populateFleetMemUsedPctP50(ctx, sr, hosts, fromMs, toMs, tier, rawBucketMs); err != nil {
+			return nil, err
+		}
+	}
 	return sr, nil
 }
 
@@ -1015,6 +1029,258 @@ func (s *MetricsStore) queryAggregatedFleet(
 		cs.Max = append(cs.Max, max)
 	}
 	return rows.Err()
+}
+
+// populateFleetP50 attaches the exact median of per-host bucket values to each
+// regular fleet counter. The primary aggregate query deliberately retains only
+// aggregate statistics, so median calculation reads the same per-host bucket
+// values once and sorts each group in place.
+func (s *MetricsStore) populateFleetP50(
+	ctx context.Context,
+	sr *Series,
+	hosts []string,
+	fromMs, toMs int64,
+	tier Tier,
+	counters []string,
+	rawBucketMs int64,
+) error {
+	q, args, err := buildFleetP50Query(hosts, fromMs, toMs, tier, counters, rawBucketMs)
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet p50 query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type group struct {
+		counter string
+		bucket  int64
+		values  []float64
+	}
+	p50ByCounter := make(map[string]map[int64]float64)
+	var current group
+	flush := func() {
+		if len(current.values) == 0 {
+			return
+		}
+		cs := sr.Data[current.counter]
+		if cs == nil {
+			return
+		}
+		i := sort.Search(len(cs.T), func(i int) bool { return cs.T[i] >= current.bucket })
+		if i == len(cs.T) || cs.T[i] != current.bucket {
+			return
+		}
+		sort.Float64s(current.values)
+		mid := len(current.values) / 2
+		p50 := current.values[mid]
+		if len(current.values)%2 == 0 {
+			p50 = (current.values[mid-1] + p50) / 2
+		}
+		if p50ByCounter[current.counter] == nil {
+			p50ByCounter[current.counter] = make(map[int64]float64)
+		}
+		p50ByCounter[current.counter][current.bucket] = p50
+	}
+	for rows.Next() {
+		var bucket int64
+		var counter string
+		var value, max float64
+		if err := rows.Scan(&bucket, &counter, &value, &max); err != nil {
+			return fmt.Errorf("telemetry: fleet p50 scan: %w", err)
+		}
+		if counter != current.counter || bucket != current.bucket {
+			flush()
+			current = group{counter: counter, bucket: bucket}
+		}
+		if counter != "sessions_max" || max < float64(sessionlimit.Unlimited) {
+			current.values = append(current.values, value)
+		}
+	}
+	flush()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for counter, cs := range sr.Data {
+		if counter == MemUsedPctCounter {
+			continue
+		}
+		medians := p50ByCounter[counter]
+		if cap(cs.P50) < len(cs.T) {
+			cs.P50 = make([]float64, len(cs.T))
+		} else {
+			cs.P50 = cs.P50[:len(cs.T)]
+		}
+		out := 0
+		for i, ts := range cs.T {
+			p50, ok := medians[ts]
+			if !ok {
+				continue
+			}
+			cs.T[out] = ts
+			cs.Avg[out] = cs.Avg[i]
+			cs.Min[out] = cs.Min[i]
+			cs.Max[out] = cs.Max[i]
+			cs.P50[out] = p50
+			out++
+		}
+		cs.T = cs.T[:out]
+		cs.Avg = cs.Avg[:out]
+		cs.Min = cs.Min[:out]
+		cs.Max = cs.Max[:out]
+		cs.P50 = cs.P50[:out]
+	}
+	return nil
+}
+
+// buildFleetP50Query emits one value per participating host and metric bucket.
+// It matches the inner side of the corresponding fleet aggregate query so P50
+// has the same host membership as avg/min/max.
+func buildFleetP50Query(hosts []string, fromMs, toMs int64, tier Tier, counters []string, rawBucketMs int64) (string, []any, error) {
+	args := make([]any, 0, len(hosts)+2+len(counters))
+	for _, host := range hosts {
+		args = append(args, host)
+	}
+	where := " WHERE host IN (" + placeholders(len(hosts)) + ") AND "
+	var q, groupBy string
+	switch tier {
+	case TierRaw, TierOneMin:
+		bucketMs := rawBucketMs
+		if tier == TierOneMin {
+			bucketMs = 60_000
+		} else if bucketMs < MinRawFleetBucketMs {
+			bucketMs = MinRawFleetBucketMs
+		}
+		fromMs = (fromMs / bucketMs) * bucketMs
+		toMs = (toMs / bucketMs) * bucketMs
+		args = append(args, fromMs, toMs)
+		q = fmt.Sprintf(
+			"SELECT (ts / %d) * %d AS bucket_ts, counter, AVG(value), MAX(value) FROM metrics_raw"+where+"ts >= ? AND ts < ?",
+			bucketMs, bucketMs,
+		)
+		groupBy = " GROUP BY bucket_ts, counter, host"
+	case TierFiveMin, TierHourly:
+		table := "metrics_5min"
+		if tier == TierHourly {
+			table = "metrics_hourly"
+		}
+		args = append(args, fromMs, toMs)
+		q = "SELECT bucket_ts, counter, avg_value, max_value FROM " + table + where + "bucket_ts >= ? AND bucket_ts < ?"
+	default:
+		return "", nil, fmt.Errorf("telemetry: p50 not available for tier %q", tier.TierName())
+	}
+	if len(counters) > 0 {
+		q += " AND counter IN (" + placeholders(len(counters)) + ")"
+		for _, counter := range counters {
+			args = append(args, counter)
+		}
+	}
+	q += groupBy + " ORDER BY counter, bucket_ts, host"
+	return q, args, nil
+}
+
+// populateFleetMemUsedPctP50 is the virtual-counter sibling of
+// populateFleetP50. Each host's percentage is calculated before sorting so
+// differently sized hosts contribute equally.
+func (s *MetricsStore) populateFleetMemUsedPctP50(
+	ctx context.Context,
+	sr *Series,
+	hosts []string,
+	fromMs, toMs int64,
+	tier Tier,
+	rawBucketMs int64,
+) error {
+	cs := sr.Data[MemUsedPctCounter]
+	if cs == nil {
+		return nil
+	}
+	q, args, err := buildFleetMemUsedPctP50Query(hosts, fromMs, toMs, tier, rawBucketMs)
+	if err != nil {
+		return err
+	}
+	rows, err := s.db.reader.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("telemetry: fleet mem_used_pct p50 query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var bucket int64
+	var values []float64
+	flush := func() {
+		if len(values) == 0 {
+			return
+		}
+		i := sort.Search(len(cs.T), func(i int) bool { return cs.T[i] >= bucket })
+		if i == len(cs.T) || cs.T[i] != bucket {
+			return
+		}
+		sort.Float64s(values)
+		mid := len(values) / 2
+		p50 := values[mid]
+		if len(values)%2 == 0 {
+			p50 = (values[mid-1] + p50) / 2
+		}
+		cs.P50 = append(cs.P50, p50)
+	}
+	for rows.Next() {
+		var nextBucket int64
+		var avail, total float64
+		if err := rows.Scan(&nextBucket, &avail, &total); err != nil {
+			return fmt.Errorf("telemetry: fleet mem_used_pct p50 scan: %w", err)
+		}
+		if nextBucket != bucket {
+			flush()
+			bucket = nextBucket
+			values = values[:0]
+		}
+		if total > 0 {
+			values = append(values, (1-avail/total)*100)
+		}
+	}
+	flush()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildFleetMemUsedPctP50Query(hosts []string, fromMs, toMs int64, tier Tier, rawBucketMs int64) (string, []any, error) {
+	args := make([]any, 0, len(hosts)+2)
+	for _, host := range hosts {
+		args = append(args, host)
+	}
+	where := " WHERE host IN (" + placeholders(len(hosts)) + ") AND "
+	var q string
+	switch tier {
+	case TierRaw, TierOneMin:
+		bucketMs := rawBucketMs
+		if tier == TierOneMin {
+			bucketMs = 60_000
+		} else if bucketMs < MinRawFleetBucketMs {
+			bucketMs = MinRawFleetBucketMs
+		}
+		fromMs = (fromMs / bucketMs) * bucketMs
+		toMs = (toMs / bucketMs) * bucketMs
+		args = append(args, fromMs, toMs)
+		q = fmt.Sprintf(
+			"SELECT (ts / %d) * %d AS bucket_ts, AVG(CASE WHEN counter = 'mem_avail_mb' THEN value END), AVG(CASE WHEN counter = 'mem_total_mb' THEN value END) FROM metrics_raw"+where+"ts >= ? AND ts < ? AND counter IN ('mem_avail_mb', 'mem_total_mb')",
+			bucketMs, bucketMs,
+		)
+		q += " GROUP BY bucket_ts, host HAVING AVG(CASE WHEN counter = 'mem_avail_mb' THEN value END) IS NOT NULL AND AVG(CASE WHEN counter = 'mem_total_mb' THEN value END) IS NOT NULL"
+	case TierFiveMin, TierHourly:
+		table := "metrics_5min"
+		if tier == TierHourly {
+			table = "metrics_hourly"
+		}
+		args = append(args, fromMs, toMs)
+		q = "SELECT bucket_ts, MAX(CASE WHEN counter = 'mem_avail_mb' THEN avg_value END), MAX(CASE WHEN counter = 'mem_total_mb' THEN avg_value END) FROM " + table + where + "bucket_ts >= ? AND bucket_ts < ? AND counter IN ('mem_avail_mb', 'mem_total_mb') GROUP BY bucket_ts, host HAVING MAX(CASE WHEN counter = 'mem_avail_mb' THEN avg_value END) IS NOT NULL AND MAX(CASE WHEN counter = 'mem_total_mb' THEN avg_value END) IS NOT NULL"
+	default:
+		return "", nil, fmt.Errorf("telemetry: mem_used_pct p50 not available for tier %q", tier.TierName())
+	}
+	q += " ORDER BY bucket_ts, host"
+	return q, args, nil
 }
 
 // NearestCounters returns, for each named counter, the value of the

@@ -160,6 +160,7 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 		Avg []float64 `json:"avg"`
 		Min []float64 `json:"min"`
 		Max []float64 `json:"max"`
+		P50 []float64 `json:"p50"`
 	}
 	type metricsResp struct {
 		Host            string                  `json:"host"`
@@ -203,7 +204,11 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 		if max == nil {
 			max = []float64{}
 		}
-		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max}
+		p50 := cs.P50
+		if p50 == nil {
+			p50 = []float64{}
+		}
+		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max, P50: p50}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -338,6 +343,7 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		Avg []float64 `json:"avg"`
 		Min []float64 `json:"min"`
 		Max []float64 `json:"max"`
+		P50 []float64 `json:"p50"`
 	}
 	type metricsResp struct {
 		Host            string                  `json:"host"`
@@ -380,7 +386,11 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		if max == nil {
 			max = []float64{}
 		}
-		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max}
+		p50 := cs.P50
+		if p50 == nil {
+			p50 = []float64{}
+		}
+		resp.Series[name] = &counterJSON{T: t, Avg: avg, Min: min, Max: max, P50: p50}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

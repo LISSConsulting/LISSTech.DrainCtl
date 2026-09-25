@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -155,6 +157,113 @@ func TestQueryRangeFleet_ExcludesUnlimitedSessionCapacity(t *testing.T) {
 				t.Errorf("fleet capacity = %v, want 100; unlimited host must not enter denominator", capacity.Avg[0])
 			}
 		})
+	}
+}
+
+func TestQueryRangeFleet_SessionsMaxDropsAllUnlimitedBuckets(t *testing.T) {
+	ms, db := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02"}
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base, Host: "SRV01", Counter: "sessions_max", Value: 9999},
+		{Ts: base, Host: "SRV02", Counter: "sessions_max", Value: 9999},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "sessions_max", Value: 100},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "sessions_max", Value: 200},
+	}); err != nil {
+		t.Fatalf("Append raw: %v", err)
+	}
+	for _, table := range []string{"metrics_5min", "metrics_hourly"} {
+		for _, sample := range []struct {
+			bucket time.Time
+			host   string
+			value  float64
+		}{
+			{base, "SRV01", 9999},
+			{base, "SRV02", 9999},
+			{base.Add(5 * time.Minute), "SRV01", 100},
+			{base.Add(5 * time.Minute), "SRV02", 200},
+		} {
+			// #nosec G202 -- table is selected exclusively from the fixed test literals above.
+			if _, err := db.writer.Exec(
+				"INSERT INTO "+table+"(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count) VALUES (?, ?, 'sessions_max', ?, ?, ?, 1)",
+				sample.bucket.UnixMilli(), sample.host, sample.value, sample.value, sample.value,
+			); err != nil {
+				t.Fatalf("insert %s: %v", table, err)
+			}
+		}
+	}
+
+	for _, tier := range []Tier{TierRaw, TierOneMin, TierFiveMin, TierHourly} {
+		t.Run(tier.TierName(), func(t *testing.T) {
+			series, err := ms.QueryRangeFleet(
+				ctx, hosts, base, base.Add(10*time.Minute), tier, []string{"sessions_max"}, 60_000,
+			)
+			if err != nil {
+				t.Fatalf("QueryRangeFleet: %v", err)
+			}
+			capacity := series.Data["sessions_max"]
+			if capacity == nil {
+				t.Fatal("sessions_max series missing")
+			}
+			if len(capacity.T) != 1 || len(capacity.Avg) != 1 || len(capacity.Min) != 1 || len(capacity.Max) != 1 || len(capacity.P50) != 1 {
+				t.Fatalf("parallel series lengths = t:%d avg:%d min:%d max:%d p50:%d, want 1",
+					len(capacity.T), len(capacity.Avg), len(capacity.Min), len(capacity.Max), len(capacity.P50))
+			}
+			if capacity.Avg[0] != 300 || capacity.P50[0] != 150 {
+				t.Errorf("finite bucket = avg:%v p50:%v, want avg:300 p50:150", capacity.Avg[0], capacity.P50[0])
+			}
+		})
+	}
+}
+
+func TestQueryRangeFleet_ExactP50HandlesOddEvenAndMissingHosts(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02", "SRV03"}
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base, Host: "SRV01", Counter: "pages_sec", Value: 10},
+		{Ts: base, Host: "SRV02", Counter: "pages_sec", Value: 30},
+		{Ts: base, Host: "SRV03", Counter: "pages_sec", Value: 20},
+		{Ts: base, Host: "SRV01", Counter: "mem_avail_mb", Value: 90},
+		{Ts: base, Host: "SRV02", Counter: "mem_avail_mb", Value: 70},
+		{Ts: base, Host: "SRV03", Counter: "mem_avail_mb", Value: 50},
+		{Ts: base, Host: "SRV01", Counter: "mem_total_mb", Value: 100},
+		{Ts: base, Host: "SRV02", Counter: "mem_total_mb", Value: 100},
+		{Ts: base, Host: "SRV03", Counter: "mem_total_mb", Value: 100},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "pages_sec", Value: 10},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "pages_sec", Value: 40},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "mem_avail_mb", Value: 80},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "mem_avail_mb", Value: 40},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "mem_total_mb", Value: 100},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "mem_total_mb", Value: 100},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	series, err := ms.QueryRangeFleet(
+		ctx, hosts, base, base.Add(2*time.Minute), TierRaw, nil, 60_000,
+	)
+	if err != nil {
+		t.Fatalf("QueryRangeFleet: %v", err)
+	}
+	pages := series.Data["pages_sec"]
+	if pages == nil {
+		t.Fatal("pages_sec series missing")
+	}
+	if got, want := pages.P50, []float64{20, 25}; !slices.Equal(got, want) {
+		t.Errorf("P50 = %v, want %v", got, want)
+	}
+	if len(pages.P50) != len(pages.T) {
+		t.Errorf("P50 length = %d, want parallel length %d", len(pages.P50), len(pages.T))
+	}
+	mem := series.Data[MemUsedPctCounter]
+	if mem == nil {
+		t.Fatal("mem_used_pct series missing")
+	}
+	if len(mem.P50) != 2 || math.Abs(mem.P50[0]-30) > 1e-9 || math.Abs(mem.P50[1]-40) > 1e-9 {
+		t.Errorf("mem_used_pct P50 = %v, want [30 40]", mem.P50)
 	}
 }
 

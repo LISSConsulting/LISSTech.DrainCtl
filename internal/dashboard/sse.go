@@ -146,35 +146,30 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		slog.Warn("sse: broadcastSettingsUpdate: failed to load config", "error", err)
 		return
 	}
-	// Strip secrets before broadcasting — webhook HMAC keys and SMTP
-	// passwords must never be sent over the event stream.
-	redacted := make([]dc.NotificationTarget, len(cfg.Notifications))
-	copy(redacted, cfg.Notifications)
-	for i := range redacted {
-		redacted[i].Secret = ""
-	}
-	// Narrow evtspike to the enabled flag only — SSE must not leak admin-only
-	// fields (thresholds, channel lists, baseline_path, security gate).
-	type evtspikeView struct {
-		Enabled bool `json:"enabled"`
-	}
+	// Project settings into the same redacted wire fields as GET /settings.
+	// This stream is browser-visible, so notification secrets and EvtSpike's
+	// baseline path must never appear here.
 	resp := struct {
-		Notifications           []dc.NotificationTarget `json:"notifications"`
-		SessionWarningThreshold int                     `json:"session_warning_threshold"`
-		GracePeriod             int                     `json:"grace_period"`
-		Performance             dc.PerformanceConfig    `json:"performance"`
-		EvtSpike                evtspikeView            `json:"evtspike"`
-		Update                  dc.UpdateConfig         `json:"update"`
+		Notifications           []notifyTargetView   `json:"notifications"`
+		NotificationExclusions  []string             `json:"notification_exclusions"`
+		SessionWarningThreshold int                  `json:"session_warning_threshold"`
+		GracePeriod             int                  `json:"grace_period"`
+		PollInterval            int                  `json:"poll_interval"`
+		Performance             dc.PerformanceConfig `json:"performance"`
+		EvtSpike                evtspikeView         `json:"evtspike"`
+		Update                  dc.UpdateConfig      `json:"update"`
 	}{
-		Notifications:           redacted,
+		Notifications:           makeNotifyTargetViews(cfg.Notifications),
+		NotificationExclusions:  cfg.NotificationExclusions,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
+		PollInterval:            cfg.PollInterval,
 		Performance:             cfg.Performance,
-		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
+		EvtSpike:                buildEvtSpikeView(cfg.EvtSpike),
 		Update:                  cfg.Update,
 	}
-	if resp.Notifications == nil {
-		resp.Notifications = []dc.NotificationTarget{}
+	if resp.NotificationExclusions == nil {
+		resp.NotificationExclusions = []string{}
 	}
 	payload, err := json.Marshal(SSEEvent{
 		Type:      "settings_update",

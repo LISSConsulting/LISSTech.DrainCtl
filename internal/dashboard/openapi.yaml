@@ -328,7 +328,7 @@ components:
         rfx_fps_out:
           type: number
           format: double
-          description: "RemoteFX output FPS P95."
+          description: "RemoteFX output FPS service P95 floor (numeric P5; 95% of sessions are at or above this value)."
         rfx_fps_out_p50:
           type: number
           format: double
@@ -360,7 +360,7 @@ components:
         rfx_quality_pct:
           type: number
           format: double
-          description: "RemoteFX frame quality P95 %."
+          description: "RemoteFX frame quality service P95 floor (numeric P5; 95% of sessions are at or above this value)."
         rfx_quality_pct_p50:
           type: number
           format: double
@@ -512,7 +512,7 @@ components:
           items:
             type: integer
             format: int64
-          description: "Unix-ms timestamps, parallel to avg/min/max."
+          description: "Unix-ms timestamps, parallel to avg/min/max/p50."
         avg:
           type: array
           items:
@@ -528,7 +528,13 @@ components:
           items:
             type: number
             format: double
-      required: [t, avg, min, max]
+        p50:
+          type: array
+          items:
+            type: number
+            format: double
+          description: "Exact median of participating host values for each timestamp/bucket."
+      required: [t, avg, min, max, p50]
 
     MetricsResponse:
       type: object
@@ -1006,11 +1012,19 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
-          description: "Per-channel cooldown after a confirmed alert."
+          description: "Default cooldown after a confirmed alert; overridden by channel_cooldown_minutes for an exact channel name."
+        channel_cooldown_minutes:
+          type: object
+          maxProperties: 256
+          additionalProperties:
+            type: integer
+            minimum: 1
+            maximum: 1440
+          description: "Per-exact-Windows-Event-Log-channel cooldown overrides in minutes. Empty map uses cooldown_minutes for every channel."
         slot_maturity_observations:
           type: integer
           minimum: 1
-          maximum: 100
+          maximum: 10000
           description: "Observations required before a time-of-day slot is used directly."
         persist_interval_seconds:
           type: integer
@@ -1078,10 +1092,19 @@ components:
           minimum: 1
           maximum: 1440
           nullable: true
+        channel_cooldown_minutes:
+          type: object
+          maxProperties: 256
+          additionalProperties:
+            type: integer
+            minimum: 1
+            maximum: 1440
+          nullable: true
+          description: "Per-exact-Windows-Event-Log-channel cooldown overrides; an empty object clears all overrides."
         slot_maturity_observations:
           type: integer
           minimum: 1
-          maximum: 100
+          maximum: 10000
           nullable: true
         persist_interval_seconds:
           type: integer

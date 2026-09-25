@@ -31,12 +31,12 @@ const BASE = '/api/v1';
  * @property {number}  [session_mem_p95_bytes]  - Per-session working set P95 in bytes (omitted when zero)
  * @property {number}  [session_mem_p50_bytes]  - Per-session working set P50 in bytes (omitted when zero)
  * @property {boolean} rfx_available            - true when RemoteFX counters are collected
- * @property {number}  [rfx_fps_out]            - RemoteFX output FPS P95
- * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS P50
- * @property {number}  [rfx_encode_ms]          - RemoteFX encode time P95 (ms)
- * @property {number}  [rfx_encode_ms_p50]      - RemoteFX encode time P50 (ms)
- * @property {number}  [rfx_quality_pct]        - RemoteFX frame quality P95 %
- * @property {number}  [rfx_quality_pct_p50]    - RemoteFX frame quality P50 %
+ * @property {number}  [rfx_fps_out]            - RemoteFX output FPS service P95 floor (numeric P5)
+ * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS median
+ * @property {number}  [rfx_encode_ms]           - RemoteFX encode time P95 (ms)
+ * @property {number}  [rfx_encode_ms_p50]       - RemoteFX encode time median (ms)
+ * @property {number}  [rfx_quality_pct]         - RemoteFX frame quality service P95 floor (numeric P5)
+ * @property {number}  [rfx_quality_pct_p50]     - RemoteFX frame quality median %
  * @property {number}  [rfx_rtt_ms]             - RemoteFX TCP round-trip time P95 (ms)
  * @property {number}  [rfx_rtt_ms_p50]         - RemoteFX TCP round-trip time P50 (ms)
  * @property {number}  [rfx_loss_pct]           - RemoteFX loss rate P95 %
@@ -130,7 +130,8 @@ const BASE = '/api/v1';
  * @property {boolean} enabled                       Master detector toggle.
  * @property {number}  min_count                     Minimum event count in a 10-second bucket before scoring.
  * @property {number}  threshold                     Tail-probability threshold under which a bucket counts as anomalous.
- * @property {number}  cooldown_minutes              Per-channel cooldown after a confirmed alert.
+ * @property {number}  cooldown_minutes              Default cooldown after a confirmed alert.
+ * @property {Object.<string, number>} channel_cooldown_minutes Exact Windows Event Log channel cooldown overrides.
  * @property {number}  slot_maturity_observations    Observations required before a time-of-day slot is used directly.
  * @property {number}  persist_interval_seconds      Baseline persistence cadence (should be a multiple of 900 for slot rollover).
  * @property {number}  half_life_buckets             EWMA half-life in 10-second buckets.
@@ -151,6 +152,7 @@ const BASE = '/api/v1';
  * @property {number}  [min_count]
  * @property {number}  [threshold]
  * @property {number}  [cooldown_minutes]
+ * @property {Object.<string, number>} [channel_cooldown_minutes]
  * @property {number}  [slot_maturity_observations]
  * @property {number}  [persist_interval_seconds]
  * @property {number}  [half_life_buckets]
@@ -605,13 +607,16 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
 
 /**
  * CounterSeries is one counter's parallel arrays inside a metrics response.
- * For tier=raw, avg === min === max === the raw sample value.
+ * P50 is the exact median across participating fleet-host values per bucket;
+ * for a single host it equals avg. For tier=raw, avg === min === max === p50
+ * === the raw sample value.
  *
  * @typedef {Object} CounterSeries
- * @property {number[]} t   - Unix-ms timestamps (parallel to avg/min/max).
+ * @property {number[]} t   - Unix-ms timestamps (parallel to avg/min/max/p50).
  * @property {number[]} avg
  * @property {number[]} min
  * @property {number[]} max
+ * @property {number[]} p50
  */
 
 /**

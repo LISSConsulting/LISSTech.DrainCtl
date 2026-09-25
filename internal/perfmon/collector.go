@@ -373,28 +373,13 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
 		snap.RFXAvailable = true
-		c.rfxScalar(c.rfxEncH, &snap.RFXEncodeMS, 1)
-		c.rfxScalar(c.rfxQualH, &snap.RFXQuality, 1)
-		c.rfxScalar(c.rfxRTTH, &snap.RFXRTT, 1)
-		c.rfxScalar(c.rfxLossH, &snap.RFXLoss, 2)
-		if c.rfxFPSH != 0 {
-			if vals, err := pdhGetDoubleArray(c.rfxFPSH); err == nil && len(vals) > 0 {
-				_, p95, _ := AggregateValues(vals)
-				snap.RFXFPSOut = RoundTo(p95, 1)
-			}
-		}
-		if c.rfxSkipSrvH != 0 {
-			if vals, err := pdhGetDoubleArray(c.rfxSkipSrvH); err == nil && len(vals) > 0 {
-				_, p95, _ := AggregateValues(vals)
-				snap.RFXSkipServer = RoundTo(p95, 1)
-			}
-		}
-		if c.rfxSkipNetH != 0 {
-			if vals, err := pdhGetDoubleArray(c.rfxSkipNetH); err == nil && len(vals) > 0 {
-				_, p95, _ := AggregateValues(vals)
-				snap.RFXSkipNet = RoundTo(p95, 1)
-			}
-		}
+		c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, true)
+		c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, false)
+		c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, false)
+		c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, false)
+		c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, true)
+		c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, false)
+		c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, false)
 	}
 
 	slog.Debug(fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
@@ -415,8 +400,6 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 		agg.PagesSec += s.PagesSec
 		agg.DiskQueue += s.DiskQueue
 		agg.TCPRetrans += s.TCPRetrans
-		agg.RFXEncodeMS += s.RFXEncodeMS
-		agg.RFXRTT += s.RFXRTT
 
 		// Worst-case metrics: keep the max across samples.
 		if s.InputDelayP50 > agg.InputDelayP50 {
@@ -440,23 +423,41 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 		if s.SessionMemP50 > agg.SessionMemP50 {
 			agg.SessionMemP50 = s.SessionMemP50
 		}
-		if s.RFXFPSOut > agg.RFXFPSOut {
-			agg.RFXFPSOut = s.RFXFPSOut
-		}
-		if s.RFXSkipServer > agg.RFXSkipServer {
-			agg.RFXSkipServer = s.RFXSkipServer
-		}
-		if s.RFXSkipNet > agg.RFXSkipNet {
-			agg.RFXSkipNet = s.RFXSkipNet
-		}
-		if s.RFXLoss > agg.RFXLoss {
-			agg.RFXLoss = s.RFXLoss
-		}
-		if s.RFXQuality > agg.RFXQuality {
-			agg.RFXQuality = s.RFXQuality
-		}
 		if s.RFXAvailable {
-			agg.RFXAvailable = true
+			if !agg.RFXAvailable {
+				agg.RFXFPSOut = s.RFXFPSOut
+				agg.RFXFPSOutP50 = s.RFXFPSOutP50
+				agg.RFXQuality = s.RFXQuality
+				agg.RFXQualityP50 = s.RFXQualityP50
+				agg.RFXEncodeMS = s.RFXEncodeMS
+				agg.RFXEncodeMSP50 = s.RFXEncodeMSP50
+				agg.RFXRTT = s.RFXRTT
+				agg.RFXRTTP50 = s.RFXRTTP50
+				agg.RFXLoss = s.RFXLoss
+				agg.RFXLossP50 = s.RFXLossP50
+				agg.RFXSkipServer = s.RFXSkipServer
+				agg.RFXSkipServerP50 = s.RFXSkipServerP50
+				agg.RFXSkipNet = s.RFXSkipNet
+				agg.RFXSkipNetP50 = s.RFXSkipNetP50
+				agg.RFXAvailable = true
+			} else {
+				// Higher-is-better metrics retain the worst (lowest) service
+				// floor across samples; lower-is-better metrics retain max.
+				agg.RFXFPSOut = min(agg.RFXFPSOut, s.RFXFPSOut)
+				agg.RFXFPSOutP50 = min(agg.RFXFPSOutP50, s.RFXFPSOutP50)
+				agg.RFXQuality = min(agg.RFXQuality, s.RFXQuality)
+				agg.RFXQualityP50 = min(agg.RFXQualityP50, s.RFXQualityP50)
+				agg.RFXEncodeMS = max(agg.RFXEncodeMS, s.RFXEncodeMS)
+				agg.RFXEncodeMSP50 = max(agg.RFXEncodeMSP50, s.RFXEncodeMSP50)
+				agg.RFXRTT = max(agg.RFXRTT, s.RFXRTT)
+				agg.RFXRTTP50 = max(agg.RFXRTTP50, s.RFXRTTP50)
+				agg.RFXLoss = max(agg.RFXLoss, s.RFXLoss)
+				agg.RFXLossP50 = max(agg.RFXLossP50, s.RFXLossP50)
+				agg.RFXSkipServer = max(agg.RFXSkipServer, s.RFXSkipServer)
+				agg.RFXSkipServerP50 = max(agg.RFXSkipServerP50, s.RFXSkipServerP50)
+				agg.RFXSkipNet = max(agg.RFXSkipNet, s.RFXSkipNet)
+				agg.RFXSkipNetP50 = max(agg.RFXSkipNetP50, s.RFXSkipNetP50)
+			}
 		}
 	}
 
@@ -474,8 +475,6 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 	agg.PagesSec = RoundTo(agg.PagesSec/n, 1)
 	agg.DiskQueue = RoundTo(agg.DiskQueue/n, 2)
 	agg.TCPRetrans = RoundTo(agg.TCPRetrans/n, 1)
-	agg.RFXEncodeMS = RoundTo(agg.RFXEncodeMS/n, 1)
-	agg.RFXRTT = RoundTo(agg.RFXRTT/n, 1)
 
 	// MemTotalMB is constant — take from last sample.
 	agg.MemTotalMB = samples[len(samples)-1].MemTotalMB
@@ -501,12 +500,14 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	return 0, false
 }
 
-func (c *Collector) rfxScalar(h syscall.Handle, dst *float64, places int) {
+func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, higherIsBetter bool) {
 	if h == 0 {
 		return
 	}
-	if v, err := pdhGetDouble(h); err == nil {
-		*dst = RoundTo(v, places)
+	if values, err := pdhGetDoubleArray(h); err == nil && len(values) > 0 {
+		median, serviceP95 := AggregateServicePercentiles(values, higherIsBetter)
+		*p50 = RoundTo(median, places)
+		*p95 = RoundTo(serviceP95, places)
 	}
 }
 

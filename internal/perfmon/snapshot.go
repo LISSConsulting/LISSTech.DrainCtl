@@ -41,6 +41,24 @@ func AggregateValues(values []float64) (p50, p95, max float64) {
 	return p50, p95, max
 }
 
+// AggregateServicePercentiles returns the median and the service-level P95.
+// For lower-is-better metrics, P95 is the numeric 95th percentile. For
+// higher-is-better metrics (FPS and frame quality), it is the numeric 5th
+// percentile: 95% of sessions are at or above that floor.
+// The input slice is sorted in place.
+func AggregateServicePercentiles(values []float64, higherIsBetter bool) (p50, p95 float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+	sort.Float64s(values)
+	p50 = Percentile(values, 50)
+	tail := 95.0
+	if higherIsBetter {
+		tail = 5
+	}
+	return p50, Percentile(values, tail)
+}
+
 // RoundTo rounds a float64 to n decimal places.
 func RoundTo(val float64, places int) float64 {
 	pow := math.Pow(10, float64(places))

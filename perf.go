@@ -24,7 +24,10 @@ type PerfSnapshot struct {
 	SessionMemP95 float64 `json:"session_mem_p95_bytes,omitempty"`
 	SessionMemP50 float64 `json:"session_mem_p50_bytes,omitempty"`
 
-	// RemoteFX (zero-valued when unavailable)
+	// RemoteFX (zero-valued when unavailable). For lower-is-better metrics,
+	// the primary field is the numeric P95. For higher-is-better FPS and frame
+	// quality, it is the service P95 floor (numeric P5): 95% of sessions are at
+	// or above it. The paired P50 field is always the numeric median.
 	RFXAvailable     bool    `json:"rfx_available"`
 	RFXFPSOut        float64 `json:"rfx_fps_out,omitempty"`
 	RFXFPSOutP50     float64 `json:"rfx_fps_out_p50,omitempty"`

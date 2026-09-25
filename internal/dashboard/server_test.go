@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -2823,6 +2824,91 @@ func TestBroadcastSettingsUpdate_SecretsStripped(t *testing.T) {
 	}
 }
 
+// TestBroadcastSettingsUpdate_MatchesGetSettingsContract ensures a settings SSE
+// snapshot can safely replace the browser's complete REST settings snapshot.
+func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
+	ds := newTestServer(t)
+	cfg := dc.DefaultConfig()
+	cfg.GracePeriod = 17
+	cfg.PollInterval = 45
+	cfg.SessionWarningThreshold = 73
+	cfg.NotificationExclusions = []string{"rds-a.example.test", "rds-b.example.test"}
+	cfg.Notifications = []dc.NotificationTarget{{
+		Type:     "webhook",
+		URL:      "https://hooks.example.test/notify",
+		Secret:   "must-not-leak",
+		Triggers: dc.DefaultTriggers,
+	}}
+	cfg.EvtSpike = dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                0.0001,
+		CooldownMinutes:          60,
+		SlotMaturityObservations: 630,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          630,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             `C:\secret\baseline.json`,
+		DisabledChannels:         []string{"Application"},
+		AddedChannels:            []string{"Custom"},
+		SecurityChannelEnabled:   true,
+	}
+	ds.testLoadConfigFunc = func() (*dc.Config, error) { return cfg, nil }
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	ds.broadcastSettingsUpdate()
+	var message []byte
+	select {
+	case message = <-ch:
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast")
+	}
+
+	var event SSEEvent
+	if err := json.Unmarshal(message, &event); err != nil {
+		t.Fatalf("decode SSE event: %v", err)
+	}
+	if event.Type != "settings_update" {
+		t.Fatalf("event type = %q, want settings_update", event.Type)
+	}
+
+	get := httptest.NewRecorder()
+	ds.handleGetSettings(get, httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET /settings status = %d, want 200: %s", get.Code, get.Body.String())
+	}
+
+	var sseSnapshot, restSnapshot map[string]any
+	if err := json.Unmarshal(event.Data, &sseSnapshot); err != nil {
+		t.Fatalf("decode SSE settings snapshot: %v", err)
+	}
+	if err := json.NewDecoder(get.Body).Decode(&restSnapshot); err != nil {
+		t.Fatalf("decode REST settings snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(sseSnapshot, restSnapshot) {
+		t.Errorf("SSE settings snapshot differs from GET /settings\nSSE:  %#v\nREST: %#v", sseSnapshot, restSnapshot)
+	}
+	if got := sseSnapshot["notification_exclusions"]; !reflect.DeepEqual(got, []any{"rds-a.example.test", "rds-b.example.test"}) {
+		t.Errorf("notification_exclusions = %#v, want both exclusions", got)
+	}
+	evtspike := sseSnapshot["evtspike"].(map[string]any)
+	if _, found := evtspike["baseline_path"]; found {
+		t.Error("SSE evtspike snapshot contains admin-only baseline_path")
+	}
+	notifications := sseSnapshot["notifications"].([]any)
+	if _, found := notifications[0].(map[string]any)["secret"]; found {
+		t.Error("SSE notification snapshot contains a secret field")
+	}
+}
+
 // TestHandleRegister_BroadcastsSSEServerUpdate verifies that a successful
 // POST /api/v1/register broadcasts a server_update event to connected browsers
 // so they can display the new server without waiting for the next poll cycle.
@@ -3035,6 +3121,7 @@ func TestMetricsHandler_ContractShape(t *testing.T) {
 			Avg []float64 `json:"avg"`
 			Min []float64 `json:"min"`
 			Max []float64 `json:"max"`
+			P50 []float64 `json:"p50"`
 		} `json:"series"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -3057,15 +3144,15 @@ func TestMetricsHandler_ContractShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("series.cpu_pct missing; got keys=%v", resp.Series)
 	}
-	if len(cpu.T) != 3 || len(cpu.Avg) != 3 || len(cpu.Min) != 3 || len(cpu.Max) != 3 {
-		t.Fatalf("series arrays wrong length: t=%d avg=%d min=%d max=%d",
-			len(cpu.T), len(cpu.Avg), len(cpu.Min), len(cpu.Max))
+	if len(cpu.T) != 3 || len(cpu.Avg) != 3 || len(cpu.Min) != 3 || len(cpu.Max) != 3 || len(cpu.P50) != 3 {
+		t.Fatalf("series arrays wrong length: t=%d avg=%d min=%d max=%d p50=%d",
+			len(cpu.T), len(cpu.Avg), len(cpu.Min), len(cpu.Max), len(cpu.P50))
 	}
-	// Contract: for raw tier, avg == min == max == original value (http-metrics.md).
+	// Contract: for raw tier, avg == min == max == p50 == original value.
 	for i := range cpu.T {
-		if cpu.Avg[i] != cpu.Min[i] || cpu.Avg[i] != cpu.Max[i] {
-			t.Errorf("raw tier avg/min/max should be equal at i=%d: avg=%v min=%v max=%v",
-				i, cpu.Avg[i], cpu.Min[i], cpu.Max[i])
+		if cpu.Avg[i] != cpu.Min[i] || cpu.Avg[i] != cpu.Max[i] || cpu.Avg[i] != cpu.P50[i] {
+			t.Errorf("raw tier stats should be equal at i=%d: avg=%v min=%v max=%v p50=%v",
+				i, cpu.Avg[i], cpu.Min[i], cpu.Max[i], cpu.P50[i])
 		}
 	}
 }
@@ -4323,6 +4410,7 @@ type counterTestSeries struct {
 	Avg []float64 `json:"avg"`
 	Min []float64 `json:"min"`
 	Max []float64 `json:"max"`
+	P50 []float64 `json:"p50"`
 }
 
 // metricsTestResp mirrors the full JSON wire format of GET /api/v1/metrics/{host}.
@@ -5431,6 +5519,7 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 		cfg.EvtSpike.MinCount = 17
 		cfg.EvtSpike.Threshold = 2.5e-5
 		cfg.EvtSpike.CooldownMinutes = 12
+		cfg.EvtSpike.ChannelCooldownMinutes = map[string]int{"Application": 30}
 		cfg.EvtSpike.SlotMaturityObservations = 60
 		cfg.EvtSpike.PersistIntervalSeconds = 1800
 		cfg.EvtSpike.HalfLifeBuckets = 480
@@ -5453,19 +5542,20 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 
 	var resp struct {
 		EvtSpike struct {
-			Enabled                  bool     `json:"enabled"`
-			MinCount                 int      `json:"min_count"`
-			Threshold                float64  `json:"threshold"`
-			CooldownMinutes          int      `json:"cooldown_minutes"`
-			SlotMaturityObservations int      `json:"slot_maturity_observations"`
-			PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
-			HalfLifeBuckets          int      `json:"half_life_buckets"`
-			PriorStrength            float64  `json:"prior_strength"`
-			MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
-			DisabledChannels         []string `json:"disabled_channels"`
-			AddedChannels            []string `json:"added_channels"`
-			SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
-			BaselinePath             string   `json:"baseline_path"`
+			Enabled                  bool           `json:"enabled"`
+			MinCount                 int            `json:"min_count"`
+			Threshold                float64        `json:"threshold"`
+			CooldownMinutes          int            `json:"cooldown_minutes"`
+			ChannelCooldownMinutes   map[string]int `json:"channel_cooldown_minutes"`
+			SlotMaturityObservations int            `json:"slot_maturity_observations"`
+			PersistIntervalSeconds   int            `json:"persist_interval_seconds"`
+			HalfLifeBuckets          int            `json:"half_life_buckets"`
+			PriorStrength            float64        `json:"prior_strength"`
+			MeanPerBucketPrior       float64        `json:"mean_per_bucket_prior"`
+			DisabledChannels         []string       `json:"disabled_channels"`
+			AddedChannels            []string       `json:"added_channels"`
+			SecurityChannelEnabled   bool           `json:"security_channel_enabled"`
+			BaselinePath             string         `json:"baseline_path"`
 		} `json:"evtspike"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -5483,6 +5573,9 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 	}
 	if e.CooldownMinutes != 12 {
 		t.Errorf("cooldown_minutes = %d, want 12", e.CooldownMinutes)
+	}
+	if !reflect.DeepEqual(e.ChannelCooldownMinutes, map[string]int{"Application": 30}) {
+		t.Errorf("channel_cooldown_minutes = %v, want Application=30", e.ChannelCooldownMinutes)
 	}
 	if e.PersistIntervalSeconds != 1800 {
 		t.Errorf("persist_interval_seconds = %d, want 1800", e.PersistIntervalSeconds)
@@ -5570,6 +5663,7 @@ func TestHandlePutSettings_EvtSpikeFullPatch_RoundTrips(t *testing.T) {
 			"half_life_buckets": 480,
 			"prior_strength": 90,
 			"mean_per_bucket_prior": 0.15,
+			"channel_cooldown_minutes": {"Application": 30},
 			"disabled_channels": ["Setup"],
 			"added_channels": ["Custom/Op"],
 			"security_channel_enabled": true
@@ -5600,6 +5694,9 @@ func TestHandlePutSettings_EvtSpikeFullPatch_RoundTrips(t *testing.T) {
 	}
 	if len(*captured.DisabledChannels) != 1 || (*captured.DisabledChannels)[0] != "Setup" {
 		t.Errorf("disabled_channels = %v, want [Setup]", *captured.DisabledChannels)
+	}
+	if got := (*captured.ChannelCooldownMinutes)["Application"]; got != 30 {
+		t.Errorf("channel_cooldown_minutes[Application] = %d, want 30", got)
 	}
 }
 
@@ -5743,5 +5840,33 @@ func TestHandlePutSettings_NoEvtSpikeBlock_NilPatch(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("testPutEvtSpikeFunc was not invoked")
+	}
+}
+
+func TestGetSettings_RemoteConfigCarriesEvtSpikeAndExclusions(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.NotificationExclusions = []string{"RDS01"}
+	cfg.EvtSpike.Enabled = true
+	cfg.EvtSpike.ChannelCooldownMinutes = map[string]int{"Application": 30}
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	settings, err := GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !reflect.DeepEqual(settings.NotificationExclusions, []string{"rds01"}) {
+		t.Errorf("notification exclusions = %v, want [rds01]", settings.NotificationExclusions)
+	}
+	if settings.EvtSpike == nil || !settings.EvtSpike.Enabled {
+		t.Fatal("evtspike settings missing or disabled")
+	}
+	if settings.EvtSpike.ChannelCooldownMinutes == nil {
+		t.Fatal("channel cooldown presence missing from in-process settings")
+	}
+	if got := (*settings.EvtSpike.ChannelCooldownMinutes)["Application"]; got != 30 {
+		t.Errorf("channel cooldown = %d, want 30", got)
 	}
 }
