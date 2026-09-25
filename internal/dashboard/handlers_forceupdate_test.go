@@ -184,7 +184,7 @@ func TestHandleForceUpdate_OfflineHostReturnsOffline(t *testing.T) {
 // negative acceptance criterion: agents below the floor must NOT
 // receive accepted. The handler returns 200 + outcome=unsupported.
 func TestHandleForceUpdate_UnsupportedAgentVersion(t *testing.T) {
-	ds := newForceUpdateTestServer(t, "host-a", "v26.9.17", time.Now(), true)
+	ds := newForceUpdateTestServer(t, "host-a", "v26.9.16", time.Now(), true)
 	body, _ := json.Marshal(map[string]string{"command_id": "cmd-00001-001"})
 	w := doForceUpdate(t, ds, "host-a", body)
 
@@ -198,6 +198,22 @@ func TestHandleForceUpdate_UnsupportedAgentVersion(t *testing.T) {
 	}
 	if got := ds.forceUpdates.Pending("host-a"); len(got) != 0 {
 		t.Errorf("Pending length = %d, want 0 (unsupported must not enqueue)", len(got))
+	}
+}
+
+func TestHandleForceUpdate_FirstSupportedReleaseAccepted(t *testing.T) {
+	ds := newForceUpdateTestServer(t, "host-a", "v26.9.17", time.Now(), true)
+	body, _ := json.Marshal(map[string]string{"command_id": "cmd-00001-001"})
+	w := doForceUpdate(t, ds, "host-a", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp forceUpdateResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Outcome != forceUpdateOutcomeAccepted {
+		t.Errorf("outcome = %q, want accepted", resp.Outcome)
 	}
 }
 

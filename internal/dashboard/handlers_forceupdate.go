@@ -16,17 +16,14 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 )
 
-// forceUpdateMinAgentVersion is the floor for an agent to be eligible to
-// receive a force-update command. Agents below this floor are reported
-// back as outcome=unsupported rather than 200-accepted so the dashboard
-// UI can surface "agent too old" instead of a misleading "queued" toast.
+// forceUpdateMinAgentVersion is the first release that shipped the
+// pending-command report protocol. Agents below this floor are reported as
+// unsupported so the UI never claims an update was queued to an agent that
+// cannot consume it.
 //
-// Format: CalVer YY.MM.N (matches the format the agent's report path
-// already parses). The version that introduces force-update on the
-// agent side — bump alongside the agent change. Comparison is
-// component-wise and numeric, so "26.9.17" < "26.10.0" (no lexical
-// flip on the month digit).
-const forceUpdateMinAgentVersion = "26.9.24"
+// Format: CalVer YY.MM.N (matches the agent report version). The comparison is
+// numeric by component, not lexicographic.
+const forceUpdateMinAgentVersion = "26.9.17"
 
 // forceUpdateResponse is the per-host JSON body returned from
 // POST /api/v1/servers/{host}/force-update.
