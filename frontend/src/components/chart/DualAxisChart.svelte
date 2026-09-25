@@ -20,16 +20,15 @@
 
     const GRID_PCTS = [0, 25, 50, 75, 100];
 
-    // Per-series stroke config. Sessions is painted as a solid high-contrast
-    // line above every filled metric so it remains readable without looking
-    // fragmented on top of the CPU area.
+    // Sessions stays above filled metrics, but uses a restrained stroke and a
+    // narrow surface halo so it reads clearly without dominating the chart.
     /** @type {Record<string, { width: number, dash?: string, halo?: number }>} */
     const STROKE_CFG = {
         cpu: { width: 3.5 },
         mem: { width: 3.5 },
-        sessions: { width: 4, halo: 3 },
+        sessions: { width: 2.25, halo: 1.25 },
     };
-    const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 72%, var(--color-fg))';
+    const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 52%, var(--color-muted))';
 
     /** Pick a short datetime format based on the visible time span. Mirrors
      * the formatter used in InteractiveTimeChart so every Overview chart
@@ -252,7 +251,7 @@
         d={allPaths.sessions.line}
         stroke="var(--color-surface)"
         stroke-width={sessionCfg.width + (sessionCfg.halo ?? 0) * 2}
-        stroke-opacity="0.9"
+        stroke-opacity="0.65"
         fill="none"
         stroke-linejoin="round"
         stroke-linecap="round"
@@ -262,6 +261,7 @@
         d={allPaths.sessions.line}
         stroke={SESSIONS_STROKE}
         stroke-width={sessionCfg.width}
+        stroke-opacity="0.82"
         fill="none"
         stroke-linejoin="round"
         stroke-linecap="round"
