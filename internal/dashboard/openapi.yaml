@@ -328,7 +328,7 @@ components:
         rfx_fps_out:
           type: number
           format: double
-          description: "RemoteFX output FPS P95."
+          description: "RemoteFX output FPS service P95 floor (numeric P5; 95% of sessions are at or above this value)."
         rfx_fps_out_p50:
           type: number
           format: double
@@ -360,7 +360,7 @@ components:
         rfx_quality_pct:
           type: number
           format: double
-          description: "RemoteFX frame quality P95 %."
+          description: "RemoteFX frame quality service P95 floor (numeric P5; 95% of sessions are at or above this value)."
         rfx_quality_pct_p50:
           type: number
           format: double
