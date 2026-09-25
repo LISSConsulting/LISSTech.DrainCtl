@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -2820,6 +2821,91 @@ func TestBroadcastSettingsUpdate_SecretsStripped(t *testing.T) {
 		t.Fatal("subscriber evicted unexpectedly")
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for SSE broadcast")
+	}
+}
+
+// TestBroadcastSettingsUpdate_MatchesGetSettingsContract ensures a settings SSE
+// snapshot can safely replace the browser's complete REST settings snapshot.
+func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
+	ds := newTestServer(t)
+	cfg := dc.DefaultConfig()
+	cfg.GracePeriod = 17
+	cfg.PollInterval = 45
+	cfg.SessionWarningThreshold = 73
+	cfg.NotificationExclusions = []string{"rds-a.example.test", "rds-b.example.test"}
+	cfg.Notifications = []dc.NotificationTarget{{
+		Type:     "webhook",
+		URL:      "https://hooks.example.test/notify",
+		Secret:   "must-not-leak",
+		Triggers: dc.DefaultTriggers,
+	}}
+	cfg.EvtSpike = dc.EvtSpikeConfig{
+		Enabled:                  true,
+		MinCount:                 10,
+		Threshold:                0.0001,
+		CooldownMinutes:          60,
+		SlotMaturityObservations: 630,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          630,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		BaselinePath:             `C:\secret\baseline.json`,
+		DisabledChannels:         []string{"Application"},
+		AddedChannels:            []string{"Custom"},
+		SecurityChannelEnabled:   true,
+	}
+	ds.testLoadConfigFunc = func() (*dc.Config, error) { return cfg, nil }
+
+	_, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.broker.Unsubscribe("sub-1")
+
+	ds.broadcastSettingsUpdate()
+	var message []byte
+	select {
+	case message = <-ch:
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE broadcast")
+	}
+
+	var event SSEEvent
+	if err := json.Unmarshal(message, &event); err != nil {
+		t.Fatalf("decode SSE event: %v", err)
+	}
+	if event.Type != "settings_update" {
+		t.Fatalf("event type = %q, want settings_update", event.Type)
+	}
+
+	get := httptest.NewRecorder()
+	ds.handleGetSettings(get, httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET /settings status = %d, want 200: %s", get.Code, get.Body.String())
+	}
+
+	var sseSnapshot, restSnapshot map[string]any
+	if err := json.Unmarshal(event.Data, &sseSnapshot); err != nil {
+		t.Fatalf("decode SSE settings snapshot: %v", err)
+	}
+	if err := json.NewDecoder(get.Body).Decode(&restSnapshot); err != nil {
+		t.Fatalf("decode REST settings snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(sseSnapshot, restSnapshot) {
+		t.Errorf("SSE settings snapshot differs from GET /settings\nSSE:  %#v\nREST: %#v", sseSnapshot, restSnapshot)
+	}
+	if got := sseSnapshot["notification_exclusions"]; !reflect.DeepEqual(got, []any{"rds-a.example.test", "rds-b.example.test"}) {
+		t.Errorf("notification_exclusions = %#v, want both exclusions", got)
+	}
+	evtspike := sseSnapshot["evtspike"].(map[string]any)
+	if _, found := evtspike["baseline_path"]; found {
+		t.Error("SSE evtspike snapshot contains admin-only baseline_path")
+	}
+	notifications := sseSnapshot["notifications"].([]any)
+	if _, found := notifications[0].(map[string]any)["secret"]; found {
+		t.Error("SSE notification snapshot contains a secret field")
 	}
 }
 
