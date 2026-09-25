@@ -130,7 +130,8 @@ const BASE = '/api/v1';
  * @property {boolean} enabled                       Master detector toggle.
  * @property {number}  min_count                     Minimum event count in a 10-second bucket before scoring.
  * @property {number}  threshold                     Tail-probability threshold under which a bucket counts as anomalous.
- * @property {number}  cooldown_minutes              Per-channel cooldown after a confirmed alert.
+ * @property {number}  cooldown_minutes              Default cooldown after a confirmed alert.
+ * @property {Object.<string, number>} channel_cooldown_minutes Exact Windows Event Log channel cooldown overrides.
  * @property {number}  slot_maturity_observations    Observations required before a time-of-day slot is used directly.
  * @property {number}  persist_interval_seconds      Baseline persistence cadence (should be a multiple of 900 for slot rollover).
  * @property {number}  half_life_buckets             EWMA half-life in 10-second buckets.
@@ -151,6 +152,7 @@ const BASE = '/api/v1';
  * @property {number}  [min_count]
  * @property {number}  [threshold]
  * @property {number}  [cooldown_minutes]
+ * @property {Object.<string, number>} [channel_cooldown_minutes]
  * @property {number}  [slot_maturity_observations]
  * @property {number}  [persist_interval_seconds]
  * @property {number}  [half_life_buckets]

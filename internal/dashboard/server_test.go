@@ -5517,6 +5517,7 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 		cfg.EvtSpike.MinCount = 17
 		cfg.EvtSpike.Threshold = 2.5e-5
 		cfg.EvtSpike.CooldownMinutes = 12
+		cfg.EvtSpike.ChannelCooldownMinutes = map[string]int{"Application": 30}
 		cfg.EvtSpike.SlotMaturityObservations = 60
 		cfg.EvtSpike.PersistIntervalSeconds = 1800
 		cfg.EvtSpike.HalfLifeBuckets = 480
@@ -5539,19 +5540,20 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 
 	var resp struct {
 		EvtSpike struct {
-			Enabled                  bool     `json:"enabled"`
-			MinCount                 int      `json:"min_count"`
-			Threshold                float64  `json:"threshold"`
-			CooldownMinutes          int      `json:"cooldown_minutes"`
-			SlotMaturityObservations int      `json:"slot_maturity_observations"`
-			PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
-			HalfLifeBuckets          int      `json:"half_life_buckets"`
-			PriorStrength            float64  `json:"prior_strength"`
-			MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
-			DisabledChannels         []string `json:"disabled_channels"`
-			AddedChannels            []string `json:"added_channels"`
-			SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
-			BaselinePath             string   `json:"baseline_path"`
+			Enabled                  bool           `json:"enabled"`
+			MinCount                 int            `json:"min_count"`
+			Threshold                float64        `json:"threshold"`
+			CooldownMinutes          int            `json:"cooldown_minutes"`
+			ChannelCooldownMinutes   map[string]int `json:"channel_cooldown_minutes"`
+			SlotMaturityObservations int            `json:"slot_maturity_observations"`
+			PersistIntervalSeconds   int            `json:"persist_interval_seconds"`
+			HalfLifeBuckets          int            `json:"half_life_buckets"`
+			PriorStrength            float64        `json:"prior_strength"`
+			MeanPerBucketPrior       float64        `json:"mean_per_bucket_prior"`
+			DisabledChannels         []string       `json:"disabled_channels"`
+			AddedChannels            []string       `json:"added_channels"`
+			SecurityChannelEnabled   bool           `json:"security_channel_enabled"`
+			BaselinePath             string         `json:"baseline_path"`
 		} `json:"evtspike"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -5569,6 +5571,9 @@ func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
 	}
 	if e.CooldownMinutes != 12 {
 		t.Errorf("cooldown_minutes = %d, want 12", e.CooldownMinutes)
+	}
+	if !reflect.DeepEqual(e.ChannelCooldownMinutes, map[string]int{"Application": 30}) {
+		t.Errorf("channel_cooldown_minutes = %v, want Application=30", e.ChannelCooldownMinutes)
 	}
 	if e.PersistIntervalSeconds != 1800 {
 		t.Errorf("persist_interval_seconds = %d, want 1800", e.PersistIntervalSeconds)
@@ -5656,6 +5661,7 @@ func TestHandlePutSettings_EvtSpikeFullPatch_RoundTrips(t *testing.T) {
 			"half_life_buckets": 480,
 			"prior_strength": 90,
 			"mean_per_bucket_prior": 0.15,
+			"channel_cooldown_minutes": {"Application": 30},
 			"disabled_channels": ["Setup"],
 			"added_channels": ["Custom/Op"],
 			"security_channel_enabled": true
@@ -5686,6 +5692,9 @@ func TestHandlePutSettings_EvtSpikeFullPatch_RoundTrips(t *testing.T) {
 	}
 	if len(*captured.DisabledChannels) != 1 || (*captured.DisabledChannels)[0] != "Setup" {
 		t.Errorf("disabled_channels = %v, want [Setup]", *captured.DisabledChannels)
+	}
+	if got := (*captured.ChannelCooldownMinutes)["Application"]; got != 30 {
+		t.Errorf("channel_cooldown_minutes[Application] = %d, want 30", got)
 	}
 }
 
@@ -5829,5 +5838,30 @@ func TestHandlePutSettings_NoEvtSpikeBlock_NilPatch(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("testPutEvtSpikeFunc was not invoked")
+	}
+}
+
+func TestGetSettings_RemoteConfigCarriesEvtSpikeAndExclusions(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.NotificationExclusions = []string{"RDS01"}
+	cfg.EvtSpike.Enabled = true
+	cfg.EvtSpike.ChannelCooldownMinutes = map[string]int{"Application": 30}
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	settings, err := GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !reflect.DeepEqual(settings.NotificationExclusions, []string{"rds01"}) {
+		t.Errorf("notification exclusions = %v, want [rds01]", settings.NotificationExclusions)
+	}
+	if settings.EvtSpike == nil || !settings.EvtSpike.Enabled {
+		t.Fatal("evtspike settings missing or disabled")
+	}
+	if got := settings.EvtSpike.ChannelCooldownMinutes["Application"]; got != 30 {
+		t.Errorf("channel cooldown = %d, want 30", got)
 	}
 }

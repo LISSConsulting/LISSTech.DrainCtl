@@ -26,23 +26,14 @@ that drive the **Healthy** badge are:
 | Field | Source | What it actually means |
 |-------|--------|------------------------|
 | `EnabledChannels` | `internal/evtspike.Status()` | Channels currently subscribed and in `StateSubscribed` (plan §B1). Channels in `StateRetrying` / `StateFailed` are excluded, so the badge reflects **operational capacity**, not configuration. |
-| `MatureChannels` | `detectorMature(d, SlotMaturityObservations)` | Channels whose detectors have crossed `SlotMaturityObservations` observations for their time-of-day slot. At default `SlotMaturityObservations=90` and a 10-second scoring cadence, that's roughly **15 minutes** of buckets — not 15 minutes of wall-clock training. |
+| `MatureChannels` | `detectorMature(d, SlotMaturityObservations)` | Channels whose detectors have crossed `SlotMaturityObservations` observations for their time-of-day slot. The steady default is 630: at up to 90 observations per 15-minute slot visit, this requires seven visits. |
 
-**"Healthy within hours" is therefore expected on a fresh server** that has
-not yet seen an anomalous burst. Specifically:
-
-1. Subscriptions come up immediately. Counts are flowing.
-2. Within ~15 minutes of buckets, **per-slot** posteriors cross the maturity
-   threshold. Score paths now use the slot-specific Gamma posterior instead
-   of the global fallback.
-3. The global Gamma posterior converges slowly because `HalfLifeBuckets=360`
-   means the EWMA half-life is one hour of buckets (~3600 buckets / 360 ≈ 10
-   hourly half-lives per day). After several hours, the detector is still
-   trusting a prior-shaped mixture for many channels.
-4. Confirmation is a **2-of-3** rolling window. A genuine one-bucket blip
-   cannot fire; two consecutive high-tail buckets across 20 seconds can.
-5. The default `CooldownMinutes=10` suppresses repeats from the same channel
-   within a 10-minute window, so a real burst emits exactly one alert.
+The post-release EventSpike sample shows **81% of repeats arrive within one
+hour** and a busy slot receives **90 observations/day**. The steady values
+therefore use a 60-minute cooldown, 630 slot observations, and a 630-bucket
+half-life. This holds repeat notifications to the observed burst window while
+requiring a week of same-slot observations before slot-specific scoring is
+trusted.
 
 **Implication**: "Healthy" is a *positive signal that nothing has tripped the
 detector yet*, not "the detector has learned what normal looks like." The
@@ -66,11 +57,11 @@ evidence backing each:
 
 | Knob | Default | Source |
 |------|---------|--------|
-| `MinCount` | 10 | `DefaultEvtSpikeMinCount`, original 006 spec |
-| `Threshold` | 1e-4 | `DefaultEvtSpikeThreshold`, original 006 spec |
-| `CooldownMinutes` | 10 | `DefaultEvtSpikeCooldownMinutes`, original 006 spec |
-| `SlotMaturityObservations` | 90 | `defaultSlotMaturityObservations`, detector.go (15 min of buckets) |
-| `HalfLifeBuckets` | 360 | `DefaultEvtSpikeHalfLifeBuckets` (≈ 1 hour EWMA half-life) |
+| `MinCount` | 10 | `DefaultEvtSpikeMinCount` |
+| `Threshold` | 1e-4 | `DefaultEvtSpikeThreshold` |
+| `CooldownMinutes` | 60 | 81% of observed repeats arrived within one hour |
+| `SlotMaturityObservations` | 630 | 90 observations/day × seven same-slot visits |
+| `HalfLifeBuckets` | 630 | Seven-visit steady learning horizon |
 | `PriorStrength` | 60 | `DefaultEvtSpikePriorStrength` |
 | `MeanPerBucketPrior` | 0.1 | `DefaultEvtSpikeMeanPerBucketPrior` |
 | `PersistIntervalSeconds` | 900 | `DefaultEvtSpikePersistIntervalSeconds` (slot rollover) |

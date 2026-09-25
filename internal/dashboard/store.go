@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -533,9 +534,14 @@ func GetSettings() (*RemoteSettings, error) {
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
+	exclusions := slices.Clone(cfg.NotificationExclusions)
+	if exclusions == nil {
+		exclusions = []string{}
+	}
 	view := buildEvtSpikeView(cfg.EvtSpike)
 	return &RemoteSettings{
 		Notifications:           notifications,
+		NotificationExclusions:  exclusions,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,

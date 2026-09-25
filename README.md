@@ -479,10 +479,11 @@ ntfy uses priority 3 for `warning`, 4 for `alert`, with tags `["evtspike", <host
 | `evtspike.added_channels` | string[] | `[]` | Extra channels beyond the default. |
 | `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability threshold for "anomalous". |
 | `evtspike.min_count` | int | `10` | Lower observed-event floor; below this never flags. |
-| `evtspike.cooldown_minutes` | int | `10` | Min time between spikes for the same `(host, channel)`. |
-| `evtspike.slot_maturity_observations` | int | `90` | Observations before a slot's posterior is "mature" (≈ one full 15-min visit at 10-s scoring). |
+| `evtspike.cooldown_minutes` | int | `60` | Default min time between spikes for the same `(host, channel)`; based on 81% of observed repeats arriving within one hour. |
+| `evtspike.channel_cooldown_minutes` | object | `{}` | Exact Windows Event Log channel-name to 1–1440 minute cooldown overrides (maximum 256); empty uses the default cooldown. |
+| `evtspike.slot_maturity_observations` | int | `630` | Observations before a slot posterior is mature: seven visits at 90 observations/day. |
 | `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence. |
-| `evtspike.half_life_buckets` | int | `360` | Exponential-forgetting half-life in 10-s buckets (~1 h). |
+| `evtspike.half_life_buckets` | int | `630` | Exponential-forgetting half-life in 10-s buckets. |
 | `evtspike.prior_strength` | float | `60.0` | Gamma prior α/β strength (bucket-equivalents of "pretend evidence"). |
 | `evtspike.mean_per_bucket_prior` | float | `0.1` | Gamma prior mean: expected events per 10-s bucket before learning. |
 

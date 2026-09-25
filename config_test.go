@@ -143,7 +143,7 @@ func TestClampEvtSpike_AboveMaxClampsToMax(t *testing.T) {
 		MinCount:                 99999,
 		Threshold:                0.5,
 		CooldownMinutes:          99999,
-		SlotMaturityObservations: 9999,
+		SlotMaturityObservations: MaxEvtSpikeSlotMaturityObservations + 1,
 		PersistIntervalSeconds:   1_000_000,
 		HalfLifeBuckets:          99999,
 		PriorStrength:            1e9,
@@ -188,6 +188,7 @@ func TestClampEvtSpike_WithinRangeIsUnchanged(t *testing.T) {
 		HalfLifeBuckets:          720,
 		PriorStrength:            120,
 		MeanPerBucketPrior:       0.5,
+		ChannelCooldownMinutes:   map[string]int{},
 		DisabledChannels:         []string{"X"},
 		AddedChannels:            []string{"Y"},
 		SecurityChannelEnabled:   true,
@@ -2017,6 +2018,8 @@ func ptrInt(v int) *int            { return &v }
 func ptrFloat(v float64) *float64  { return &v }
 func ptrStrs(v []string) *[]string { return &v }
 
+func ptrCooldowns(v map[string]int) *map[string]int { return &v }
+
 func TestUpdateEvtSpike_NoPatchIsNoOp(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
 	if err := SaveConfig(DefaultConfig()); err != nil {
@@ -2295,5 +2298,42 @@ func TestNotificationExclusions_CanonicalMatchingIsExact(t *testing.T) {
 	cfg.Validate()
 	if got, want := cfg.NotificationExclusions, []string{"rds01.example.test"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("normalized exclusions = %v, want %v", got, want)
+	}
+}
+
+func TestEvtSpikeChannelCooldowns_NormalizePersistAndClone(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	overrides := map[string]int{" Application ": 30}
+	cfg := DefaultConfig()
+	cfg.EvtSpike.ChannelCooldownMinutes = overrides
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	overrides[" Application "] = 1
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !reflect.DeepEqual(got.EvtSpike.ChannelCooldownMinutes, map[string]int{"Application": 30}) {
+		t.Fatalf("channel cooldowns = %#v, want normalized independent copy", got.EvtSpike.ChannelCooldownMinutes)
+	}
+
+	replacement := map[string]int{" System ": 120}
+	ApplyEvtSpikePatch(&got.EvtSpike, &EvtSpikeConfigPatch{ChannelCooldownMinutes: ptrCooldowns(replacement)})
+	replacement[" System "] = 1
+	if !reflect.DeepEqual(got.EvtSpike.ChannelCooldownMinutes, map[string]int{"System": 120}) {
+		t.Errorf("patch channel cooldowns = %#v, want normalized defensive copy", got.EvtSpike.ChannelCooldownMinutes)
+	}
+}
+
+func TestValidateEvtSpikePatch_RejectsUnsafeChannelCooldowns(t *testing.T) {
+	blank := map[string]int{" ": 5}
+	if err := ValidateEvtSpikePatch(&EvtSpikeConfigPatch{ChannelCooldownMinutes: &blank}); err == nil {
+		t.Fatal("blank channel cooldown key accepted")
+	}
+	invalid := map[string]int{"Application": 0}
+	if err := ValidateEvtSpikePatch(&EvtSpikeConfigPatch{ChannelCooldownMinutes: &invalid}); err == nil {
+		t.Fatal("out-of-range channel cooldown accepted")
 	}
 }

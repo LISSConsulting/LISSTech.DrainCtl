@@ -1782,3 +1782,75 @@ func TestStop_WaitsForSubscriberGoroutines(t *testing.T) {
 		t.Fatalf("Stop returned too fast (%v < %v); it did not wait for subscription goroutines", elapsed, linger)
 	}
 }
+
+func TestScoreOnce_OnlySubscribedChannelsMatureAndInactiveCountersClear(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+	s.initChannels(context.Background(), nil)
+
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	const subscribed = "Application"
+	const retrying = "System"
+	const failed = "Microsoft-FSLogix-Apps/Admin"
+
+	s.mu.Lock()
+	s.subscriptions[retrying].state = StateRetrying
+	s.subscriptions[failed].state = StateFailed
+	beforeRetrying := s.detectors[retrying].Slots[timeSlot(now)].N
+	beforeFailed := s.detectors[failed].Slots[timeSlot(now)].N
+	s.mu.Unlock()
+
+	s.counters[subscribed].Add(1)
+	s.counters[retrying].Add(99)
+	s.counters[failed].Add(99)
+	s.scoreOnce(now)
+
+	s.mu.Lock()
+	subscribedN := s.detectors[subscribed].Slots[timeSlot(now)].N
+	retryingN := s.detectors[retrying].Slots[timeSlot(now)].N
+	failedN := s.detectors[failed].Slots[timeSlot(now)].N
+	s.mu.Unlock()
+	if subscribedN == 0 {
+		t.Fatal("subscribed channel did not observe its bucket")
+	}
+	if retryingN != beforeRetrying || failedN != beforeFailed {
+		t.Fatalf("inactive channels matured: retrying %d→%d, failed %d→%d", beforeRetrying, retryingN, beforeFailed, failedN)
+	}
+	if got := s.counters[retrying].Load(); got != 0 {
+		t.Errorf("retrying counter = %d, want cleared", got)
+	}
+	if got := s.counters[failed].Load(); got != 0 {
+		t.Errorf("failed counter = %d, want cleared", got)
+	}
+}
+
+func TestSubsystem_ChannelCooldownOverrideHotReload(t *testing.T) {
+	s := testSubsystem(t, "TEST-HOST")
+	s.OnSpike = func(SpikePayload) {}
+	s.initChannels(context.Background(), nil)
+
+	cfg := s.cfg
+	cfg.CooldownMinutes = 60
+	cfg.ChannelCooldownMinutes = map[string]int{"Application": 15}
+	if err := s.Reload(cfg); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	s.mu.Lock()
+	application := s.detectors["Application"].Cfg.Cooldown
+	system := s.detectors["System"].Cfg.Cooldown
+	s.mu.Unlock()
+	if application != 15*time.Minute {
+		t.Errorf("Application cooldown = %v, want 15m", application)
+	}
+	if system != time.Hour {
+		t.Errorf("System cooldown = %v, want 1h", system)
+	}
+	cfg.ChannelCooldownMinutes["Application"] = 1
+	s.mu.Lock()
+	retained := s.detectors["Application"].Cfg.Cooldown
+	s.mu.Unlock()
+	if retained != 15*time.Minute {
+		t.Errorf("detector cooldown aliased caller map: %v", retained)
+	}
+}

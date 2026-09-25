@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -532,8 +533,20 @@ func overlayEvtSpikeFromRemote(dst *dc.EvtSpikeConfig, remote *dashboard.RemoteE
 		cp := append([]string(nil), remote.AddedChannels...)
 		dst.AddedChannels = cp
 	}
+	dst.ChannelCooldownMinutes = clampRemoteChannelCooldowns(remote.ChannelCooldownMinutes)
 }
 
+func clampRemoteChannelCooldowns(overrides map[string]int) map[string]int {
+	clamped := make(map[string]int, min(len(overrides), 256))
+	for channel, minutes := range overrides {
+		channel = strings.TrimSpace(channel)
+		if channel == "" || len(clamped) == 256 {
+			continue
+		}
+		clamped[channel] = clampRemoteInt(minutes, dc.MinEvtSpikeCooldownMinutes, dc.MaxEvtSpikeCooldownMinutes, dc.DefaultEvtSpikeCooldownMinutes)
+	}
+	return clamped
+}
 func clampRemoteInt(v, min, max, fallback int) int {
 	if v == 0 {
 		return fallback
