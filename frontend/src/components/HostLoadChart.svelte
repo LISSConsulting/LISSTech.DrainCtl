@@ -68,7 +68,7 @@
             color: 'var(--color-amber)',
             axis: 'left',
             lineOnly: false,
-            fillOpacity: 0.3,
+            fillOpacity: 0.92,
             hideStroke: true,
             show: () => showCpuP95,
             toggle: () => {
