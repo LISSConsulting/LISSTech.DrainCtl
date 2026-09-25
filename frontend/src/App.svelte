@@ -12,6 +12,8 @@
         setDetectorStatus,
         appendRecentSpike,
         removeEvtSpikeState,
+        dropSelection,
+        recordForceUpdateCompletion,
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, settingsFromWire } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
@@ -48,6 +50,25 @@
 
     /** Previous server statuses keyed by hostname. Empty on first refresh → all servers emit "registered". */
     const prevStates = /** @type {Map<string, string>} */ (new Map());
+
+    // SSE is ordered per connection, but events already queued by the broker can
+    // arrive after a removal. Suppress those obsolete updates briefly so they do
+    // not resurrect a row or log a phantom registration. Restore clears the
+    // marker immediately; expiry bounds memory if no restore follows.
+    const RECENTLY_REMOVED_MS = 60_000;
+    const recentlyRemovedUntil = new Map();
+
+    function markRecentlyRemoved(host) {
+        recentlyRemovedUntil.set(host, Date.now() + RECENTLY_REMOVED_MS);
+    }
+
+    function isRecentlyRemoved(host) {
+        const until = recentlyRemovedUntil.get(host);
+        if (!until) return false;
+        if (until > Date.now()) return true;
+        recentlyRemovedUntil.delete(host);
+        return false;
+    }
 
     /**
      * Previous perf alert levels per host. Tracks threshold crossings so an
@@ -362,7 +383,7 @@
         es.onmessage = (e) => {
             try {
                 const event = JSON.parse(e.data);
-                if (event.type === 'server_update' && event.host && event.data) {
+                if (event.type === 'server_update' && event.host && event.data && !isRecentlyRemoved(event.host)) {
                     const sv = event.data;
                     // Detect status transitions immediately so the event log updates
                     // in real-time rather than waiting for the next 30-second poll.
@@ -402,6 +423,12 @@
                     appState.handleSSEServerDeleted(event.host);
                     removeServerMetrics(event.host);
                     removeEvtSpikeState(event.host);
+                    // Permanent removal and transient DELETE both flow through this
+                    // handler (PermanentRemoval emits `server_permanently_removed` with
+                    // the same {host} shape; we listen for both below). Either way the
+                    // host is gone — drop any in-flight batch selection so the
+                    // toolbar never operates on a stale row.
+                    dropSelection(event.host);
                     prevStates.delete(event.host);
                     addEvent(
                         serverEvent(
@@ -411,12 +438,67 @@
                             'alert',
                         ),
                     );
+                } else if (event.type === 'server_permanently_removed' && event.host) {
+                    // PermanentRemoval's durable tombstone event. The host is gone for
+                    // good — apply the same UI cleanup as a transient delete so the
+                    // batch toolbar never tries to act on a row that has already been
+                    // tombstoned by a sibling dashboard session.
+                    appState.handleSSEServerDeleted(event.host);
+                    removeServerMetrics(event.host);
+                    markRecentlyRemoved(event.host);
+                    appState.notifyRemovedServersChanged();
+                    removeEvtSpikeState(event.host);
+                    dropSelection(event.host);
+                    prevStates.delete(event.host);
+                    addEvent(
+                        serverEvent(
+                            formatTime12(new Date(), { seconds: true }),
+                            { host: event.host, status: 'off', changed_by: event.data?.removed_by ?? '' },
+                            'permanently removed',
+                            'alert',
+                        ),
+                    );
+                } else if (event.type === 'server_restored' && event.host) {
+                    // Restore removes the tombstone only; the agent registers later.
+                    // Let a subsequent legitimate update through immediately and
+                    // refresh the management panel in every connected browser.
+                    recentlyRemovedUntil.delete(event.host);
+                    appState.notifyRemovedServersChanged();
+                    addEvent({
+                        time: formatTime12(new Date(), { seconds: true }),
+                        host: event.host.split('.')[0],
+                        text: 'restored; awaiting agent registration',
+                        sev: 'ok',
+                        transition: false,
+                    });
                 } else if (event.type === 'detector_status' && event.host && event.data) {
-                    // Broker fires detector_status only on state transitions (see
-                    // dashboard-sse-events.md), so no client-side dedup is needed.
+                    // The broker suppresses identical status snapshots but sends
+                    // readiness and durable warm-up changes while training.
                     setDetectorStatus(event.host, event.data);
                 } else if (event.type === 'recent_spike' && event.host && event.data) {
                     appendRecentSpike(event.host, event.data);
+                } else if (
+                    event.type === 'force_update' &&
+                    event.host &&
+                    event.data?.command_id &&
+                    ['completed', 'failed', 'duplicate', 'refused'].includes(event.data.outcome)
+                ) {
+                    recordForceUpdateCompletion({
+                        command_id: event.data.command_id,
+                        host: event.host,
+                        outcome: event.data.outcome,
+                        reason: event.data.reason,
+                        old_version: event.data.old_version,
+                        new_version: event.data.new_version,
+                        decided_at: event.data.decided_at,
+                    });
+                    addEvent({
+                        time: formatTime12(new Date(event.data.decided_at || Date.now()), { seconds: true }),
+                        host: event.host.split('.')[0],
+                        text: `force update ${event.data.outcome}${event.data.reason ? `: ${event.data.reason}` : ''}`,
+                        sev: event.data.outcome === 'completed' ? 'ok' : 'alert',
+                        transition: false,
+                    });
                 } else if (event.type === 'settings_update' && event.data) {
                     // REST and SSE share one sentinel-aware conversion from Go's
                     // % free memory thresholds to the UI's % used values.

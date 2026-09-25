@@ -106,7 +106,7 @@ The service remains available until Windows Installer reaches `StopServices`; MS
 1. Build a copy of the MSI signed with a self-signed test cert (`signtool sign /f testcert.pfx /p testpass dist/.../LISSTech.DrainCtl.msi`).
 2. Point the test-fork release at this MSI instead of the real one.
 3. Restart the service, wait for the next poll.
-4. Expected log: `update=refused reason=subject_mismatch subject=...`. The temp file is gone (`Get-ChildItem $env:TEMP\drainctl-update-*.msi` returns nothing). The service is still running at V010. No msiexec spawn occurred (`Get-Process msiexec` shows nothing).
+4. Expected log: `update=refused reason=subject_mismatch subject=...`. The downloaded file is gone (`Get-ChildItem "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\updates\drainctl-update-*.msi"` returns nothing). The service is still running at V010. No msiexec spawn occurred (`Get-Process msiexec` shows nothing).
 
 ### Step 6: stress the network-failure path
 

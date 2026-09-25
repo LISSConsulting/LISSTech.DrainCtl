@@ -43,7 +43,7 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 	if info == nil {
 		return
 	}
-	view := toServerView(*info)
+	view := toServerView(*info, ds.staleAfter())
 	payload, err := json.Marshal(SSEEvent{
 		Type:      "server_update",
 		Host:      host,
@@ -80,6 +80,54 @@ func (ds *DashboardServer) broadcastServerDeleted(host, changedBy string) {
 	})
 	if err != nil {
 		slog.Warn("sse: broadcastServerDeleted: marshal failed", "host", host, "error", err) //nolint:gosec // host is validated by the router pattern
+		return
+	}
+	ds.broker.Broadcast(payload)
+}
+
+// broadcastServerPermanentlyRemoved emits the durable
+// server_permanently_removed SSE event after its tombstone has been written.
+// Callers also emit the legacy server_deleted event first, preserving existing
+// clients while updated clients consume the durable removal metadata.
+func (ds *DashboardServer) broadcastServerPermanentlyRemoved(host, removedBy, reason string, removedAt time.Time) {
+	type removedData struct {
+		RemovedBy string    `json:"removed_by,omitempty"`
+		Reason    string    `json:"reason,omitempty"`
+		RemovedAt time.Time `json:"removed_at"`
+		Permanent bool      `json:"permanent"`
+	}
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "server_permanently_removed",
+		Host:      host,
+		Data:      mustMarshal(removedData{RemovedBy: removedBy, Reason: reason, RemovedAt: removedAt, Permanent: true}),
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.Warn("sse: broadcastServerPermanentlyRemoved: marshal failed", "host", host, "error", err) //nolint:gosec
+		return
+	}
+	ds.broker.Broadcast(payload)
+}
+
+// broadcastServerRestored broadcasts a server_restored SSE event after the
+// tombstone for the host has been deleted. The live roster does NOT
+// automatically re-add the host — the agent's next /api/v1/register call
+// creates a fresh row. The dashboard's "removed servers" panel removes the
+// entry. UI state holding a selected row that was just restored can
+// reconcile by listening for this event and re-issuing /api/v1/servers.
+func (ds *DashboardServer) broadcastServerRestored(host, restoredBy string, restoredAt time.Time) {
+	type restoredData struct {
+		RestoredBy string    `json:"restored_by,omitempty"`
+		RestoredAt time.Time `json:"restored_at"`
+	}
+	payload, err := json.Marshal(SSEEvent{
+		Type:      "server_restored",
+		Host:      host,
+		Data:      mustMarshal(restoredData{RestoredBy: restoredBy, RestoredAt: restoredAt}),
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.Warn("sse: broadcastServerRestored: marshal failed", "host", host, "error", err) //nolint:gosec
 		return
 	}
 	ds.broker.Broadcast(payload)

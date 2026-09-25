@@ -82,8 +82,9 @@ Lives in `internal/evtspike/baseline.go`.
 
 | Field | Type | JSON | Notes |
 |-------|------|------|-------|
-| SchemaVersion | `int` | `schema_version` | Starts at `1`. Bump on any breaking change. Version mismatch → discard and rebuild. |
-| WrittenAt | `time.Time` | `written_at` | RFC 3339; informational, not load-gating. |
+| SchemaVersion | `int` | `schema_version` | Version `2`; version `1` is migrated without discarding learned channels. |
+| WrittenAt | `time.Time` | `written_at` | RFC 3339; informational and migration evidence. |
+| WarmupStartedAt | `time.Time` | `warmup_started_at` | Durable start of the seven-day public-status warm-up. |
 | Host | `string` | `host` | Hostname at write time; informational. |
 | Channels | `map[string]ChannelState` | `channels` | Keyed by channel name. |
 
@@ -94,6 +95,19 @@ Lives in `internal/evtspike/baseline.go`.
 | Slots | `[96]GammaState` | `slots` | |
 | Global | `GammaState` | `global` | |
 | LastAlert | `time.Time` | `last_alert` | RFC 3339; zero-value means never. |
+
+
+### Version-1 warm-up migration
+
+Version-1 files lack `warmup_started_at`, but their learned posteriors are
+retained. On first version-2 start, the detector uses (in order) a persisted
+start when present; a `written_at` at least seven days old; a slot with at
+least 630 observations (90 ten-second scoring windows per 15-minute slot per
+day for seven days); otherwise the non-future `written_at`. A missing, zero,
+or future timestamp falls back to the current start time. The inferred value
+is written immediately, so later restarts cannot restart the clock. This
+fallback is deliberately conservative: a recently written v1 file without
+seven-day evidence stays `training` until its durable clock reaches day seven.
 
 **RecentFlags is intentionally NOT persisted** — starting fresh after restart is fine; the 2-of-3 window re-fills within 30 seconds of running.
 
@@ -173,6 +187,7 @@ Lives in `internal/evtspike/status.go`. Published via REST + SSE per R7.
 | State | `string` | `state` | One of `"healthy"` / `"training"` / `"disabled"` / `"error"`. |
 | EnabledChannels | `int` | `enabled_channels` | Count of subscribed channels. |
 | MatureChannels | `int` | `mature_channels` | Count of channels with at least one mature slot (any of 96 slots has `N >= SlotMaturityObservations`). |
+| WarmupStartedAt | `time.Time` | `warmup_started_at,omitempty` | Durable start of the seven-day public-status warm-up; omitted when disabled. |
 | ErrorReason | `string` | `error_reason,omitempty` | Populated only when `state == "error"`. |
 | LastSpikeAt | `time.Time` | `last_spike_at,omitempty` | Zero-value → never. |
 
@@ -181,10 +196,11 @@ Lives in `internal/evtspike/status.go`. Published via REST + SSE per R7.
 |-----------|-------|
 | `cfg.EvtSpike.Enabled == false` | `disabled` |
 | `EnabledChannels == 0` (no channel subscriptions succeeded) | `error` |
-| `MatureChannels * 2 >= EnabledChannels` (≥50% mature) | `healthy` |
-| else (running, <50% mature) | `training` |
+| Less than seven elapsed days since `WarmupStartedAt` | `training` |
+| `MatureChannels * 2 >= EnabledChannels` (≥50% mature) after warm-up | `healthy` |
+| else (running, readiness incomplete) | `training` |
 
-The threshold uses integer arithmetic (`MatureChannels * 2 >= EnabledChannels`) to avoid floating-point edge cases. The enum remains the four-state `healthy | training | disabled | error` — no new `partial` state is introduced; the transition from `training` to `healthy` is simply gated on more than one mature channel.
+The readiness threshold uses integer arithmetic (`MatureChannels * 2 >= EnabledChannels`) to avoid floating-point edge cases. The enum remains the four-state `healthy | training | disabled | error` — no new `partial` state is introduced; `healthy` requires both the seven-day elapsed-time gate and readiness.
 
 ---
 

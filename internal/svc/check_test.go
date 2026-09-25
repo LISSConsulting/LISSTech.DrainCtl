@@ -278,3 +278,190 @@ func TestPruneNotifyState_SkipsBlankURLTargets(t *testing.T) {
 		t.Error("entry for non-blank URL should be pruned when only blank-URL targets remain")
 	}
 }
+
+// TestApplyRemoteConfig_EvtSpikeFullKnobs_PropagatesAndClamps verifies every
+// operator-safe evtspike field is overlaid onto the local config by
+// applyRemoteConfig, with out-of-range values clamped to the documented
+// bounds. This guards the contract documented at the top of
+// overlayEvtSpikeFromRemote: "every operator-safe field from the dashboard
+// is layered on top of the locally-loaded EvtSpikeConfig".
+func TestApplyRemoteConfig_EvtSpikeFullKnobs_PropagatesAndClamps(t *testing.T) {
+	cfg := &dc.ServiceConfig{}
+	targets := []dc.NotificationTarget{}
+	evt := &dc.EvtSpikeConfig{
+		// Start from non-default local values so we can prove they got
+		// replaced, not merged.
+		MinCount:                 99,
+		Threshold:                0.5,
+		CooldownMinutes:          99,
+		SlotMaturityObservations: 99,
+		PersistIntervalSeconds:   9999,
+		HalfLifeBuckets:          9999,
+		PriorStrength:            9999,
+		MeanPerBucketPrior:       99,
+		DisabledChannels:         []string{"old"},
+		AddedChannels:            []string{"old"},
+		SecurityChannelEnabled:   false,
+	}
+	remote := &dashboard.RemoteSettings{
+		EvtSpike: &dashboard.RemoteEvtSpike{
+			Enabled:                  true,
+			MinCount:                 25,
+			Threshold:                5e-5,
+			CooldownMinutes:          7,
+			SlotMaturityObservations: 45,
+			PersistIntervalSeconds:   1800,
+			HalfLifeBuckets:          720,
+			PriorStrength:            120,
+			MeanPerBucketPrior:       0.25,
+			DisabledChannels:         []string{"Setup"},
+			AddedChannels:            []string{"Custom/Op"},
+			SecurityChannelEnabled:   true,
+		},
+	}
+	applyRemoteConfig(remote, cfg, &targets, evt)
+
+	if !evt.Enabled {
+		t.Error("Enabled not propagated")
+	}
+	if evt.MinCount != 25 {
+		t.Errorf("MinCount = %d, want 25", evt.MinCount)
+	}
+	if evt.Threshold != 5e-5 {
+		t.Errorf("Threshold = %g, want 5e-5", evt.Threshold)
+	}
+	if evt.CooldownMinutes != 7 {
+		t.Errorf("CooldownMinutes = %d, want 7", evt.CooldownMinutes)
+	}
+	if evt.SlotMaturityObservations != 45 {
+		t.Errorf("SlotMaturityObservations = %d, want 45", evt.SlotMaturityObservations)
+	}
+	if evt.PersistIntervalSeconds != 1800 {
+		t.Errorf("PersistIntervalSeconds = %d, want 1800", evt.PersistIntervalSeconds)
+	}
+	if evt.HalfLifeBuckets != 720 {
+		t.Errorf("HalfLifeBuckets = %d, want 720", evt.HalfLifeBuckets)
+	}
+	if evt.PriorStrength != 120 {
+		t.Errorf("PriorStrength = %g, want 120", evt.PriorStrength)
+	}
+	if evt.MeanPerBucketPrior != 0.25 {
+		t.Errorf("MeanPerBucketPrior = %g, want 0.25", evt.MeanPerBucketPrior)
+	}
+	if !evt.SecurityChannelEnabled {
+		t.Error("SecurityChannelEnabled not propagated")
+	}
+	if len(evt.DisabledChannels) != 1 || evt.DisabledChannels[0] != "Setup" {
+		t.Errorf("DisabledChannels = %v, want [Setup]", evt.DisabledChannels)
+	}
+	if len(evt.AddedChannels) != 1 || evt.AddedChannels[0] != "Custom/Op" {
+		t.Errorf("AddedChannels = %v, want [Custom/Op]", evt.AddedChannels)
+	}
+}
+
+func TestApplyRemoteConfig_EvtSpikeClampsOutOfRange(t *testing.T) {
+	evt := &dc.EvtSpikeConfig{}
+	remote := &dashboard.RemoteSettings{
+		EvtSpike: &dashboard.RemoteEvtSpike{
+			// One in-range value to prove clamping is per-field, not
+			// "discard the whole block on any out-of-range".
+			MinCount:        dc.MaxEvtSpikeMinCount * 10,
+			Threshold:       dc.MaxEvtSpikeThreshold * 2,
+			CooldownMinutes: dc.MaxEvtSpikeCooldownMinutes + 1,
+			HalfLifeBuckets: 1, // below min
+			PriorStrength:   -5,
+		},
+	}
+	applyRemoteConfig(remote, &dc.ServiceConfig{}, &[]dc.NotificationTarget{}, evt)
+
+	if evt.MinCount != dc.MaxEvtSpikeMinCount {
+		t.Errorf("MinCount = %d, want %d (clamped to max)", evt.MinCount, dc.MaxEvtSpikeMinCount)
+	}
+	if evt.Threshold != dc.MaxEvtSpikeThreshold {
+		t.Errorf("Threshold = %g, want %g (clamped to max)", evt.Threshold, dc.MaxEvtSpikeThreshold)
+	}
+	if evt.CooldownMinutes != dc.MaxEvtSpikeCooldownMinutes {
+		t.Errorf("CooldownMinutes = %d, want %d (clamped to max)", evt.CooldownMinutes, dc.MaxEvtSpikeCooldownMinutes)
+	}
+	if evt.HalfLifeBuckets != dc.MinEvtSpikeHalfLifeBuckets {
+		t.Errorf("HalfLifeBuckets = %d, want %d (clamped to min)", evt.HalfLifeBuckets, dc.MinEvtSpikeHalfLifeBuckets)
+	}
+	if evt.PriorStrength != dc.MinEvtSpikePriorStrength {
+		t.Errorf("PriorStrength = %g, want %g (clamped to min)", evt.PriorStrength, dc.MinEvtSpikePriorStrength)
+	}
+}
+
+// TestApplyRemoteConfig_EvtSpikeEmptySlicesClear verifies that sending an
+// explicit empty slice on the wire CLEARS the agent's local list. This is
+// the only sensible interpretation of "the dashboard operator pressed Clear
+// on the disabled channels row".
+func TestApplyRemoteConfig_EvtSpikeEmptySlicesClear(t *testing.T) {
+	evt := &dc.EvtSpikeConfig{
+		DisabledChannels: []string{"Setup", "System"},
+		AddedChannels:    []string{"Custom-A"},
+	}
+	remote := &dashboard.RemoteSettings{
+		EvtSpike: &dashboard.RemoteEvtSpike{
+			DisabledChannels: []string{},
+			AddedChannels:    []string{},
+		},
+	}
+	applyRemoteConfig(remote, &dc.ServiceConfig{}, &[]dc.NotificationTarget{}, evt)
+	if len(evt.DisabledChannels) != 0 {
+		t.Errorf("DisabledChannels = %v, want [] (cleared)", evt.DisabledChannels)
+	}
+	if len(evt.AddedChannels) != 0 {
+		t.Errorf("AddedChannels = %v, want [] (cleared)", evt.AddedChannels)
+	}
+}
+
+// TestApplyRemoteConfig_EvtSpikeFullWireFormatRoundTrip pins the wire shape
+// the dashboard emits via GET /api/v1/config: every operator-safe field must
+// be present and parseable, and applying that decoded shape must populate the
+// corresponding subsystem fields exactly.
+func TestApplyRemoteConfig_EvtSpikeFullWireFormatRoundTrip(t *testing.T) {
+	wire := []byte(`{
+		"evtspike": {
+			"enabled": true,
+			"min_count": 25,
+			"threshold": 5e-05,
+			"cooldown_minutes": 7,
+			"slot_maturity_observations": 45,
+			"persist_interval_seconds": 1800,
+			"half_life_buckets": 720,
+			"prior_strength": 120,
+			"mean_per_bucket_prior": 0.25,
+			"disabled_channels": ["Setup"],
+			"added_channels": ["Custom/Op"],
+			"security_channel_enabled": true
+		}
+	}`)
+	var remote dashboard.RemoteSettings
+	if err := json.Unmarshal(wire, &remote); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if remote.EvtSpike == nil {
+		t.Fatal("EvtSpike block missing from decoded payload")
+	}
+	evt := &dc.EvtSpikeConfig{}
+	applyRemoteConfig(&remote, &dc.ServiceConfig{}, &[]dc.NotificationTarget{}, evt)
+	if !evt.Enabled || evt.MinCount != 25 || evt.HalfLifeBuckets != 720 {
+		t.Errorf("wire-decoded fields did not propagate: %+v", evt)
+	}
+	if !evt.SecurityChannelEnabled {
+		t.Error("security_channel_enabled not decoded/propagated")
+	}
+}
+
+func TestToDashboardCompletionPreservesCanonicalHost(t *testing.T) {
+	completion := toDashboardCompletion(&dashboard.ForceUpdateCompletion{
+		CommandID: "cmd-00001-001",
+		Outcome:   "completed",
+	}, "rdsh-01")
+	if completion == nil {
+		t.Fatal("toDashboardCompletion returned nil")
+	}
+	if completion.Host != "rdsh-01" {
+		t.Errorf("Host = %q, want canonical checked host", completion.Host)
+	}
+}

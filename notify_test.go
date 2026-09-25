@@ -217,6 +217,27 @@ func TestSendNotification_SkipsExcludedServerTriggerOnly(t *testing.T) {
 	}
 }
 
+func TestSendNotificationWithExclusions_SkipsEveryTargetAndTrigger(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&count, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targets := []NotificationTarget{
+		{Type: "webhook", URL: srv.URL, Triggers: []Trigger{TriggerAlert}},
+		{Type: "webhook", URL: srv.URL + "/future-target", Triggers: []Trigger{TriggerEventSpike}},
+	}
+	result := newTestResult("RDS01.EXAMPLE.TEST.", "Alert")
+	SendNotificationWithExclusions(targets, []string{"rds01.example.test"}, &NotifyState{}, result, TriggerAlert, "")
+	SendNotificationWithExclusions(targets, []string{"rds01.example.test"}, &NotifyState{}, result, TriggerEventSpike, "")
+
+	if got := atomic.LoadInt32(&count); got != 0 {
+		t.Errorf("globally excluded host sent %d notifications, want 0", got)
+	}
+}
+
 func TestSendNotification_RepeatOnce(t *testing.T) {
 	var count int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -31,6 +31,7 @@ const (
 	scoringIntervalSeconds  = 10
 	defaultBaselineFilename = "baseline.json"
 	defaultChannelQuery     = `*[System[(Level<=4)]]`
+	warmupDuration          = 7 * 24 * time.Hour
 )
 
 // SubscribeFunc is the signature the Subsystem uses to subscribe a channel.
@@ -146,12 +147,12 @@ type Subsystem struct {
 	capOverflowWarn map[string]time.Time
 	startupErr      error
 	lastSpikeAt     time.Time
-
-	runMu    sync.Mutex
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	ctx      context.Context
-	startCtx context.Context
+	warmupStartedAt time.Time
+	runMu           sync.Mutex
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	ctx             context.Context
+	startCtx        context.Context
 }
 
 // New returns an unstarted Subsystem. cfg is assumed already clamped by
@@ -217,15 +218,19 @@ func (s *Subsystem) startEnabled() error {
 	s.runMu.Unlock()
 
 	s.initChannels(runCtx, bf)
-
+	s.initializeWarmup(bf)
 	if s.OnStatusChange != nil {
 		s.OnStatusChange(s.Status())
 	}
-
 	s.wg.Add(3)
 	go s.scoringLoop(runCtx)
 	go s.persistenceLoop(runCtx)
 	go s.supervisorLoop(runCtx)
+
+	// A newly created or migrated baseline must survive an immediate restart;
+	// waiting for the normal persistence tick would let it reset the 7-day
+	// public-status clock after a crash.
+	s.writeBaseline()
 
 	return nil
 }
@@ -316,9 +321,9 @@ func (s *Subsystem) Stop() {
 }
 
 // ResetBaseline wipes in-memory detector state for every subscribed channel
-// and deletes the baseline file on disk. The subsystem keeps running —
-// subscriptions, scoring loop, and persistence loop are untouched — so a
-// fresh baseline begins accumulating from the next 10-second scoring tick.
+// and replaces the baseline file with a fresh one. The subsystem keeps
+// running — subscriptions, scoring loop, and persistence loop are untouched
+// — while the public status begins a new seven-day warm-up.
 // Use this after confirming a channel's learned baseline is poisoned (e.g.,
 // a spike fired during training) rather than deleting baseline.json from
 // under the running service (the file is rewritten on the next persistence
@@ -331,17 +336,19 @@ func (s *Subsystem) ResetBaseline() error {
 		cfg := old.Cfg
 		s.detectors[channel] = NewDetector(s.cfg.MeanPerBucketPrior, s.cfg.PriorStrength, float64(s.cfg.HalfLifeBuckets), cfg)
 	}
+	s.warmupStartedAt = s.Now()
 	path := s.baselinePath
 	s.mu.Unlock()
 
 	// Delete the persisted baseline so a crash-before-next-write doesn't
-	// resurrect the wiped state. Missing file is benign — the file is
-	// recreated on the next persistence tick regardless.
+	// resurrect the wiped state. Missing file is benign — the immediately
+	// following write durably records the fresh baseline and warm-up start.
 	if path != "" {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("evtspike: remove baseline %q: %w", path, err)
 		}
 	}
+	s.writeBaseline()
 	slog.Info("", "evtspike", "baseline_reset", "host", s.host, "path", path)
 	if s.OnStatusChange != nil {
 		s.OnStatusChange(s.Status())
@@ -373,6 +380,7 @@ func (s *Subsystem) quiesce() {
 	s.capOverflowWarn = make(map[string]time.Time)
 	s.startupErr = nil
 	s.lastSpikeAt = time.Time{}
+	s.warmupStartedAt = time.Time{}
 	s.mu.Unlock()
 }
 
@@ -745,6 +753,49 @@ func (s *Subsystem) scoreOnce(now time.Time) {
 
 		s.OnSpike(*payload)
 	}
+	if s.OnStatusChange != nil {
+		s.OnStatusChange(s.Status())
+	}
+}
+
+// initializeWarmup restores the durable clock after a restart or migrates a
+// version-1 baseline. A v1 WrittenAt older than seven days proves the
+// detector was already running then. If the file was written recently, a
+// slot with at least 630 observations also proves seven elapsed days: each
+// 15-minute slot can be scored at most 90 times per day. Otherwise WrittenAt
+// is the conservative fallback; it is the oldest durable evidence available.
+func (s *Subsystem) initializeWarmup(bf *BaselineFile) {
+	now := s.Now()
+	startedAt := now
+	if bf != nil {
+		switch {
+		case !bf.WarmupStartedAt.IsZero() && !bf.WarmupStartedAt.After(now):
+			startedAt = bf.WarmupStartedAt
+		case !bf.WrittenAt.IsZero() && !bf.WrittenAt.After(now.Add(-warmupDuration)):
+			startedAt = bf.WrittenAt
+		case baselineProvesWarmupAge(bf):
+			startedAt = now.Add(-warmupDuration)
+		case !bf.WrittenAt.IsZero() && !bf.WrittenAt.After(now):
+			startedAt = bf.WrittenAt
+		}
+	}
+
+	s.mu.Lock()
+	s.warmupStartedAt = startedAt
+	s.mu.Unlock()
+}
+
+func baselineProvesWarmupAge(bf *BaselineFile) bool {
+	const observationsPerSlotPerDay = (15 * 60) / scoringIntervalSeconds
+	minimumObservations := observationsPerSlotPerDay * int(warmupDuration/(24*time.Hour))
+	for _, channel := range bf.Channels {
+		for _, slot := range channel.Slots {
+			if slot.N >= minimumObservations {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Subsystem) writeBaseline() {
@@ -755,10 +806,11 @@ func (s *Subsystem) writeBaseline() {
 
 	s.mu.Lock()
 	bf := &BaselineFile{
-		SchemaVersion: SchemaVersion,
-		WrittenAt:     s.Now(),
-		Host:          s.host,
-		Channels:      make(map[string]ChannelState, len(s.detectors)),
+		SchemaVersion:   SchemaVersion,
+		WrittenAt:       s.Now(),
+		WarmupStartedAt: s.warmupStartedAt,
+		Host:            s.host,
+		Channels:        make(map[string]ChannelState, len(s.detectors)),
 	}
 	for name, d := range s.detectors {
 		bf.Channels[name] = ChannelState{
@@ -814,12 +866,18 @@ func (s *Subsystem) Status() DetectorStatus {
 		t := s.lastSpikeAt
 		lastSpike = &t
 	}
+	var warmupStartedAt *time.Time
+	if !s.warmupStartedAt.IsZero() {
+		t := s.warmupStartedAt
+		warmupStartedAt = &t
+	}
 
 	status := DetectorStatus{
 		Host:            s.host,
-		State:           DeriveState(s.cfg.Enabled, enabled, mature, s.startupErr),
+		State:           DeriveState(s.cfg.Enabled, enabled, mature, s.warmupStartedAt, s.Now(), s.startupErr),
 		EnabledChannels: enabled,
 		MatureChannels:  mature,
+		WarmupStartedAt: warmupStartedAt,
 		LastSpikeAt:     lastSpike,
 	}
 	if s.startupErr != nil {

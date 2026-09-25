@@ -4,7 +4,12 @@ package updater
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +25,71 @@ func TestSubsystemImplementsLifecycle(t *testing.T) {
 	s := New(dc.UpdateConfig{})
 	_ = s.Start
 	_ = s.Stop
+}
+
+func TestTriggerCheckNowBypassesDisabledPeriodicPolicyAndSuppressesDuplicate(t *testing.T) {
+	var calls atomic.Int32
+	s, _ := runUpdater(t, dc.UpdateConfig{Enabled: false, PollInterval: dc.Duration(time.Hour)}, fakes{
+		fetchRelease: func(_ context.Context, _ *http.Client, _, _ string) (release, error) {
+			calls.Add(1)
+			return release{noReleases: true}, nil
+		},
+	})
+	defer s.Stop()
+
+	first := s.TriggerCheckNow(context.Background(), "command-0001")
+	if first.Decision != "no_stable_release" {
+		t.Fatalf("first decision = %q, want no_stable_release", first.Decision)
+	}
+	second := s.TriggerCheckNow(context.Background(), "command-0001")
+	if second.Decision != "duplicate" {
+		t.Fatalf("second decision = %q, want duplicate", second.Decision)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("fetch calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestPruneForceUpdateCommandsCapsDeterministically(t *testing.T) {
+	now := time.Now().UTC()
+	state := updateState{ForceUpdateCommands: make(map[string]time.Time)}
+	for i := range forceUpdateCommandLedgerCap + 10 {
+		state.ForceUpdateCommands[fmt.Sprintf("command-%03d", i)] = now.Add(time.Duration(i) * time.Second)
+	}
+	pruneForceUpdateCommands(&state, now.Add(time.Hour))
+	if len(state.ForceUpdateCommands) != forceUpdateCommandLedgerCap-1 {
+		t.Fatalf("ledger size = %d, want %d", len(state.ForceUpdateCommands), forceUpdateCommandLedgerCap-1)
+	}
+	if _, retained := state.ForceUpdateCommands["command-000"]; retained {
+		t.Fatal("oldest command retained after deterministic cap pruning")
+	}
+	if _, retained := state.ForceUpdateCommands["command-011"]; !retained {
+		t.Fatal("newest command was not retained after cap pruning")
+	}
+}
+
+func TestDownloadToTempUsesCanonicalProgramDataDirectory(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "signed-msi-payload")
+	}))
+	defer server.Close()
+
+	path, err := downloadToTemp(context.Background(), server.Client(), server.URL)
+	if err != nil {
+		t.Fatalf("downloadToTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	if got, want := filepath.Clean(filepath.Dir(path)), filepath.Clean(dc.DefaultUpdatesDir()); got != want {
+		t.Fatalf("download directory = %q, want %q", got, want)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read downloaded MSI: %v", err)
+	}
+	if string(body) != "signed-msi-payload" {
+		t.Fatalf("downloaded payload = %q", body)
+	}
 }
 
 // TestStart_DisabledLaunchesGoroutineButSkipsFetch verifies the

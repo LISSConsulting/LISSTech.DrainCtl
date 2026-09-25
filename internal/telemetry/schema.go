@@ -106,10 +106,31 @@ CREATE TABLE IF NOT EXISTS servers (
     last_seen_ms     INTEGER NOT NULL DEFAULT 0,
     last_result_json TEXT
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS server_exclusions (
+    hostname        TEXT    PRIMARY KEY,
+    excluded_at_ms  INTEGER NOT NULL,
+    excluded_by     TEXT    NOT NULL DEFAULT '',
+    reason          TEXT    NOT NULL DEFAULT ''
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS server_exclusions_at
+    ON server_exclusions(excluded_at_ms DESC);
+CREATE TABLE IF NOT EXISTS force_update_outbox (
+    command_id     TEXT    NOT NULL,
+    host           TEXT    NOT NULL,
+    reason         TEXT    NOT NULL DEFAULT '',
+    accepted_at_ms INTEGER NOT NULL,
+    agent_version  TEXT    NOT NULL,
+    PRIMARY KEY (host, command_id)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS force_update_outbox_pending
+    ON force_update_outbox(host, accepted_at_ms, command_id);
 `
 
-// applySchema runs the DDL block inside a transaction and stamps user_version = 1.
-// Idempotent: every statement uses IF NOT EXISTS.
+// applySchema runs additive idempotent DDL and advances user_version to 2.
+// It never downgrades a schema version advanced by a future feature.
 func applySchema(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -122,8 +143,14 @@ func applySchema(db *sql.DB) error {
 			return err
 		}
 	}
-	if _, err = tx.Exec("PRAGMA user_version = 1"); err != nil {
+	var version int
+	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
+	}
+	if version < 2 {
+		if _, err = tx.Exec("PRAGMA user_version = 2"); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

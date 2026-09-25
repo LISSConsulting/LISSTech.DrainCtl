@@ -34,10 +34,22 @@ type NotifyState struct {
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
-// SendNotification evaluates whether a notification should fire for the
-// given trigger and dispatches to matching targets. Errors are logged but
-// never returned — notifications must not crash the service.
+// SendNotification evaluates whether a notification should fire for the given
+// trigger and dispatches to matching targets. Errors are logged but never
+// returned — notifications must not crash the service.
+//
+// This compatibility entry point has no global exclusions. Service callers must
+// use SendNotificationWithExclusions so durable catch-all policy is enforced.
 func SendNotification(targets []NotificationTarget, state *NotifyState, result *CheckResult, trigger Trigger, changedBy string) {
+	SendNotificationWithExclusions(targets, nil, state, result, trigger, changedBy)
+}
+
+// SendNotificationWithExclusions enforces a global host exclusion before it
+// inspects any target or trigger, then dispatches to matching targets.
+func SendNotificationWithExclusions(targets []NotificationTarget, exclusions []string, state *NotifyState, result *CheckResult, trigger Trigger, changedBy string) {
+	if result == nil || IsNotificationExcluded(exclusions, result.Host) {
+		return
+	}
 	if len(targets) == 0 {
 		return
 	}
