@@ -174,6 +174,31 @@
     }
 </script>
 
+<!-- ── Sessions: independent right-axis area painted first, behind every metric layer ── -->
+{#if visible.sessions && allPaths.sessions?.line}
+    {@const sessionCfg = STROKE_CFG.sessions}
+    <path d={allPaths.sessions.area} fill={SESSIONS_STROKE} fill-opacity="0.92" />
+    <path
+        d={allPaths.sessions.line}
+        stroke="var(--color-surface)"
+        stroke-width={sessionCfg.width + (sessionCfg.halo ?? 0) * 2}
+        stroke-opacity="0.65"
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-dasharray={sessionCfg.dash ?? ''}
+    />
+    <path
+        d={allPaths.sessions.line}
+        stroke={SESSIONS_STROKE}
+        stroke-width={sessionCfg.width}
+        stroke-opacity="0.82"
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-dasharray={sessionCfg.dash ?? ''}
+    />
+{/if}
 <!-- ── Left-axis labels (no grid lines) ── -->
 {#each GRID_PCTS as pct}
     {@const y = $yScale(pct)}
@@ -243,32 +268,6 @@
         >
     {/if}
 {/each}
-
-<!-- ── Sessions: independent right-axis line, always above filled metrics ── -->
-{#if visible.sessions && allPaths.sessions?.line}
-    {@const sessionCfg = STROKE_CFG.sessions}
-    <path d={allPaths.sessions.area} fill={SESSIONS_STROKE} fill-opacity="0.3" />
-    <path
-        d={allPaths.sessions.line}
-        stroke="var(--color-surface)"
-        stroke-width={sessionCfg.width + (sessionCfg.halo ?? 0) * 2}
-        stroke-opacity="0.65"
-        fill="none"
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-dasharray={sessionCfg.dash ?? ''}
-    />
-    <path
-        d={allPaths.sessions.line}
-        stroke={SESSIONS_STROKE}
-        stroke-width={sessionCfg.width}
-        stroke-opacity="0.82"
-        fill="none"
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-dasharray={sessionCfg.dash ?? ''}
-    />
-{/if}
 
 <!-- ── X-axis labels ── -->
 {#each xLabels as xl}
