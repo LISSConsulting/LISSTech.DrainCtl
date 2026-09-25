@@ -1144,7 +1144,7 @@ func buildFleetP50Query(hosts []string, fromMs, toMs int64, tier Tier, counters 
 		args = append(args, host)
 	}
 	where := " WHERE host IN (" + placeholders(len(hosts)) + ") AND "
-	var q string
+	var q, groupBy string
 	switch tier {
 	case TierRaw, TierOneMin:
 		bucketMs := rawBucketMs
@@ -1160,7 +1160,7 @@ func buildFleetP50Query(hosts []string, fromMs, toMs int64, tier Tier, counters 
 			"SELECT (ts / %d) * %d AS bucket_ts, counter, AVG(value), MAX(value) FROM metrics_raw"+where+"ts >= ? AND ts < ?",
 			bucketMs, bucketMs,
 		)
-		q += " GROUP BY bucket_ts, counter, host"
+		groupBy = " GROUP BY bucket_ts, counter, host"
 	case TierFiveMin, TierHourly:
 		table := "metrics_5min"
 		if tier == TierHourly {
@@ -1177,7 +1177,7 @@ func buildFleetP50Query(hosts []string, fromMs, toMs int64, tier Tier, counters 
 			args = append(args, counter)
 		}
 	}
-	q += " ORDER BY counter, bucket_ts, host"
+	q += groupBy + " ORDER BY counter, bucket_ts, host"
 	return q, args, nil
 }
 

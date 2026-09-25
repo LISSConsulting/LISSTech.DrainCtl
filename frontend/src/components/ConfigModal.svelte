@@ -41,6 +41,8 @@
     let loading = $state(true);
     let saving = $state(false);
     let testing = $state(false);
+    let channelCooldownDraft = $state('');
+    let channelCooldownError = $state('');
     let showConfirmClose = $state(false);
     let closing = $state(false);
     const CLOSE_MS = 150;
@@ -99,7 +101,8 @@
 
     let dirty = $derived.by(() => {
         if (!config || !original) return false;
-        return JSON.stringify(config) !== JSON.stringify(original);
+        const originalCooldowns = channelCooldownList(original.evtspike?.channel_cooldown_minutes);
+        return JSON.stringify(config) !== JSON.stringify(original) || channelCooldownDraft !== originalCooldowns;
     });
 
     // ---------------------------------------------------------------------------
@@ -217,7 +220,11 @@
                 snapshot.evtspike.channel_cooldown_minutes ??= {};
                 snapshot.evtspike.disabled_channels ??= [];
                 snapshot.evtspike.added_channels ??= [];
+                channelCooldownDraft = channelCooldownList(snapshot.evtspike.channel_cooldown_minutes);
+            } else {
+                channelCooldownDraft = '';
             }
+            channelCooldownError = '';
             config = snapshot;
             original = JSON.parse(JSON.stringify(snapshot));
         } catch (e) {
@@ -307,6 +314,8 @@
         for (const knob of EVTSPIKE_KNOBS) config.evtspike[knob.key] = defaults[knob.key];
         config.evtspike.enabled = false;
         config.evtspike.channel_cooldown_minutes = {};
+        channelCooldownDraft = '';
+        channelCooldownError = '';
         config.evtspike.disabled_channels = [];
         config.evtspike.added_channels = [];
         config.evtspike.security_channel_enabled = false;
@@ -633,17 +642,32 @@
             .join('\n');
     }
 
+    function parseChannelCooldowns(value) {
+        const overrides = {};
+        const lines = value.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const splitAt = line.lastIndexOf('=');
+            if (splitAt <= 0 || splitAt === line.length - 1) {
+                return { overrides, error: `Channel cooldown line ${i + 1} must be Channel=Minutes` };
+            }
+            const name = line.slice(0, splitAt).trim();
+            const minutes = Number(line.slice(splitAt + 1).trim());
+            if (!name || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+                return { overrides, error: `Channel cooldown line ${i + 1} must use an integer from 1–1440` };
+            }
+            overrides[name] = minutes;
+        }
+        return { overrides, error: '' };
+    }
+
     function updateChannelCooldowns(value) {
         if (!config?.evtspike) return;
-        const overrides = {};
-        for (const line of value.split(/\r?\n/)) {
-            const [channel, minutes, ...extra] = line.split('=');
-            const name = channel?.trim();
-            const parsed = Number(minutes?.trim());
-            if (!name || extra.length || !Number.isInteger(parsed)) continue;
-            overrides[name] = parsed;
-        }
-        config.evtspike.channel_cooldown_minutes = overrides;
+        channelCooldownDraft = value;
+        const parsed = parseChannelCooldowns(value);
+        channelCooldownError = parsed.error;
+        if (!parsed.error) config.evtspike.channel_cooldown_minutes = parsed.overrides;
     }
 
     // ---------------------------------------------------------------------------
@@ -666,6 +690,10 @@
     async function save() {
         if (!config) return false;
         const err = validateThresholds() ?? validateEvtSpike();
+        if (channelCooldownError) {
+            toast.err(channelCooldownError);
+            return false;
+        }
         if (err) {
             toast.err(err);
             return false;
@@ -1441,8 +1469,14 @@
                                             </div>
                                             <textarea
                                                 class="settings-num evtspike-channels"
-                                                value={channelCooldownList(config.evtspike.channel_cooldown_minutes)}
-                                                oninput={(e) => updateChannelCooldowns(e.currentTarget.value)}></textarea>
+                                                value={channelCooldownDraft}
+                                                oninput={(e) => updateChannelCooldowns(e.currentTarget.value)}
+                                            ></textarea>
+                                            {#if channelCooldownError}
+                                                <div class="settings-hint" style="color:var(--color-red)">
+                                                    {channelCooldownError}
+                                                </div>
+                                            {/if}
                                         </div>
                                     </div>
                                     <label class="settings-check">
