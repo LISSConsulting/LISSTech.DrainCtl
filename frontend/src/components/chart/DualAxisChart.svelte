@@ -20,13 +20,14 @@
 
     const GRID_PCTS = [0, 25, 50, 75, 100];
 
-    // Per-series stroke config. Area series get solid strokes; line-only
-    // series are dashed so the independent Sessions scale remains distinct.
+    // Per-series stroke config. Sessions is painted as a solid high-contrast
+    // line above every filled metric so it remains readable without looking
+    // fragmented on top of the CPU area.
     /** @type {Record<string, { width: number, dash?: string, halo?: number }>} */
     const STROKE_CFG = {
         cpu: { width: 3.5 },
         mem: { width: 3.5 },
-        sessions: { width: 4, dash: '10,5', halo: 3 },
+        sessions: { width: 4, halo: 3 },
     };
     const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 72%, var(--color-fg))';
 
@@ -351,7 +352,6 @@
                     y2={ty + TIP_HDR + si * TIP_LNSP + 5}
                     stroke={s.color}
                     stroke-width="2.5"
-                    stroke-dasharray="4,2"
                 />
             {:else}
                 <rect
