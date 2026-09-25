@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -155,6 +157,56 @@ func TestQueryRangeFleet_ExcludesUnlimitedSessionCapacity(t *testing.T) {
 				t.Errorf("fleet capacity = %v, want 100; unlimited host must not enter denominator", capacity.Avg[0])
 			}
 		})
+	}
+}
+
+func TestQueryRangeFleet_ExactP50HandlesOddEvenAndMissingHosts(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02", "SRV03"}
+	if err := ms.Append(ctx, []Sample{
+		{Ts: base, Host: "SRV01", Counter: "pages_sec", Value: 10},
+		{Ts: base, Host: "SRV02", Counter: "pages_sec", Value: 30},
+		{Ts: base, Host: "SRV03", Counter: "pages_sec", Value: 20},
+		{Ts: base, Host: "SRV01", Counter: "mem_avail_mb", Value: 90},
+		{Ts: base, Host: "SRV02", Counter: "mem_avail_mb", Value: 70},
+		{Ts: base, Host: "SRV03", Counter: "mem_avail_mb", Value: 50},
+		{Ts: base, Host: "SRV01", Counter: "mem_total_mb", Value: 100},
+		{Ts: base, Host: "SRV02", Counter: "mem_total_mb", Value: 100},
+		{Ts: base, Host: "SRV03", Counter: "mem_total_mb", Value: 100},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "pages_sec", Value: 10},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "pages_sec", Value: 40},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "mem_avail_mb", Value: 80},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "mem_avail_mb", Value: 40},
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "mem_total_mb", Value: 100},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "mem_total_mb", Value: 100},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	series, err := ms.QueryRangeFleet(
+		ctx, hosts, base, base.Add(2*time.Minute), TierRaw, nil, 60_000,
+	)
+	if err != nil {
+		t.Fatalf("QueryRangeFleet: %v", err)
+	}
+	pages := series.Data["pages_sec"]
+	if pages == nil {
+		t.Fatal("pages_sec series missing")
+	}
+	if got, want := pages.P50, []float64{20, 25}; !slices.Equal(got, want) {
+		t.Errorf("P50 = %v, want %v", got, want)
+	}
+	if len(pages.P50) != len(pages.T) {
+		t.Errorf("P50 length = %d, want parallel length %d", len(pages.P50), len(pages.T))
+	}
+	mem := series.Data[MemUsedPctCounter]
+	if mem == nil {
+		t.Fatal("mem_used_pct series missing")
+	}
+	if len(mem.P50) != 2 || math.Abs(mem.P50[0]-30) > 1e-9 || math.Abs(mem.P50[1]-40) > 1e-9 {
+		t.Errorf("mem_used_pct P50 = %v, want [30 40]", mem.P50)
 	}
 }
 

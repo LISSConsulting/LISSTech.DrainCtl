@@ -101,6 +101,7 @@
         },
         {
             key: 'pagesPerSec',
+            p50Key: 'p50PagesPerSec',
             label: 'Pages/sec',
             unit: '/sec',
             thresholds: { warn: 80, crit: 150 },
@@ -112,6 +113,7 @@
         },
         {
             key: 'tcpRetrans',
+            p50Key: 'p50TcpRetrans',
             label: 'TCP Retrans',
             unit: '/sec',
             thresholds: { warn: 10, crit: 25 },
@@ -123,6 +125,7 @@
         },
         {
             key: 'diskQueue',
+            p50Key: 'p50DiskQueue',
             label: 'Avg Disk Queue',
             unit: '',
             thresholds: { warn: 2, crit: 5 },
@@ -292,8 +295,8 @@
      * sibling counters by timestamp rather than array index. Different
      * counters can have different T arrays when individual samples are
      * missing, so positional indexing mispairs them.
-     * @param {{t: number[], avg: number[], min: number[], max: number[]}|undefined} s
-     * @param {'avg'|'min'|'max'} [field]
+     * @param {{t: number[], avg: number[], min: number[], max: number[], p50: number[]}|undefined} s
+     * @param {'avg'|'min'|'max'|'p50'} [field]
      * @returns {Map<number, number>}
      */
     function tsMap(s, field = 'avg') {
@@ -307,7 +310,7 @@
 
     /**
      * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
+     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[], p50: number[]}>} series
      * @returns {import('../lib/state.svelte.js').MetricsSample[]}
      */
     function adaptFleetToMetricsSamples(series) {
@@ -324,8 +327,11 @@
         const idMap = tsMap(series['input_delay_p95_ms']);
         const idP50Map = tsMap(series['input_delay_p50_ms']);
         const psMap = tsMap(series['pages_sec']);
+        const psP50Map = tsMap(series['pages_sec'], 'p50');
         const trMap = tsMap(series['tcp_retrans_sec']);
+        const trP50Map = tsMap(series['tcp_retrans_sec'], 'p50');
         const dqMap = tsMap(series['disk_queue']);
+        const dqP50Map = tsMap(series['disk_queue'], 'p50');
         return cpu.t.map((ts) => {
             const cpuV = cpuAvg.get(ts) ?? 0;
             const cpuP95V = cpuMax.get(ts);
@@ -341,10 +347,10 @@
                 pagesPerSec: psMap.get(ts) ?? 0,
                 tcpRetrans: trMap.get(ts) ?? 0,
                 diskQueue: dqMap.get(ts) ?? 0,
-                p50InputDelay: idP50Map.get(ts) ?? 0,
-                p50PagesPerSec: 0,
-                p50TcpRetrans: 0,
-                p50DiskQueue: 0,
+                p50InputDelay: idP50Map.get(ts),
+                p50PagesPerSec: psP50Map.get(ts),
+                p50TcpRetrans: trP50Map.get(ts),
+                p50DiskQueue: dqP50Map.get(ts),
             };
         });
     }
