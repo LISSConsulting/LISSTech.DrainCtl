@@ -25,16 +25,13 @@ const (
 	// least 1e-12 in production).
 	negBinUnderflow = 1e-300
 	robustCapProb   = 0.99
-	// defaultSlotMaturityObservations sets the N threshold used by the
-	// dashboard badge (via detectorMature) and by ObserveBucket's
-	// slot-vs-global scoring fallback. ObserveBucket runs every 10 s, so
-	// one 15-minute visit to a slot contributes up to 90 observations;
-	// 90 means "this slot has been populated for at least one full
-	// time-of-day visit" before the UI claims the detector is HEALTHY
-	// and before scoring stops leaning on the global posterior. The
-	// previous value of 7 declared maturity after ~70 s of runtime —
-	// far too permissive for an anomaly baseline.
-	defaultSlotMaturityObservations = 90
+	// defaultSlotMaturityObservations is the fallback used when a caller
+	// constructs a Detector without passing the service-level setting.
+	// ObserveBucket runs every 10 seconds, so one 15-minute time-of-day slot
+	// receives at most 90 observations per day. Requiring 630 observations
+	// means seven daily visits before slot-specific scoring replaces the global
+	// posterior, matching the durable seven-day training contract.
+	defaultSlotMaturityObservations = 630
 )
 
 // GammaState holds the sufficient statistics of a Gamma(alpha, beta) posterior.

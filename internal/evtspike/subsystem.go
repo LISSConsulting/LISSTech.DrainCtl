@@ -158,6 +158,7 @@ type Subsystem struct {
 // New returns an unstarted Subsystem. cfg is assumed already clamped by
 // ClampEvtSpike on the caller.
 func New(cfg dc.EvtSpikeConfig, host string) *Subsystem {
+	cfg.ChannelCooldownMinutes = cloneCooldownOverrides(cfg.ChannelCooldownMinutes)
 	s := &Subsystem{
 		cfg:               cfg,
 		host:              host,
@@ -449,12 +450,10 @@ func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
 	if newCfg.HalfLifeBuckets > 0 {
 		newRho = math.Exp(-math.Ln2 / float64(newCfg.HalfLifeBuckets))
 	}
-	newCooldown := time.Duration(newCfg.CooldownMinutes) * time.Minute
-
-	for _, d := range s.detectors {
+	for channel, d := range s.detectors {
 		d.Cfg.MinCount = newCfg.MinCount
 		d.Cfg.Threshold = newCfg.Threshold
-		d.Cfg.Cooldown = newCooldown
+		d.Cfg.Cooldown = effectiveCooldown(newCfg, channel)
 		d.Cfg.SlotMaturityObservations = newCfg.SlotMaturityObservations
 		d.Cfg.Rho = newRho
 	}
@@ -462,6 +461,7 @@ func (s *Subsystem) Reload(newCfg dc.EvtSpikeConfig) error {
 	s.cfg.MinCount = newCfg.MinCount
 	s.cfg.Threshold = newCfg.Threshold
 	s.cfg.CooldownMinutes = newCfg.CooldownMinutes
+	s.cfg.ChannelCooldownMinutes = cloneCooldownOverrides(newCfg.ChannelCooldownMinutes)
 	s.cfg.SlotMaturityObservations = newCfg.SlotMaturityObservations
 	s.cfg.PersistIntervalSeconds = newCfg.PersistIntervalSeconds
 	s.cfg.HalfLifeBuckets = newCfg.HalfLifeBuckets
@@ -611,11 +611,27 @@ func (s *Subsystem) onSubscriptionLoss(channel string, err error) {
 	}
 }
 
+func effectiveCooldown(cfg dc.EvtSpikeConfig, channel string) time.Duration {
+	minutes := cfg.CooldownMinutes
+	if override, ok := cfg.ChannelCooldownMinutes[channel]; ok {
+		minutes = override
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func cloneCooldownOverrides(overrides map[string]int) map[string]int {
+	clone := make(map[string]int, len(overrides))
+	for channel, minutes := range overrides {
+		clone[channel] = minutes
+	}
+	return clone
+}
+
 func (s *Subsystem) buildDetector(bf *BaselineFile, channel string) *Detector {
 	cfg := DetectorConfig{
 		MinCount:                 s.cfg.MinCount,
 		Threshold:                s.cfg.Threshold,
-		Cooldown:                 time.Duration(s.cfg.CooldownMinutes) * time.Minute,
+		Cooldown:                 effectiveCooldown(s.cfg, channel),
 		SlotMaturityObservations: s.cfg.SlotMaturityObservations,
 	}
 	d := NewDetector(s.cfg.MeanPerBucketPrior, s.cfg.PriorStrength, float64(s.cfg.HalfLifeBuckets), cfg)
@@ -696,12 +712,21 @@ func (s *Subsystem) scoreOnce(now time.Time) {
 		s.mu.Lock()
 		d := s.detectors[ch]
 		c := s.counters[ch]
+		sub := s.subscriptions[ch]
 		if d == nil || c == nil {
 			s.mu.Unlock()
 			continue
 		}
 
+		// Events collected while a subscription is retrying or failed cannot
+		// represent a complete scoring bucket. Clear them so a recovery cannot
+		// turn stale accumulated events into a first-bucket spike, but leave
+		// the learned Gamma state untouched until the channel is subscribed.
 		count := int(c.Swap(0))
+		if sub == nil || sub.state != StateSubscribed {
+			s.mu.Unlock()
+			continue
+		}
 		r := d.ObserveBucket(now, count)
 
 		var payload *SpikePayload

@@ -140,7 +140,11 @@
                 x: xs(i, n),
                 y: ys(transform(/** @type {any} */ (h)[valueKey] ?? 0), sMax),
             }));
-            const bY = yChartBot.toFixed(1);
+            // Higher-is-better metrics (FPS and frame quality) fill downward
+            // from the chart ceiling; latency/error metrics fill upward from
+            // zero. This keeps the P50 envelope nested inside the worse P95
+            // envelope regardless of threshold direction.
+            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
             const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
             return { line, area };
@@ -158,7 +162,7 @@
                 x: xs(i, n),
                 y: ys(transform(/** @type {any} */ (h)[p50Key] ?? 0), sMax),
             }));
-            const bY = yChartBot.toFixed(1);
+            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
             const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
             return { line, area };
@@ -449,14 +453,15 @@
                     />
                 {/if}
 
-                <!-- ── Secondary stroke line ── -->
+                <!-- ── P50 stroke: dotted so it remains distinct from the solid P95 line ── -->
                 {#if p50Paths.line}
                     <path
                         d={p50Paths.line}
                         fill="none"
                         stroke-linejoin="round"
                         stroke-linecap="round"
-                        style="stroke: color-mix(in srgb, {color} 85%, black); stroke-width: 3.5"
+                        stroke-dasharray="2,6"
+                        style="stroke: color-mix(in srgb, {color} 85%, black); stroke-width: 3"
                     />
                 {/if}
 
@@ -517,10 +522,9 @@
                             cx={crosshairX.toFixed(1)}
                             cy={dotY.toFixed(1)}
                             r="4"
-                            fill={color}
-                            stroke="var(--color-bg)"
-                            stroke-width="2"
-                            opacity="0.7"
+                            fill="var(--color-card)"
+                            stroke={color}
+                            stroke-width="2.5"
                         />
                     {/if}
 
@@ -531,7 +535,7 @@
                             yChartTop + 2,
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
                         )}
-                        {@const hoverT = /** @type {any} */ ((history[displayIndex])?.[timeKey])}
+                        {@const hoverT = /** @type {any} */ (history[displayIndex]?.[timeKey])}
                         {@const timeStr = Number.isFinite(hoverT) ? formatTs(new Date(hoverT).toISOString()) : '—'}
 
                         <rect

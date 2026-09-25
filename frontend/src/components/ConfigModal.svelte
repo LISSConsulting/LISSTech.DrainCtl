@@ -41,6 +41,8 @@
     let loading = $state(true);
     let saving = $state(false);
     let testing = $state(false);
+    let channelCooldownDraft = $state('');
+    let channelCooldownError = $state('');
     let showConfirmClose = $state(false);
     let closing = $state(false);
     const CLOSE_MS = 150;
@@ -99,7 +101,8 @@
 
     let dirty = $derived.by(() => {
         if (!config || !original) return false;
-        return JSON.stringify(config) !== JSON.stringify(original);
+        const originalCooldowns = channelCooldownList(original.evtspike?.channel_cooldown_minutes);
+        return JSON.stringify(config) !== JSON.stringify(original) || channelCooldownDraft !== originalCooldowns;
     });
 
     // ---------------------------------------------------------------------------
@@ -214,9 +217,14 @@
             // when an older dashboard omitted them (defensive against future
             // backend rollbacks).
             if (snapshot.evtspike) {
+                snapshot.evtspike.channel_cooldown_minutes ??= {};
                 snapshot.evtspike.disabled_channels ??= [];
                 snapshot.evtspike.added_channels ??= [];
+                channelCooldownDraft = channelCooldownList(snapshot.evtspike.channel_cooldown_minutes);
+            } else {
+                channelCooldownDraft = '';
             }
+            channelCooldownError = '';
             config = snapshot;
             original = JSON.parse(JSON.stringify(snapshot));
         } catch (e) {
@@ -305,6 +313,9 @@
         const defaults = EVTSPIKE_PRESETS[1];
         for (const knob of EVTSPIKE_KNOBS) config.evtspike[knob.key] = defaults[knob.key];
         config.evtspike.enabled = false;
+        config.evtspike.channel_cooldown_minutes = {};
+        channelCooldownDraft = '';
+        channelCooldownError = '';
         config.evtspike.disabled_channels = [];
         config.evtspike.added_channels = [];
         config.evtspike.security_channel_enabled = false;
@@ -358,8 +369,14 @@
         if (e.min_count < 1 || e.min_count > 10000) return 'Min events per bucket must be 1–10000';
         if (e.threshold < 1e-9 || e.threshold > 0.1) return 'Anomaly tail probability must be 0.000000001–0.1';
         if (e.cooldown_minutes < 1 || e.cooldown_minutes > 1440) return 'Cooldown must be 1–1440 minutes';
-        if (e.slot_maturity_observations < 1 || e.slot_maturity_observations > 100) {
-            return 'Slot maturity must be 1–100 observations';
+        const overrides = e.channel_cooldown_minutes ?? {};
+        if (Object.keys(overrides).length > 256) return 'Channel cooldown overrides are limited to 256 entries';
+        for (const [channel, minutes] of Object.entries(overrides)) {
+            if (!channel.trim() || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
+                return 'Each channel cooldown must use a non-empty channel name and 1–1440 minutes';
+        }
+        if (e.slot_maturity_observations < 1 || e.slot_maturity_observations > 10000) {
+            return 'Slot maturity must be 1–10000 observations';
         }
         if (e.persist_interval_seconds < 60 || e.persist_interval_seconds > 86400) {
             return 'Persistence interval must be 60–86400 seconds';
@@ -483,10 +500,10 @@
             tagline: 'Fewer, higher-confidence alerts',
             min_count: 20,
             threshold: 1e-5,
-            cooldown_minutes: 30,
-            slot_maturity_observations: 100,
+            cooldown_minutes: 120,
+            slot_maturity_observations: 1260,
             persist_interval_seconds: 3600,
-            half_life_buckets: 720,
+            half_life_buckets: 1260,
             prior_strength: 120,
             mean_per_bucket_prior: 0.2,
         },
@@ -496,10 +513,10 @@
             tagline: 'Balanced production defaults',
             min_count: 10,
             threshold: 1e-4,
-            cooldown_minutes: 10,
-            slot_maturity_observations: 90,
+            cooldown_minutes: 60,
+            slot_maturity_observations: 630,
             persist_interval_seconds: 900,
-            half_life_buckets: 360,
+            half_life_buckets: 630,
             prior_strength: 60,
             mean_per_bucket_prior: 0.1,
         },
@@ -509,10 +526,10 @@
             tagline: 'Earlier, more frequent detection',
             min_count: 5,
             threshold: 1e-3,
-            cooldown_minutes: 5,
-            slot_maturity_observations: 30,
+            cooldown_minutes: 15,
+            slot_maturity_observations: 315,
             persist_interval_seconds: 300,
-            half_life_buckets: 120,
+            half_life_buckets: 315,
             prior_strength: 20,
             mean_per_bucket_prior: 0.05,
         },
@@ -548,9 +565,9 @@
             key: 'slot_maturity_observations',
             label: 'Slot maturity',
             help: 'Observations needed before a time-of-week baseline is trusted; higher values train longer.',
-            unit: 'observations (1–100)',
+            unit: 'observations (1–10000)',
             min: 1,
-            max: 100,
+            max: 10000,
         },
         {
             key: 'persist_interval_seconds',
@@ -619,6 +636,40 @@
             .filter(Boolean);
     }
 
+    function channelCooldownList(value) {
+        return Object.entries(value ?? {})
+            .map(([channel, minutes]) => `${channel}=${minutes}`)
+            .join('\n');
+    }
+
+    function parseChannelCooldowns(value) {
+        const overrides = {};
+        const lines = value.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const splitAt = line.lastIndexOf('=');
+            if (splitAt <= 0 || splitAt === line.length - 1) {
+                return { overrides, error: `Channel cooldown line ${i + 1} must be Channel=Minutes` };
+            }
+            const name = line.slice(0, splitAt).trim();
+            const minutes = Number(line.slice(splitAt + 1).trim());
+            if (!name || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+                return { overrides, error: `Channel cooldown line ${i + 1} must use an integer from 1–1440` };
+            }
+            overrides[name] = minutes;
+        }
+        return { overrides, error: '' };
+    }
+
+    function updateChannelCooldowns(value) {
+        if (!config?.evtspike) return;
+        channelCooldownDraft = value;
+        const parsed = parseChannelCooldowns(value);
+        channelCooldownError = parsed.error;
+        if (!parsed.error) config.evtspike.channel_cooldown_minutes = parsed.overrides;
+    }
+
     // ---------------------------------------------------------------------------
     // Validation & actions
     // ---------------------------------------------------------------------------
@@ -639,6 +690,10 @@
     async function save() {
         if (!config) return false;
         const err = validateThresholds() ?? validateEvtSpike();
+        if (channelCooldownError) {
+            toast.err(channelCooldownError);
+            return false;
+        }
         if (err) {
             toast.err(err);
             return false;
@@ -1406,6 +1461,23 @@
                                                         .map((s) => s.trim())
                                                         .filter(Boolean))}></textarea>
                                         </div>
+                                        <div class="evtspike-full-width">
+                                            <div class="settings-label">Channel cooldown overrides</div>
+                                            <div class="settings-hint">
+                                                Exact Windows Event Log channel name and cooldown minutes, one per line:
+                                                <code>Channel=Minutes</code>. Empty uses the global cooldown.
+                                            </div>
+                                            <textarea
+                                                class="settings-num evtspike-channels"
+                                                value={channelCooldownDraft}
+                                                oninput={(e) => updateChannelCooldowns(e.currentTarget.value)}
+                                            ></textarea>
+                                            {#if channelCooldownError}
+                                                <div class="settings-hint" style="color:var(--color-red)">
+                                                    {channelCooldownError}
+                                                </div>
+                                            {/if}
+                                        </div>
                                     </div>
                                     <label class="settings-check">
                                         <input
@@ -1563,7 +1635,7 @@
                 <!-- Actions bar -->
                 <div class="settings-actions-wrap">
                     <div class="settings-actions">
-                        <div style="display:flex;gap:8px">
+                        <div class="settings-actions-context">
                             <button
                                 type="button"
                                 class="btn-brutal btn-secondary"
@@ -1581,6 +1653,8 @@
                                     {testing ? 'Sending...' : 'Send Test'}
                                 </button>
                             {/if}
+                        </div>
+                        <div class="settings-actions-primary">
                             <button class="btn-brutal btn-save" onclick={save} disabled={saving || !dirty}>
                                 <Save size={14} />
                                 {saving ? 'Saving...' : 'Save'}
@@ -2143,6 +2217,15 @@
         justify-content: space-between;
         flex-wrap: wrap;
         gap: 12px;
+    }
+    .settings-actions-context,
+    .settings-actions-primary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .settings-actions-primary {
+        margin-left: auto;
     }
     .repeat-pills {
         display: flex;

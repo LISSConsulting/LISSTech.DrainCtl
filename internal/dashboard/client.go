@@ -422,13 +422,43 @@ func hostName() (string, error) {
 	return os.Hostname()
 }
 
-// RemoteEvtSpike is the dashboard's operator-safe evtspike view that agents
-// fetch via /api/v1/config. It mirrors the dashboard's evtspikeView one-to-one
-// so the wire format round-trips. baseline_path stays admin-only on the agent
-// side (lives in config.json) and is intentionally omitted. Every field is
-// writable by the dashboard; the agent simply overlays each knob on its
-// local EvtSpikeConfig per applyRemoteConfig.
-type RemoteEvtSpike = evtspikeView
+// RemoteEvtSpike is the agent-side representation of the operator-safe
+// evtspike view. ChannelCooldownMinutes is a pointer solely to preserve wire
+// presence: older dashboards omit the property (nil → keep local overrides),
+// while a newer dashboard's explicit {} clears every override.
+type RemoteEvtSpike struct {
+	Enabled                  bool            `json:"enabled"`
+	MinCount                 int             `json:"min_count"`
+	Threshold                float64         `json:"threshold"`
+	CooldownMinutes          int             `json:"cooldown_minutes"`
+	ChannelCooldownMinutes   *map[string]int `json:"channel_cooldown_minutes,omitempty"`
+	SlotMaturityObservations int             `json:"slot_maturity_observations"`
+	PersistIntervalSeconds   int             `json:"persist_interval_seconds"`
+	HalfLifeBuckets          int             `json:"half_life_buckets"`
+	PriorStrength            float64         `json:"prior_strength"`
+	MeanPerBucketPrior       float64         `json:"mean_per_bucket_prior"`
+	DisabledChannels         []string        `json:"disabled_channels"`
+	AddedChannels            []string        `json:"added_channels"`
+	SecurityChannelEnabled   bool            `json:"security_channel_enabled"`
+}
+
+func remoteEvtSpikeFromView(view evtspikeView) RemoteEvtSpike {
+	return RemoteEvtSpike{
+		Enabled:                  view.Enabled,
+		MinCount:                 view.MinCount,
+		Threshold:                view.Threshold,
+		CooldownMinutes:          view.CooldownMinutes,
+		ChannelCooldownMinutes:   &view.ChannelCooldownMinutes,
+		SlotMaturityObservations: view.SlotMaturityObservations,
+		PersistIntervalSeconds:   view.PersistIntervalSeconds,
+		HalfLifeBuckets:          view.HalfLifeBuckets,
+		PriorStrength:            view.PriorStrength,
+		MeanPerBucketPrior:       view.MeanPerBucketPrior,
+		DisabledChannels:         view.DisabledChannels,
+		AddedChannels:            view.AddedChannels,
+		SecurityChannelEnabled:   view.SecurityChannelEnabled,
+	}
+}
 
 // RemoteSettings holds dashboard settings fetched by the service agent. Every
 // field that the dashboard's ConfigModal edits must be represented here so

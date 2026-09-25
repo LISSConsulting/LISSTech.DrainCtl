@@ -465,3 +465,17 @@ func TestToDashboardCompletionPreservesCanonicalHost(t *testing.T) {
 		t.Errorf("Host = %q, want canonical checked host", completion.Host)
 	}
 }
+
+func TestOverlayEvtSpikeFromRemote_ChannelCooldownPresence(t *testing.T) {
+	local := &dc.EvtSpikeConfig{ChannelCooldownMinutes: map[string]int{"Application": 30}}
+	overlayEvtSpikeFromRemote(local, &dashboard.RemoteEvtSpike{})
+	if got := local.ChannelCooldownMinutes["Application"]; got != 30 {
+		t.Errorf("omitted channel cooldowns = %v, want local override preserved", local.ChannelCooldownMinutes)
+	}
+
+	empty := map[string]int{}
+	overlayEvtSpikeFromRemote(local, &dashboard.RemoteEvtSpike{ChannelCooldownMinutes: &empty})
+	if len(local.ChannelCooldownMinutes) != 0 {
+		t.Errorf("explicit empty channel cooldowns = %v, want cleared", local.ChannelCooldownMinutes)
+	}
+}

@@ -2225,10 +2225,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
   "enabled": true,
   "min_count": 10,
   "threshold": 1e-4,
-  "cooldown_minutes": 10,
-  "slot_maturity_observations": 90,
+  "cooldown_minutes": 60,
+  "channel_cooldown_minutes": {},
+  "slot_maturity_observations": 630,
   "persist_interval_seconds": 900,
-  "half_life_buckets": 360,
+  "half_life_buckets": 630,
   "prior_strength": 60.0,
   "mean_per_bucket_prior": 0.1,
   "security_channel_enabled": false,
@@ -2279,16 +2280,14 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     </tr>
                     <tr>
                         <td><code>cooldown_minutes</code></td>
-                        <td>10</td>
+                        <td>60</td>
                         <td>1 &ndash; 1440</td>
                         <td>
-                            After a confirmed spike fires on a channel, further spikes on the same channel are
-                            suppressed for this many minutes. Pair with your notification target's
-                            <code>repeat_minutes</code>: the detector cooldown gates the first fire; the target cooldown
-                            gates reminder notifications. Short cooldowns (<code>2</code>&ndash;<code>5</code>) are useful
-                            on channels where distinct incidents can arrive back-to-back (auth failure storms). Long
-                            cooldowns (<code>60</code>+) fit channels where a single incident produces a multi-hour
-                            burst (patch storms, scheduled backup windows).
+                            Default cooldown after a confirmed spike. Post-release EventSpike data showed 81% of
+                            repeats within one hour, so the steady value suppresses a single incident's repeat burst.
+                            Use <code>channel_cooldown_minutes</code> for up to 256 exact
+                            <code>Windows Event Log channel=minutes</code> overrides; an empty object uses this
+                            global value for every channel.
                         </td>
                     </tr>
                 </tbody>

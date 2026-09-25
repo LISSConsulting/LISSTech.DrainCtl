@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,16 +67,16 @@ const (
 	DefaultEvtSpikeThreshold                = 1e-4
 	MinEvtSpikeThreshold                    = 1e-9
 	MaxEvtSpikeThreshold                    = 0.1
-	DefaultEvtSpikeCooldownMinutes          = 10
+	DefaultEvtSpikeCooldownMinutes          = 60
 	MinEvtSpikeCooldownMinutes              = 1
 	MaxEvtSpikeCooldownMinutes              = 1440
-	DefaultEvtSpikeSlotMaturityObservations = 90
+	DefaultEvtSpikeSlotMaturityObservations = 630
 	MinEvtSpikeSlotMaturityObservations     = 1
-	MaxEvtSpikeSlotMaturityObservations     = 100
+	MaxEvtSpikeSlotMaturityObservations     = 10000
 	DefaultEvtSpikePersistIntervalSeconds   = 900
 	MinEvtSpikePersistIntervalSeconds       = 60
 	MaxEvtSpikePersistIntervalSeconds       = 86400
-	DefaultEvtSpikeHalfLifeBuckets          = 360
+	DefaultEvtSpikeHalfLifeBuckets          = 630
 	MinEvtSpikeHalfLifeBuckets              = 60
 	MaxEvtSpikeHalfLifeBuckets              = 10000
 	DefaultEvtSpikePriorStrength            = 60.0
@@ -244,19 +245,20 @@ type TelemetryConfig struct {
 // EvtSpikeConfig holds event-log anomaly detection settings. Zero value is
 // fully disabled; numeric fields are promoted to defaults by ClampEvtSpike.
 type EvtSpikeConfig struct {
-	Enabled                  bool     `json:"enabled"`
-	MinCount                 int      `json:"min_count"`
-	Threshold                float64  `json:"threshold"`
-	CooldownMinutes          int      `json:"cooldown_minutes"`
-	SlotMaturityObservations int      `json:"slot_maturity_observations"`
-	PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
-	HalfLifeBuckets          int      `json:"half_life_buckets"`
-	PriorStrength            float64  `json:"prior_strength"`
-	MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
-	BaselinePath             string   `json:"baseline_path"`
-	DisabledChannels         []string `json:"disabled_channels"`
-	AddedChannels            []string `json:"added_channels"`
-	SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
+	Enabled                  bool           `json:"enabled"`
+	MinCount                 int            `json:"min_count"`
+	Threshold                float64        `json:"threshold"`
+	CooldownMinutes          int            `json:"cooldown_minutes"`
+	ChannelCooldownMinutes   map[string]int `json:"channel_cooldown_minutes"`
+	SlotMaturityObservations int            `json:"slot_maturity_observations"`
+	PersistIntervalSeconds   int            `json:"persist_interval_seconds"`
+	HalfLifeBuckets          int            `json:"half_life_buckets"`
+	PriorStrength            float64        `json:"prior_strength"`
+	MeanPerBucketPrior       float64        `json:"mean_per_bucket_prior"`
+	BaselinePath             string         `json:"baseline_path"`
+	DisabledChannels         []string       `json:"disabled_channels"`
+	AddedChannels            []string       `json:"added_channels"`
+	SecurityChannelEnabled   bool           `json:"security_channel_enabled"`
 }
 
 // Config is the top-level config file structure (config.json).
@@ -380,7 +382,7 @@ func DefaultConfig() *Config {
 		Performance:             PerformanceConfig{CollectPerSession: true},
 		Retention:               RetentionConfig{MetricsDays: DefaultMetricsDays, AuditDays: DefaultAuditDays},
 		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
-		EvtSpike:                EvtSpikeConfig{DisabledChannels: []string{}, AddedChannels: []string{}},
+		EvtSpike:                EvtSpikeConfig{ChannelCooldownMinutes: map[string]int{}, DisabledChannels: []string{}, AddedChannels: []string{}},
 		Update:                  UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
 	}
 }
@@ -766,6 +768,57 @@ func ClampEvtSpike(cfg *EvtSpikeConfig) {
 	if cfg.AddedChannels == nil {
 		cfg.AddedChannels = []string{}
 	}
+	normalizeEvtSpikeChannelCooldowns(cfg)
+}
+
+// normalizeEvtSpikeChannelCooldowns canonicalizes direct config-file values.
+// Keys are sorted before trimming. If two keys trim to the same exact channel
+// name, the lexicographically first raw key wins and later keys are discarded;
+// dashboard patches reject that ambiguity before persistence.
+func normalizeEvtSpikeChannelCooldowns(cfg *EvtSpikeConfig) {
+	if len(cfg.ChannelCooldownMinutes) == 0 {
+		cfg.ChannelCooldownMinutes = map[string]int{}
+		return
+	}
+
+	keys := make([]string, 0, len(cfg.ChannelCooldownMinutes))
+	for channel := range cfg.ChannelCooldownMinutes {
+		keys = append(keys, channel)
+	}
+	sort.Strings(keys)
+
+	normalized := make(map[string]int, len(keys))
+	for _, rawChannel := range keys {
+		channel := strings.TrimSpace(rawChannel)
+		if channel == "" {
+			slog.Default().Warn("evtspike: ignoring blank channel cooldown override")
+			continue
+		}
+		if _, duplicate := normalized[channel]; duplicate {
+			slog.Default().Warn("evtspike: ignoring duplicate normalized channel cooldown override", "channel", channel)
+			continue
+		}
+		if len(normalized) >= 256 {
+			slog.Default().Warn("evtspike: ignoring channel cooldown overrides above limit", "max", 256)
+			break
+		}
+		normalized[channel] = clampIntField(
+			"channel_cooldown_minutes["+channel+"]",
+			cfg.ChannelCooldownMinutes[rawChannel],
+			DefaultEvtSpikeCooldownMinutes,
+			MinEvtSpikeCooldownMinutes,
+			MaxEvtSpikeCooldownMinutes,
+		)
+	}
+	cfg.ChannelCooldownMinutes = normalized
+}
+
+func cloneChannelCooldownMinutes(overrides map[string]int) map[string]int {
+	clone := make(map[string]int, len(overrides))
+	for channel, minutes := range overrides {
+		clone[channel] = minutes
+	}
+	return clone
 }
 
 func clampIntField(name string, v, def, min, max int) int {
@@ -917,6 +970,7 @@ func cloneConfig(cfg *Config) *Config {
 	}
 	clone.EvtSpike.DisabledChannels = slices.Clone(cfg.EvtSpike.DisabledChannels)
 	clone.EvtSpike.AddedChannels = slices.Clone(cfg.EvtSpike.AddedChannels)
+	clone.EvtSpike.ChannelCooldownMinutes = cloneChannelCooldownMinutes(cfg.EvtSpike.ChannelCooldownMinutes)
 	if autoPin := cfg.Dashboard.AutoPin; autoPin != nil {
 		value := *autoPin
 		clone.Dashboard.AutoPin = &value
@@ -1244,18 +1298,19 @@ func UpdateEvtSpikeEnabled(enabled *bool) error {
 // Admin-only fields (BaselinePath) are not exposed here; editing them
 // requires editing config.json directly.
 type EvtSpikeConfigPatch struct {
-	Enabled                  *bool     `json:"enabled,omitempty"`
-	MinCount                 *int      `json:"min_count,omitempty"`
-	Threshold                *float64  `json:"threshold,omitempty"`
-	CooldownMinutes          *int      `json:"cooldown_minutes,omitempty"`
-	SlotMaturityObservations *int      `json:"slot_maturity_observations,omitempty"`
-	PersistIntervalSeconds   *int      `json:"persist_interval_seconds,omitempty"`
-	HalfLifeBuckets          *int      `json:"half_life_buckets,omitempty"`
-	PriorStrength            *float64  `json:"prior_strength,omitempty"`
-	MeanPerBucketPrior       *float64  `json:"mean_per_bucket_prior,omitempty"`
-	DisabledChannels         *[]string `json:"disabled_channels,omitempty"`
-	AddedChannels            *[]string `json:"added_channels,omitempty"`
-	SecurityChannelEnabled   *bool     `json:"security_channel_enabled,omitempty"`
+	Enabled                  *bool           `json:"enabled,omitempty"`
+	MinCount                 *int            `json:"min_count,omitempty"`
+	Threshold                *float64        `json:"threshold,omitempty"`
+	CooldownMinutes          *int            `json:"cooldown_minutes,omitempty"`
+	ChannelCooldownMinutes   *map[string]int `json:"channel_cooldown_minutes,omitempty"`
+	SlotMaturityObservations *int            `json:"slot_maturity_observations,omitempty"`
+	PersistIntervalSeconds   *int            `json:"persist_interval_seconds,omitempty"`
+	HalfLifeBuckets          *int            `json:"half_life_buckets,omitempty"`
+	PriorStrength            *float64        `json:"prior_strength,omitempty"`
+	MeanPerBucketPrior       *float64        `json:"mean_per_bucket_prior,omitempty"`
+	DisabledChannels         *[]string       `json:"disabled_channels,omitempty"`
+	AddedChannels            *[]string       `json:"added_channels,omitempty"`
+	SecurityChannelEnabled   *bool           `json:"security_channel_enabled,omitempty"`
 }
 
 // ValidateEvtSpikePatch returns an error describing the first out-of-range
@@ -1300,6 +1355,25 @@ func ValidateEvtSpikePatch(patch *EvtSpikeConfigPatch) error {
 	if patch.AddedChannels != nil && len(*patch.AddedChannels) > 256 {
 		return fmt.Errorf("evtspike.added_channels: too many entries (max 256)")
 	}
+	if v := patch.ChannelCooldownMinutes; v != nil {
+		if len(*v) > 256 {
+			return fmt.Errorf("evtspike.channel_cooldown_minutes: too many entries (max 256)")
+		}
+		normalized := make(map[string]struct{}, len(*v))
+		for channel, minutes := range *v {
+			channel = strings.TrimSpace(channel)
+			if channel == "" {
+				return fmt.Errorf("evtspike.channel_cooldown_minutes: channel name must not be blank")
+			}
+			if _, duplicate := normalized[channel]; duplicate {
+				return fmt.Errorf("evtspike.channel_cooldown_minutes: duplicate normalized channel %q", channel)
+			}
+			normalized[channel] = struct{}{}
+			if minutes < MinEvtSpikeCooldownMinutes || minutes > MaxEvtSpikeCooldownMinutes {
+				return fmt.Errorf("evtspike.channel_cooldown_minutes[%q] must be %d-%d", channel, MinEvtSpikeCooldownMinutes, MaxEvtSpikeCooldownMinutes)
+			}
+		}
+	}
 	return nil
 }
 
@@ -1322,6 +1396,9 @@ func ApplyEvtSpikePatch(dst *EvtSpikeConfig, patch *EvtSpikeConfigPatch) {
 	}
 	if patch.CooldownMinutes != nil {
 		dst.CooldownMinutes = *patch.CooldownMinutes
+	}
+	if patch.ChannelCooldownMinutes != nil {
+		dst.ChannelCooldownMinutes = cloneChannelCooldownMinutes(*patch.ChannelCooldownMinutes)
 	}
 	if patch.SlotMaturityObservations != nil {
 		dst.SlotMaturityObservations = *patch.SlotMaturityObservations
@@ -1369,6 +1446,7 @@ func IsEvtSpikePatchEmpty(patch *EvtSpikeConfigPatch) bool {
 		patch.HalfLifeBuckets == nil &&
 		patch.PriorStrength == nil &&
 		patch.MeanPerBucketPrior == nil &&
+		patch.ChannelCooldownMinutes == nil &&
 		patch.DisabledChannels == nil &&
 		patch.AddedChannels == nil &&
 		patch.SecurityChannelEnabled == nil

@@ -1089,6 +1089,7 @@ function handleRequest(method, pathname, body, query = {}) {
             const avg = [];
             const min = [];
             const max = [];
+            const p50 = [];
             for (const { time, samples } of windowed) {
                 const vals = [];
                 for (const s of samples) {
@@ -1105,7 +1106,11 @@ function handleRequest(method, pathname, body, query = {}) {
                     if (v < lo) lo = v;
                     if (v > hi) hi = v;
                 }
+                vals.sort((a, b) => a - b);
+                const mid = Math.floor(vals.length / 2);
+                const median = vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid];
                 t.push(time);
+                p50.push(Math.round(median * 10) / 10);
                 if (isSummable) {
                     // Sessions-family counters: fleet row is the SUM; min/max collapse
                     // to the sum since per-host spread is not meaningful for a count.
@@ -1121,7 +1126,7 @@ function handleRequest(method, pathname, body, query = {}) {
                 }
             }
             if (t.length === 0) continue;
-            series[counter] = { t, avg, min, max };
+            series[counter] = { t, avg, min, max, p50 };
         }
         const oldest = oldestTime !== null ? new Date(oldestTime).toISOString() : null;
         const newest = newestTime !== null ? new Date(newestTime).toISOString() : null;

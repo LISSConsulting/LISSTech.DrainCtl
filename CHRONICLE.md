@@ -33,6 +33,15 @@
   hints, channel-list textareas, and a "Reset to defaults" button. The
   new validation is wired into `save()` alongside the existing performance
   threshold check.
+- Post-release EventSpike evidence changed Steady defaults to a 60-minute
+  cooldown and 630 slot-maturity/half-life buckets: 81% of repeats arrived
+  within an hour and a busy slot receives 90 observations/day, so 630 is seven
+  same-slot visits. `channel_cooldown_minutes` adds up to 256 trimmed exact
+  Windows Event Log channel overrides, propagated through dashboard GET/PUT,
+  SSE, remote config, reload, and the `Channel=Minutes` editor. Reload updates
+  detector cooldowns without resetting learned Gamma state. Retrying/failed
+  subscriptions now clear their counters but never observe or mature buckets,
+  preventing stale-event spikes after recovery.
 - Status-pill semantics are documented in `specs/008-sqlite-chart-consumers/
   evtspike-defaults-analysis.md`. The owner selected a durable seven-day
   warm-up: status remains `training` until the elapsed-time and existing
