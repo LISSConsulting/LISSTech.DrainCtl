@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -770,17 +771,31 @@ func ClampEvtSpike(cfg *EvtSpikeConfig) {
 	normalizeEvtSpikeChannelCooldowns(cfg)
 }
 
+// normalizeEvtSpikeChannelCooldowns canonicalizes direct config-file values.
+// Keys are sorted before trimming. If two keys trim to the same exact channel
+// name, the lexicographically first raw key wins and later keys are discarded;
+// dashboard patches reject that ambiguity before persistence.
 func normalizeEvtSpikeChannelCooldowns(cfg *EvtSpikeConfig) {
 	if len(cfg.ChannelCooldownMinutes) == 0 {
 		cfg.ChannelCooldownMinutes = map[string]int{}
 		return
 	}
 
-	normalized := make(map[string]int, len(cfg.ChannelCooldownMinutes))
-	for channel, minutes := range cfg.ChannelCooldownMinutes {
-		channel = strings.TrimSpace(channel)
+	keys := make([]string, 0, len(cfg.ChannelCooldownMinutes))
+	for channel := range cfg.ChannelCooldownMinutes {
+		keys = append(keys, channel)
+	}
+	sort.Strings(keys)
+
+	normalized := make(map[string]int, len(keys))
+	for _, rawChannel := range keys {
+		channel := strings.TrimSpace(rawChannel)
 		if channel == "" {
 			slog.Default().Warn("evtspike: ignoring blank channel cooldown override")
+			continue
+		}
+		if _, duplicate := normalized[channel]; duplicate {
+			slog.Default().Warn("evtspike: ignoring duplicate normalized channel cooldown override", "channel", channel)
 			continue
 		}
 		if len(normalized) >= 256 {
@@ -789,7 +804,7 @@ func normalizeEvtSpikeChannelCooldowns(cfg *EvtSpikeConfig) {
 		}
 		normalized[channel] = clampIntField(
 			"channel_cooldown_minutes["+channel+"]",
-			minutes,
+			cfg.ChannelCooldownMinutes[rawChannel],
 			DefaultEvtSpikeCooldownMinutes,
 			MinEvtSpikeCooldownMinutes,
 			MaxEvtSpikeCooldownMinutes,
@@ -1344,10 +1359,16 @@ func ValidateEvtSpikePatch(patch *EvtSpikeConfigPatch) error {
 		if len(*v) > 256 {
 			return fmt.Errorf("evtspike.channel_cooldown_minutes: too many entries (max 256)")
 		}
+		normalized := make(map[string]struct{}, len(*v))
 		for channel, minutes := range *v {
-			if strings.TrimSpace(channel) == "" {
+			channel = strings.TrimSpace(channel)
+			if channel == "" {
 				return fmt.Errorf("evtspike.channel_cooldown_minutes: channel name must not be blank")
 			}
+			if _, duplicate := normalized[channel]; duplicate {
+				return fmt.Errorf("evtspike.channel_cooldown_minutes: duplicate normalized channel %q", channel)
+			}
+			normalized[channel] = struct{}{}
 			if minutes < MinEvtSpikeCooldownMinutes || minutes > MaxEvtSpikeCooldownMinutes {
 				return fmt.Errorf("evtspike.channel_cooldown_minutes[%q] must be %d-%d", channel, MinEvtSpikeCooldownMinutes, MaxEvtSpikeCooldownMinutes)
 			}

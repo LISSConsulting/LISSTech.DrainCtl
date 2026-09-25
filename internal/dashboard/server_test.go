@@ -5863,7 +5863,10 @@ func TestGetSettings_RemoteConfigCarriesEvtSpikeAndExclusions(t *testing.T) {
 	if settings.EvtSpike == nil || !settings.EvtSpike.Enabled {
 		t.Fatal("evtspike settings missing or disabled")
 	}
-	if got := settings.EvtSpike.ChannelCooldownMinutes["Application"]; got != 30 {
+	if settings.EvtSpike.ChannelCooldownMinutes == nil {
+		t.Fatal("channel cooldown presence missing from in-process settings")
+	}
+	if got := (*settings.EvtSpike.ChannelCooldownMinutes)["Application"]; got != 30 {
 		t.Errorf("channel cooldown = %d, want 30", got)
 	}
 }
