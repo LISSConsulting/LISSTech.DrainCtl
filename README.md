@@ -337,9 +337,9 @@ Both accept `debug`, `info`, `warn`, `error`. CLI verbosity is separate (`--log-
 
 ### Dashboard-authoritative configuration
 
-For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, **Servers**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, fleet controls, and automatic-update policy. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
+For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, **Servers**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, removed-server recovery, and automatic-update policy. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
 
-The **Servers** tab keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and restore durable tombstones from the same tab. A removed agent cannot re-register until restored.
+The live **Servers** view keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and issue Force Update. Durable tombstones are listed and restored under **Config → Servers**. A removed agent cannot re-register until restored.
 
 ---
 
@@ -635,9 +635,9 @@ The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now retu
 
 LayerCake + Svelte 5 frontend embedded into the service binary:
 
-- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / disk queue), **Fleet Health Indicators** (input delay and session utilization), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host).
+- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / Sessions), **Health Indicators** (input delay, pages/sec, TCP retransmits, disk queue), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host).
 - **Windows** — use `5M`, `15M` where the chart has sufficient source resolution, `1H`, `1D`, `3D`, `5D`, or `30D`. SQLite retained telemetry, not browser-local history, supplies the series.
-- **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values.
+- **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values. Fleet Health Indicator P50 is the exact median across participating hosts for each bucket.
 - **Server Detail** — Host Load combines the host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes.
 - **Offline detection** — a registered host becomes offline after three consecutive expected heartbeats are missed. The timeout follows `poll_interval` (for example, 3 minutes at a 60-second interval).
 

@@ -2169,17 +2169,15 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
 
             <h3>Enable the detector</h3>
             <p>
-                Open the dashboard, click the <strong>gear icon</strong>, scroll to the
-                <em>Event Log Anomaly Detection</em> group, and tick <strong>Enable detector</strong>. The change
-                propagates to every connected agent on the next pull and takes effect without a service restart.
+                Open <strong>Config → Event Spikes</strong> and choose <strong>Chill</strong>,
+                <strong>Steady</strong>, or <strong>Vigilant</strong>. Each preset enables the detector and activates
+                the corresponding per-knob value pills. Every operator-safe field remains visible below the presets.
             </p>
             <p>
-                Subscribed channels default to <code>Application</code>, <code>System</code>, and
-                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Choose the
-                <strong>Chill</strong>, <strong>Steady</strong>, or <strong>Vigilant</strong> preset, or use
-                <em>Customize settings manually</em> for fine-grained control. Every preset enables the detector.
-                <code>baseline_path</code> is the only local-only field and remains under <code>"evtspike"</code> in
-                the local agent configuration; it is never propagated by the dashboard.
+                The detector requests a curated set of 54 Windows channels covering Application, System, FSLogix,
+                authentication, SMB, RDS, printing, profiles, DNS, WMI, Defender, and related operational logs.
+                Channels unavailable on a host remain retrying/failed and do not mature a zero-event baseline.
+                <code>baseline_path</code> is the only local-only field; the dashboard never overwrites it.
             </p>
 
             <h3>Dashboard display</h3>
@@ -2241,8 +2239,8 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <code>threshold=1e-4</code>, <code>cooldown_minutes=60</code>,
                 <code>slot_maturity_observations=630</code>, <code>persist_interval_seconds=900</code>,
                 <code>half_life_buckets=630</code>, <code>prior_strength=60</code>, and
-                <code>mean_per_bucket_prior=0.1</code>. Chill trades stricter suppression for more operator visibility;
-                Vigilant tightens the response posture. Use manual fields when a preset is not the right fit.
+                <code>mean_per_bucket_prior=0.1</code>. Chill reduces alert frequency; Vigilant responds earlier and
+                more often. Every knob remains visible and can be set independently of a preset.
             </p>
 
             <p>A complete Steady block:</p>
@@ -2251,7 +2249,7 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
   "min_count": 10,
   "threshold": 1e-4,
   "cooldown_minutes": 60,
-  "channel_cooldown_minutes": [],
+  "channel_cooldown_minutes": {},
   "slot_maturity_observations": 630,
   "persist_interval_seconds": 900,
   "half_life_buckets": 630,
@@ -2486,12 +2484,13 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
   "enabled": true,
   "min_count": 25,
   "threshold": 1e-6,
-  "cooldown_minutes": 10
+  "cooldown_minutes": 120
 }</code></pre>
             <p>
                 Higher <code>min_count</code> filters out small deviations. Tighter <code>threshold</code> demands
-                extreme tail events. Steady's <code>slot_maturity_observations = 630</code> requires substantially more
-                channel evidence before it is mature; warm-up detection remains active throughout.
+                extreme tail events. A longer cooldown collapses repeated bursts from the same channel. Steady's
+                <code>slot_maturity_observations = 630</code> requires seven daily visits before a time-of-day slot
+                replaces the global posterior; warm-up detection remains active throughout.
             </p>
 
             <h4>Noisy-channel surgery (keep the rest, tame the one)</h4>
