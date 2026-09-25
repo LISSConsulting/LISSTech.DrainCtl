@@ -1059,6 +1059,7 @@ func (s *MetricsStore) populateFleetP50(
 		bucket  int64
 		values  []float64
 	}
+	p50ByCounter := make(map[string]map[int64]float64)
 	var current group
 	flush := func() {
 		if len(current.values) == 0 {
@@ -1078,7 +1079,10 @@ func (s *MetricsStore) populateFleetP50(
 		if len(current.values)%2 == 0 {
 			p50 = (current.values[mid-1] + p50) / 2
 		}
-		cs.P50 = append(cs.P50, p50)
+		if p50ByCounter[current.counter] == nil {
+			p50ByCounter[current.counter] = make(map[int64]float64)
+		}
+		p50ByCounter[current.counter][current.bucket] = p50
 	}
 	for rows.Next() {
 		var bucket int64
@@ -1098,6 +1102,35 @@ func (s *MetricsStore) populateFleetP50(
 	flush()
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	for counter, cs := range sr.Data {
+		if counter == MemUsedPctCounter {
+			continue
+		}
+		medians := p50ByCounter[counter]
+		if cap(cs.P50) < len(cs.T) {
+			cs.P50 = make([]float64, len(cs.T))
+		} else {
+			cs.P50 = cs.P50[:len(cs.T)]
+		}
+		out := 0
+		for i, ts := range cs.T {
+			p50, ok := medians[ts]
+			if !ok {
+				continue
+			}
+			cs.T[out] = ts
+			cs.Avg[out] = cs.Avg[i]
+			cs.Min[out] = cs.Min[i]
+			cs.Max[out] = cs.Max[i]
+			cs.P50[out] = p50
+			out++
+		}
+		cs.T = cs.T[:out]
+		cs.Avg = cs.Avg[:out]
+		cs.Min = cs.Min[:out]
+		cs.Max = cs.Max[:out]
+		cs.P50 = cs.P50[:out]
 	}
 	return nil
 }
