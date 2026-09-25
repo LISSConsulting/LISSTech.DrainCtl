@@ -16,10 +16,40 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
+// exclusionReader is the narrow contract ServerState uses to gate
+// re-registration against a tombstone. Production code supplies
+// *telemetry.RemovalStore; tests may pass an in-memory stub via
+// SetExclusionReader.
+type exclusionReader interface {
+	IsExcluded(ctx context.Context, hostname string) (bool, error)
+}
+
+// removalWriter is the narrow contract ServerState uses for permanent-remove
+// and restore. Production code supplies *telemetry.RemovalStore; the same
+// stub used as exclusionReader MAY implement both. Embedding exclusionReader
+// here means a single *telemetry.RemovalStore instance can be passed to
+// SetExclusionReader AND SetRemovalWriter without an extra adapter.
+type removalWriter interface {
+	exclusionReader
+	Exclude(ctx context.Context, hostname, by, reason string) error
+	PermanentRemove(ctx context.Context, hostname, by, reason string) error
+	RegisterIfNotExcluded(ctx context.Context, hostname string) (accepted, excluded bool, err error)
+	Restore(ctx context.Context, hostname string) (bool, error)
+	AllExcluded(ctx context.Context) ([]telemetry.RemovalEntry, error)
+}
+
 // serverStoreOpTimeout bounds every underlying SQLite call so a pathological
 // lock or disk stall can't wedge an HTTP handler. Matches the 5 s envelope
 // used for metrics Append in Subsystem.Start.
 const serverStoreOpTimeout = 5 * time.Second
+
+type registrationResult uint8
+
+const (
+	registrationFailed registrationResult = iota
+	registrationAccepted
+	registrationExcluded
+)
 
 // ServerInfo describes a registered server and its last known state. JSON
 // field names are the dashboard wire contract — do not change without a
@@ -36,6 +66,16 @@ type ServerInfo struct {
 // Replaces the pre-009 servers.json file-based implementation.
 type ServerState struct {
 	store serverReader
+
+	// exclusions is the durable tombstone store used to gate re-registration
+	// against permanently-removed servers. May be nil for callers that do not
+	// want this gate (e.g. tests for the legacy behavior). SetExclusionReader
+	// is the safe way to attach a real *telemetry.RemovalStore in production.
+	exclusions exclusionReader
+	// removals is the durable tombstone store used for permanent-remove and
+	// restore mutations. May be nil alongside exclusions; when set, both
+	// references should point at the same *telemetry.RemovalStore instance.
+	removals removalWriter
 
 	// cache holds the most recent immutable *ServerInfo per host. Populated by
 	// Update after a successful DB write; consulted by GetCached on the SSE
@@ -83,6 +123,36 @@ type ServerState struct {
 	// DashboardServer's remote-status cache so the pull function can answer
 	// for non-local hosts. Zero value when the host has never reported.
 	GetRemoteEvtSpikeStatus func(host string) evtspike.DetectorStatus
+
+	// ConsumeForceUpdate returns the next queued force-update command for
+	// the named host. Wired by Subsystem.Start to a closure over
+	// ds.forceUpdates.Consume so the local-report path (svcRunCheck
+	// runs in the same process as the dashboard) can pull the pending
+	// command without going through HTTP. Returns nil when the registry
+	// has nothing queued; caller's ForceUpdate code path then no-ops.
+	ConsumeForceUpdate func(host string) *ForceUpdatePendingCommand
+
+	// OnLocalForceUpdateCompletion, if non-nil, is called by ReportLocal
+	// with the parsed force-update completion payload when the local
+	// agent posts a `force_update` block alongside its heartbeat. Wired
+	// by Subsystem.Start so the same dashboard-side SSE broadcast runs
+	// for both the remote-report path (handleReport) and the local-report
+	// path (ReportLocal). Without this hook, a local agent that finishes
+	// a forced update would never emit a force_update SSE event because
+	// the HTTP report path is bypassed entirely.
+	OnLocalForceUpdateCompletion func(payload ForceUpdateCompletionPayload)
+}
+
+// GetConsumeForceUpdate returns the wired ConsumeForceUpdate closure.
+// Exported accessor used by the local-report path's svc loop to pull
+// the next pending force-update command from the dashboard's
+// in-process registry. The accessor is exported because the
+// dashboard-side registry types are package-private and the svc loop
+// lives in a different package; the closure itself returns the
+// wire-side ForceUpdatePendingCommand so consumers don't need access
+// to the registry's internal struct layout.
+func (s *ServerState) GetConsumeForceUpdate() func(string) *ForceUpdatePendingCommand {
+	return s.ConsumeForceUpdate
 }
 
 // NewServerState wraps a serverReader (typically *telemetry.ServerStore) with
@@ -92,20 +162,84 @@ func NewServerState(store serverReader) *ServerState {
 	return &ServerState{store: store}
 }
 
-// Register adds (or re-registers) a hostname. Idempotent — re-registering an
-// existing host preserves its original RegisteredAt timestamp.
-func (s *ServerState) Register(hostname string) {
+// SetExclusionReader wires the durable tombstone gate. Once set, Register
+// rejects re-registration of any host that has an entry in the exclusion
+// store; IsExcluded can be checked directly via ServerState.IsExcluded().
+// Typically called once at Subsystem.Start with a *telemetry.RemovalStore.
+func (s *ServerState) SetExclusionReader(r exclusionReader) {
+	s.exclusions = r
+}
+
+// SetRemovalWriter wires the durable tombstone store used by the
+// permanent-remove / restore HTTP handlers. Typically called once at
+// Subsystem.Start with the same *telemetry.RemovalStore passed to
+// SetExclusionReader.
+func (s *ServerState) SetRemovalWriter(w removalWriter) {
+	s.removals = w
+}
+
+// IsExcluded returns true if hostname has a tombstone. Mirrors
+// exclusionReader.IsExcluded for handler-side checks; returns false when no
+// exclusion store has been wired (preserves legacy behavior in tests).
+func (s *ServerState) IsExcluded(hostname string) bool {
+	hostname = telemetry.CanonicalHostname(hostname)
+	if s.exclusions == nil {
+		return false
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
-	if err := s.store.Register(ctx, hostname); err != nil {
-		slog.Error("dashboard: register failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+	excluded, err := s.exclusions.IsExcluded(ctx, hostname)
+	if err != nil {
+		slog.Error("dashboard: is_excluded failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
+		return false
 	}
+	return excluded
+}
+
+// Register adds (or re-registers) a hostname. Its result tells the HTTP
+// handler whether the durable tombstone gate accepted, rejected, or could not
+// persist the registration.
+func (s *ServerState) Register(hostname string) registrationResult {
+	hostname = telemetry.CanonicalHostname(hostname)
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	if s.removals != nil {
+		accepted, excluded, err := s.removals.RegisterIfNotExcluded(ctx, hostname)
+		if err != nil {
+			slog.Error("dashboard: register failed", "host", hostname, "error", err) //nolint:gosec
+			return registrationFailed
+		}
+		if excluded {
+			return registrationExcluded
+		}
+		if accepted {
+			return registrationAccepted
+		}
+		return registrationFailed
+	}
+	if s.exclusions != nil {
+		excluded, err := s.exclusions.IsExcluded(ctx, hostname)
+		if err != nil {
+			slog.Error("dashboard: register pre-check failed", "host", hostname, "error", err) //nolint:gosec
+			return registrationFailed
+		}
+		if excluded {
+			return registrationExcluded
+		}
+	}
+	if err := s.store.Register(ctx, hostname); err != nil {
+		slog.Error("dashboard: register failed", "host", hostname, "error", err) //nolint:gosec
+		return registrationFailed
+	}
+	return registrationAccepted
 }
 
 // Remove deletes a server by hostname. Returns true if found. Invalidates the
 // per-host cache so a subsequent re-register starts from a clean slate and a
 // stale cached *ServerInfo can't outlive the row it described.
 func (s *ServerState) Remove(hostname string) bool {
+	hostname = telemetry.CanonicalHostname(hostname)
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
 	found, err := s.store.Remove(ctx, hostname)
@@ -122,6 +256,7 @@ func (s *ServerState) Remove(hostname string) bool {
 // and returns false — denying the calling handler is safer than falsely
 // accepting an unregistered host.
 func (s *ServerState) IsRegistered(hostname string) bool {
+	hostname = telemetry.CanonicalHostname(hostname)
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
 	ok, err := s.store.IsRegistered(ctx, hostname)
@@ -151,6 +286,16 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 // On store.Update error the cache is left untouched: a failed write must not
 // poison the cache with an unpersisted snapshot.
 func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
+	hostname = telemetry.CanonicalHostname(hostname)
+	// Exclusion gate: refuse to write new metric data for tombstoned hosts.
+	// The /report HTTP handler is expected to call IsRegistered first, but
+	// ReportLocal races with PermanentRemove can drop a stale Update through
+	// the live IsRegistered check — this second gate catches the race so
+	// excluded hosts cannot ingest reports until restored.
+	if s.IsExcluded(hostname) {
+		slog.Info("dashboard: update refused — host is permanently removed", "host", hostname) //nolint:gosec
+		return
+	}
 	lastJSON := ""
 	if result != nil {
 		data, err := json.Marshal(result)
@@ -249,6 +394,7 @@ func (s *ServerState) lookupRegisteredAt(ctx context.Context, hostname string) (
 // DB — that's the point of the cache and the property
 // TestBroadcastServerUpdateUsesCache asserts.
 func (s *ServerState) GetCached(hostname string) *ServerInfo {
+	hostname = telemetry.CanonicalHostname(hostname)
 	v, ok := s.cache.Load(hostname)
 	if !ok {
 		return nil
@@ -262,6 +408,7 @@ func (s *ServerState) GetCached(hostname string) *ServerInfo {
 
 // Get returns a snapshot of the named server, or nil if not registered.
 func (s *ServerState) Get(hostname string) *ServerInfo {
+	hostname = telemetry.CanonicalHostname(hostname)
 	s.storeGetCalls.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
@@ -303,13 +450,75 @@ func (s *ServerState) All() []ServerInfo {
 	return out
 }
 
+// PermanentRemove atomically removes the live row and writes its tombstone.
+// The removal store owns both tables on the same SQLite connection, so a
+// failing tombstone insert rolls back the deletion.
+func (s *ServerState) PermanentRemove(hostname, by, reason string) (time.Time, error) {
+	hostname = telemetry.CanonicalHostname(hostname)
+	if s.removals == nil {
+		return time.Time{}, fmt.Errorf("dashboard: no removal store wired")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	if err := s.removals.PermanentRemove(ctx, hostname, by, reason); err != nil {
+		return time.Time{}, fmt.Errorf("dashboard: permanent remove: %w", err)
+	}
+	s.cache.Delete(hostname)
+	s.registeredAt.Delete(hostname)
+	return time.Now().UTC(), nil
+}
+
+// RestoreRemoved deletes the tombstone for hostname. The live `servers` row
+// is NOT auto-recreated — the agent's next /api/v1/register will create a
+// fresh row with the current timestamp. Returns true when a tombstone row
+// was removed.
+func (s *ServerState) RestoreRemoved(hostname string) (bool, time.Time, error) {
+	hostname = telemetry.CanonicalHostname(hostname)
+	if s.removals == nil {
+		return false, time.Time{}, fmt.Errorf("dashboard: no removal store wired")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	found, err := s.removals.Restore(ctx, hostname)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("dashboard: restore tombstone: %w", err)
+	}
+	return found, time.Now().UTC(), nil
+}
+
+// AllRemoved returns every tombstoned host, newest first. Returns an empty
+// slice when no removals store is wired. The slice is freshly allocated so
+// the caller may retain it.
+func (s *ServerState) AllRemoved() ([]telemetry.RemovalEntry, error) {
+	if s.removals == nil {
+		return []telemetry.RemovalEntry{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+	defer cancel()
+	return s.removals.AllExcluded(ctx)
+}
+
 // ReportLocal processes a check result for the local host without HTTP.
-// Returns false if the host is not registered.
-func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult) bool {
+// Returns false if the host is not registered OR has a tombstone. Permanent
+// removal removes the host from the live roster first, so the more common
+// path here is "host is not registered" — but when an excluded report races
+// with PermanentRemove, the second gate below refuses it.
+//
+// forceUpdate may be nil; when non-nil it represents the local agent's
+// terminal updater decision and is forwarded to the dashboard's SSE pipeline.
+func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult, forceUpdate *ForceUpdateCompletionPayload) bool {
+	hostname = telemetry.CanonicalHostname(hostname)
 	if !s.IsRegistered(hostname) {
 		return false
 	}
+	if s.IsExcluded(hostname) {
+		slog.Info("dashboard: report refused — host is permanently removed", "host", hostname) //nolint:gosec
+		return false
+	}
 	s.Update(hostname, result)
+	if forceUpdate != nil && s.OnLocalForceUpdateCompletion != nil {
+		s.OnLocalForceUpdateCompletion(*forceUpdate)
+	}
 	return true
 }
 
@@ -324,13 +533,14 @@ func GetSettings() (*RemoteSettings, error) {
 	if notifications == nil {
 		notifications = []dc.NotificationTarget{}
 	}
+	view := buildEvtSpikeView(cfg.EvtSpike)
 	return &RemoteSettings{
 		Notifications:           notifications,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
 		Performance:             &cfg.Performance,
-		EvtSpike:                &RemoteEvtSpike{Enabled: cfg.EvtSpike.Enabled},
+		EvtSpike:                &view,
 		Update:                  &cfg.Update,
 	}, nil
 }

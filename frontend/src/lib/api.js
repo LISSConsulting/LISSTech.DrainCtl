@@ -121,13 +121,44 @@ const BASE = '/api/v1';
  */
 
 /**
- * EvtSpikeSettings is the narrow dashboard view of the evtspike config block.
- * Only the `enabled` toggle is surfaced per FR-028 — admin-only fields
- * (thresholds, channel lists, baseline_path, security-channel gate) live in
- * config.json and are not exposed via /api/v1/settings.
+ * EvtSpikeSettings is the dashboard's operator-safe view of the evtspike
+ * config block. Every field here round-trips through GET/PUT
+ * `/api/v1/settings`; baseline_path is intentionally omitted because it is
+ * admin-only (lives in config.json).
  *
  * @typedef {Object} EvtSpikeSettings
- * @property {boolean} enabled
+ * @property {boolean} enabled                       Master detector toggle.
+ * @property {number}  min_count                     Minimum event count in a 10-second bucket before scoring.
+ * @property {number}  threshold                     Tail-probability threshold under which a bucket counts as anomalous.
+ * @property {number}  cooldown_minutes              Per-channel cooldown after a confirmed alert.
+ * @property {number}  slot_maturity_observations    Observations required before a time-of-day slot is used directly.
+ * @property {number}  persist_interval_seconds      Baseline persistence cadence (should be a multiple of 900 for slot rollover).
+ * @property {number}  half_life_buckets             EWMA half-life in 10-second buckets.
+ * @property {number}  prior_strength                Effective prior observation count for the Gamma prior.
+ * @property {number}  mean_per_bucket_prior         Prior mean event count per 10-second bucket.
+ * @property {string[]} disabled_channels           Case-insensitive channels from the curated default list to suppress.
+ * @property {string[]} added_channels               Extra channels to subscribe in addition to the curated default.
+ * @property {boolean} security_channel_enabled      Opt-in to the Windows Security log.
+ */
+
+/**
+ * EvtSpikeSettingsPatch mirrors EvtSpikeSettings but every field is
+ * optional. The backend uses pointer-style partial-update semantics
+ * (absent = no change; explicit value = apply; out-of-range = 400).
+ *
+ * @typedef {Object} EvtSpikeSettingsPatch
+ * @property {boolean} [enabled]
+ * @property {number}  [min_count]
+ * @property {number}  [threshold]
+ * @property {number}  [cooldown_minutes]
+ * @property {number}  [slot_maturity_observations]
+ * @property {number}  [persist_interval_seconds]
+ * @property {number}  [half_life_buckets]
+ * @property {number}  [prior_strength]
+ * @property {number}  [mean_per_bucket_prior]
+ * @property {string[]} [disabled_channels]
+ * @property {string[]} [added_channels]
+ * @property {boolean} [security_channel_enabled]
  */
 
 /**
@@ -143,6 +174,7 @@ const BASE = '/api/v1';
  * @property {number} session_warning_threshold
  * @property {PerfMonitoringConfig} performance
  * @property {NotifyTarget[]} notifications
+ * @property {string[]} notification_exclusions - canonical hosts suppressed across every target and trigger
  * @property {EvtSpikeSettings} [evtspike]
  * @property {UpdateSettings} [update]
  */
@@ -275,6 +307,256 @@ export async function fetchServers() {
  */
 export async function deleteServer(host) {
     await apiFetch(`/servers/${encodeURIComponent(host)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Batch operations (Servers-table multi-select toolbar actions)
+//
+// BatchOperations consumes the contracts owned by PermanentRemoval and
+// ForceUpdate; the helpers below do not invent endpoints. Names and request
+// shapes match the sibling sprint deliverables; if a sibling adjusts the
+// wire shape we adjust these helpers in lockstep and leave the rest of the
+// toolbar untouched.
+// ---------------------------------------------------------------------------
+
+/**
+ * BatchPermanentRemoveResult mirrors the response body of
+ * `POST /api/v1/servers/permanent-remove` (PermanentRemoval's batch endpoint).
+ *
+ * @typedef {Object} BatchPermanentRemoveError
+ * @property {string} host
+ * @property {number} status
+ * @property {string} reason
+ *
+ * @typedef {Object} BatchPermanentRemoveResult
+ * @property {string[]} removed
+ * @property {string[]} skipped
+ * @property {BatchPermanentRemoveError[]} errors
+ */
+
+/**
+ * POST /api/v1/servers/permanent-remove
+ *
+ * Tombstone N hosts atomically per-host (no transactional rollback across
+ * hosts; each host is its own atomic write into the SQLite tombstone table).
+ * Hosts listed in `errors[]` failed and must NOT be considered removed; hosts
+ * in `skipped[]` were never registered and may be ignored; hosts in
+ * `removed[]` are durable gone.
+ *
+ * @param {string[]} hosts
+ * @returns {Promise<BatchPermanentRemoveResult>}
+ */
+export async function permanentRemoveHosts(hosts) {
+    const res = await apiFetch('/servers/permanent-remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hosts }),
+    });
+    return /** @type {BatchPermanentRemoveResult} */ (await res.json());
+}
+
+/**
+ * RemovedServer is a durable permanent-removal tombstone returned by
+ * GET /api/v1/servers/removed.
+ *
+ * @typedef {Object} RemovedServer
+ * @property {string} host
+ * @property {string} removed_at
+ * @property {string} [removed_by]
+ * @property {string} [reason]
+ * @property {boolean} permanent
+ * @property {boolean} was_present
+ */
+
+/** @returns {Promise<RemovedServer[]>} */
+export async function fetchRemovedServers() {
+    const res = await apiFetch('/servers/removed');
+    return /** @type {RemovedServer[]} */ (await res.json());
+}
+
+/**
+ * Remove one durable tombstone. The agent must register again before it
+ * returns to the live servers table.
+ *
+ * @param {string} host
+ * @returns {Promise<{ok:boolean, host:string, restored_at:string, restored_by?:string, was_tombstoned:boolean}>}
+ */
+export async function restoreRemovedServer(host) {
+    const res = await apiFetch(`/servers/${encodeURIComponent(host)}/restore`, {
+        method: 'POST',
+    });
+    return await res.json();
+}
+
+/**
+ * BatchForceUpdateResult mirrors the per-host response body of
+ * `POST /api/v1/servers/{host}/force-update` (ForceUpdate's primary endpoint).
+ * Per-host outcomes distinguish "accepted for delivery" from
+ * "offline / unsupported / duplicate" so the dashboard can render partial
+ * failure without re-querying.
+ *
+ * @typedef {'accepted'|'duplicate'|'offline'|'unsupported'|'invalid'} ForceUpdateOutcome
+ *
+ * @typedef {Object} ForceUpdateResult
+ * @property {string} host
+ * @property {string} command_id             - echoed from the request body
+ * @property {ForceUpdateOutcome} outcome
+ * @property {string} [accepted_at]          - ISO-8601 UTC; populated for accepted/duplicate
+ * @property {string} [version]              - agent's last-reported version (for the offline/unsupported UI hint)
+ * @property {string} [reason]               - human-readable detail when the outcome explains itself
+ *
+ * @typedef {Object} ForceUpdateHostError
+ * @property {number} status                 - HTTP status code (404 / 422 / 403)
+ * @property {string} reason                 - server-provided error text
+ */
+
+/**
+ * POST /api/v1/servers/{host}/force-update
+ *
+ * Issues a force-update command to ONE host. ForceUpdate is the contract
+ * owner for this endpoint; BatchOperations invokes it once per host from the
+ * ServerTable's "Force update" toolbar action and renders the per-host
+ * outcomes inline.
+ *
+ * `command_id` is REQUIRED for idempotency — the server dedupes on
+ * (host, command_id) for 24 hours. The caller MUST mint a fresh UUID for
+ * every distinct operation; replays with the same id are silently dropped
+ * server-side and surfaced here as outcome: "duplicate".
+ *
+ * The HTTP request is synchronous: it returns once the backend has
+ * accepted / classified the command. The actual updater run happens on
+ * the agent and surfaces via SSE event type `force_update` (same shape,
+ * keyed on `command_id`).
+ *
+ * Throws `ApiError` on transport failure or non-2xx that the helper cannot
+ * classify (rare; the 200/outcome channel covers accepted/duplicate/
+ * offline/unsupported).
+ *
+ * @param {string} host
+ * @param {{ command_id: string, reason?: string }} opts
+ * @returns {Promise<ForceUpdateResult>}
+ */
+export async function forceUpdateHost(host, { command_id, reason } = {}) {
+    if (!command_id) {
+        throw new Error('forceUpdateHost requires command_id for server-side idempotency');
+    }
+    const body = { command_id };
+    if (reason) body.reason = reason;
+    const res = await apiFetch(`/servers/${encodeURIComponent(host)}/force-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    /** @type {ForceUpdateResult} */
+    const result = await res.json();
+    return { ...result, host };
+}
+
+/**
+ * @typedef {Object} BatchForceUpdateErrorEntry
+ * @property {string} host
+ * @property {number} status
+ * @property {string} reason
+ *
+ * @typedef {Object} BatchForceUpdateSummary
+ * @property {number} accepted
+ * @property {number} duplicate
+ * @property {number} offline
+ * @property {number} unsupported
+ * @property {number} failed
+ *
+ * @typedef {Object} BatchForceUpdateResult
+ * @property {string} command_id
+ * @property {BatchForceUpdateSummary} summary
+ * @property {ForceUpdateResult[]} results
+ * @property {BatchForceUpdateErrorEntry[]} errors
+ */
+
+/**
+ * Mint a fresh command_id for force-update. Uses crypto.randomUUID() where
+ * available; falls back to a Math.random() UUIDv4-shaped string otherwise.
+ * Kept inline (not a top-level helper) so the dependency on the runtime
+ * API is visible at every call site.
+ * @returns {string}
+ */
+function mintCommandId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    // RFC 4122 v4 fallback for environments without crypto.randomUUID
+    // (very old browsers, jsdom tests, etc.).
+    const bytes = new Uint8Array(16);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0'));
+    return (
+        hex.slice(0, 4).join('') +
+        '-' +
+        hex.slice(4, 6).join('') +
+        '-' +
+        hex.slice(6, 8).join('') +
+        '-' +
+        hex.slice(8, 10).join('') +
+        '-' +
+        hex.slice(10, 16).join('')
+    );
+}
+
+/**
+ * Fan-out helper for the Servers-table "Force update" toolbar action.
+ * Invokes the per-host endpoint in parallel via Promise.allSettled and
+ * returns an aggregated BatchForceUpdateResult shaped like the optional
+ * batch route — even though we never call the batch route. The shape is
+ * what the toolbar renders; using a single shape across single-host and
+ * multi-host invocations keeps the rendering layer trivially consistent.
+ *
+ * Each call gets its OWN command_id so per-host dedupe remains effective
+ * even when the operator clicks "Force update" twice on a 50-host fleet.
+ *
+ * @param {string[]} hosts
+ * @param {{ reason?: string, signal?: AbortSignal }} [opts]
+ * @returns {Promise<BatchForceUpdateResult>}
+ */
+export async function forceUpdateHosts(hosts, { reason, signal } = {}) {
+    const results = await Promise.allSettled(
+        hosts.map((host) => {
+            const command_id = mintCommandId();
+            return forceUpdateHost(host, { command_id, reason }).then((r) => {
+                if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+                return r;
+            });
+        }),
+    );
+    const accepted = [];
+    const errors = [];
+    const summary = { accepted: 0, duplicate: 0, offline: 0, unsupported: 0, failed: 0 };
+    /** @type {ForceUpdateResult[]} */
+    const out = [];
+    for (let i = 0; i < hosts.length; i++) {
+        const host = hosts[i];
+        const r = results[i];
+        if (r.status === 'fulfilled') {
+            out.push(r.value);
+            summary[r.value.outcome] = (summary[r.value.outcome] ?? 0) + 1;
+            if (r.value.outcome === 'accepted') accepted.push(r.value);
+        } else {
+            const reason = r.reason?.detail ?? r.reason?.message ?? String(r.reason);
+            const status = r.reason?.status ?? 0;
+            errors.push({ host, status, reason });
+            summary.failed++;
+        }
+    }
+    return {
+        command_id: '',
+        summary,
+        results: out,
+        errors,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +778,18 @@ export async function saveSettings(config) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
     });
+}
+
+/**
+ * Toggle the global notification exclusion for one host.
+ * @param {string} host
+ * @returns {Promise<{host: string, excluded: boolean}>}
+ */
+export async function toggleNotificationExclusion(host) {
+    const res = await apiFetch(`/settings/notification-exclusions/${encodeURIComponent(host)}`, {
+        method: 'POST',
+    });
+    return /** @type {{host: string, excluded: boolean}} */ (await res.json());
 }
 
 /**

@@ -32,6 +32,7 @@ func newTestServer(t *testing.T) *DashboardServer {
 		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
 		broker:               NewBroker(),
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
+		forceUpdates:         newForceUpdateState(),
 	}
 }
 
@@ -139,11 +140,12 @@ func TestHandleHealth_StatusCounts(t *testing.T) {
 
 func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
 	ds := newTestServer(t)
+	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
-	// Back-date LastSeen past the stale threshold.
-	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-15*time.Minute)); err != nil {
+	// Three expected reports have been missed.
+	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-3*time.Minute-time.Second)); err != nil {
 		t.Fatalf("BackdateLastSeen: %v", err)
 	}
 
@@ -161,15 +163,18 @@ func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
 		t.Errorf("healthy = %d, want 0 (stale server must not count as healthy)", resp.Healthy)
 	}
 	if resp.Offline != 1 {
-		t.Errorf("offline = %d, want 1 (last_seen > staleThreshold)", resp.Offline)
+		t.Errorf("offline = %d, want 1 after three missed heartbeats", resp.Offline)
 	}
 }
 
 func TestHandleHealth_FreshServerNotOffline(t *testing.T) {
 	ds := newTestServer(t)
+	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
-	// Update sets LastSeen = time.Now() — well within the stale threshold.
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-3*time.Minute+time.Second)); err != nil {
+		t.Fatalf("BackdateLastSeen: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -185,22 +190,23 @@ func TestHandleHealth_FreshServerNotOffline(t *testing.T) {
 		t.Errorf("healthy = %d, want 1 (fresh server)", resp.Healthy)
 	}
 	if resp.Offline != 0 {
-		t.Errorf("offline = %d, want 0 (last_seen < staleThreshold)", resp.Offline)
+		t.Errorf("offline = %d, want 0 before three missed heartbeats", resp.Offline)
 	}
 }
 
 func TestHandleHealth_StaleAlertAndGraceCountedAsOffline(t *testing.T) {
 	ds := newTestServer(t)
+	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
 	ds.state.Register("SRV02")
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
 
 	store := ds.state.store.(*telemetry.ServerStore)
-	if err := store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-20*time.Minute)); err != nil {
+	if err := store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-4*time.Minute)); err != nil {
 		t.Fatalf("BackdateLastSeen SRV01: %v", err)
 	}
-	if err := store.BackdateLastSeen(context.Background(), "SRV02", time.Now().Add(-11*time.Minute)); err != nil {
+	if err := store.BackdateLastSeen(context.Background(), "SRV02", time.Now().Add(-4*time.Minute)); err != nil {
 		t.Fatalf("BackdateLastSeen SRV02: %v", err)
 	}
 
@@ -289,9 +295,6 @@ func TestHandleRegister_HostnameTrimmed(t *testing.T) {
 	}
 	if !ds.state.IsRegistered("SRV01") {
 		t.Error("trimmed hostname 'SRV01' should be registered")
-	}
-	if ds.state.IsRegistered("  SRV01  ") {
-		t.Error("untrimmed key '  SRV01  ' should not be registered")
 	}
 }
 
@@ -1332,6 +1335,65 @@ func TestHandleGetSettings_MultipleTargets(t *testing.T) {
 	}
 	if resp.Notifications[1].Type != "ntfy" {
 		t.Errorf("notifications[1].type = %q, want ntfy", resp.Notifications[1].Type)
+	}
+}
+
+func TestNotificationExclusionsHandlers_ReturnCanonicalStateAndToggle(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.NotificationExclusions = []string{"rds01.example.test"}
+		return cfg, nil
+	}
+	var toggledHost string
+	ds.testToggleNotificationExclusionFunc = func(host string) (bool, error) {
+		toggledHost = host
+		return true, nil
+	}
+
+	get := httptest.NewRecorder()
+	ds.handleGetNotificationExclusions(get, httptest.NewRequest(http.MethodGet, "/api/v1/settings/notification-exclusions", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200: %s", get.Code, get.Body.String())
+	}
+	var list notificationExclusionsResponse
+	if err := json.NewDecoder(get.Body).Decode(&list); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if !slices.Equal(list.NotificationExclusions, []string{"rds01.example.test"}) {
+		t.Errorf("GET notification_exclusions = %v, want [rds01.example.test]", list.NotificationExclusions)
+	}
+
+	toggle := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notification-exclusions/RDS01.EXAMPLE.TEST.", nil)
+	req.SetPathValue("host", "RDS01.EXAMPLE.TEST.")
+	ds.handleToggleNotificationExclusion(toggle, req)
+	if toggle.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200: %s", toggle.Code, toggle.Body.String())
+	}
+	if toggledHost != "rds01.example.test" {
+		t.Errorf("toggle host = %q, want canonical rds01.example.test", toggledHost)
+	}
+	var result struct {
+		Host     string `json:"host"`
+		Excluded bool   `json:"excluded"`
+	}
+	if err := json.NewDecoder(toggle.Body).Decode(&result); err != nil {
+		t.Fatalf("decode POST: %v", err)
+	}
+	if result.Host != "rds01.example.test" || !result.Excluded {
+		t.Errorf("POST response = %+v, want canonical excluded host", result)
+	}
+}
+
+func TestHandleToggleNotificationExclusion_RejectsEmptyHost(t *testing.T) {
+	ds := newTestServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/settings/notification-exclusions/", nil)
+	r.SetPathValue("host", " . ")
+	ds.handleToggleNotificationExclusion(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
 
@@ -5356,5 +5418,330 @@ func TestHandleDeleteNotificationTarget_OutOfRange_Returns404(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+// ── evtspike GET/PUT round-trip ───────────────────────────────────────────────
+
+func TestHandleGetSettings_ReturnsFullEvtSpikeView(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.EvtSpike.Enabled = true
+		cfg.EvtSpike.MinCount = 17
+		cfg.EvtSpike.Threshold = 2.5e-5
+		cfg.EvtSpike.CooldownMinutes = 12
+		cfg.EvtSpike.SlotMaturityObservations = 60
+		cfg.EvtSpike.PersistIntervalSeconds = 1800
+		cfg.EvtSpike.HalfLifeBuckets = 480
+		cfg.EvtSpike.PriorStrength = 75
+		cfg.EvtSpike.MeanPerBucketPrior = 0.2
+		cfg.EvtSpike.DisabledChannels = []string{"Setup"}
+		cfg.EvtSpike.AddedChannels = []string{"Custom/Op"}
+		cfg.EvtSpike.SecurityChannelEnabled = true
+		cfg.EvtSpike.BaselinePath = `C:\admin\baseline.json`
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		EvtSpike struct {
+			Enabled                  bool     `json:"enabled"`
+			MinCount                 int      `json:"min_count"`
+			Threshold                float64  `json:"threshold"`
+			CooldownMinutes          int      `json:"cooldown_minutes"`
+			SlotMaturityObservations int      `json:"slot_maturity_observations"`
+			PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
+			HalfLifeBuckets          int      `json:"half_life_buckets"`
+			PriorStrength            float64  `json:"prior_strength"`
+			MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
+			DisabledChannels         []string `json:"disabled_channels"`
+			AddedChannels            []string `json:"added_channels"`
+			SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
+			BaselinePath             string   `json:"baseline_path"`
+		} `json:"evtspike"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	e := resp.EvtSpike
+	if !e.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if e.MinCount != 17 {
+		t.Errorf("min_count = %d, want 17", e.MinCount)
+	}
+	if e.Threshold != 2.5e-5 {
+		t.Errorf("threshold = %g, want 2.5e-5", e.Threshold)
+	}
+	if e.CooldownMinutes != 12 {
+		t.Errorf("cooldown_minutes = %d, want 12", e.CooldownMinutes)
+	}
+	if e.PersistIntervalSeconds != 1800 {
+		t.Errorf("persist_interval_seconds = %d, want 1800", e.PersistIntervalSeconds)
+	}
+	if e.HalfLifeBuckets != 480 {
+		t.Errorf("half_life_buckets = %d, want 480", e.HalfLifeBuckets)
+	}
+	if e.PriorStrength != 75 {
+		t.Errorf("prior_strength = %g, want 75", e.PriorStrength)
+	}
+	if e.MeanPerBucketPrior != 0.2 {
+		t.Errorf("mean_per_bucket_prior = %g, want 0.2", e.MeanPerBucketPrior)
+	}
+	if !e.SecurityChannelEnabled {
+		t.Error("security_channel_enabled = false, want true")
+	}
+	if len(e.DisabledChannels) != 1 || e.DisabledChannels[0] != "Setup" {
+		t.Errorf("disabled_channels = %v, want [Setup]", e.DisabledChannels)
+	}
+	if len(e.AddedChannels) != 1 || e.AddedChannels[0] != "Custom/Op" {
+		t.Errorf("added_channels = %v, want [Custom/Op]", e.AddedChannels)
+	}
+	// baseline_path is admin-only and must NEVER appear on the wire, even
+	// when populated. The view intentionally omits the JSON tag.
+	if e.BaselinePath != "" {
+		t.Errorf("baseline_path leaked to the dashboard: %q (admin-only field must never be exposed)", e.BaselinePath)
+	}
+}
+
+func TestHandleGetSettings_EvtSpikeSlicesAlwaysArray(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testLoadConfigFunc = func() (*dc.Config, error) {
+		cfg := dc.DefaultConfig()
+		cfg.EvtSpike.DisabledChannels = nil // simulate pre-existing config that omits the slice
+		cfg.EvtSpike.AddedChannels = nil
+		return cfg, nil
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	ds.handleGetSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	evtspikeRaw := raw["evtspike"]
+	if len(evtspikeRaw) == 0 {
+		t.Fatal("evtspike block missing from response")
+	}
+	var evtspike map[string]json.RawMessage
+	if err := json.Unmarshal(evtspikeRaw, &evtspike); err != nil {
+		t.Fatalf("decode evtspike: %v", err)
+	}
+	for _, key := range []string{"disabled_channels", "added_channels"} {
+		if string(evtspike[key]) == "null" {
+			t.Errorf("%s = null; want []", key)
+		}
+	}
+}
+
+func TestHandlePutSettings_EvtSpikeFullPatch_RoundTrips(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error { return nil }
+	ds.testPutUpdateConfigFunc = func(_ *dc.UpdateConfig) error { return nil }
+
+	var captured *dc.EvtSpikeConfigPatch
+	ds.testPutEvtSpikeFunc = func(patch *dc.EvtSpikeConfigPatch) error {
+		captured = patch
+		return nil
+	}
+
+	body := `{
+		"evtspike": {
+			"enabled": true,
+			"min_count": 15,
+			"threshold": 5e-5,
+			"cooldown_minutes": 8,
+			"slot_maturity_observations": 75,
+			"persist_interval_seconds": 1800,
+			"half_life_buckets": 480,
+			"prior_strength": 90,
+			"mean_per_bucket_prior": 0.15,
+			"disabled_channels": ["Setup"],
+			"added_channels": ["Custom/Op"],
+			"security_channel_enabled": true
+		}
+	}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if captured == nil {
+		t.Fatal("testPutEvtSpikeFunc was not invoked")
+	}
+	if captured.Enabled == nil || !*captured.Enabled {
+		t.Error("enabled missing or wrong")
+	}
+	if *captured.MinCount != 15 {
+		t.Errorf("min_count = %d, want 15", *captured.MinCount)
+	}
+	if *captured.Threshold != 5e-5 {
+		t.Errorf("threshold = %g, want 5e-5", *captured.Threshold)
+	}
+	if !*captured.SecurityChannelEnabled {
+		t.Error("security_channel_enabled = false, want true")
+	}
+	if len(*captured.DisabledChannels) != 1 || (*captured.DisabledChannels)[0] != "Setup" {
+		t.Errorf("disabled_channels = %v, want [Setup]", *captured.DisabledChannels)
+	}
+}
+
+func TestHandlePutSettings_EvtSpikePartialPatch_LeavesOthersAlone(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error { return nil }
+	ds.testPutUpdateConfigFunc = func(_ *dc.UpdateConfig) error { return nil }
+
+	var captured *dc.EvtSpikeConfigPatch
+	ds.testPutEvtSpikeFunc = func(patch *dc.EvtSpikeConfigPatch) error {
+		captured = patch
+		return nil
+	}
+
+	// Only enabled + min_count are sent — all other knobs should be nil
+	// (meaning "don't change") in the captured patch.
+	body := `{"evtspike":{"enabled":true,"min_count":42}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if captured == nil {
+		t.Fatal("testPutEvtSpikeFunc was not invoked")
+	}
+	if !*captured.Enabled {
+		t.Error("enabled missing")
+	}
+	if *captured.MinCount != 42 {
+		t.Errorf("min_count = %d, want 42", *captured.MinCount)
+	}
+	if captured.Threshold != nil {
+		t.Errorf("threshold = %v, want nil (absent = unchanged)", captured.Threshold)
+	}
+	if captured.CooldownMinutes != nil {
+		t.Errorf("cooldown_minutes = %v, want nil", captured.CooldownMinutes)
+	}
+	if captured.DisabledChannels != nil {
+		t.Errorf("disabled_channels = %v, want nil", captured.DisabledChannels)
+	}
+}
+
+func TestHandlePutSettings_EvtSpikeOutOfRange_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutEvtSpikeFunc = func(_ *dc.EvtSpikeConfigPatch) error {
+		t.Fatal("testPutEvtSpikeFunc must not run when validation fails")
+		return nil
+	}
+
+	body := `{"evtspike":{"min_count":99999}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "min_count") {
+		t.Errorf("error body %q should mention min_count", w.Body.String())
+	}
+}
+
+func TestHandlePutSettings_EvtSpikeChannelListTooLarge_Returns400(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutEvtSpikeFunc = func(_ *dc.EvtSpikeConfigPatch) error {
+		t.Fatal("must not be called when validation rejects")
+		return nil
+	}
+
+	// 257 entries > 256 cap
+	channels := make([]string, 257)
+	for i := range channels {
+		channels[i] = "ch"
+	}
+	body := `{"evtspike":{"disabled_channels":["` + strings.Join(channels, `","`) + `"]}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "disabled_channels") {
+		t.Errorf("error body %q should mention disabled_channels", w.Body.String())
+	}
+}
+
+func TestHandlePutSettings_EvtSpikeEmptyPatch_NoOp(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error { return nil }
+	ds.testPutUpdateConfigFunc = func(_ *dc.UpdateConfig) error { return nil }
+
+	var captured *dc.EvtSpikeConfigPatch
+	ds.testPutEvtSpikeFunc = func(patch *dc.EvtSpikeConfigPatch) error {
+		captured = patch
+		return nil
+	}
+
+	// Empty evtspike object — every pointer nil, must still be passed through.
+	body := `{"evtspike":{}}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if captured == nil {
+		t.Fatal("empty patch must still flow through to UpdateEvtSpike (no-op)")
+	}
+}
+
+func TestHandlePutSettings_NoEvtSpikeBlock_NilPatch(t *testing.T) {
+	ds := newTestServer(t)
+	ds.testPutSettingsFunc = func(_ *[]dc.NotificationTarget, _ *int, _ *int, _ *int, _ *dc.PerformanceConfig) error { return nil }
+	ds.testPutUpdateConfigFunc = func(_ *dc.UpdateConfig) error { return nil }
+
+	var called bool
+	ds.testPutEvtSpikeFunc = func(patch *dc.EvtSpikeConfigPatch) error {
+		called = true
+		if patch != nil {
+			t.Errorf("patch = %+v, want nil when evtspike block is absent", patch)
+		}
+		return nil
+	}
+
+	body := `{"session_warning_threshold":50}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ds.handlePutSettings(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !called {
+		t.Fatal("testPutEvtSpikeFunc was not invoked")
 	}
 }

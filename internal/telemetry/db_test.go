@@ -57,8 +57,8 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 	if got := queryPragmaInt(t, db, "foreign_keys"); got != 1 {
 		t.Errorf("foreign_keys = %d, want 1 (ON)", got)
 	}
-	if got := queryPragmaInt(t, db, "user_version"); got != 1 {
-		t.Errorf("user_version = %d, want 1", got)
+	if got := queryPragmaInt(t, db, "user_version"); got != 2 {
+		t.Errorf("user_version = %d, want 2", got)
 	}
 }
 
@@ -79,8 +79,30 @@ func TestOpen_IsIdempotent(t *testing.T) {
 	}
 	defer func() { _ = db2.Close() }()
 
-	if got := queryPragmaInt(t, db2, "user_version"); got != 1 {
-		t.Errorf("second open: user_version = %d, want 1", got)
+	if got := queryPragmaInt(t, db2, "user_version"); got != 2 {
+		t.Errorf("second open: user_version = %d, want 2", got)
+	}
+}
+
+func TestOpen_DoesNotDowngradeUserVersion(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := db.writer.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close first DB: %v", err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if got := queryPragmaInt(t, reopened, "user_version"); got != 2 {
+		t.Errorf("user_version = %d, want 2 (must not downgrade another additive migration)", got)
 	}
 }
 

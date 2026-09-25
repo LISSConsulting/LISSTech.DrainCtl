@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -185,6 +186,29 @@ func (t NotificationTarget) ExcludesServer(server string, trigger Trigger) bool 
 	return false
 }
 
+// CanonicalNotificationHost is the durable representation of a host exclusion.
+// Hosts are recorded exactly as reported (apart from whitespace, a terminal DNS
+// dot, and case) so an exclusion cannot accidentally affect another host that
+// merely shares its short name in a different domain.
+func CanonicalNotificationHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+}
+
+// IsNotificationExcluded reports whether host is globally excluded from every
+// notification target and trigger.
+func IsNotificationExcluded(exclusions []string, host string) bool {
+	host = CanonicalNotificationHost(host)
+	if host == "" {
+		return false
+	}
+	for _, exclusion := range exclusions {
+		if CanonicalNotificationHost(exclusion) == host {
+			return true
+		}
+	}
+	return false
+}
+
 // ── Config (JSON file) ──────────────────────────────────────────────────
 
 // PerformanceConfig holds performance monitoring settings.
@@ -246,7 +270,8 @@ type Config struct {
 	LogFileLevel  string `json:"log_file_level,omitempty"`  // min level for file sink: debug|info|warn|error (default: info)
 	LogEventLevel string `json:"log_event_level,omitempty"` // min level for event log sink: debug|info|warn|error (default: info)
 
-	Notifications []NotificationTarget `json:"notifications"`
+	Notifications          []NotificationTarget `json:"notifications"`
+	NotificationExclusions []string             `json:"notification_exclusions"`
 
 	DashboardOnly bool          `json:"dashboard_only"` // true = run dashboard but skip local drain monitoring
 	Dashboard     DashboardJSON `json:"dashboard"`
@@ -321,15 +346,16 @@ type ServiceConfig struct {
 
 // DashboardConfig holds runtime dashboard parameters.
 type DashboardConfig struct {
-	Enabled        bool
-	Port           int
-	Group          string
-	URL            string        // agent-side: dashboard URL to report to
-	TLSCert        string        // path to PEM certificate file
-	TLSKey         string        // path to PEM private key file
-	TLSFingerprint string        // SHA-256 cert fingerprint for pinning (agent-side)
-	AutoPin        bool          // auto-pin dashboard cert on register (default false)
-	FetchInterval  time.Duration // interval between config fetches from dashboard
+	Enabled           bool
+	Port              int
+	Group             string
+	URL               string        // agent-side: dashboard URL to report to
+	TLSCert           string        // path to PEM certificate file
+	TLSKey            string        // path to PEM private key file
+	TLSFingerprint    string        // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin           bool          // auto-pin dashboard cert on register (default false)
+	FetchInterval     time.Duration // interval between config fetches from dashboard
+	HeartbeatInterval time.Duration // expected interval between agent reports
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -347,6 +373,7 @@ func DefaultConfig() *Config {
 		PollInterval:            DefaultPollInterval,
 		AuditPath:               DefaultDBPath(),
 		Notifications:           []NotificationTarget{},
+		NotificationExclusions:  []string{},
 		Dashboard:               DashboardJSON{Port: DefaultDashboardPort, Group: DefaultDashboardGroup, FetchInterval: DefaultDashboardFetchInterval},
 		SessionWarningThreshold: DefaultSessionWarningThreshold,
 		MemoryLimitMB:           DefaultMemoryLimitMB,
@@ -376,15 +403,16 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 // ToDashboardConfig converts the JSON config to runtime DashboardConfig.
 func (c *Config) ToDashboardConfig() DashboardConfig {
 	return DashboardConfig{
-		Enabled:        c.Dashboard.Enabled,
-		Port:           c.Dashboard.Port,
-		Group:          c.Dashboard.Group,
-		URL:            c.Dashboard.URL,
-		TLSCert:        c.Dashboard.TLSCert,
-		TLSKey:         c.Dashboard.TLSKey,
-		TLSFingerprint: c.Dashboard.TLSFingerprint,
-		AutoPin:        c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
-		FetchInterval:  c.dashFetchInterval(),
+		Enabled:           c.Dashboard.Enabled,
+		Port:              c.Dashboard.Port,
+		Group:             c.Dashboard.Group,
+		URL:               c.Dashboard.URL,
+		TLSCert:           c.Dashboard.TLSCert,
+		TLSKey:            c.Dashboard.TLSKey,
+		TLSFingerprint:    c.Dashboard.TLSFingerprint,
+		AutoPin:           c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
+		FetchInterval:     c.dashFetchInterval(),
+		HeartbeatInterval: time.Duration(c.PollInterval) * time.Second,
 	}
 }
 
@@ -427,6 +455,12 @@ func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
 	c.Retention.MetricsDays = ClampRetention(c.Retention.MetricsDays)
 	ClampEvtSpike(&c.EvtSpike)
+	if c.EvtSpike.BaselinePath != "" &&
+		!strings.EqualFold(filepath.Clean(c.EvtSpike.BaselinePath), filepath.Clean(DefaultBaselinePath())) {
+		slog.Default().Warn("evtspike baseline_path outside the canonical data directory ignored",
+			"requested", c.EvtSpike.BaselinePath, "canonical", DefaultBaselinePath())
+	}
+	c.EvtSpike.BaselinePath = DefaultBaselinePath()
 	if c.Retention.AuditDays < MinRetentionDays {
 		slog.Default().Warn("audit retention below minimum, clamping", "requested", c.Retention.AuditDays, "min", MinRetentionDays)
 		c.Retention.AuditDays = MinRetentionDays
@@ -451,18 +485,14 @@ func (c *Config) Validate() {
 	if c.PollInterval < 10 || c.PollInterval > MaxPollInterval {
 		c.PollInterval = DefaultPollInterval
 	}
-	if c.AuditPath == "" {
-		c.AuditPath = DefaultDBPath()
-	} else if strings.HasSuffix(strings.ToLower(c.AuditPath), "audit.jsonl") {
-		// Legacy value from pre-007 installs (JSONL audit trail). The file
-		// was retired in feature 007 when audit moved to SQLite; rewrite
-		// to drainctl.db within the SAME directory so a custom data-dir
-		// configuration (e.g. D:\DrainCtl\audit.jsonl) doesn't get
-		// silently relocated to %ProgramData%. GetHistory still accepts
-		// either form at read time, but keeping audit.jsonl here rots
-		// further as the field name ultimately renames to db_path.
-		c.AuditPath = filepath.Join(filepath.Dir(c.AuditPath), "drainctl.db")
+	// The telemetry writer is single-location. Keeping the deprecated
+	// audit_path field canonical prevents configuration from advertising a
+	// second data root that the service no longer uses.
+	if c.AuditPath != "" && !strings.EqualFold(filepath.Clean(c.AuditPath), filepath.Clean(DefaultDBPath())) {
+		slog.Default().Warn("audit_path outside the canonical data directory ignored",
+			"requested", c.AuditPath, "canonical", DefaultDBPath())
 	}
+	c.AuditPath = DefaultDBPath()
 	if c.Dashboard.Port < 1 || c.Dashboard.Port > 65535 {
 		c.Dashboard.Port = DefaultDashboardPort
 	}
@@ -590,6 +620,25 @@ func (c *Config) Validate() {
 			c.Notifications[i].Severity = ""
 		}
 	}
+
+	// Global exclusions are a catch-all routing policy, deliberately separate
+	// from per-target trigger exclusions. Normalize and de-duplicate them so a
+	// single canonical host controls every current and future target/trigger.
+	exclusions := make([]string, 0, len(c.NotificationExclusions))
+	seenExclusions := make(map[string]struct{}, len(c.NotificationExclusions))
+	for _, exclusion := range c.NotificationExclusions {
+		host := CanonicalNotificationHost(exclusion)
+		if host == "" {
+			slog.Default().Warn("empty notification exclusion ignored")
+			continue
+		}
+		if _, seen := seenExclusions[host]; seen {
+			continue
+		}
+		seenExclusions[host] = struct{}{}
+		exclusions = append(exclusions, host)
+	}
+	c.NotificationExclusions = exclusions
 
 	// Validate email targets: require smtp(s):// URL, from, and at least one to.
 	for i := range c.Notifications {
@@ -766,6 +815,7 @@ func loadConfigLocked() (*Config, error) {
 		if err := json.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
+		migrateLegacyBaseline(cfg.EvtSpike.BaselinePath)
 		cfg.Validate()
 		cfg.DecryptSecrets()
 		return cfg, nil
@@ -788,9 +838,75 @@ func loadConfigLocked() (*Config, error) {
 	slog.Default().Info("default config written", "path", path)
 	return cfg, nil
 }
+
+func migrateLegacyBaseline(source string) {
+	target := DefaultBaselinePath()
+	if source == "" || strings.EqualFold(filepath.Clean(source), filepath.Clean(target)) {
+		return
+	}
+	if _, err := os.Stat(target); err == nil {
+		return
+	} else if !os.IsNotExist(err) {
+		slog.Default().Warn("evtspike baseline migration target unavailable", "path", target, "error", err)
+		return
+	}
+
+	src, err := os.Open(source)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Default().Warn("evtspike baseline migration source unavailable", "path", source, "error", err)
+		}
+		return
+	}
+	defer func() { _ = src.Close() }()
+
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), "baseline.migration-*")
+	if err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	tmpPath := tmp.Name()
+	published := false
+	defer func() {
+		_ = tmp.Close()
+		if !published {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := io.Copy(tmp, src); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	if err := src.Close(); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		slog.Default().Warn("evtspike baseline migration failed", "source", source, "target", target, "error", err)
+		return
+	}
+	published = true
+	if err := os.Remove(source); err != nil {
+		slog.Default().Warn("evtspike legacy baseline removal failed", "path", source, "error", err)
+	}
+	slog.Default().Info("evtspike baseline migrated", "source", source, "target", target)
+}
 func cloneConfig(cfg *Config) *Config {
 	clone := *cfg
 	clone.Notifications = slices.Clone(cfg.Notifications)
+	clone.NotificationExclusions = slices.Clone(cfg.NotificationExclusions)
 	for i := range clone.Notifications {
 		clone.Notifications[i].Triggers = slices.Clone(cfg.Notifications[i].Triggers)
 		clone.Notifications[i].To = slices.Clone(cfg.Notifications[i].To)
@@ -1052,6 +1168,7 @@ func UpdateUpdateConfig(update *UpdateConfig) error {
 }
 
 // ReadModifyWriteNotifications atomically modifies the notifications slice
+
 // under the same cross-process config lock used by every other config writer.
 // The mutate callback receives a copy of the current targets and returns the
 // new slice; returning an error aborts the write. This is the building block
@@ -1077,20 +1194,209 @@ func ReadModifyWriteNotifications(mutate func(targets []NotificationTarget) ([]N
 	})
 }
 
+// ToggleNotificationExclusion atomically adds or removes host from the global
+// notification exclusion list. Its return value is the resulting excluded
+// state. Target-specific exclusions are intentionally untouched.
+func ToggleNotificationExclusion(host string) (bool, error) {
+	host = CanonicalNotificationHost(host)
+	if host == "" {
+		return false, fmt.Errorf("host is required")
+	}
+	excluded := false
+	err := readModifyWrite(func(cfg *Config) error {
+		for i, existing := range cfg.NotificationExclusions {
+			if CanonicalNotificationHost(existing) == host {
+				cfg.NotificationExclusions = append(
+					cfg.NotificationExclusions[:i],
+					cfg.NotificationExclusions[i+1:]...,
+				)
+				return nil
+			}
+		}
+		cfg.NotificationExclusions = append(cfg.NotificationExclusions, host)
+		excluded = true
+		return nil
+	})
+	return excluded, err
+}
+
 // UpdateEvtSpikeEnabled flips only the evtspike.enabled flag, leaving all
 // other evtspike fields (thresholds, channel lists, baseline_path, security
-// channel gate) untouched. Per FR-028 the dashboard Settings modal surfaces
-// ONLY the enabled toggle — sensitivity, per-channel, and security-channel
-// controls are out of scope. Passing nil is a no-op. The live-reload path in
-// internal/svc picks up the change via the config-file watcher and calls
-// evtspike.Subsystem.Reload per the matrix in contracts/evtspike-config.md.
+// channel gate) untouched. Retained as a thin wrapper for callers that only
+// need the toggle (legacy tests and dashboard fallbacks). New code should
+// prefer UpdateEvtSpike, which propagates the full operator-safe surface.
+//
+// Passing nil is a no-op. The live-reload path in internal/svc picks up the
+// change via the config-file watcher and calls evtspike.Subsystem.Reload per
+// the matrix in contracts/evtspike-config.md.
 func UpdateEvtSpikeEnabled(enabled *bool) error {
 	if enabled == nil {
 		return nil
 	}
+	return UpdateEvtSpike(&EvtSpikeConfigPatch{Enabled: enabled})
+}
+
+// EvtSpikeConfigPatch is the operator-safe, dashboard-writeable subset of
+// EvtSpikeConfig. Every pointer distinguishes "absent → leave unchanged"
+// from "explicit value" so the bulk PUT handler can layer each field on
+// top of an existing config without clobbering un-touched knobs.
+//
+// Admin-only fields (BaselinePath) are not exposed here; editing them
+// requires editing config.json directly.
+type EvtSpikeConfigPatch struct {
+	Enabled                  *bool     `json:"enabled,omitempty"`
+	MinCount                 *int      `json:"min_count,omitempty"`
+	Threshold                *float64  `json:"threshold,omitempty"`
+	CooldownMinutes          *int      `json:"cooldown_minutes,omitempty"`
+	SlotMaturityObservations *int      `json:"slot_maturity_observations,omitempty"`
+	PersistIntervalSeconds   *int      `json:"persist_interval_seconds,omitempty"`
+	HalfLifeBuckets          *int      `json:"half_life_buckets,omitempty"`
+	PriorStrength            *float64  `json:"prior_strength,omitempty"`
+	MeanPerBucketPrior       *float64  `json:"mean_per_bucket_prior,omitempty"`
+	DisabledChannels         *[]string `json:"disabled_channels,omitempty"`
+	AddedChannels            *[]string `json:"added_channels,omitempty"`
+	SecurityChannelEnabled   *bool     `json:"security_channel_enabled,omitempty"`
+}
+
+// ValidateEvtSpikePatch returns an error describing the first out-of-range
+// field in patch, or nil if all provided fields are within bounds. nil
+// patch fields are skipped; absent fields mean "leave unchanged".
+//
+// Bounds mirror ClampEvtSpike — validation here lets the dashboard return
+// a 400 with a clear message before the load-modify-save cycle, instead of
+// silently clamping (which would mislead an operator who clicked Save on
+// what they thought was 5 minutes but got 1).
+func ValidateEvtSpikePatch(patch *EvtSpikeConfigPatch) error {
+	if patch == nil {
+		return nil
+	}
+	if v := patch.MinCount; v != nil && (*v < MinEvtSpikeMinCount || *v > MaxEvtSpikeMinCount) {
+		return fmt.Errorf("evtspike.min_count must be %d-%d", MinEvtSpikeMinCount, MaxEvtSpikeMinCount)
+	}
+	if v := patch.Threshold; v != nil && (*v < MinEvtSpikeThreshold || *v > MaxEvtSpikeThreshold) {
+		return fmt.Errorf("evtspike.threshold must be %g-%g", MinEvtSpikeThreshold, MaxEvtSpikeThreshold)
+	}
+	if v := patch.CooldownMinutes; v != nil && (*v < MinEvtSpikeCooldownMinutes || *v > MaxEvtSpikeCooldownMinutes) {
+		return fmt.Errorf("evtspike.cooldown_minutes must be %d-%d", MinEvtSpikeCooldownMinutes, MaxEvtSpikeCooldownMinutes)
+	}
+	if v := patch.SlotMaturityObservations; v != nil && (*v < MinEvtSpikeSlotMaturityObservations || *v > MaxEvtSpikeSlotMaturityObservations) {
+		return fmt.Errorf("evtspike.slot_maturity_observations must be %d-%d", MinEvtSpikeSlotMaturityObservations, MaxEvtSpikeSlotMaturityObservations)
+	}
+	if v := patch.PersistIntervalSeconds; v != nil && (*v < MinEvtSpikePersistIntervalSeconds || *v > MaxEvtSpikePersistIntervalSeconds) {
+		return fmt.Errorf("evtspike.persist_interval_seconds must be %d-%d", MinEvtSpikePersistIntervalSeconds, MaxEvtSpikePersistIntervalSeconds)
+	}
+	if v := patch.HalfLifeBuckets; v != nil && (*v < MinEvtSpikeHalfLifeBuckets || *v > MaxEvtSpikeHalfLifeBuckets) {
+		return fmt.Errorf("evtspike.half_life_buckets must be %d-%d", MinEvtSpikeHalfLifeBuckets, MaxEvtSpikeHalfLifeBuckets)
+	}
+	if v := patch.PriorStrength; v != nil && (*v < MinEvtSpikePriorStrength || *v > MaxEvtSpikePriorStrength) {
+		return fmt.Errorf("evtspike.prior_strength must be %g-%g", MinEvtSpikePriorStrength, MaxEvtSpikePriorStrength)
+	}
+	if v := patch.MeanPerBucketPrior; v != nil && (*v < MinEvtSpikeMeanPerBucketPrior || *v > MaxEvtSpikeMeanPerBucketPrior) {
+		return fmt.Errorf("evtspike.mean_per_bucket_prior must be %g-%g", MinEvtSpikeMeanPerBucketPrior, MaxEvtSpikeMeanPerBucketPrior)
+	}
+	if patch.DisabledChannels != nil && len(*patch.DisabledChannels) > 256 {
+		return fmt.Errorf("evtspike.disabled_channels: too many entries (max 256)")
+	}
+	if patch.AddedChannels != nil && len(*patch.AddedChannels) > 256 {
+		return fmt.Errorf("evtspike.added_channels: too many entries (max 256)")
+	}
+	return nil
+}
+
+// ApplyEvtSpikePatch layers patch onto dst, leaving untouched fields alone.
+// Slice fields use the standard "absent slice pointer" sentinel — nil means
+// don't change; non-nil (including length-0) replaces the slice. This mirrors
+// the bulk PUT convention used by the notifications block.
+func ApplyEvtSpikePatch(dst *EvtSpikeConfig, patch *EvtSpikeConfigPatch) {
+	if dst == nil || patch == nil {
+		return
+	}
+	if patch.Enabled != nil {
+		dst.Enabled = *patch.Enabled
+	}
+	if patch.MinCount != nil {
+		dst.MinCount = *patch.MinCount
+	}
+	if patch.Threshold != nil {
+		dst.Threshold = *patch.Threshold
+	}
+	if patch.CooldownMinutes != nil {
+		dst.CooldownMinutes = *patch.CooldownMinutes
+	}
+	if patch.SlotMaturityObservations != nil {
+		dst.SlotMaturityObservations = *patch.SlotMaturityObservations
+	}
+	if patch.PersistIntervalSeconds != nil {
+		dst.PersistIntervalSeconds = *patch.PersistIntervalSeconds
+	}
+	if patch.HalfLifeBuckets != nil {
+		dst.HalfLifeBuckets = *patch.HalfLifeBuckets
+	}
+	if patch.PriorStrength != nil {
+		dst.PriorStrength = *patch.PriorStrength
+	}
+	if patch.MeanPerBucketPrior != nil {
+		dst.MeanPerBucketPrior = *patch.MeanPerBucketPrior
+	}
+	if patch.DisabledChannels != nil {
+		// Defensive copy so the caller can reuse its slice buffer.
+		cp := append([]string{}, *patch.DisabledChannels...)
+		dst.DisabledChannels = cp
+	}
+	if patch.AddedChannels != nil {
+		cp := append([]string{}, *patch.AddedChannels...)
+		dst.AddedChannels = cp
+	}
+	if patch.SecurityChannelEnabled != nil {
+		dst.SecurityChannelEnabled = *patch.SecurityChannelEnabled
+	}
+	// Clamp + normalise zero slices so the persisted JSON stays canonical.
+	ClampEvtSpike(dst)
+}
+
+// IsEvtSpikePatchEmpty reports whether patch is nil or every field pointer
+// is nil (so the caller can short-circuit a no-op read-modify-write).
+func IsEvtSpikePatchEmpty(patch *EvtSpikeConfigPatch) bool {
+	if patch == nil {
+		return true
+	}
+	return patch.Enabled == nil &&
+		patch.MinCount == nil &&
+		patch.Threshold == nil &&
+		patch.CooldownMinutes == nil &&
+		patch.SlotMaturityObservations == nil &&
+		patch.PersistIntervalSeconds == nil &&
+		patch.HalfLifeBuckets == nil &&
+		patch.PriorStrength == nil &&
+		patch.MeanPerBucketPrior == nil &&
+		patch.DisabledChannels == nil &&
+		patch.AddedChannels == nil &&
+		patch.SecurityChannelEnabled == nil
+}
+
+// UpdateEvtSpike atomically writes the operator-safe evtspike fields
+// described by patch. A nil patch (or one whose every pointer is nil) is a
+// no-op. Range-validated by ValidateEvtSpikePatch before the load-modify-save
+// cycle runs so a 400 returns immediately with a clear field-level message.
+//
+// BaselinePath is intentionally NOT in the patch — it is admin-only (lives in
+// config.json) and is preserved verbatim across dashboard edits.
+//
+// Rolling-upgrade behavior: this writes the same EvtSpikeConfig shape that
+// pre-existing config.json files already use, so older binaries that read
+// only the documented fields round-trip without surprises. Newer fields
+// (security_channel_enabled, half_life_buckets, prior_strength,
+// mean_per_bucket_prior) are also already on the EvtSpikeConfig struct, so
+// no schema migration is required.
+func UpdateEvtSpike(patch *EvtSpikeConfigPatch) error {
+	if err := ValidateEvtSpikePatch(patch); err != nil {
+		return err
+	}
+	if IsEvtSpikePatchEmpty(patch) {
+		return nil
+	}
 	return readModifyWrite(func(cfg *Config) error {
-		cfg.EvtSpike.Enabled = *enabled
-		ClampEvtSpike(&cfg.EvtSpike)
+		ApplyEvtSpikePatch(&cfg.EvtSpike, patch)
 		return nil
 	})
 }

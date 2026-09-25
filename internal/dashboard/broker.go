@@ -44,14 +44,26 @@ type Broker struct {
 	nextID      int
 
 	stateMu       sync.Mutex
-	detectorState map[string]string
+	detectorState map[string]detectorStatusSnapshot
+}
+
+// detectorStatusSnapshot contains the fields that drive the detector status
+// surface. LastSpikeAt deliberately is not included: recent_spike already
+// carries that live event, while including it would turn every alert into a
+// redundant detector-status broadcast.
+type detectorStatusSnapshot struct {
+	State           string
+	EnabledChannels int
+	MatureChannels  int
+	WarmupStartedAt time.Time
+	ErrorReason     string
 }
 
 // NewBroker creates an empty broker.
 func NewBroker() *Broker {
 	return &Broker{
 		subscribers:   make(map[string]*subscriber),
-		detectorState: make(map[string]string),
+		detectorState: make(map[string]detectorStatusSnapshot),
 	}
 }
 
@@ -136,20 +148,31 @@ func (b *Broker) Count() int {
 	return len(b.subscribers)
 }
 
-// PublishDetectorStatus broadcasts a detector_status SSE event only when the
-// host's reported state differs from the last one broadcast. Subsystems may
-// call this every evaluation cycle; only transitions reach subscribers, so
-// the stream stays quiet on steady state.
+// PublishDetectorStatus broadcasts a detector_status SSE event when the
+// status surface changes. Subsystems call this after every scoring pass, but
+// identical snapshots are suppressed so the 10-second scorer stays quiet.
+// Changes to maturity, subscribed-channel capacity, warm-up start, or error
+// detail must reach clients even when the coarse state remains "training".
 //
 // Returns true when an event was emitted, false when the call was suppressed.
 func (b *Broker) PublishDetectorStatus(status evtspike.DetectorStatus) bool {
+	snapshot := detectorStatusSnapshot{
+		State:           status.State,
+		EnabledChannels: status.EnabledChannels,
+		MatureChannels:  status.MatureChannels,
+		ErrorReason:     status.ErrorReason,
+	}
+	if status.WarmupStartedAt != nil {
+		snapshot.WarmupStartedAt = *status.WarmupStartedAt
+	}
+
 	b.stateMu.Lock()
 	prev, seen := b.detectorState[status.Host]
-	if seen && prev == status.State {
+	if seen && prev == snapshot {
 		b.stateMu.Unlock()
 		return false
 	}
-	b.detectorState[status.Host] = status.State
+	b.detectorState[status.Host] = snapshot
 	b.stateMu.Unlock()
 
 	data, err := json.Marshal(status)

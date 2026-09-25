@@ -58,7 +58,7 @@
           show: () => showCpuP95, toggle: () => { showCpuP95 = !showCpuP95; } },
         { key: 'mem', label: 'Memory %', color: 'var(--color-green)', axis: 'left', lineOnly: false,
           show: () => showMem, toggle: () => { showMem = !showMem; } },
-        { key: 'sessions', label: 'Sessions', color: 'var(--color-red)', axis: 'right', lineOnly: true,
+        { key: 'sessions', label: 'Sessions', color: 'var(--color-blue)', axis: 'right', lineOnly: true,
           show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
     ];
 
@@ -281,7 +281,7 @@
         { label: 'MEM', value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%` : '—',
           color: 'var(--color-green)', icon: MemoryStick, show: () => showMem },
         { label: 'SESS', value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
-          color: 'var(--color-red)', icon: Users, show: () => showSessions },
+          color: 'var(--color-blue)', icon: Users, show: () => showSessions },
     ]);
 
     const Y_DOMAIN = [0, 100];

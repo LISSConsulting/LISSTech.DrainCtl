@@ -23,6 +23,16 @@ func DefaultDataDir() string {
 	return pd + `\LISS Technologies\LISSTech DrainCtl`
 }
 
+// DefaultUpdatesDir returns the directory used for downloaded update packages.
+func DefaultUpdatesDir() string {
+	return DefaultDataDir() + `\updates`
+}
+
+// DefaultBaselinePath returns the event-spike detector's persisted baseline path.
+func DefaultBaselinePath() string {
+	return DefaultDataDir() + `\baseline.json`
+}
+
 // DefaultDBDir returns the default directory containing the drainctl SQLite DB.
 func DefaultDBDir() string {
 	return DefaultDataDir()

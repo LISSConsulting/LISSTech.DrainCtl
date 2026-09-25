@@ -36,6 +36,8 @@ tags:
     description: Background maintenance job status (aggregator, retention, one-shot startup jobs)
   - name: notifications
     description: Notification target testing
+  - name: evtspike
+    description: Event-log anomaly detector status and confirmed spikes
 
 components:
   securitySchemes:
@@ -61,6 +63,36 @@ components:
           type: string
       required: [error]
 
+
+    ForceUpdateRequest:
+      type: object
+      required: [command_id]
+      properties:
+        command_id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{8,128}$"
+        reason:
+          type: string
+          maxLength: 256
+
+    ForceUpdateResponse:
+      type: object
+      required: [host, command_id, outcome]
+      properties:
+        host:
+          type: string
+        command_id:
+          type: string
+        outcome:
+          type: string
+          enum: [accepted, duplicate, offline, unsupported, invalid, failed]
+        accepted_at:
+          type: string
+          format: date-time
+        version:
+          type: string
+        reason:
+          type: string
     OkResponse:
       type: object
       properties:
@@ -68,6 +100,161 @@ components:
           type: boolean
           const: true
       required: [ok]
+
+    PermanentRemoveRequest:
+      type: object
+      description: Optional operator note recorded on the tombstone.
+      properties:
+        reason:
+          type: string
+          maxLength: 1024
+
+    PermanentRemoveResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        host:
+          type: string
+        permanent:
+          type: boolean
+          const: true
+        removed_at:
+          type: string
+          format: date-time
+        removed_by:
+          type: string
+      required: [ok, host, permanent, removed_at]
+
+    PermanentRemoveBatchRequest:
+      type: object
+      properties:
+        hosts:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        reason:
+          type: string
+          maxLength: 1024
+      required: [hosts]
+
+    PermanentRemoveBatchFailure:
+      type: object
+      properties:
+        host:
+          type: string
+        status:
+          type: integer
+        reason:
+          type: string
+      required: [host, status, reason]
+
+    PermanentRemoveBatchResponse:
+      type: object
+      properties:
+        removed:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermanentRemoveBatchFailure"
+
+    RemoveBatchFailure:
+      type: object
+      properties:
+        host:
+          type: string
+        status:
+          type: integer
+        reason:
+          type: string
+      required: [host, status, reason]
+
+    RestoreResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        host:
+          type: string
+        restored_at:
+          type: string
+          format: date-time
+        restored_by:
+          type: string
+        was_tombstoned:
+          type: boolean
+          const: true
+      required: [ok, host, restored_at, was_tombstoned]
+
+    RestoreBatchRequest:
+      type: object
+      properties:
+        hosts:
+          type: array
+          minItems: 1
+          items:
+            type: string
+      required: [hosts]
+
+    RestoreBatchResponse:
+      type: object
+      properties:
+        restored:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemoveBatchFailure"
+
+    RemovedServer:
+      type: object
+      properties:
+        host:
+          type: string
+        removed_at:
+          type: string
+          format: date-time
+        removed_by:
+          type: string
+        reason:
+          type: string
+        permanent:
+          type: boolean
+          const: true
+        was_present:
+          type: boolean
+      required: [host, removed_at, permanent]
+
+    GoneResponse:
+      type: object
+      description: |
+        Returned with HTTP 410 from /api/v1/register and /api/v1/report
+        when the host has a tombstone in `server_exclusions`. The header
+        `X-Permanently-Removed: 1` always accompanies this body so agents
+        that don't introspect the body still detect the durable gate.
+      properties:
+        error:
+          type: string
+          const: "host permanently removed"
+        host:
+          type: string
+        action:
+          type: string
+      required: [error, host]
 
     SessionSummary:
       type: object
@@ -251,7 +438,7 @@ components:
         status:
           type: string
           enum: [ok, warning, grace, alert, "off"]
-          description: "Composite status. `warning` = perf threshold warning. `off` = no report in 10 minutes."
+          description: "Composite status. `warning` = perf threshold warning. `off` = three consecutive expected reports missed, based on the configured poll interval."
         drain_mode:
           type: string
         sessions:
@@ -288,6 +475,35 @@ components:
           $ref: "#/components/schemas/PerfSnapshot"
           nullable: true
 
+
+    DetectorStatus:
+      type: object
+      description: |
+        Per-host event-spike detector state. During the durable seven-day
+        warm-up the detector continues to score and emit confirmed spikes,
+        but state remains `training` until the channel-readiness gate also
+        passes.
+      properties:
+        host:
+          type: string
+        state:
+          type: string
+          enum: [healthy, training, disabled, error]
+        enabled_channels:
+          type: integer
+        mature_channels:
+          type: integer
+        warmup_started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Durable seven-day warm-up start; omitted when the detector is disabled."
+        error_reason:
+          type: string
+        last_spike_at:
+          type: string
+          format: date-time
+      required: [host, state, enabled_channels, mature_channels]
     MetricsSeries:
       type: object
       properties:
@@ -619,6 +835,26 @@ components:
             $ref: "#/components/schemas/NotificationTarget"
       required: [notifications]
 
+    NotificationExclusionsResponse:
+      type: object
+      properties:
+        notification_exclusions:
+          type: array
+          description: "Canonical host names suppressed for every notification target and trigger."
+          items:
+            type: string
+      required: [notification_exclusions]
+
+    NotificationExclusionToggleResponse:
+      type: object
+      properties:
+        host:
+          type: string
+          description: "Canonical host name."
+        excluded:
+          type: boolean
+      required: [host, excluded]
+
     PerformanceConfig:
       type: object
       properties:
@@ -689,6 +925,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NotificationTarget"
+        notification_exclusions:
+          type: array
+          description: "Canonical host names suppressed for every notification target and trigger."
+          items:
+            type: string
         session_warning_threshold:
           type: integer
           minimum: 0
@@ -702,6 +943,8 @@ components:
           $ref: "#/components/schemas/PerformanceConfig"
         update:
           $ref: "#/components/schemas/UpdateConfig"
+        evtspike:
+          $ref: "#/components/schemas/EvtSpikeSettings"
 
     SettingsUpdate:
       type: object
@@ -733,6 +976,148 @@ components:
         update:
           $ref: "#/components/schemas/UpdateConfig"
           nullable: true
+        evtspike:
+          $ref: "#/components/schemas/EvtSpikeSettingsPatch"
+          nullable: true
+
+    EvtSpikeSettings:
+      type: object
+      description: |
+        Event-log anomaly detector operator-safe view. baseline_path is
+        intentionally omitted — it lives in config.json and is admin-only.
+        Every field round-trips through `GET /api/v1/settings` so the modal
+        can show current values and persist edits via `PUT`.
+      properties:
+        enabled:
+          type: boolean
+          description: "Master detector toggle."
+        min_count:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: "Minimum event count in a 10-second bucket before scoring."
+        threshold:
+          type: number
+          format: double
+          minimum: 1.0e-9
+          maximum: 0.1
+          description: "Tail-probability threshold under which a bucket counts as anomalous."
+        cooldown_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: "Per-channel cooldown after a confirmed alert."
+        slot_maturity_observations:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: "Observations required before a time-of-day slot is used directly."
+        persist_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          description: |
+            Baseline persistence cadence. Should be a multiple of 900 for
+            slot-rollover alignment; non-multiples emit a coherence warning.
+        half_life_buckets:
+          type: integer
+          minimum: 60
+          maximum: 10000
+          description: "EWMA half-life in 10-second buckets for the detector's Rho."
+        prior_strength:
+          type: number
+          format: double
+          minimum: 1.0
+          maximum: 10000.0
+          description: "Effective prior observation count for the Gamma prior."
+        mean_per_bucket_prior:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1000.0
+          description: "Prior mean event count per 10-second bucket."
+        disabled_channels:
+          type: array
+          items:
+            type: string
+          description: "Case-insensitive channels from the curated default list to suppress."
+        added_channels:
+          type: array
+          items:
+            type: string
+          description: "Extra channels to subscribe in addition to the curated default."
+        security_channel_enabled:
+          type: boolean
+          description: "Opt-in to the Windows Security log (requires SeSecurityPrivilege)."
+
+    EvtSpikeSettingsPatch:
+      type: object
+      description: |
+        Partial evtspike update. Every property is optional and pointer-style
+        on the wire (absent means "leave unchanged"; explicit value means
+        "apply"). Slice fields use the standard "absent = leave unchanged,
+        empty array = clear" convention. Out-of-range fields yield a 400
+        instead of being silently clamped.
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        min_count:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          nullable: true
+        threshold:
+          type: number
+          format: double
+          minimum: 1.0e-9
+          maximum: 0.1
+          nullable: true
+        cooldown_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          nullable: true
+        slot_maturity_observations:
+          type: integer
+          minimum: 1
+          maximum: 100
+          nullable: true
+        persist_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          nullable: true
+        half_life_buckets:
+          type: integer
+          minimum: 60
+          maximum: 10000
+          nullable: true
+        prior_strength:
+          type: number
+          format: double
+          minimum: 1.0
+          maximum: 10000.0
+          nullable: true
+        mean_per_bucket_prior:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1000.0
+          nullable: true
+        disabled_channels:
+          type: array
+          items:
+            type: string
+          nullable: true
+        added_channels:
+          type: array
+          items:
+            type: string
+          nullable: true
+        security_channel_enabled:
+          type: boolean
+          nullable: true
 
 paths:
   /health:
@@ -763,9 +1148,32 @@ paths:
                     type: integer
                   offline:
                     type: integer
-                    description: "No report in 10 minutes."
+                    description: "Three consecutive expected reports missed, based on the configured poll interval."
                   unknown:
                     type: integer
+
+  /evtspike/status:
+    get:
+      tags: [evtspike]
+      summary: Get event-spike detector status
+      operationId: getEvtSpikeStatus
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current detector state. `training` means either the seven-day warm-up or channel-readiness gate has not completed; confirmed spike detection remains active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectorStatus"
+        "404":
+          description: Host is not registered.
 
   /auth/negotiate:
     post:
@@ -933,6 +1341,22 @@ paths:
                 $ref: "#/components/schemas/Error"
         "403":
           description: Machine account does not match hostname.
+        "410":
+          description: |
+            Host has a tombstone in `server_exclusions`. Agents MUST stop
+            retrying registration until an operator issues
+            `POST /api/v1/servers/{host}/restore`. The response always
+            includes the header `X-Permanently-Removed: 1` so agents that
+            don't introspect the body still detect the durable gate.
+          headers:
+            X-Permanently-Removed:
+              schema:
+                type: string
+                const: "1"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoneResponse"
 
   /report:
     post:
@@ -965,6 +1389,17 @@ paths:
                 $ref: "#/components/schemas/Error"
         "403":
           description: Machine account does not match hostname.
+        "410":
+          description: |
+            Host has been permanently removed. Agents MUST stop sending
+            reports until an operator issues
+            `POST /api/v1/servers/{host}/restore`. The response always
+            includes the header `X-Permanently-Removed: 1`.
+          headers:
+            X-Permanently-Removed:
+              schema:
+                type: string
+                const: "1"
 
   /config:
     get:
@@ -1034,7 +1469,12 @@ paths:
     delete:
       tags: [servers]
       summary: Remove server
-      description: Removes a server from the dashboard and its history.
+      description: |
+        Transient removal — deletes the host from the live roster and emits a
+        `server_deleted` SSE event but does NOT place a tombstone. Subsequent
+        /register calls from the agent will silently bring the host back.
+        Use the durable permanent-remove endpoints below for tombstones that
+        block re-registration until an operator restores the host.
       operationId: deleteServer
       security:
         - session: []
@@ -1055,6 +1495,176 @@ paths:
           description: Not authenticated.
         "404":
           description: Server not found.
+
+  /servers/{host}/permanent-remove:
+    post:
+      tags: [servers]
+      summary: Permanently remove a server
+      description: |
+        Durable removal. Deletes the live `servers` row and inserts a
+        `server_exclusions` tombstone. Both /api/v1/register and
+        /api/v1/report from the same host are rejected with HTTP 410 Gone
+        (header `X-Permanently-Removed: 1`) until an operator restores the
+        host via POST /api/v1/servers/{host}/restore.
+
+        Idempotent: a repeat call refreshes the tombstone metadata and
+        returns the same 200 body shape. Unknown hosts return 404 — use
+        the legacy DELETE for transient ghosts you do not want tombstoned.
+
+        Emits the SSE events `server_deleted` (legacy transient signal so
+        any cached UI rows drop) and `server_permanently_removed`
+        (durable signal that the host cannot re-register until restored).
+      operationId: permanentRemoveServer
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermanentRemoveRequest"
+      responses:
+        "200":
+          description: Permanently removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermanentRemoveResponse"
+        "400":
+          description: Invalid hostname.
+        "401":
+          description: Not authenticated.
+        "404":
+          description: Host not registered (and not already tombstoned).
+        "500":
+          description: Storage failure.
+
+  /servers/permanent-remove:
+    post:
+      tags: [servers]
+      summary: Batch permanent removal
+      description: |
+        Removes every host in the request body. Each host is its own atomic
+        mutation against the `server_exclusions` table; there is no
+        transactional rollback across hosts. Unknown hosts land in
+        `skipped`, validation failures in `errors[]`, and successful
+        tombstones in `removed[]`. Idempotent on hosts already in the
+        exclusion store.
+      operationId: permanentRemoveBatch
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermanentRemoveBatchRequest"
+      responses:
+        "200":
+          description: Per-host result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermanentRemoveBatchResponse"
+        "400":
+          description: Invalid JSON body.
+        "401":
+          description: Not authenticated.
+
+  /servers/{host}/restore:
+    post:
+      tags: [servers]
+      summary: Restore a permanently-removed server
+      description: |
+        Deletes the tombstone for hostname. The live `servers` row is NOT
+        auto-recreated; the host's next /api/v1/register call creates a
+        fresh row with the current timestamp. Emits a `server_restored`
+        SSE event so removed-servers panels drop the entry. 404 when the
+        host is not currently tombstoned.
+      operationId: restoreServer
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreResponse"
+        "400":
+          description: Host is currently live (nothing to restore) or invalid hostname.
+        "401":
+          description: Not authenticated.
+        "404":
+          description: Host is not currently tombstoned.
+
+  /servers/restore:
+    post:
+      tags: [servers]
+      summary: Batch restore
+      description: |
+        Restores every host in the request body that currently has a
+        tombstone. Already-live or never-tombstoned hosts land in
+        `skipped`; validation failures in `errors[]`. The batch itself
+        returns 200 even when individual entries errored.
+      operationId: restoreBatch
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreBatchRequest"
+      responses:
+        "200":
+          description: Per-host result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreBatchResponse"
+        "400":
+          description: Invalid JSON body.
+        "401":
+          description: Not authenticated.
+
+  /servers/removed:
+    get:
+      tags: [servers]
+      summary: List permanently-removed servers
+      description: |
+        Returns every host currently in the `server_exclusions` table,
+        newest first. Empty array when no hosts have been permanently
+        removed. Used by the dashboard's removed-servers panel and by
+        operators who need to discover hosts eligible for restore.
+      operationId: listRemovedServers
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Removed server list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RemovedServer"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Storage failure.
 
   /settings:
     get:
@@ -1082,7 +1692,9 @@ paths:
       description: |
         Atomic update. Absent fields are left unchanged. Empty notifications
         array clears all targets. The update block, when present, must contain
-        enabled, channel, and poll_interval. Max body 8 KB.
+        enabled, channel, and poll_interval. The evtspike block follows the
+        pointer-style partial-update convention (absent = no change;
+        out-of-range = 400). Max body 8 KB.
       operationId: updateSettings
       security:
         - session: []
@@ -1105,6 +1717,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Failed to save config.
+
+  /settings/notification-exclusions:
+    get:
+      tags: [settings]
+      summary: List global notification exclusions
+      description: Returns the durable catch-all host policy independently of target-specific trigger exclusions.
+      operationId: getNotificationExclusions
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current exclusions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationExclusionsResponse"
+        "401":
+          description: Not authenticated.
+        "500":
+          description: Failed to load config.
+
+  /settings/notification-exclusions/{host}:
+    post:
+      tags: [settings]
+      summary: Toggle a global notification exclusion
+      description: Adds or removes the canonical host from the durable catch-all policy without changing target-specific exclusions.
+      operationId: toggleNotificationExclusion
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated exclusion state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationExclusionToggleResponse"
+        "400":
+          description: Empty host.
         "401":
           description: Not authenticated.
         "500":
@@ -1289,6 +1949,52 @@ paths:
         { "changed_by": "<username>" }
         ```
 
+        **`server_permanently_removed`** — emitted when a server is durably
+        tombstoned via `POST /api/v1/servers/{host}/permanent-remove`. `host`
+        is set. `data` is:
+        ```json
+        {
+          "removed_by": "<username>",
+          "reason": "<optional operator note>",
+          "removed_at": "<RFC3339>",
+          "permanent": true
+        }
+        ```
+        Connected UI MUST reconcile the removed-servers panel on this
+        event. The legacy `server_deleted` event is also emitted for
+        backwards-compatible row-drop behaviour.
+
+        **`server_restored`** — emitted when a server's tombstone is
+        removed via `POST /api/v1/servers/{host}/restore`. `host` is set.
+        `data` is:
+        ```json
+        {
+          "restored_by": "<username>",
+          "restored_at": "<RFC3339>"
+        }
+        ```
+        The host is NOT automatically re-registered; the next agent
+        /register creates a fresh row.
+
+        **`force_update`** — emitted when a managed agent acknowledges a
+        force-update command with a terminal result. `host` is the canonical
+        hostname. `data` is:
+        ```json
+        {
+          "host": "RDSH01",
+          "command_id": "550e8400-e29b-41d4-a716-446655440000",
+          "outcome": "completed",
+          "reason": "up_to_date",
+          "old_version": "26.9.23",
+          "new_version": "26.9.23",
+          "decided_at": "2026-09-24T22:10:00Z"
+        }
+        ```
+        `outcome` is one of `completed`, `failed`, `duplicate`, or `refused`.
+        Consumers SHOULD correlate terminal results with the initiating
+        `command_id`; accepted commands remain in the durable outbox and may be
+        redelivered until this acknowledgement is received.
+
         **`settings_update`** — emitted when configuration is saved via
         `PUT /api/v1/settings`. `host` is empty. `data` is:
         ```json
@@ -1318,6 +2024,53 @@ paths:
           description: Not authenticated.
         "429":
           description: Too many concurrent SSE connections (limit 100).
+
+  /servers/{host}/force-update:
+    post:
+      tags: [servers]
+      summary: Request an immediate updater check on one host
+      description: |
+        Queues one bounded, SQLite-durable delivery for a current online agent.
+        Reuse the same `command_id` on retries; it returns `duplicate` and is
+        not delivered again. An unacknowledged command is redelivered after a
+        dashboard restart until the authenticated agent completion acknowledges
+        it or the 24-hour expiry elapses. Offline and incompatible agents return
+        their outcome without queuing a command. `failed` means persistence
+        failed and no command was accepted.
+      operationId: forceUpdateServer
+      security:
+        - session: []
+      parameters:
+        - in: path
+          name: host
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForceUpdateRequest"
+      responses:
+        "200":
+          description: Command outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForceUpdateResponse"
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Caller is not authorized for the host.
+        "404":
+          description: Host is not registered.
+        "422":
+          description: Invalid command ID or reason.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /metrics/{host}:
     get:

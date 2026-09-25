@@ -138,8 +138,14 @@ C:\Program Files\WindowsPowerShell\Modules\LISSTech.DrainCtl\
   └── LISSTech.DrainCtl.psm1
 
 C:\ProgramData\LISS Technologies\LISSTech DrainCtl\
-  ├── config.json          atomic-write JSON, hot-reloaded
-  └── drainctl.db          SQLite telemetry (WAL)
+  ├── config.json          atomic-write JSON, hot-reloaded, preserved across upgrades
+  ├── drainctl.db          SQLite telemetry (WAL)
+  ├── drainctl*.log        active and rotated service logs
+  ├── baseline.json        event-spike detector state
+  ├── update-state.json    updater replay-defense state
+  ├── dashboard-tls.*      auto-generated or installed dashboard certificate
+  ├── updates\             downloaded update packages
+  └── diags\               optional scheduled diagnostics output
 
 Service                    DrainCtl, auto-start, LocalSystem
 ETW provider               LISS Technologies-DrainCtl (Operational + Debug)
@@ -394,7 +400,8 @@ Opt-in event-log anomaly detector. Watches 54 curated Windows channels (Winlogon
 
 - 96 time-of-day slots × per-channel baseline. Robust update cap blocks a single flood from poisoning the model — a follow-on smaller anomaly still flags.
 - 2-of-3 confirmation across 10-second scoring windows. One-shot transients don't page.
-- Persists `baseline.json` every 15 min and on shutdown. Restarts skip warm-up.
+- Persists `baseline.json` every 15 min and on shutdown, including a durable warm-up start. Restarts cannot reset it.
+- The status remains **TRAINING** until at least seven elapsed days *and* at least half of subscribed channels are mature; confirmed spikes continue to score, emit, and notify during that interval.
 - Routes through the existing notification pipeline. Severity is set per-target, not by the detector.
 
 ### Enable
@@ -512,6 +519,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
     "collect_remotefx": false, "collect_per_session": true
   },
   "dashboard": { "url": "" },
+  "notification_exclusions": ["rdsh01.example.test"],
   "notifications": [
     {
       "type": "webhook",
@@ -547,6 +555,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `poll_interval_seconds` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
 | `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
+| `dashboard_only` | bool | `false` | Run the HTTPS dashboard, SQLite storage, and authentication only. This host does not read local drain state, collect performance/event telemetry, register itself, or send drain notifications. |
 | `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration; empty = SRV discovery. |
 | `dashboard.tls_cert` / `tls_key` | string | *(empty)* | PEM paths; auto-generated self-signed if empty. |
 | `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning. |
@@ -560,6 +569,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `performance.load_alert_delay_sec` | int | `120` | CPU/memory threshold sustain window (two default samples). |
 | `performance.input_delay_alert_delay_sec` | int | `180` | Input-delay threshold sustain window (three default samples). |
 | `notifications` | array | `[]` | Notification targets — see below. |
+| `notification_exclusions` | string[] | `[]` | Canonical hosts suppressed for every notification target and trigger. This catch-all policy is independent of `server_exclusions`; matching ignores case and a terminal DNS dot, but does not equate a short name with an FQDN. |
 
 **Notification target fields**
 
@@ -613,6 +623,7 @@ LayerCake + Svelte 5 frontend embedded into the service binary:
 - **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / disk queue), **Health Indicators** (input-delay p95, session utilization), **Sessions** (active / disconnected / total), and **RemoteFX** (when `collect_remotefx` is on for any host). Window presets: `1H / 1D / 3D / 5D` (the 15M preset was retired in v26.119.10 — at default 60-s polling it added no resolution over 1H).
 - **Server Detail → HostLoadChart** — single-host multi-counter view of LOAD, stacked against drain-mode audit events on the same time axis.
 - **Event Spikes** — status pill and recent-spikes list on Server Detail.
+- **Offline detection** — a registered host becomes offline after three consecutive expected heartbeats are missed. The timeout follows `poll_interval` (for example, 3 minutes at a 60-second interval).
 
 ---
 

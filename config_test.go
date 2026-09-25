@@ -828,6 +828,25 @@ func TestToServiceConfig_CopiesFields(t *testing.T) {
 	}
 }
 
+func TestDashboardOnly_RoundTripsRuntimeAndInstallerConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	dashboardOnly := true
+	ApplyInstallerConfig(cfg, InstallerConfigInput{
+		Mode:          "dashboard",
+		DashboardOnly: &dashboardOnly,
+	})
+
+	if !cfg.Dashboard.Enabled {
+		t.Fatal("Dashboard.Enabled = false, want true for dashboard install mode")
+	}
+	if !cfg.DashboardOnly {
+		t.Fatal("DashboardOnly = false, want installer selection preserved")
+	}
+	if !cfg.ToServiceConfig().DashboardOnly {
+		t.Fatal("ServiceConfig.DashboardOnly = false, want runtime role preserved")
+	}
+}
+
 // ── ToDashboardConfig ─────────────────────────────────────────────────────────
 
 func TestToDashboardConfig_NilAutoPinIsFalse(t *testing.T) {
@@ -836,6 +855,15 @@ func TestToDashboardConfig_NilAutoPinIsFalse(t *testing.T) {
 	dash := cfg.ToDashboardConfig()
 	if dash.AutoPin {
 		t.Error("AutoPin: expected false when Dashboard.AutoPin is nil")
+	}
+}
+
+func TestToDashboardConfigCarriesHeartbeatInterval(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PollInterval = 45
+	dash := cfg.ToDashboardConfig()
+	if dash.HeartbeatInterval != 45*time.Second {
+		t.Errorf("HeartbeatInterval = %v, want 45s", dash.HeartbeatInterval)
 	}
 }
 
@@ -894,53 +922,17 @@ func TestValidate_SetsDefaultAuditPath(t *testing.T) {
 	}
 }
 
-func TestValidate_PreservesExistingAuditPath(t *testing.T) {
-	// Non-legacy custom paths (e.g. an operator-configured SQLite DB location)
-	// are preserved as-is by Validate.
-	const custom = `C:\custom\drainctl.db`
-	cfg := &Config{AuditPath: custom}
-	cfg.Validate()
-	if cfg.AuditPath != custom {
-		t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, custom)
-	}
-}
-
-func TestValidate_RewritesLegacyJSONLAuditPath(t *testing.T) {
-	// Pre-007 installs wrote audit.jsonl as the default AuditPath; that file
-	// was retired when audit moved to SQLite in feature 007. Validate rewrites
-	// any lingering audit.jsonl tail to drainctl.db in the SAME directory so
-	// operators don't see stale references to a file that no longer exists,
-	// and operators with custom data-dir paths don't get their data silently
-	// relocated to %ProgramData% (codex round-1 finding C-1).
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "default-dir legacy",
-			in:   `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\audit.jsonl`,
-			want: `C:\ProgramData\LISS Technologies\LISSTech DrainCtl\drainctl.db`,
-		},
-		{
-			name: "custom dir legacy preserves directory",
-			in:   `D:\Custom\DrainCtl\audit.jsonl`,
-			want: `D:\Custom\DrainCtl\drainctl.db`,
-		},
-		{
-			name: "case-insensitive suffix",
-			in:   `D:\Custom\AUDIT.JSONL`,
-			want: `D:\Custom\drainctl.db`,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &Config{AuditPath: tc.in}
-			cfg.Validate()
-			if cfg.AuditPath != tc.want {
-				t.Errorf("AuditPath = %q, want %q", cfg.AuditPath, tc.want)
-			}
-		})
+func TestValidate_NormalizesAuditPathToCanonicalDataDirectory(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	for _, configured := range []string{
+		`C:\custom\drainctl.db`,
+		`D:\Custom\DrainCtl\audit.jsonl`,
+	} {
+		cfg := &Config{AuditPath: configured}
+		cfg.Validate()
+		if cfg.AuditPath != DefaultDBPath() {
+			t.Errorf("AuditPath = %q, want canonical %q", cfg.AuditPath, DefaultDBPath())
+		}
 	}
 }
 
@@ -1109,6 +1101,47 @@ func TestLoadConfig_FreshInstall_ReturnsValidDefault(t *testing.T) {
 	// A valid default must have a positive grace period.
 	if got.GracePeriod < 1 {
 		t.Errorf("GracePeriod = %d, want >= 1", got.GracePeriod)
+	}
+}
+
+func TestLoadConfigMigratesLegacyBaselineIntoCanonicalDataDirectory(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	legacyDir := t.TempDir()
+	legacyPath := filepath.Join(legacyDir, "baseline.json")
+	const payload = `{"schema_version":1,"host":"RDS01","channels":{}}`
+	if err := os.WriteFile(legacyPath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write legacy baseline: %v", err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.EvtSpike.BaselinePath = legacyPath
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.MkdirAll(DefaultDataDir(), 0o755); err != nil {
+		t.Fatalf("create data directory: %v", err)
+	}
+	if err := os.WriteFile(DefaultConfigPath(), data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.EvtSpike.BaselinePath != DefaultBaselinePath() {
+		t.Fatalf("BaselinePath = %q, want %q", got.EvtSpike.BaselinePath, DefaultBaselinePath())
+	}
+	migrated, err := os.ReadFile(DefaultBaselinePath())
+	if err != nil {
+		t.Fatalf("read migrated baseline: %v", err)
+	}
+	if string(migrated) != payload {
+		t.Fatalf("migrated baseline = %q, want %q", migrated, payload)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy baseline still exists: err=%v", err)
 	}
 }
 
@@ -1974,5 +2007,293 @@ func TestDuration_UnmarshalRejectsInvalid(t *testing.T) {
 				t.Errorf("Unmarshal(%s) = nil err, want error", tt)
 			}
 		})
+	}
+}
+
+// ── UpdateEvtSpike / ValidateEvtSpikePatch / ApplyEvtSpikePatch ──────────────
+
+func ptrBool(v bool) *bool         { return &v }
+func ptrInt(v int) *int            { return &v }
+func ptrFloat(v float64) *float64  { return &v }
+func ptrStrs(v []string) *[]string { return &v }
+
+func TestUpdateEvtSpike_NoPatchIsNoOp(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if err := UpdateEvtSpike(nil); err != nil {
+		t.Fatalf("UpdateEvtSpike(nil): %v", err)
+	}
+	if err := UpdateEvtSpike(&EvtSpikeConfigPatch{}); err != nil {
+		t.Fatalf("UpdateEvtSpike(empty patch): %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.EvtSpike.Enabled {
+		t.Errorf("Enabled flipped by no-op; want false")
+	}
+}
+
+func TestUpdateEvtSpike_PersistsScalarKnobs(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	patch := &EvtSpikeConfigPatch{
+		Enabled:                  ptrBool(true),
+		MinCount:                 ptrInt(25),
+		Threshold:                ptrFloat(5e-5),
+		CooldownMinutes:          ptrInt(7),
+		SlotMaturityObservations: ptrInt(45),
+		PersistIntervalSeconds:   ptrInt(1800),
+		HalfLifeBuckets:          ptrInt(720),
+		PriorStrength:            ptrFloat(120),
+		MeanPerBucketPrior:       ptrFloat(0.25),
+		SecurityChannelEnabled:   ptrBool(true),
+	}
+	if err := UpdateEvtSpike(patch); err != nil {
+		t.Fatalf("UpdateEvtSpike: %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.EvtSpike.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if cfg.EvtSpike.MinCount != 25 {
+		t.Errorf("MinCount = %d, want 25", cfg.EvtSpike.MinCount)
+	}
+	if cfg.EvtSpike.Threshold != 5e-5 {
+		t.Errorf("Threshold = %g, want 5e-5", cfg.EvtSpike.Threshold)
+	}
+	if cfg.EvtSpike.CooldownMinutes != 7 {
+		t.Errorf("CooldownMinutes = %d, want 7", cfg.EvtSpike.CooldownMinutes)
+	}
+	if cfg.EvtSpike.SlotMaturityObservations != 45 {
+		t.Errorf("SlotMaturityObservations = %d, want 45", cfg.EvtSpike.SlotMaturityObservations)
+	}
+	if cfg.EvtSpike.PersistIntervalSeconds != 1800 {
+		t.Errorf("PersistIntervalSeconds = %d, want 1800", cfg.EvtSpike.PersistIntervalSeconds)
+	}
+	if cfg.EvtSpike.HalfLifeBuckets != 720 {
+		t.Errorf("HalfLifeBuckets = %d, want 720", cfg.EvtSpike.HalfLifeBuckets)
+	}
+	if cfg.EvtSpike.PriorStrength != 120 {
+		t.Errorf("PriorStrength = %g, want 120", cfg.EvtSpike.PriorStrength)
+	}
+	if cfg.EvtSpike.MeanPerBucketPrior != 0.25 {
+		t.Errorf("MeanPerBucketPrior = %g, want 0.25", cfg.EvtSpike.MeanPerBucketPrior)
+	}
+	if !cfg.EvtSpike.SecurityChannelEnabled {
+		t.Error("SecurityChannelEnabled = false, want true")
+	}
+}
+
+func TestUpdateEvtSpike_PreservesUnchangedFields(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.EvtSpike.MinCount = 33
+	cfg.EvtSpike.HalfLifeBuckets = 480
+	cfg.EvtSpike.DisabledChannels = []string{"Application"}
+	// BaselinePath gets normalized to the canonical data-dir path by
+	// Config.Validate() on every load (see config.go's Validate clamp).
+	// That's pre-existing behaviour independent of the patch — what the test
+	// actually exercises is that the patch itself does NOT touch BaselinePath.
+	wantBaseline := DefaultBaselinePath()
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	// Only toggle enabled; everything else must round-trip untouched.
+	if err := UpdateEvtSpike(&EvtSpikeConfigPatch{Enabled: ptrBool(true)}); err != nil {
+		t.Fatalf("UpdateEvtSpike: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !got.EvtSpike.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if got.EvtSpike.MinCount != 33 {
+		t.Errorf("MinCount = %d, want 33 (preserved)", got.EvtSpike.MinCount)
+	}
+	if got.EvtSpike.HalfLifeBuckets != 480 {
+		t.Errorf("HalfLifeBuckets = %d, want 480 (preserved)", got.EvtSpike.HalfLifeBuckets)
+	}
+	if len(got.EvtSpike.DisabledChannels) != 1 || got.EvtSpike.DisabledChannels[0] != "Application" {
+		t.Errorf("DisabledChannels = %v, want [Application] (preserved)", got.EvtSpike.DisabledChannels)
+	}
+	if got.EvtSpike.BaselinePath != wantBaseline {
+		t.Errorf("BaselinePath = %q, want canonical %q (admin-only field must survive dashboard edits; never appears in patch)",
+			got.EvtSpike.BaselinePath, wantBaseline)
+	}
+}
+
+func TestUpdateEvtSpike_ReplacesSlicesExplicitly(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.EvtSpike.DisabledChannels = []string{"System", "Setup"}
+	cfg.EvtSpike.AddedChannels = []string{"Custom-A"}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	// Explicit empty slice clears the list — mirrors the bulk PUT notifications
+	// convention so the dashboard's "Clear" affordance works.
+	if err := UpdateEvtSpike(&EvtSpikeConfigPatch{
+		DisabledChannels: ptrStrs([]string{}),
+	}); err != nil {
+		t.Fatalf("UpdateEvtSpike: %v", err)
+	}
+	got, _ := LoadConfig()
+	if len(got.EvtSpike.DisabledChannels) != 0 {
+		t.Errorf("DisabledChannels = %v, want [] (cleared)", got.EvtSpike.DisabledChannels)
+	}
+	if len(got.EvtSpike.AddedChannels) != 1 || got.EvtSpike.AddedChannels[0] != "Custom-A" {
+		t.Errorf("AddedChannels = %v, want [Custom-A] (untouched)", got.EvtSpike.AddedChannels)
+	}
+}
+
+func TestValidateEvtSpikePatch_RejectsOutOfRange(t *testing.T) {
+	cases := []struct {
+		name  string
+		patch *EvtSpikeConfigPatch
+		want  string // substring of the expected error
+	}{
+		{"min_count too low", &EvtSpikeConfigPatch{MinCount: ptrInt(0)}, "min_count"},
+		{"min_count too high", &EvtSpikeConfigPatch{MinCount: ptrInt(MaxEvtSpikeMinCount + 1)}, "min_count"},
+		{"threshold too high", &EvtSpikeConfigPatch{Threshold: ptrFloat(0.5)}, "threshold"},
+		{"threshold negative", &EvtSpikeConfigPatch{Threshold: ptrFloat(-1)}, "threshold"},
+		{"cooldown too low", &EvtSpikeConfigPatch{CooldownMinutes: ptrInt(0)}, "cooldown_minutes"},
+		{"cooldown too high", &EvtSpikeConfigPatch{CooldownMinutes: ptrInt(MaxEvtSpikeCooldownMinutes + 1)}, "cooldown_minutes"},
+		{"slot maturity too low", &EvtSpikeConfigPatch{SlotMaturityObservations: ptrInt(0)}, "slot_maturity_observations"},
+		{"persist too low", &EvtSpikeConfigPatch{PersistIntervalSeconds: ptrInt(30)}, "persist_interval_seconds"},
+		{"half-life too low", &EvtSpikeConfigPatch{HalfLifeBuckets: ptrInt(10)}, "half_life_buckets"},
+		{"prior strength too low", &EvtSpikeConfigPatch{PriorStrength: ptrFloat(0.5)}, "prior_strength"},
+		{"mean negative", &EvtSpikeConfigPatch{MeanPerBucketPrior: ptrFloat(-0.1)}, "mean_per_bucket_prior"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateEvtSpikePatch(tc.patch)
+			if err == nil {
+				t.Fatalf("ValidateEvtSpikePatch(%+v) = nil, want error", tc.patch)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateEvtSpikePatch_AcceptsNilAndEmpty(t *testing.T) {
+	if err := ValidateEvtSpikePatch(nil); err != nil {
+		t.Errorf("nil patch: %v", err)
+	}
+	if err := ValidateEvtSpikePatch(&EvtSpikeConfigPatch{}); err != nil {
+		t.Errorf("empty patch: %v", err)
+	}
+}
+
+func TestApplyEvtSpikePatch_PartialLeavesOthersAlone(t *testing.T) {
+	dst := &EvtSpikeConfig{
+		Enabled:                  false,
+		MinCount:                 11,
+		Threshold:                2e-4,
+		CooldownMinutes:          12,
+		SlotMaturityObservations: 50,
+		PersistIntervalSeconds:   900,
+		HalfLifeBuckets:          360,
+		PriorStrength:            60,
+		MeanPerBucketPrior:       0.1,
+		DisabledChannels:         []string{"Application"},
+		AddedChannels:            []string{"Custom/X"},
+	}
+	ApplyEvtSpikePatch(dst, &EvtSpikeConfigPatch{Enabled: ptrBool(true)})
+	if !dst.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if dst.MinCount != 11 {
+		t.Errorf("MinCount = %d, want 11 (untouched)", dst.MinCount)
+	}
+	if dst.Threshold != 2e-4 {
+		t.Errorf("Threshold = %g, want 2e-4", dst.Threshold)
+	}
+	if dst.HalfLifeBuckets != 360 {
+		t.Errorf("HalfLifeBuckets = %d, want 360", dst.HalfLifeBuckets)
+	}
+	if len(dst.DisabledChannels) != 1 || dst.DisabledChannels[0] != "Application" {
+		t.Errorf("DisabledChannels = %v, want [Application]", dst.DisabledChannels)
+	}
+}
+
+func TestApplyEvtSpikePatch_NormalisesNilSlices(t *testing.T) {
+	dst := &EvtSpikeConfig{}
+	ApplyEvtSpikePatch(dst, &EvtSpikeConfigPatch{})
+	if dst.DisabledChannels == nil {
+		t.Error("DisabledChannels still nil after Clamp")
+	}
+	if dst.AddedChannels == nil {
+		t.Error("AddedChannels still nil after Clamp")
+	}
+}
+
+func TestIsEvtSpikePatchEmpty(t *testing.T) {
+	if !IsEvtSpikePatchEmpty(nil) {
+		t.Error("nil patch should be empty")
+	}
+	if !IsEvtSpikePatchEmpty(&EvtSpikeConfigPatch{}) {
+		t.Error("zero patch should be empty")
+	}
+	if IsEvtSpikePatchEmpty(&EvtSpikeConfigPatch{Enabled: ptrBool(false)}) {
+		t.Error("enabled:false is still an explicit change, must not be empty")
+	}
+	if IsEvtSpikePatchEmpty(&EvtSpikeConfigPatch{DisabledChannels: ptrStrs([]string{})}) {
+		t.Error("disabled_channels:[] is still an explicit change, must not be empty")
+	}
+}
+
+func TestUpdateEvtSpikeEnabled_DelegatesToUpdateEvtSpike(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if err := UpdateEvtSpikeEnabled(ptrBool(true)); err != nil {
+		t.Fatalf("UpdateEvtSpikeEnabled: %v", err)
+	}
+	cfg, _ := LoadConfig()
+	if !cfg.EvtSpike.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	// Other knobs should still be the zero (clamped) defaults, proving the
+	// wrapper only touches enabled.
+	if cfg.EvtSpike.MinCount != DefaultEvtSpikeMinCount {
+		t.Errorf("MinCount = %d, want default %d (wrapper must not touch it)",
+			cfg.EvtSpike.MinCount, DefaultEvtSpikeMinCount)
+	}
+	if err := UpdateEvtSpikeEnabled(nil); err != nil {
+		t.Errorf("UpdateEvtSpikeEnabled(nil): %v", err)
+	}
+}
+
+func TestNotificationExclusions_CanonicalMatchingIsExact(t *testing.T) {
+	exclusions := []string{" RDS01.EXAMPLE.TEST. "}
+	if !IsNotificationExcluded(exclusions, "rds01.example.test") {
+		t.Error("canonical FQDN should match")
+	}
+	if IsNotificationExcluded(exclusions, "rds01") {
+		t.Error("short host must not match a different canonical FQDN")
+	}
+
+	cfg := DefaultConfig()
+	cfg.NotificationExclusions = []string{" RDS01.EXAMPLE.TEST. ", "rds01.example.test", ""}
+	cfg.Validate()
+	if got, want := cfg.NotificationExclusions, []string{"rds01.example.test"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("normalized exclusions = %v, want %v", got, want)
 	}
 }

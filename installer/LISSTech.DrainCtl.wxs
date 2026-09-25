@@ -300,7 +300,8 @@
     <Fragment>
         <Component Id="DefaultConfig" Directory="DATADIRECTORY"
             Guid="39697d17-5164-472b-8a1e-533e93d4e4c9"
-            NeverOverwrite="yes">
+            NeverOverwrite="yes"
+            Permanent="yes">
             <File Id="config.json"
                 Source="config.json"
                 KeyPath="yes" />
