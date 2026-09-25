@@ -184,6 +184,7 @@ func TestQueryRangeFleet_SessionsMaxDropsAllUnlimitedBuckets(t *testing.T) {
 			{base.Add(5 * time.Minute), "SRV01", 100},
 			{base.Add(5 * time.Minute), "SRV02", 200},
 		} {
+			// #nosec G202 -- table is selected exclusively from the fixed test literals above.
 			if _, err := db.writer.Exec(
 				"INSERT INTO "+table+"(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count) VALUES (?, ?, 'sessions_max', ?, ?, ?, 1)",
 				sample.bucket.UnixMilli(), sample.host, sample.value, sample.value, sample.value,
