@@ -343,8 +343,8 @@
                     <li><a href="index.html">Home</a></li>
                     <li><a href="#install">Install</a></li>
                     <li><a href="#configure">Configure</a></li>
-                    <li><a href="#usage">Usage</a></li>
-                    <li><a href="#notifications">Notifications</a></li>
+                    <li><a href="#dashboard">Dashboard</a></li>
+                    <li><a href="#evtspike">Event Spikes</a></li>
                     <li><a href="https://github.com/LISSConsulting/LISSTech.DrainCtl">GitHub</a></li>
                 </ul>
             </div>
@@ -388,19 +388,29 @@
                 GPO, or just double-click it.
             </p>
             <p>
-                Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">current stable MSI</a>.
-                Every release is signed, upgrades in place, and keeps your service configuration, registered servers,
-                notification targets, and retained telemetry.
+                Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">current stable MSI (v26.9.36)</a>.
+                Every release is signed, upgrades in place, and preserves service configuration, retained telemetry,
+                removed-server tombstones, the Force Update outbox, and EventSpike baseline and warm-up state.
             </p>
             <div class="callout">
-                <strong>What the current release improves:</strong> lower background overhead, live dashboard controls,
-                alert thresholds that preserve disabled and default states, more reliable local status requests, and
-                safer handling of saved credentials. No configuration migration is required.
+                <strong>Current stable: v26.9.36.</strong> It includes dashboard-only deployment, durable fleet
+                controls, retained 30-day charts, and the current EventSpike detector defaults. No configuration
+                migration is required.
             </div>
+
+            <h3>Choose an installation mode</h3>
+            <p>
+                Use <strong>standalone</strong> for one locally monitored server, <strong>registration</strong> for an
+                agent that reports to an existing dashboard, or <strong>dashboard</strong> to host the dashboard. A
+                dashboard host can also be a monitored agent. Set <code>DASHBOARD_ONLY=1</code> when its sole role is
+                to host the fleet dashboard: it runs the dashboard listener, authentication, SQLite storage, and
+                retention workers, but does <strong>not</strong> run local drain monitoring, performance or EventSpike
+                collection, registration/reporting, notifications, or the updater.
+            </p>
 
             <h3>Interactive install</h3>
             <p>
-                Double-click the MSI to launch the interactive installer. It walks you through choosing an install mode
+                Double-click the MSI to launch the interactive installer. It walks you through choosing a mode
                 (<strong>dashboard</strong>, <strong>registration</strong>, or <strong>standalone</strong>) and setting
                 notification URLs, dashboard address, grace period, and other options.
             </p>
@@ -426,9 +436,10 @@
                         <td><code>INSTALL_MODE</code></td>
                         <td><code>dashboard</code> | <code>registration</code> | <code>standalone</code></td>
                         <td>
-                            Sets the operational mode. <strong>dashboard</strong> enables the web UI,
-                            <strong>registration</strong> registers with an existing dashboard,
-                            <strong>standalone</strong> runs independently.
+                            Sets the operational mode. <strong>dashboard</strong> hosts the web UI,
+                            <strong>registration</strong> joins an existing dashboard, and
+                            <strong>standalone</strong> runs independently. Add <code>DASHBOARD_ONLY=1</code> only to a
+                            dashboard host that must not monitor itself.
                         </td>
                     </tr>
                     <tr>
@@ -484,7 +495,7 @@
                     <tr>
                         <td><code>DASHBOARD_ONLY</code></td>
                         <td><code>1</code> | <code>0</code></td>
-                        <td>Run dashboard, storage, and authentication only; skip local monitoring and the updater subsystem.</td>
+                        <td>Dashboard-only role: listener, authentication, SQLite, and retention only; no local monitor, performance/EventSpike collection, registration/reporting, notifications, or updater.</td>
                     </tr>
                 </tbody>
             </table>
@@ -564,7 +575,9 @@
                 skips all configuration dialogs &mdash; you go straight from the welcome screen to install.
             </p>
             <ul>
-                <li><code>config.json</code> and <code>servers.json</code> are preserved</li>
+                <li><code>config.json</code> and server registration data are preserved</li>
+                <li>SQLite telemetry and audit history, removed-server tombstones, and the Force Update outbox are preserved</li>
+                <li>EventSpike baselines and seven-day warm-up state are preserved</li>
                 <li>Configuration actions are skipped (existing settings are not overwritten)</li>
                 <li>ETW provider, Event Log permissions, and the Windows Service are re-registered</li>
                 <li>Audit trail and TLS certificates in ProgramData are preserved</li>
@@ -765,7 +778,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     <tr>
                         <td><code>dashboard_only</code></td>
                         <td>false</td>
-                        <td>Run dashboard, storage, and authentication without local monitoring or the updater subsystem. Changing it at runtime stops or starts the updater.</td>
+                        <td>Run the dashboard listener, authentication, SQLite, and retention only. It disables local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, and the updater.</td>
                     </tr>
                     <tr>
                         <td><code>session_warning_threshold</code></td>
@@ -1347,7 +1360,7 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
   "state_duration_seconds": 900,
   "grace_period_seconds": 3600,
   "connections_allowed": false,
-  "version": "26.95.0",
+  "version": "26.9.36",
   "timestamp": "2026-04-03T14:30:00-04:00",
   "sessions": {
     "active_sessions": 12,
@@ -1457,8 +1470,9 @@ drainctl configure --session-warning-threshold 90
             <h3>How it works</h3>
             <ol>
                 <li>
-                    <strong>One server runs the dashboard</strong> &mdash; enable it in <code>config.json</code>, the
-                    DrainCtl service serves an HTTP dashboard
+                    <strong>One server runs the dashboard</strong> &mdash; enable it in <code>config.json</code>; the
+                    DrainCtl service serves an HTTPS dashboard. Use dashboard-only mode when that server must only host
+                    the dashboard and its retained data.
                 </li>
                 <li>
                     <strong>Other servers register</strong> &mdash; run drainctl register once, the agent starts
@@ -1649,27 +1663,33 @@ https://dashboard-server:49470</code></pre>
                 last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for
                 alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current
                 utilization, plus an <strong>Overview LOAD chart</strong> that overlays CPU, CPU P95, Memory, and
-                Sessions for the entire fleet on one dual-axis uPlot canvas.
+                Sessions for the entire fleet on one dual-axis canvas.
+            </p>
+
+            <p>
+                Charts use retained SQLite data, not browser history. Select 5M, 15M where applicable, 1H, 1D, 3D,
+                5D, or 30D; the dashboard selects the appropriate retention tier for the requested range. For latency,
+                load, queues, and other lower-is-better measures, P95 is the upper-tail value. FPS and frame quality
+                are higher-is-better: their displayed P95 is the service floor (numeric P5), while P50 is the median.
+                Fleet Health Indicators show the actual P50 median, not a proxy.
             </p>
 
             <p>
                 Clicking a server opens the <strong>Server Detail</strong> panel. The Host Load tile on that panel is a
-                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host with its
-                own 5M/1H/1D/3D/5D window pill (replacing the earlier layout of three separate small charts). A
-                <strong>swimlane tile</strong> below it plots confirmed event-log spikes per channel, with a
-                <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> / <code>ERROR</code> state chip in the
-                header sourced from the host's evtspike detector. See
-                <a href="#evtspike">Event-Log Anomaly Detection</a> for how those states are derived.
+                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host. An
+                <strong>Event Spikes</strong> swimlane below it plots confirmed event-log spikes per channel and reports
+                <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> / <code>ERROR</code>. See
+                <a href="#evtspike">Event-Log Anomaly Detection</a> for the detector states.
             </p>
 
+            <h3>Configuration modal</h3>
             <p>
-                The <strong>Configuration modal</strong> (gear icon) is the single place operators edit runtime
-                settings. It exposes: CPU warn/critical and memory warn/critical thresholds, input-delay warn/critical
-                thresholds and percentile (P50/P95), the grace period, session warning threshold, agent poll interval,
-                sample interval, performance-monitoring toggle (including RemoteFX and per-session CPU sub-toggles), the
-                evtspike detector toggle, and every notification target (each with its own triggers &mdash; including
-                <code>event_spike</code> &mdash; and repeat interval). The Alert Sensitivity row (Chill / Anxious /
-                Twitchy presets) sets thresholds, percentile, and sustain windows in one click.
+                The gear icon opens five tabs: <strong>Alerts &amp; Performance</strong> (thresholds, percentile,
+                sustain windows, polling, and performance collection), <strong>Event Spikes</strong> (detector,
+                presets, channels, and tuning), <strong>Notifications</strong> (targets, triggers, and repeats),
+                <strong>Servers</strong> (fleet lifecycle controls), and <strong>System</strong> (dashboard and update
+                policy). The dashboard propagates its settings to connected agents, including <em>all</em>
+                operator-safe EventSpike fields; <code>baseline_path</code> is deliberately local-only.
             </p>
 
             <h3>Manage servers</h3>
@@ -1877,11 +1897,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 The dashboard is the <strong>single source of truth</strong> for runtime settings. When an agent has a
                 <code>dashboard.url</code> configured, it pulls notification targets, host-wide notification exclusions,
-                thresholds, the grace period, the session warning threshold, the performance block, and the
-                operator-safe evtspike knobs (enabled toggle, sensitivity, channel lists, security-channel gate) from
-                the dashboard server. Edit settings once in the Configuration modal and every agent picks up the change
-                on its next poll &mdash; and immediately on its local <code>config.json</code> write.
-            </p>
+                thresholds, the grace period, the session warning threshold, the performance block, and every
+                operator-safe EventSpike field (detector state, presets and all tuning values, channel lists and
+                cooldown overrides) from the dashboard server. Edit settings once in the Configuration modal and every
+                connected agent picks up the change on its next poll and hot-reloads it. <code>baseline_path</code>
+                remains local-only.
 
             <p><strong>How it works:</strong></p>
             <ul>
@@ -1910,13 +1930,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
 
             <div class="callout warn">
-                <strong>&#x26A0;&#xFE0F; Do not hand-edit per-agent <code>config.json</code>.</strong>
-                Once an agent is joined to a dashboard, any runtime field you change locally will be overwritten on the
-                next pull. Use the dashboard Configuration modal instead. The local file is useful for bootstrap
-                settings (<code>dashboard.url</code>, <code>dashboard.tls_fingerprint</code>, log levels,
-                <code>memory_limit_mb</code>) and for admin-only evtspike knobs (<code>baseline_path</code>) that the
-                dashboard modal intentionally does not expose. Sensitivity thresholds, channel lists, and the
-                security-channel gate are dashboard-authoritative.
+                <strong>&#x26A0;&#xFE0F; Do not hand-edit dashboard-managed per-agent <code>config.json</code>.</strong>
+                Once an agent is joined to a dashboard, dashboard-managed runtime fields are overwritten on the next
+                pull. Use the Configuration modal instead. The local file remains appropriate for bootstrap settings
+                (<code>dashboard.url</code>, <code>dashboard.tls_fingerprint</code>, log levels,
+                <code>memory_limit_mb</code>) and the local-only EventSpike <code>baseline_path</code>.
             </div>
 
             <div class="callout">
@@ -2013,8 +2031,8 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Opening a server reveals the Server Detail panel &mdash; a single dual-axis
                 <strong>Host Load chart</strong> scoped to that host plots CPU, CPU P95, Memory, and Sessions together,
-                with its own 5M/1H/1D/3D/5D window pill. Input delay, disk queue, and RemoteFX counters (when the role
-                is installed) are surfaced in the metrics tiles alongside.
+                with retained 5M, 15M where applicable, 1H, 1D, 3D, 5D, and 30D ranges. Input delay, disk queue, and
+                RemoteFX counters (when the role is installed) are surfaced in the metrics tiles alongside.
             </p>
 
             <h3>Server Status Levels</h3>
@@ -2088,35 +2106,35 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <li><strong>Capacity</strong>: up to 100 concurrent browser sessions with &lt;1 MB memory per subscriber</li>
             </ul>
 
-            <h3>Multi-Select and Batch Actions</h3>
+            <h3>Servers: selection, lifecycle, and updates</h3>
             <p>
-                The Servers table supports multi-select with per-row checkboxes and a tri-state
-                select-all header control. Once one or more servers are selected, a batch action
-                toolbar appears with two operations:
+                The Servers table supports persistent multi-select with per-row checkboxes and a tri-state select-all
+                control. Selection survives filtering and pagination until you clear it or complete an action, so an
+                operator can assemble a batch deliberately before acting.
             </p>
             <ul>
                 <li>
-                    <strong>Permanent Remove</strong> &mdash; durable tombstone via
-                    <code>POST /api/v1/servers/permanent-remove</code>. The confirm dialog
-                    shows the exact host count and names before invocation. The batch response
-                    reports <code>removed</code>, <code>skipped</code>, and per-host
-                    <code>errors</code> so partial failures are surfaced. Tombstoned hosts
-                    cannot re-register until restored.
+                    <strong>Permanent Remove</strong> creates a durable tombstone for every selected server after a
+                    confirmation that names the exact hosts. Tombstoned agents cannot re-register. To reinstate a
+                    decommissioned host, open <strong>Configuration &rarr; Servers</strong> and restore it; restoration
+                    removes the tombstone and permits registration again.
                 </li>
                 <li>
-                    <strong>Force Update</strong> &mdash; non-destructive; instructs each
-                    selected agent to perform an immediate updater check via
-                    <code>POST /api/v1/servers/{host}/force-update</code>. A toast shows
-                    per-host <code>accepted</code>, <code>offline</code>,
-                    <code>unsupported</code>, or <code>duplicate</code> outcomes; the agent
-                    surfaces completion via the <code>force_update</code> SSE event. Each
-                    call carries a unique <code>command_id</code> for 24-hour server-side
-                    idempotency.
+                    <strong>Mute / Notify</strong> is a per-server global delivery switch. Mute suppresses notifications
+                    for that server without changing its detector, telemetry, or dashboard visibility; Notify restores
+                    normal delivery.
+                </li>
+                <li>
+                    <strong>Force Update</strong> queues an immediate update check for each selected compatible agent
+                    (v26.9.17 or later). The command is durable and retries until the agent acknowledges it, including
+                    when an agent is temporarily offline. The dashboard reports terminal outcomes per host, including
+                    completion, no update available, unsupported version, and delivery or update failure.
                 </li>
             </ul>
             <p>
-                Selection is automatically reconciled when servers are added, removed via
-                SSE, or filtered &mdash; the toolbar never operates on a stale or invisible row.
+                Force Update does not change the configured update policy; it requests a one-time check. The table and
+                server detail surface each command's delivery and terminal status so a queued request is not mistaken
+                for a completed upgrade.
             </p>
 
             <h3>Dashboard UI Features</h3>
@@ -2157,18 +2175,18 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <p>
                 Subscribed channels default to <code>Application</code>, <code>System</code>, and
-                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Pick a sensitivity
-                preset (Chill / Steady / Vigilant) for the most common tuning, or expand
-                <em>Customize settings manually</em> for fine-grained control. <code>baseline_path</code> remains the
-                only admin-only knob and lives under <code>"evtspike"</code> in <code>config.json</code> on the
-                dashboard server.
+                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Choose the
+                <strong>Chill</strong>, <strong>Steady</strong>, or <strong>Vigilant</strong> preset, or use
+                <em>Customize settings manually</em> for fine-grained control. Every preset enables the detector.
+                <code>baseline_path</code> is the only local-only field and remains under <code>"evtspike"</code> in
+                the local agent configuration; it is never propagated by the dashboard.
             </p>
 
             <h3>Dashboard display</h3>
             <p>
                 Each Server Detail panel carries an <strong>Event Spikes</strong> swimlane tile: one row per active
-                channel, with confirmed spikes plotted as markers on a time axis (5M / 1H / 1D / 3D / 5D window pill).
-                The tile header carries a state chip:
+                channel, with confirmed spikes plotted on the retained 5M, 15M where applicable, 1H, 1D, 3D, 5D, and
+                30D time ranges. The tile header carries a state chip:
             </p>
             <table>
                 <thead>
@@ -2209,24 +2227,31 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 </tbody>
             </table>
 
-            <h3>Configuration knobs</h3>
+            <h3>Configuration knobs and presets</h3>
             <p>
-                Every numeric knob below lives under <code>"evtspike"</code> in <code>config.json</code> on the
-                dashboard server and propagates to every connected agent on the next pull. Numeric fields are clamped
-                to the ranges shown; setting a value outside the range silently falls back to the default. The
-                dashboard Settings modal exposes every knob except <code>baseline_path</code> &mdash; use the modal's
-                sensitivity presets for one-click tuning, or expand <em>Customize settings manually</em> to edit any
-                single field. Out-of-range dashboard edits return a clear field-level error instead of being silently
-                clamped.
+                The Event Spikes tab manages all operator-safe fields and propagates them to every connected agent on
+                its next configuration pull. A seven-day durable warm-up starts when detection is enabled. Detection
+                continues during warm-up, but a channel only matures while it is successfully processing observations:
+                retrying or failed channels do not mature. <code>baseline_path</code> is not dashboard-managed.
             </p>
 
-            <p>A complete block with defaults:</p>
+            <p>
+                <strong>Chill</strong>, <strong>Steady</strong>, and <strong>Vigilant</strong> are supported operating
+                postures and each enables the detector. Steady is the default: <code>min_count=10</code>,
+                <code>threshold=1e-4</code>, <code>cooldown_minutes=60</code>,
+                <code>slot_maturity_observations=630</code>, <code>persist_interval_seconds=900</code>,
+                <code>half_life_buckets=630</code>, <code>prior_strength=60</code>, and
+                <code>mean_per_bucket_prior=0.1</code>. Chill trades stricter suppression for more operator visibility;
+                Vigilant tightens the response posture. Use manual fields when a preset is not the right fit.
+            </p>
+
+            <p>A complete Steady block:</p>
             <pre><code>"evtspike": {
   "enabled": true,
   "min_count": 10,
   "threshold": 1e-4,
   "cooldown_minutes": 60,
-  "channel_cooldown_minutes": {},
+  "channel_cooldown_minutes": [],
   "slot_maturity_observations": 630,
   "persist_interval_seconds": 900,
   "half_life_buckets": 630,
@@ -2283,11 +2308,10 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                         <td>60</td>
                         <td>1 &ndash; 1440</td>
                         <td>
-                            Default cooldown after a confirmed spike. Post-release EventSpike data showed 81% of
-                            repeats within one hour, so the steady value suppresses a single incident's repeat burst.
-                            Use <code>channel_cooldown_minutes</code> for up to 256 exact
-                            <code>Windows Event Log channel=minutes</code> overrides; an empty object uses this
-                            global value for every channel.
+                            Default cooldown after a confirmed spike. Override one exact channel with
+                            <code>Channel=Minutes</code>, for example
+                            <code>Microsoft-Windows-SMBClient/Audit=15</code>. Overrides match the channel name
+                            exactly; any channel without one uses the global cooldown.
                         </td>
                     </tr>
                 </tbody>
@@ -2311,32 +2335,23 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <tbody>
                     <tr>
                         <td><code>slot_maturity_observations</code></td>
-                        <td>90</td>
-                        <td>1 &ndash; 100</td>
+                        <td>630</td>
+                        <td>Configured detector range</td>
                         <td>
-                            Number of bucket observations a single 15-minute slot must accumulate before scoring
-                            prefers it over the global posterior. The default of <code>90</code> means a slot is
-                            declared mature only after a full 15-minute visit (90 ten-second buckets) in that
-                            time-of-day window — eliminating the "first morning back after a long weekend" false
-                            positive class. Lower values accept less evidence before trusting a slot's own
-                            statistics; if you find the detector spends too long in TRAINING on quiet channels,
-                            <code>30</code>&ndash;<code>60</code> is a reasonable softer setting. Pre-009 the default
-                            was <code>7</code> (≈70 s of coverage); persisted <code>7</code> values are NOT
-                            auto-migrated, so existing installs keep their tuning.
+                            Number of observations a channel slot needs before it is mature. Steady requires
+                            <code>630</code>; a channel in retry or failure never accumulates maturity. The dashboard
+                            remains <code>TRAINING</code> until the durable seven-day warm-up and readiness conditions
+                            are satisfied, although confirmed spikes can still be detected and delivered.
                         </td>
                     </tr>
                     <tr>
                         <td><code>half_life_buckets</code></td>
-                        <td>360</td>
-                        <td>60 &ndash; 10000</td>
+                        <td>630</td>
+                        <td>Configured detector range</td>
                         <td>
-                            Exponential-forgetting half-life in 10-second buckets. At <code>360</code> the baseline
-                            weights the last hour heavily and older data fades; after one half-life the contribution
-                            of a given observation drops to half. Shorter (<code>120</code>&ndash;<code>180</code>,
-                            20&ndash;30 minutes) adapts faster to channel-behaviour drift but is more easily dragged
-                            by a sustained background-rate shift. Longer (<code>720</code>+, two-plus hours) is more
-                            stable across short incidents but slower to re-home on a permanent rate change (e.g., a
-                            newly deployed application that changed the channel's idle rate).
+                            Exponential-forgetting half-life in 10-second buckets. Steady retains a 630-bucket
+                            half-life: after one half-life an observation's contribution is halved. Lower values adapt
+                            faster; higher values retain more historical influence.
                         </td>
                     </tr>
                     <tr>
@@ -2457,8 +2472,8 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Lower <code>min_count</code> and looser <code>threshold</code> catch more. Longer <code>cooldown</code>
                 prevents a single noisy channel from pager-bombing you while you figure out if it's signal or normal.
-                Lower <code>slot_maturity_observations</code> than the default (90) lets per-slot scoring engage sooner
-                so you see borderline activity earlier — at the cost of more false positives in the first few hours.
+                Lower <code>slot_maturity_observations</code> than Steady's <code>630</code> lets channel slots mature
+                sooner, at the cost of less evidence.
             </p>
 
             <h4>Strict (mature fleet, high-signal alerts only)</h4>
@@ -2475,10 +2490,8 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
 }</code></pre>
             <p>
                 Higher <code>min_count</code> filters out small deviations. Tighter <code>threshold</code> demands
-                extreme tail events. The default <code>slot_maturity_observations = 90</code> already means the
-                detector refuses to call a slot mature until it has seen a full 15-minute visit in that time-of-day
-                window &mdash; eliminates
-                the "first morning back after a three-day weekend" false positive class.
+                extreme tail events. Steady's <code>slot_maturity_observations = 630</code> requires substantially more
+                channel evidence before it is mature; warm-up detection remains active throughout.
             </p>
 
             <h4>Noisy-channel surgery (keep the rest, tame the one)</h4>
@@ -2607,17 +2620,20 @@ if ($result.exit_code -ne 0) {
 
             <p>
                 DrainCtl can keep itself current on the stable release channel. When enabled, it checks once a day,
-                accepts only releases signed by LISS Consulting, upgrades silently, and keeps your configuration and
-                history. Auto-update is <strong>off by default</strong> &mdash; the service does not contact GitHub until
-                an operator opts in.
+                accepts only releases signed by LISS Consulting, upgrades silently, and preserves configuration,
+                telemetry, removed-server tombstones, the Force Update outbox, and EventSpike baseline and warm-up
+                state. Auto-update is <strong>off by default</strong>; the service does not contact GitHub until an
+                operator opts in. Dashboard-only hosts do not run an updater.
             </p>
 
             <h3>Controlling auto-update from the dashboard</h3>
 
             <p>
-                Open <strong>Settings &rarr; Automatic Updates</strong> to enable or disable updates, choose the
-                stable or prerelease channel, and select the polling cadence. The dashboard policy applies to every
-                connected agent on its next settings synchronization without a service restart.
+                Open <strong>Configuration &rarr; System</strong> to enable or disable updates, choose the stable or
+                prerelease channel, and select the polling cadence. The dashboard policy applies to every connected
+                agent on its next settings synchronization without a service restart. For an immediate one-time check,
+                use the Servers table's Force Update action; it is supported by agents v26.9.17 and later and remains
+                queued until acknowledged.
             </p>
 
             <h3>Configuring a standalone agent</h3>
@@ -2704,8 +2720,8 @@ if ($result.exit_code -ne 0) {
             <h3>Opting back out</h3>
 
             <p>
-                Clear <strong>Automatically install updates</strong> in dashboard Settings, or set
-                <code>"enabled": false</code> in a standalone agent&rsquo;s <code>config.json</code>. The running
+                Clear <strong>Automatically install updates</strong> in <strong>Configuration &rarr; System</strong>, or
+                set <code>"enabled": false</code> in a standalone agent&rsquo;s <code>config.json</code>. The running
                 updater applies the changed policy without a service restart.
             </p>
 
@@ -2873,6 +2889,28 @@ drainctl service uninstall</code></pre>
                 </li>
                 <li>Check the DrainCtl event log on the reporting server for DrainCtl errors</li>
             </ul>
+
+            <h3>Force Update remains queued</h3>
+            <p>
+                A queued Force Update means the dashboard has not yet received an agent acknowledgement. Confirm the
+                server is online and reporting, then inspect the command's per-server delivery status in
+                <strong>Configuration &rarr; Servers</strong>. Agents older than v26.9.17 are terminally unsupported;
+                delivery and update failures are terminal outcomes, not successful updates.
+            </p>
+
+            <h3>Event Spikes stays TRAINING</h3>
+            <p>
+                TRAINING is expected until the seven-day durable warm-up and channel readiness requirements are met;
+                detection still runs during that time. Check the tile or service log for channels retrying or failing,
+                because those channels do not mature. Do not delete <code>baseline.json</code> while the service is
+                running; use <code>drainctl baseline reset</code> only when you intentionally need a fresh baseline.
+            </p>
+
+            <h3>Cannot re-register a removed server</h3>
+            <p>
+                Permanent removal creates a tombstone by design. Open <strong>Configuration &rarr; Servers</strong>,
+                restore the exact server, and then register it again.
+            </p>
 
             <h3>Dashboard returns 401 or "Access Denied"</h3>
             <p>Windows Authentication (Kerberos) issue:</p>
