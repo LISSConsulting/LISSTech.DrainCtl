@@ -449,14 +449,15 @@
                     />
                 {/if}
 
-                <!-- ── Secondary stroke line ── -->
+                <!-- ── P50 stroke: dotted so it remains distinct from the solid P95 line ── -->
                 {#if p50Paths.line}
                     <path
                         d={p50Paths.line}
                         fill="none"
                         stroke-linejoin="round"
                         stroke-linecap="round"
-                        style="stroke: color-mix(in srgb, {color} 85%, black); stroke-width: 3.5"
+                        stroke-dasharray="2,6"
+                        style="stroke: color-mix(in srgb, {color} 85%, black); stroke-width: 3"
                     />
                 {/if}
 
@@ -517,10 +518,9 @@
                             cx={crosshairX.toFixed(1)}
                             cy={dotY.toFixed(1)}
                             r="4"
-                            fill={color}
-                            stroke="var(--color-bg)"
-                            stroke-width="2"
-                            opacity="0.7"
+                            fill="var(--color-card)"
+                            stroke={color}
+                            stroke-width="2.5"
                         />
                     {/if}
 
@@ -531,7 +531,7 @@
                             yChartTop + 2,
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
                         )}
-                        {@const hoverT = /** @type {any} */ ((history[displayIndex])?.[timeKey])}
+                        {@const hoverT = /** @type {any} */ (history[displayIndex]?.[timeKey])}
                         {@const timeStr = Number.isFinite(hoverT) ? formatTs(new Date(hoverT).toISOString()) : '—'}
 
                         <rect
