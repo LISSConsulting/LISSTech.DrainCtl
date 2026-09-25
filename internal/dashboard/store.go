@@ -539,6 +539,7 @@ func GetSettings() (*RemoteSettings, error) {
 		exclusions = []string{}
 	}
 	view := buildEvtSpikeView(cfg.EvtSpike)
+	remoteEvtSpike := remoteEvtSpikeFromView(view)
 	return &RemoteSettings{
 		Notifications:           notifications,
 		NotificationExclusions:  exclusions,
@@ -546,7 +547,7 @@ func GetSettings() (*RemoteSettings, error) {
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
 		Performance:             &cfg.Performance,
-		EvtSpike:                &view,
+		EvtSpike:                &remoteEvtSpike,
 		Update:                  &cfg.Update,
 	}, nil
 }

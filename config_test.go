@@ -2337,3 +2337,19 @@ func TestValidateEvtSpikePatch_RejectsUnsafeChannelCooldowns(t *testing.T) {
 		t.Fatal("out-of-range channel cooldown accepted")
 	}
 }
+
+func TestEvtSpikeChannelCooldowns_DirectConfigCollisionIsDeterministic(t *testing.T) {
+	cfg := EvtSpikeConfig{ChannelCooldownMinutes: map[string]int{
+		" Application ": 30,
+		"Application":   60,
+	}}
+	ClampEvtSpike(&cfg)
+	if !reflect.DeepEqual(cfg.ChannelCooldownMinutes, map[string]int{"Application": 30}) {
+		t.Errorf("normalized collisions = %#v, want lexicographically first raw key to win", cfg.ChannelCooldownMinutes)
+	}
+
+	duplicates := map[string]int{" Application ": 30, "Application": 60}
+	if err := ValidateEvtSpikePatch(&EvtSpikeConfigPatch{ChannelCooldownMinutes: &duplicates}); err == nil {
+		t.Fatal("whitespace-normalized duplicate override accepted")
+	}
+}

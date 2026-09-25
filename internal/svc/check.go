@@ -533,7 +533,9 @@ func overlayEvtSpikeFromRemote(dst *dc.EvtSpikeConfig, remote *dashboard.RemoteE
 		cp := append([]string(nil), remote.AddedChannels...)
 		dst.AddedChannels = cp
 	}
-	dst.ChannelCooldownMinutes = clampRemoteChannelCooldowns(remote.ChannelCooldownMinutes)
+	if remote.ChannelCooldownMinutes != nil {
+		dst.ChannelCooldownMinutes = clampRemoteChannelCooldowns(*remote.ChannelCooldownMinutes)
+	}
 }
 
 func clampRemoteChannelCooldowns(overrides map[string]int) map[string]int {
