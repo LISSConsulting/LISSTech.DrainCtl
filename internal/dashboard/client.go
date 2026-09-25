@@ -159,28 +159,129 @@ func ReportSpike(ctx context.Context, dashboardURL string, spike *dc.SpikePayloa
 		"observed", spike.Observed, "expected", spike.Expected)
 }
 
+// ForceUpdatePendingCommand is the per-host command the dashboard
+// attaches to a /api/v1/report response when an operator has
+// requested a force-update. The agent is expected to invoke the updater
+// immediately on receipt and post a completion via
+// ReportForceUpdateCompletion on its next heartbeat.
+//
+// The struct is the wire-side envelope; the dashboard's
+// internal/dashboard.forceUpdateCommand is the registry-side mirror.
+type ForceUpdatePendingCommand struct {
+	CommandID    string    `json:"command_id"`
+	Host         string    `json:"host"`
+	Reason       string    `json:"reason,omitempty"`
+	AcceptedAt   time.Time `json:"accepted_at"`
+	AgentVersion string    `json:"agent_version"`
+}
+
+// ForceUpdateCompletion is the wire-side envelope the agent posts back
+// to the dashboard alongside its heartbeat to report the terminal
+// outcome of a forced update. Mirrors
+// internal/dashboard.ForceUpdateCompletionPayload.
+type ForceUpdateCompletion struct {
+	CommandID  string    `json:"command_id"`
+	Outcome    string    `json:"outcome"` // completed | failed | duplicate | refused
+	Reason     string    `json:"reason,omitempty"`
+	OldVersion string    `json:"old_version,omitempty"`
+	NewVersion string    `json:"new_version,omitempty"`
+	DecidedAt  time.Time `json:"decided_at"`
+}
+
+// ForceUpdateCompletionOutcome values are the documented terminal
+// outcomes the agent may post back. Used as constants so call sites
+// don't pass free-form strings.
+const (
+	ForceUpdateOutcomeCompleted = "completed"
+	ForceUpdateOutcomeFailed    = "failed"
+	ForceUpdateOutcomeDuplicate = "duplicate"
+	ForceUpdateOutcomeRefused   = "refused"
+)
+
+// ReportResult is the parsed shape of a successful /api/v1/report
+// response. PendingCommand is non-nil only when the dashboard has
+// queued a force-update command for this host that has not yet been
+// delivered.
+type ReportResult struct {
+	PendingCommand *ForceUpdatePendingCommand
+}
+
 // ReportState sends the latest CheckResult to the dashboard server.
 // Errors are logged but never crash the service.
-func ReportState(ctx context.Context, dashboardURL string, result *dc.CheckResult) {
+//
+// On a 2xx response the body is parsed for a `pending_command` block;
+// the returned ReportResult carries the pending command (nil if absent)
+// so the caller can immediately invoke the updater. Errors from the
+// dashboard (non-2xx, transport failure) yield a nil ReportResult and
+// are logged but never crash the service.
+func ReportState(ctx context.Context, dashboardURL string, result *dc.CheckResult) *ReportResult {
 	payload, err := json.Marshal(result)
 	if err != nil {
 		slog.Warn("dashboard: marshal failed", "error", err)
-		return
+		return nil
 	}
 
 	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/report", payload)
 	if err != nil {
 		slog.Warn("dashboard: report failed", "error", err)
-		return
+		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slog.Warn("dashboard: report rejected", "status", resp.StatusCode, "host", result.Host)
-		return
+		return nil
 	}
 	slog.Info("dashboard=reported", "host", result.Host, "status", result.Status)
+	if len(body) == 0 {
+		return &ReportResult{}
+	}
+	var parsed struct {
+		OK             bool                       `json:"ok"`
+		PendingCommand *ForceUpdatePendingCommand `json:"pending_command"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		slog.Debug("dashboard: report body unparsable", "error", err)
+		return &ReportResult{}
+	}
+	return &ReportResult{PendingCommand: parsed.PendingCommand}
+}
+
+// ReportForceUpdateCompletion posts the terminal updater decision back to the
+// dashboard via the report endpoint. The dashboard broadcasts a force_update
+// SSE event while retaining the command ID for its idempotency window.
+//
+// Callers invoke this once per command_id. Errors are logged but never crash
+// the service.
+func ReportForceUpdateCompletion(ctx context.Context, dashboardURL string, host string, completion ForceUpdateCompletion) {
+	if completion.DecidedAt.IsZero() {
+		completion.DecidedAt = time.Now().UTC()
+	}
+	type wire struct {
+		Host        string                `json:"host"`
+		ForceUpdate ForceUpdateCompletion `json:"force_update"`
+	}
+	payload, err := json.Marshal(wire{Host: host, ForceUpdate: completion})
+	if err != nil {
+		slog.Warn("dashboard: marshal completion failed", "error", err)
+		return
+	}
+	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/report", payload)
+	if err != nil {
+		slog.Warn("dashboard: completion report failed", "error", err, "command_id", completion.CommandID)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		slog.Warn("dashboard: completion report rejected", "status", resp.StatusCode, "command_id", completion.CommandID)
+		return
+	}
+	slog.Info("dashboard=force_update_completion",
+		"host", host,
+		"command_id", completion.CommandID,
+		"outcome", completion.Outcome)
 }
 
 // negotiateRequest performs an HTTP request with SSPI Negotiate authentication.
@@ -321,13 +422,13 @@ func hostName() (string, error) {
 	return os.Hostname()
 }
 
-// RemoteEvtSpike is the subset of evtspike config the dashboard exposes to
-// agents. Only `enabled` is writable remotely; thresholds and channel lists
-// remain local-only. Wire shape matches the dashboard's handleGetSettings
-// response so the JSON decodes cleanly off `/api/v1/config`.
-type RemoteEvtSpike struct {
-	Enabled bool `json:"enabled"`
-}
+// RemoteEvtSpike is the dashboard's operator-safe evtspike view that agents
+// fetch via /api/v1/config. It mirrors the dashboard's evtspikeView one-to-one
+// so the wire format round-trips. baseline_path stays admin-only on the agent
+// side (lives in config.json) and is intentionally omitted. Every field is
+// writable by the dashboard; the agent simply overlays each knob on its
+// local EvtSpikeConfig per applyRemoteConfig.
+type RemoteEvtSpike = evtspikeView
 
 // RemoteSettings holds dashboard settings fetched by the service agent. Every
 // field that the dashboard's ConfigModal edits must be represented here so
@@ -339,6 +440,7 @@ type RemoteEvtSpike struct {
 // unexpectedly flip the flag.
 type RemoteSettings struct {
 	Notifications           []dc.NotificationTarget `json:"notifications"`
+	NotificationExclusions  []string                `json:"notification_exclusions"`
 	SessionWarningThreshold int                     `json:"session_warning_threshold"`
 	GracePeriod             int                     `json:"grace_period"`
 	PollInterval            int                     `json:"poll_interval,omitempty"`

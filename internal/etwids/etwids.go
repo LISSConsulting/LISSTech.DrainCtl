@@ -9,5 +9,7 @@ const (
 	EvtServerRegistered      = 5002 // host registered with dashboard
 	EvtServerRemoved         = 5003 // host removed from dashboard
 	EvtAccessDenied          = 5004 // authentication or authorization failure
+	EvtForceUpdateAccepted   = 5005 // dashboard accepted a force-update command for an agent
+	EvtForceUpdateCompleted  = 5006 // agent reported its updater decision back to the dashboard
 	EvtGenericAudit          = 5099 // generic audit event
 )

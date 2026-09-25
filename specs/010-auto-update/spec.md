@@ -75,7 +75,7 @@ The poll has to be a good network citizen and a good neighbor on the host. This 
 - **FR-003**: The poll cadence is configurable via `update.poll_interval` (Go duration string, default `24h`). Each poll's actual delay is `interval ± rand([0, jitter])` where `jitter = interval/12` (so 24h ± 2h). Minimum permitted interval is `1h`; values below are clamped with a warning.
 - **FR-004**: First poll fires `rand(5m, 15m)` after Start, not immediately. This delay is fixed regardless of `poll_interval`.
 - **FR-005**: The version comparison MUST parse `vYY.MM.BUILD` numerically, component by component. A remote tag that does not match this pattern is treated as "older than current" (skip).
-- **FR-006**: The downloader MUST stream the MSI to a temp path (`%TEMP%\drainctl-update-<random>.msi`), not buffer in memory. On any error, the temp file MUST be deleted.
+- **FR-006**: The downloader MUST stream the MSI beneath `%ProgramData%\LISS Technologies\LISSTech DrainCtl\updates\`, not buffer it in memory or write it to `%TEMP%`. On any error, the partial file MUST be deleted.
 - **FR-007**: Before install, the verifier MUST call `WinVerifyTrust` on the temp MSI with `WINTRUST_ACTION_GENERIC_VERIFY_V2`. A non-zero return rejects the install.
 - **FR-008**: After `WinVerifyTrust` succeeds, the verifier MUST extract the signing cert via `CryptQueryObject` and assert the Subject CN equals exactly `LISS Consulting, Corp.`. A mismatch rejects the install.
 - **FR-009**: Install spawns `msiexec /i <path> /quiet /norestart` with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`, then calls `cmd.Process.Release()` without waiting.
@@ -176,7 +176,7 @@ Manifests produced before the schema_version field was added unmarshal with `Sch
 
 ### Out of scope
 
-- **Local-admin attacker**: an attacker with write access to `%TEMP%\drainctl-update-*.msi` between verify and msiexec spawn can substitute the binary. The temp dir is admin-only on LocalSystem hosts; an attacker with admin can subvert the binary directly. Hardening (re-hash post-spawn-prep, fd-based msiexec) is not pursued.
+- **Local-admin attacker**: an attacker with write access to `%ProgramData%\LISS Technologies\LISSTech DrainCtl\updates\drainctl-update-*.msi` between verify and msiexec spawn can substitute the binary. The package inherits the product data-directory ACL; an attacker with admin can subvert the installed binary directly. Hardening (re-hash post-spawn-prep, fd-based msiexec) is not pursued.
 - **Replay/freeze defense**: persisting a highest-seen version to defend against signed-but-stale replay is tracked as M1 in `docs/reviews/codex-2026-04-27-sspi-update-remediation-plan.md`. Until that lands, a network-positioned attacker can stall a fleet on a previously-published signed release.
 - **Schema-version rejection-of-0** as noted above; tracked as a v1.1 backlog item.
 

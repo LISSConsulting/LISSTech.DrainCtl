@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"golang.org/x/sys/windows"
@@ -22,8 +23,13 @@ import (
 // first Start). The replay/freeze gate refuses any remote release
 // strictly lower than this value, so a network-positioned attacker
 // cannot stall a fleet on a previously-published-but-stale signed MSI.
+//
+// ForceUpdateCommands is an at-most-once ledger. An ID is persisted before
+// its updater check begins, so replay after a service restart is suppressed
+// rather than risking a second installer invocation.
 type updateState struct {
-	HighestSeenVersion string `json:"highest_seen_version"`
+	HighestSeenVersion  string               `json:"highest_seen_version"`
+	ForceUpdateCommands map[string]time.Time `json:"force_update_commands,omitempty"`
 }
 
 // updateStateMutexName is deliberately distinct from
@@ -69,8 +75,7 @@ func loadUpdateStateImpl() (updateState, error) {
 		return updateState{}, nil
 	}
 	if int64(len(data)) > maxUpdateStateFileSize {
-		slog.Warn("update=state_oversize", "path", path, "size", len(data))
-		return updateState{}, nil
+		return updateState{}, fmt.Errorf("update state exceeds %d bytes", maxUpdateStateFileSize)
 	}
 	var s updateState
 	if err := json.Unmarshal(data, &s); err != nil {

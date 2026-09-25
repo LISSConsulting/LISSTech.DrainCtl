@@ -18,6 +18,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -95,7 +96,12 @@ type Subsystem struct {
 	// seconds rather than at the next poll_interval tick.
 	wakeCh chan struct{}
 
-	// Mutable state held by the poll goroutine only — no synchronization.
+	// runMu serializes periodic and forced checks. Both paths mutate ETag and
+	// backoff state, and allowing them to overlap can launch two installers.
+	runMu sync.Mutex
+
+	// Mutable updater state. Access is serialized by runMu for both periodic
+	// and operator-triggered checks.
 	etag    string
 	backoff backoff
 
@@ -151,6 +157,58 @@ func (s *Subsystem) snapshot() dc.UpdateConfig {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg
+}
+
+const (
+	forceUpdateIdempotencyWindow = 24 * time.Hour
+	forceUpdateCommandLedgerCap  = 256
+)
+
+func (s *Subsystem) TriggerCheckNow(ctx context.Context, commandID string) tickOutcome {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+
+	now := time.Now().UTC()
+	state, err := loadUpdateState()
+	if err != nil {
+		return tickOutcome{Decision: "error", Reason: "read_command_ledger:" + err.Error()}
+	}
+	pruneForceUpdateCommands(&state, now)
+	if _, exists := state.ForceUpdateCommands[commandID]; exists {
+		return tickOutcome{Decision: "duplicate", Reason: "idempotent_replay"}
+	}
+	state.ForceUpdateCommands[commandID] = now
+	if err := saveUpdateState(state); err != nil {
+		return tickOutcome{Decision: "error", Reason: "record_command:" + err.Error()}
+	}
+	return s.runTick(ctx, true)
+}
+
+func pruneForceUpdateCommands(state *updateState, now time.Time) {
+	if state.ForceUpdateCommands == nil {
+		state.ForceUpdateCommands = make(map[string]time.Time)
+		return
+	}
+	cutoff := now.Add(-forceUpdateIdempotencyWindow)
+	for id, seenAt := range state.ForceUpdateCommands {
+		if seenAt.Before(cutoff) {
+			delete(state.ForceUpdateCommands, id)
+		}
+	}
+	if len(state.ForceUpdateCommands) < forceUpdateCommandLedgerCap {
+		return
+	}
+	ids := make([]string, 0, len(state.ForceUpdateCommands))
+	for id := range state.ForceUpdateCommands {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		left, right := state.ForceUpdateCommands[ids[i]], state.ForceUpdateCommands[ids[j]]
+		return left.Before(right) || (left.Equal(right) && ids[i] < ids[j])
+	})
+	for _, id := range ids[:len(ids)-forceUpdateCommandLedgerCap+1] {
+		delete(state.ForceUpdateCommands, id)
+	}
 }
 
 // Start implements lifecycle.Subsystem. Always launches the poll
@@ -226,64 +284,90 @@ func (s *Subsystem) run() {
 	}
 }
 
-// tick runs one poll. Mutations to s.etag and s.backoff happen here.
-func (s *Subsystem) tick() {
+// tickOutcome is the structured result of a single tick. Returned by
+// the synchronous TriggerCheckNow path so the service loop can post a
+// completion report back to the dashboard without parsing slog lines.
+// The decision string mirrors the human-readable decision messages
+// already used in the slog logging (e.g. "up_to_date", "not_modified",
+// "installer_spawned", "no_stable_release", "refused"); the "error" decision
+// is reserved for transport / verification failures and the err field carries
+// the underlying message.
+type tickOutcome struct {
+	Decision string // up_to_date | not_modified | no_stable_release | installer_spawned | refused | error | disabled | duplicate
+	Reason   string // free-form: slog message, error text, refusal stage
+	OldVer   string // empty when not applicable
+	NewVer   string // empty when not applicable
+}
+
+// TickOutcome completes a tick() that ran successfully with one of the
+// terminal decisions (not a transport error). Used by TriggerCheckNow
+// to bridge the updater's decision vocabulary into the dashboard's
+// ForceUpdateCompletion outcome vocabulary.
+//
+// As of this commit the public TriggerCheckNow path wraps the
+// decision in the dashboard-side ForceUpdateCompletionOutcome string,
+// so TickOutcome is consumed indirectly. Kept exported so callers (and
+// tests) can introspect the raw decision before the wrapper applies.
+func (o tickOutcome) String() string {
+	if o.Reason == "" {
+		return o.Decision
+	}
+	return o.Decision + ":" + o.Reason
+}
+
+// runTick runs one poll synchronously against the supplied context and
+// returns the structured outcome. Exposed via TriggerCheckNow for the
+// dashboard's force-update path; the periodic background loop also
+// calls it (after the initial sleep) so both paths share one
+// implementation. runTick takes a context so the caller (the periodic
+// loop's goroutine OR the synchronous trigger path) controls the
+// deadline; the background goroutine passes s.ctx, the dashboard path
+// passes its own ctx (typically the parent svc ctx with a tighter bound).
+func (s *Subsystem) runTick(ctx context.Context, forced bool) tickOutcome {
 	cfg := s.snapshot()
-	if !cfg.Enabled {
+	if !forced && !cfg.Enabled {
 		slog.Debug("update=disabled tick_skip")
-		return
+		return tickOutcome{Decision: "disabled"}
 	}
 
 	slog.Debug("update=poll_start", "current", dc.Version, "channel", cfg.Channel)
 
-	rel, err := fetchRelease(s.ctx, s.client, cfg.Channel, s.etag)
+	rel, err := fetchRelease(ctx, s.client, cfg.Channel, s.etag)
 	if err != nil {
-		// Don't backoff on ctx cancel — the goroutine is exiting.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return
+			return tickOutcome{Decision: "cancelled"}
 		}
 		delay := s.backoff.recordFailure()
 		slog.Warn("update=poll_failed", "error", err.Error(), "backoff", delay.String(), "failures", s.backoff.failureCount())
-		return
+		return tickOutcome{Decision: "error", Reason: err.Error()}
 	}
 
 	switch {
 	case rel.notModified:
 		slog.Debug("update=not_modified", "etag", s.etag)
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "not_modified"}
 	case rel.noReleases:
 		slog.Info("update=no_stable_release", "channel", cfg.Channel)
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "no_stable_release"}
 	}
 
-	// 200 path. Capture the new ETag before any decision so a later poll
-	// can short-circuit even if this one ends in a refusal.
 	s.etag = rel.etag
 
 	remote, err := parseVersion(rel.tag)
 	if err != nil {
 		slog.Warn("update=bad_tag", "tag", rel.tag, "error", err.Error())
-		s.backoff.recordSuccess() // not a network failure
-		return
+		s.backoff.recordSuccess()
+		return tickOutcome{Decision: "refused", Reason: "bad_tag:" + err.Error()}
 	}
 	current, err := parseVersion(dc.Version)
 	if err != nil {
-		// Should never happen — dc.Version comes from build-time ldflags.
-		// Treat as up-to-date to avoid an install loop on a malformed
-		// local version.
 		slog.Warn("update=bad_local_version", "version", dc.Version, "error", err.Error())
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "refused", Reason: "bad_local_version"}
 	}
 
-	// Replay/freeze gate: refuse any remote strictly less than the
-	// highest version we've ever seen. The carve-out for remote == highSeen
-	// lets a re-poll of the exact same legitimate release pass through;
-	// the up-to-date branch below catches the no-op case. Parsed version
-	// comparison (not String()) so "v26.6.17" and "26.6.17" are
-	// recognised as equal across the persisted-state and remote paths.
 	if state, _ := loadUpdateState(); state.HighestSeenVersion != "" {
 		if highSeen, err := parseVersion(state.HighestSeenVersion); err == nil {
 			if remote.less(highSeen) && !remote.equals(highSeen) {
@@ -292,7 +376,7 @@ func (s *Subsystem) tick() {
 					"highest_seen", highSeen.String(),
 					"remote", remote.String())
 				s.backoff.recordSuccess()
-				return
+				return tickOutcome{Decision: "refused", Reason: "replay_fence"}
 			}
 		}
 	}
@@ -300,45 +384,38 @@ func (s *Subsystem) tick() {
 	if !current.less(remote) {
 		slog.Info("update=up_to_date", "current", current.String(), "remote", remote.String())
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "up_to_date", OldVer: current.String(), NewVer: remote.String()}
 	}
 
 	// Newer available. Download → verify → spawn. The MSI owns service restart.
-	tempPath, err := downloadMSI(s.ctx, s.client, rel.assetURL)
+	tempPath, err := downloadMSI(ctx, s.client, rel.assetURL)
 	if err != nil {
 		delay := s.backoff.recordFailure()
 		slog.Warn("update=download_failed", "url", rel.assetURL, "error", err.Error(), "backoff", delay.String())
-		return
+		return tickOutcome{Decision: "error", Reason: "download:" + err.Error()}
 	}
 
-	if err := verifyManifest(s.ctx, s.client, tempPath, rel.manifestURL, rel.sigURL, s.signingKeys); err != nil {
-		// Same reasoning as below: verification failure isn't transient.
+	if err := verifyManifest(ctx, s.client, tempPath, rel.manifestURL, rel.sigURL, s.signingKeys); err != nil {
 		slog.Warn("update=refused", "path", tempPath, "stage", "manifest", "error", err.Error())
 		_ = os.Remove(tempPath)
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "refused", Reason: "manifest:" + err.Error()}
 	}
 
 	if err := verifyMSI(tempPath); err != nil {
-		// Verification failure is NOT a transient network issue — could
-		// be deliberate poisoning. Don't escalate backoff; stay on the
-		// configured cadence.
 		slog.Warn("update=refused", "path", tempPath, "stage", "authenticode", "error", err.Error())
 		_ = os.Remove(tempPath)
 		s.backoff.recordSuccess()
-		return
+		return tickOutcome{Decision: "refused", Reason: "authenticode:" + err.Error()}
 	}
 
-	// FR-011 v1: durable persistence deferred. The slog.Info line below
-	// is the v1 record of the version transition; the file log keeps
-	// 7 days of rotation.
 	slog.Info("update=installing", "old", current.String(), "new", remote.String(), "path", tempPath)
 
 	if err := spawnMSI(tempPath); err != nil {
 		delay := s.backoff.recordFailure()
 		slog.Warn("update=spawn_failed", "path", tempPath, "error", err.Error(), "backoff", delay.String())
 		_ = os.Remove(tempPath)
-		return
+		return tickOutcome{Decision: "error", Reason: "spawn:" + err.Error()}
 	}
 
 	// A successful process spawn is not a successful installation. Keep the
@@ -347,6 +424,17 @@ func (s *Subsystem) tick() {
 	s.etag = ""
 	s.backoff.recordSuccess()
 	slog.Info("update=installer_spawned", "new", remote.String())
+	return tickOutcome{
+		Decision: "installer_spawned",
+		OldVer:   current.String(),
+		NewVer:   remote.String(),
+	}
+}
+
+func (s *Subsystem) tick() {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	_ = s.runTick(s.ctx, false)
 }
 
 // verifyManifestRemote enforces Ed25519-signed manifest + SHA-256 hash
@@ -408,9 +496,9 @@ func downloadAssetBytes(ctx context.Context, client *http.Client, url string) ([
 	return b, nil
 }
 
-// downloadToTemp streams the asset to %TEMP%\drainctl-update-<random>.msi
-// and returns the path. On any error, the partial file is cleaned up
-// before returning.
+// downloadToTemp streams the asset to the updates subdirectory beneath the
+// canonical ProgramData root and returns the path. On any error, the partial
+// file is cleaned up before returning.
 func downloadToTemp(ctx context.Context, client *http.Client, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -425,7 +513,10 @@ func downloadToTemp(ctx context.Context, client *http.Client, url string) (strin
 		return "", fmt.Errorf("download: unexpected status %d", resp.StatusCode)
 	}
 
-	f, err := os.CreateTemp("", "drainctl-update-*.msi")
+	if err := os.MkdirAll(dc.DefaultUpdatesDir(), 0o755); err != nil {
+		return "", fmt.Errorf("download: create updates dir: %w", err)
+	}
+	f, err := os.CreateTemp(dc.DefaultUpdatesDir(), "drainctl-update-*.msi")
 	if err != nil {
 		return "", fmt.Errorf("download: CreateTemp: %w", err)
 	}

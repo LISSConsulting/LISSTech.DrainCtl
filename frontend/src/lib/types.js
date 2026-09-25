@@ -21,6 +21,7 @@
  * @property {'healthy'|'training'|'disabled'|'error'} state
  * @property {number} enabled_channels
  * @property {number} mature_channels
+ * @property {string} [warmup_started_at] - ISO-8601 UTC; start of the durable seven-day public-status warm-up
  * @property {string} [error_reason]     - populated only when state === 'error'
  * @property {string} [last_spike_at]    - ISO-8601 UTC; omitted if no spike ever observed
  */

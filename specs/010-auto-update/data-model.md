@@ -57,11 +57,11 @@ None of these survive a service restart. FR-015 documents the explicit choice to
 
 We depend on the subset of `/repos/.../releases/latest` documented in [contracts/github-releases-api.md](./contracts/github-releases-api.md). The JSON body is parsed into a temporary struct, the relevant fields are extracted (`tag_name` and the matching asset's `browser_download_url`), and the body is discarded. No part of this JSON is persisted or logged at full fidelity (we log just `tag_name` and the chosen download URL).
 
-## 5. Temp-file path for the downloaded MSI
+## 5. Download path for the MSI
 
-- **Location**: `os.TempDir() + "drainctl-update-<random>.msi"` where `<random>` is a `crypto/rand` 8-byte hex string. (Not `time.Now().UnixNano()` — predictable filenames are an attack surface for a privileged process.)
-- **Lifetime**: From the start of the streamed download to the post-install cleanup. Deleted on every error path (download failure, signature verification failure, msiexec spawn failure). On a successful spawn, the file persists until msiexec finishes consuming it; we do NOT delete it ourselves because msiexec may still be reading. The OS reclaims the temp dir on next reboot if msiexec leaves it behind.
-- **ACL**: Inherits the temp directory's ACL. Writable by the service account (SYSTEM); not readable by other unprivileged users. We do not tighten further — the file is in-flight only during the install window.
+- **Location**: `%ProgramData%\LISS Technologies\LISSTech DrainCtl\updates\drainctl-update-<random>.msi`, created with `os.CreateTemp`.
+- **Lifetime**: From the start of the streamed download to the post-install cleanup. Deleted on every error path (download failure, signature verification failure, msiexec spawn failure). On a successful spawn, the file persists until msiexec finishes consuming it.
+- **ACL**: Inherits the canonical ProgramData directory ACL. Runtime data does not spill into the service account's temporary directory.
 
 ## What is NOT in the data model
 

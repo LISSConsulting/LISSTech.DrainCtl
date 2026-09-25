@@ -484,7 +484,7 @@
                     <tr>
                         <td><code>DASHBOARD_ONLY</code></td>
                         <td><code>1</code> | <code>0</code></td>
-                        <td>Run only the dashboard service on this host; skip local drain monitoring</td>
+                        <td>Run dashboard, storage, and authentication only; skip local monitoring and the updater subsystem.</td>
                     </tr>
                 </tbody>
             </table>
@@ -617,6 +617,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
   "memory_limit_mb": 32,
   "log_file_level": "info",
   "log_event_level": "info",
+  "notification_exclusions": ["rdsh01.example.test"],
   "notifications": [
     {
       "type": "webhook",
@@ -749,6 +750,11 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td>Array of notification targets (see <a href="#notifications">Notifications</a>).</td>
                     </tr>
                     <tr>
+                        <td><code>notification_exclusions</code></td>
+                        <td><em>[]</em></td>
+                        <td>Canonical hosts suppressed for every notification target and trigger. This is independent of per-target <code>server_exclusions</code>.</td>
+                    </tr>
+                    <tr>
                         <td><code>dashboard</code></td>
                         <td><em>see above</em></td>
                         <td>
@@ -759,7 +765,7 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     <tr>
                         <td><code>dashboard_only</code></td>
                         <td>false</td>
-                        <td>Run the dashboard on this host without local drain monitoring.</td>
+                        <td>Run dashboard, storage, and authentication without local monitoring or the updater subsystem. Changing it at runtime stops or starts the updater.</td>
                     </tr>
                     <tr>
                         <td><code>session_warning_threshold</code></td>
@@ -1323,6 +1329,11 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
                 servers. Each entry names a server and the target's triggers to suppress. Hostname matching is
                 case-insensitive, and a short name such as <code>RDSH01</code> matches its reported FQDN.
             </p>
+            <p>
+                Use the top-level <code>notification_exclusions</code> array for a host-wide catch-all that blocks
+                every current and future target and trigger. Entries are canonicalized by trimming whitespace and a
+                terminal DNS dot and folding case; a short name never matches a distinct FQDN.
+            </p>
 
             <h3>Webhook payload</h3>
             <pre><code>{
@@ -1865,10 +1876,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <h3>Dashboard-authoritative config (the pull model)</h3>
             <p>
                 The dashboard is the <strong>single source of truth</strong> for runtime settings. When an agent has a
-                <code>dashboard.url</code> configured, it pulls notification targets, thresholds, the grace period, the
-                session warning threshold, the performance block, and the evtspike enabled flag from the dashboard
-                server. Edit settings once in the Configuration modal and every agent picks up the change on its next
-                poll &mdash; and immediately on its local <code>config.json</code> write.
+                <code>dashboard.url</code> configured, it pulls notification targets, host-wide notification exclusions,
+                thresholds, the grace period, the session warning threshold, the performance block, and the
+                operator-safe evtspike knobs (enabled toggle, sensitivity, channel lists, security-channel gate) from
+                the dashboard server. Edit settings once in the Configuration modal and every agent picks up the change
+                on its next poll &mdash; and immediately on its local <code>config.json</code> write.
             </p>
 
             <p><strong>How it works:</strong></p>
@@ -1902,8 +1914,9 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 Once an agent is joined to a dashboard, any runtime field you change locally will be overwritten on the
                 next pull. Use the dashboard Configuration modal instead. The local file is useful for bootstrap
                 settings (<code>dashboard.url</code>, <code>dashboard.tls_fingerprint</code>, log levels,
-                <code>memory_limit_mb</code>) and for admin-only evtspike knobs (channel lists, thresholds, baseline
-                path) that the dashboard modal intentionally does not expose.
+                <code>memory_limit_mb</code>) and for admin-only evtspike knobs (<code>baseline_path</code>) that the
+                dashboard modal intentionally does not expose. Sensitivity thresholds, channel lists, and the
+                security-channel gate are dashboard-authoritative.
             </div>
 
             <div class="callout">
@@ -2041,7 +2054,7 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td>Offline</td>
                         <td>Grey</td>
-                        <td>No report received in the last 10 minutes</td>
+                        <td>Three consecutive expected reports were missed (for example, 3 minutes at a 60-second poll interval)</td>
                     </tr>
                 </tbody>
             </table>
@@ -2074,6 +2087,37 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <li><strong>Fallback</strong>: the existing periodic poll continues as a full-sync safety net</li>
                 <li><strong>Capacity</strong>: up to 100 concurrent browser sessions with &lt;1 MB memory per subscriber</li>
             </ul>
+
+            <h3>Multi-Select and Batch Actions</h3>
+            <p>
+                The Servers table supports multi-select with per-row checkboxes and a tri-state
+                select-all header control. Once one or more servers are selected, a batch action
+                toolbar appears with two operations:
+            </p>
+            <ul>
+                <li>
+                    <strong>Permanent Remove</strong> &mdash; durable tombstone via
+                    <code>POST /api/v1/servers/permanent-remove</code>. The confirm dialog
+                    shows the exact host count and names before invocation. The batch response
+                    reports <code>removed</code>, <code>skipped</code>, and per-host
+                    <code>errors</code> so partial failures are surfaced. Tombstoned hosts
+                    cannot re-register until restored.
+                </li>
+                <li>
+                    <strong>Force Update</strong> &mdash; non-destructive; instructs each
+                    selected agent to perform an immediate updater check via
+                    <code>POST /api/v1/servers/{host}/force-update</code>. A toast shows
+                    per-host <code>accepted</code>, <code>offline</code>,
+                    <code>unsupported</code>, or <code>duplicate</code> outcomes; the agent
+                    surfaces completion via the <code>force_update</code> SSE event. Each
+                    call carries a unique <code>command_id</code> for 24-hour server-side
+                    idempotency.
+                </li>
+            </ul>
+            <p>
+                Selection is automatically reconciled when servers are added, removed via
+                SSE, or filtered &mdash; the toolbar never operates on a stale or invisible row.
+            </p>
 
             <h3>Dashboard UI Features</h3>
             <ul>
@@ -2113,9 +2157,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <p>
                 Subscribed channels default to <code>Application</code>, <code>System</code>, and
-                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Channel lists,
-                thresholds, cooldowns, and the optional <code>Security</code>-channel opt-in are admin-only knobs and
-                live under <code>"evtspike"</code> in <code>config.json</code> on the dashboard server.
+                <code>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</code>. Pick a sensitivity
+                preset (Chill / Steady / Vigilant) for the most common tuning, or expand
+                <em>Customize settings manually</em> for fine-grained control. <code>baseline_path</code> remains the
+                only admin-only knob and lives under <code>"evtspike"</code> in <code>config.json</code> on the
+                dashboard server.
             </p>
 
             <h3>Dashboard display</h3>
@@ -2135,16 +2181,16 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td><code>HEALTHY</code></td>
                         <td>
-                            Detector enabled; at least half of the subscribed channels have accumulated enough per-slot
-                            observations to score reliably.
+                            Detector enabled; the durable seven-day warm-up has elapsed and at least half of the
+                            subscribed channels have accumulated enough per-slot observations to score reliably.
                         </td>
                     </tr>
                     <tr>
                         <td><code>TRAINING</code></td>
                         <td>
-                            Detector enabled and subscribed, but fewer than half of the channels are mature yet. Spikes
-                            can still fire for channels that have matured; the chip stays amber until the majority are
-                            in a usable state.
+                            Detector enabled and subscribed, but the seven-day warm-up or channel-readiness gate is
+                            incomplete. It still scores and emits confirmed spikes throughout training; hover the amber
+                            chip for remaining warm-up time or readiness detail.
                         </td>
                     </tr>
                     <tr>
@@ -2167,9 +2213,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Every numeric knob below lives under <code>"evtspike"</code> in <code>config.json</code> on the
                 dashboard server and propagates to every connected agent on the next pull. Numeric fields are clamped
-                to the ranges shown; setting a value outside the range silently falls back to the default. The only
-                runtime knob also editable from the dashboard UI is <code>enabled</code>; everything else is an
-                admin-only file edit.
+                to the ranges shown; setting a value outside the range silently falls back to the default. The
+                dashboard Settings modal exposes every knob except <code>baseline_path</code> &mdash; use the modal's
+                sensitivity presets for one-click tuning, or expand <em>Customize settings manually</em> to edit any
+                single field. Out-of-range dashboard edits return a clear field-level error instead of being silently
+                clamped.
             </p>
 
             <p>A complete block with defaults:</p>
@@ -2621,10 +2669,10 @@ if ($result.exit_code -ne 0) {
                 <li>Compare CalVer tags numerically. If the remote version is not newer, log
                     <code>update=up_to_date</code> and reschedule.</li>
                 <li>Download <code>release.json</code> and <code>release.json.sig</code>, then verify the Ed25519 signature against the public key embedded in the binary.</li>
-                <li>Download the signed MSI to <code>%TEMP%\drainctl-update-&lt;random&gt;.msi</code> and verify its SHA-256 matches the signed manifest.</li>
+                <li>Download the signed MSI beneath <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\updates\</code> and verify its SHA-256 matches the signed manifest.</li>
                 <li>Verify the Authenticode signature is valid AND the signing-certificate Subject CN equals exactly
                     <code>LISS Consulting, Corp.</code> Anything else &mdash; missing signature, untrusted chain, wrong
-                    subject &mdash; is refused and the temp file is deleted.</li>
+                    subject &mdash; is refused and the downloaded file is deleted.</li>
                 <li>Spawn <code>msiexec /i &lt;path&gt; /quiet /norestart</code> as a detached process so it survives
                     the service's exit.</li>
                 <li>Trigger our own clean shutdown so file replacement isn't blocked by the running service. The MSI's

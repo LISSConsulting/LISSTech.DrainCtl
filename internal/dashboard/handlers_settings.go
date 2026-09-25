@@ -41,6 +41,64 @@ type notifyTargetWire struct {
 	ClearSecret bool `json:"clear_secret,omitempty"`
 }
 
+// evtspikeView is the GET surface for the operator-safe evtspike settings.
+// baseline_path stays admin-only and is intentionally omitted; everything
+// else round-trips so the modal can show current values, validate edits,
+// and persist the same shape via PUT. Disabled/AddedChannels are emitted as
+// non-nil empty arrays so the JSON never encodes `null` (the frontend
+// treats the absence of a pill row as "no exclusions", not "unknown").
+type evtspikeView struct {
+	Enabled                  bool     `json:"enabled"`
+	MinCount                 int      `json:"min_count"`
+	Threshold                float64  `json:"threshold"`
+	CooldownMinutes          int      `json:"cooldown_minutes"`
+	SlotMaturityObservations int      `json:"slot_maturity_observations"`
+	PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
+	HalfLifeBuckets          int      `json:"half_life_buckets"`
+	PriorStrength            float64  `json:"prior_strength"`
+	MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
+	DisabledChannels         []string `json:"disabled_channels"`
+	AddedChannels            []string `json:"added_channels"`
+	SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
+}
+
+// buildEvtSpikeView projects an on-disk EvtSpikeConfig into the operator-safe
+// view. The copy is a defensive snapshot — the slice headers are duplicated so
+// downstream JSON encoding cannot mutate the caller's data, and nil slices
+// are normalised to length-0 so the wire format is always an array.
+func buildEvtSpikeView(cfg dc.EvtSpikeConfig) evtspikeView {
+	disabled := cfg.DisabledChannels
+	if disabled == nil {
+		disabled = []string{}
+	} else {
+		cp := make([]string, len(disabled))
+		copy(cp, disabled)
+		disabled = cp
+	}
+	added := cfg.AddedChannels
+	if added == nil {
+		added = []string{}
+	} else {
+		cp := make([]string, len(added))
+		copy(cp, added)
+		added = cp
+	}
+	return evtspikeView{
+		Enabled:                  cfg.Enabled,
+		MinCount:                 cfg.MinCount,
+		Threshold:                cfg.Threshold,
+		CooldownMinutes:          cfg.CooldownMinutes,
+		SlotMaturityObservations: cfg.SlotMaturityObservations,
+		PersistIntervalSeconds:   cfg.PersistIntervalSeconds,
+		HalfLifeBuckets:          cfg.HalfLifeBuckets,
+		PriorStrength:            cfg.PriorStrength,
+		MeanPerBucketPrior:       cfg.MeanPerBucketPrior,
+		DisabledChannels:         disabled,
+		AddedChannels:            added,
+		SecurityChannelEnabled:   cfg.SecurityChannelEnabled,
+	}
+}
+
 // makeNotifyTargetView projects an on-disk target into the redacted view.
 func makeNotifyTargetView(t dc.NotificationTarget) notifyTargetView {
 	return notifyTargetView{
@@ -189,15 +247,14 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 	}
 
 	views := makeNotifyTargetViews(cfg.Notifications)
-	// evtspike surface is intentionally narrow: the modal only exposes the
-	// enabled toggle per FR-028. Other evtspike fields (thresholds, channel
-	// lists, baseline_path, security-channel gate) stay admin-only in
-	// config.json and are not leaked here.
-	type evtspikeView struct {
-		Enabled bool `json:"enabled"`
-	}
+	// evtspike surface exposes every operator-safe knob so the dashboard
+	// modal can show presets, validation hints, and a collapsed
+	// "Customize settings manually" panel. baseline_path stays admin-only
+	// (lives in config.json) so it never round-trips through this endpoint.
+	evtspike := buildEvtSpikeView(cfg.EvtSpike)
 	out := struct {
 		Notifications           []notifyTargetView   `json:"notifications"`
+		NotificationExclusions  []string             `json:"notification_exclusions"`
 		SessionWarningThreshold int                  `json:"session_warning_threshold"`
 		GracePeriod             int                  `json:"grace_period"`
 		PollInterval            int                  `json:"poll_interval"`
@@ -206,18 +263,86 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		Update                  dc.UpdateConfig      `json:"update"`
 	}{
 		Notifications:           views,
+		NotificationExclusions:  cfg.NotificationExclusions,
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
 		Performance:             cfg.Performance,
-		EvtSpike:                evtspikeView{Enabled: cfg.EvtSpike.Enabled},
+		EvtSpike:                evtspike,
 		Update:                  cfg.Update,
+	}
+	if out.NotificationExclusions == nil {
+		out.NotificationExclusions = []string{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
+}
+
+type notificationExclusionsResponse struct {
+	NotificationExclusions []string `json:"notification_exclusions"`
+}
+
+// handleGetNotificationExclusions returns the durable global host exclusions.
+func (ds *DashboardServer) handleGetNotificationExclusions(w http.ResponseWriter, _ *http.Request) {
+	var cfg *dc.Config
+	var err error
+	if ds.testLoadConfigFunc != nil {
+		cfg, err = ds.testLoadConfigFunc()
+	} else {
+		cfg, err = dc.LoadConfig()
+	}
+	if err != nil {
+		slog.Error("load notification exclusions failed", "error", err)
+		http.Error(w, "failed to load notification exclusions", http.StatusInternalServerError)
+		return
+	}
+	exclusions := cfg.NotificationExclusions
+	if exclusions == nil {
+		exclusions = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(notificationExclusionsResponse{NotificationExclusions: exclusions})
+}
+
+// handleToggleNotificationExclusion adds or removes the canonical host-wide
+// catch-all exclusion without mutating any target-specific exclusions.
+func (ds *DashboardServer) handleToggleNotificationExclusion(w http.ResponseWriter, r *http.Request) {
+	host := dc.CanonicalNotificationHost(r.PathValue("host"))
+	if host == "" {
+		http.Error(w, "host is required", http.StatusBadRequest)
+		return
+	}
+	var (
+		excluded bool
+		err      error
+	)
+	if ds.testToggleNotificationExclusionFunc != nil {
+		excluded, err = ds.testToggleNotificationExclusionFunc(host)
+	} else {
+		excluded, err = dc.ToggleNotificationExclusion(host)
+	}
+	if err != nil {
+		slog.Error("toggle notification exclusion failed", "host", host, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	auth := GetAuthInfo(r)
+	user := ""
+	if auth != nil {
+		user = auth.Username
+	}
+	slog.Info("dashboard=settings-updated", slog.Int("event_id", etwids.EvtDashboardConfigChange), "user", user, "scope", "notification_exclusions", "host", host, "excluded", excluded)
+	ds.broadcastSettingsUpdate()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Host     string `json:"host"`
+		Excluded bool   `json:"excluded"`
+	}{Host: host, Excluded: excluded})
 }
 
 // handlePutSettings accepts JSON and updates dashboard settings atomically.
@@ -231,12 +356,11 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// evtspikeInput narrows the modal's write surface to just the enabled
-	// flag (FR-028). Admin-only evtspike fields are not accepted here; those
-	// belong in config.json.
-	type evtspikeInput struct {
-		Enabled *bool `json:"enabled,omitempty"`
-	}
+	// evtspikeInput mirrors dc.EvtSpikeConfigPatch so the dashboard modal
+	// can edit every operator-safe knob while leaving baseline_path admin-only.
+	// Pointer fields distinguish "absent → don't change" from "explicit value"
+	// so a partial PUT only touches the fields the operator actually edited.
+	type evtspikeInput = dc.EvtSpikeConfigPatch
 	// Use pointer-to-slice so we can distinguish absent ("don't change") from
 	// explicit empty array ("clear all notifications").
 	var in struct {
@@ -319,6 +443,17 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Validate evtspike fields up-front so an out-of-range knob returns a
+	// 400 with a clear field-level message instead of being silently clamped
+	// (silent clamping would mislead the operator who clicked Save on what
+	// they thought was a 30-minute cooldown and got 1).
+	if in.EvtSpike != nil {
+		if err := dc.ValidateEvtSpikePatch(in.EvtSpike); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Apply the three-mode secret policy. Bulk PUT keys lookups by Type+URL,
 	// which is fragile across renames — the per-target endpoints below address
 	// this by index instead.
@@ -351,19 +486,21 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	var evtspikeEnabled *bool
+	// Pass the full evtspike patch through. An empty patch (or nil input) is
+	// a no-op, matching the bulk PUT "absent field means unchanged" contract.
+	var evtspikePatch *dc.EvtSpikeConfigPatch
 	if in.EvtSpike != nil {
-		evtspikeEnabled = in.EvtSpike.Enabled
+		evtspikePatch = in.EvtSpike
 	}
-	if ds.testPutEvtSpikeEnabledFunc != nil {
-		if err := ds.testPutEvtSpikeEnabledFunc(evtspikeEnabled); err != nil {
-			slog.Error("update evtspike enabled failed (test hook)", "error", err)
+	if ds.testPutEvtSpikeFunc != nil {
+		if err := ds.testPutEvtSpikeFunc(evtspikePatch); err != nil {
+			slog.Error("update evtspike settings failed (test hook)", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := dc.UpdateEvtSpikeEnabled(evtspikeEnabled); err != nil {
-			slog.Error("update evtspike enabled failed", "error", err)
+		if err := dc.UpdateEvtSpike(evtspikePatch); err != nil {
+			slog.Error("update evtspike settings failed", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

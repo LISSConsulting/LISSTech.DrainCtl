@@ -102,9 +102,7 @@
     // mem_total_mb separately, so the chart fetches both and derives the %
     // used client-side. Matches the derivation in MetricsChart's fleet adapter.
     const VIRTUAL_MEM_USED_PCT = 'mem_used_pct';
-    let requestedCounters = $derived(
-        counter === VIRTUAL_MEM_USED_PCT ? ['mem_avail_mb', 'mem_total_mb'] : [counter],
-    );
+    let requestedCounters = $derived(counter === VIRTUAL_MEM_USED_PCT ? ['mem_avail_mb', 'mem_total_mb'] : [counter]);
 
     async function load(from, to) {
         if (!host) return;
@@ -263,6 +261,7 @@
         { label: '1D', ms: 24 * 60 * 60 * 1000 },
         { label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
         { label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
+        { label: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
     ];
 
     /** @param {number} spanMs */
@@ -294,7 +293,9 @@
     // compute points below by joining mem_avail_mb and mem_total_mb. The
     // regular isEmpty / series accessors still fire for real counters.
     let series = $derived(
-        counter === VIRTUAL_MEM_USED_PCT ? (response?.series?.['mem_total_mb'] ?? null) : (response?.series?.[counter] ?? null),
+        counter === VIRTUAL_MEM_USED_PCT
+            ? (response?.series?.['mem_total_mb'] ?? null)
+            : (response?.series?.[counter] ?? null),
     );
     let isEmpty = $derived.by(() => {
         if (!response) return true;

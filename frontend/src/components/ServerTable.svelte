@@ -1,17 +1,38 @@
 <script>
     import { untrack } from 'svelte';
-    import { appState, removeServerMetrics, setDetectorStatus } from '../lib/state.svelte.js';
-    import { deleteServer, fetchEvtSpikeStatus } from '../lib/api.js';
+    import {
+        appState,
+        removeServerMetrics,
+        removeEvtSpikeState,
+        setDetectorStatus,
+        setSelection,
+        toggleSelection,
+        pruneSelectionFor,
+        clearSelection,
+    } from '../lib/state.svelte.js';
+    import {
+        deleteServer,
+        fetchEvtSpikeStatus,
+        fetchServers,
+        permanentRemoveHosts,
+        forceUpdateHosts,
+    } from '../lib/api.js';
     import { getThresholdColor, resolveThresholds } from '../lib/thresholds.js';
     import { rel, modeLabel } from '../lib/utils.js';
     import ServerDetail from './ServerDetail.svelte';
     import CellSparkline from './CellSparkline.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
+    import NotificationExclusionAction from './NotificationExclusionAction.svelte';
+    import { toast } from '../lib/toast.svelte.js';
 
     let { onhistoryclick } = $props();
 
     /** @type {string|null} */
     let confirmRemoveHost = $state(null);
+
+    /** Hosts queued for permanent-remove confirmation. null when modal closed. */
+    /** @type {string[]|null} */
+    let confirmBatchRemoveHosts = $state(null);
 
     /** @type {Set<string>} */
     let expandedHosts = $state(new Set());
@@ -26,7 +47,9 @@
     let removeErrorTimer = null;
     // Clear the error-dismiss timer on component destroy so it never fires on
     // an unmounted instance (e.g. navigating away while a remove was in flight).
-    $effect(() => () => { clearTimeout(removeErrorTimer); });
+    $effect(() => () => {
+        clearTimeout(removeErrorTimer);
+    });
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
 
@@ -47,10 +70,9 @@
             expandedHosts = next;
         }
     });
-
-    // The SSE broker publishes detector_status only on transitions, so a cold
-    // page load has no entry in appState.detectorStatuses until the next
-    // transition. Seed via REST for any server that the map doesn't yet cover.
+    // The SSE broker suppresses only identical detector-status snapshots.
+    // Cold pages still seed through REST before the next readiness, warm-up,
+    // or state change arrives.
     /** @type {Set<string>} */
     const seedingEvtSpike = new Set();
     $effect(() => {
@@ -58,9 +80,13 @@
             if (appState.detectorStatuses.has(srv.host) || seedingEvtSpike.has(srv.host)) continue;
             seedingEvtSpike.add(srv.host);
             fetchEvtSpikeStatus(srv.host)
-                .then((status) => { if (status) setDetectorStatus(srv.host, status); })
+                .then((status) => {
+                    if (status) setDetectorStatus(srv.host, status);
+                })
                 .catch(() => {})
-                .finally(() => { seedingEvtSpike.delete(srv.host); });
+                .finally(() => {
+                    seedingEvtSpike.delete(srv.host);
+                });
         }
     });
 
@@ -183,6 +209,7 @@
             await deleteServer(host);
             appState.servers = appState.servers.filter((s) => s.host !== host);
             removeServerMetrics(host);
+            removeEvtSpikeState(host);
             if (expandedHosts.has(host)) {
                 const next = new Set(expandedHosts);
                 next.delete(host);
@@ -198,6 +225,202 @@
             removingHosts = next;
         }
     }
+
+    // ------------------------------------------------------------------
+    // Batch actions (BatchOperations)
+    //
+    // Selection state is owned by `appState.selectedHosts`; this component is
+    // the integration owner for checkbox UI, toolbar rendering, and
+    // reconciliation. The actual REST calls are delegated to the PermanentRemoval
+    // and ForceUpdate contracts via `permanentRemoveHosts` / `forceUpdateHosts`
+    // in lib/api.js — this file does NOT define endpoints.
+    // ------------------------------------------------------------------
+
+    /**
+     * Action hosts are the current selection intersected with the live roster.
+     * Filters and pagination only control which rows are visible; they never
+     * silently narrow an already selected batch.
+     * @type {string[]}
+     */
+    let actionHosts = $derived.by(() => {
+        const live = new Set(appState.servers.map((server) => server.host));
+        return [...appState.selectedHosts].filter((host) => live.has(host)).sort();
+    });
+
+    /** All currently-rendered hosts (sorted by host) for select-all toggle. */
+    let visibleHosts = $derived(paged.map((s) => s.host).sort());
+
+    /** Tri-state select-all: 'none' | 'some' | 'all'. */
+    let selectAllState = $derived.by(() => {
+        const total = visibleHosts.length;
+        if (total === 0) return 'none';
+        let count = 0;
+        for (const h of visibleHosts) if (appState.selectedHosts.has(h)) count++;
+        if (count === 0) return 'none';
+        if (count === total) return 'all';
+        return 'some';
+    });
+
+    /**
+     * Header selection affects only visible rows: add them when any is absent,
+     * or subtract them when all are already selected. Existing selection on
+     * another page or behind a filter is deliberately preserved.
+     */
+    function onSelectAllClick() {
+        const next = new Set(appState.selectedHosts);
+        if (selectAllState === 'all') {
+            for (const host of visibleHosts) next.delete(host);
+        } else {
+            for (const host of visibleHosts) next.add(host);
+        }
+        setSelection(next);
+    }
+
+    /** Toggle a single host's selection. Stops propagation so the row does not expand. */
+    function onRowCheckboxClick(host, e) {
+        e.stopPropagation();
+        toggleSelection(host);
+    }
+
+    /** Stop propagation for the row checkbox keydown so it doesn't expand the row. */
+    function onRowCheckboxKeydown(host, e) {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleSelection(host);
+        }
+    }
+
+    /**
+     * Reconcile selection against the live server list whenever it changes.
+     * This is the safety net that ensures a batch action can never target a
+     * host that has just been removed via SSE or a /servers poll refresh.
+     * Reading `appState.servers` (and not `paged`) here is intentional — we
+     * want to drop removed hosts from selection regardless of which page or
+     * filter is active when the SSE event arrives.
+     */
+    $effect(() => {
+        const liveHosts = appState.servers.map((s) => s.host);
+        pruneSelectionFor(liveHosts);
+    });
+
+    /** Open the destructive confirm modal with the exact live selection. */
+    function requestBatchRemove() {
+        if (actionHosts.length === 0) return;
+        confirmBatchRemoveHosts = actionHosts;
+    }
+
+    /**
+     * After confirmation, invoke PermanentRemoval's batch endpoint. Outcomes
+     * are reflected in the UI:
+     *   - removed[]  → row is dropped locally and from selection
+     *   - skipped[]  → left alone (already gone); cleaned from selection
+     *   - errors[]   → left alone, surfaced as a non-blocking error banner
+     */
+    async function doBatchRemove() {
+        const hosts = confirmBatchRemoveHosts;
+        confirmBatchRemoveHosts = null;
+        if (!hosts || hosts.length === 0) return;
+        try {
+            const result = await permanentRemoveHosts(hosts);
+            const removedSet = new Set(result.removed);
+            const skippedSet = new Set(result.skipped);
+            // Filter servers list locally so the table updates immediately;
+            // the SSE server_permanently_removed event will reconcile other
+            // browser sessions a moment later.
+            if (removedSet.size > 0 || skippedSet.size > 0) {
+                appState.servers = appState.servers.filter((s) => !removedSet.has(s.host) && !skippedSet.has(s.host));
+            }
+            for (const host of new Set([...removedSet, ...skippedSet])) {
+                removeServerMetrics(host);
+                removeEvtSpikeState(host);
+            }
+
+            // Always drop the targeted hosts from selection — even on errors
+            // we want to clear them so the operator doesn't double-click.
+            const next = new Set(appState.selectedHosts);
+            for (const h of hosts) next.delete(h);
+            // setSelection preserves Svelte 5 reactivity by assigning a fresh Set.
+            setSelection(next);
+            if (result.errors && result.errors.length > 0) {
+                const sample = result.errors
+                    .slice(0, 3)
+                    .map((e) => `${e.host}: ${e.reason}`)
+                    .join('; ');
+                removeError =
+                    `Removed ${result.removed.length}, skipped ${result.skipped.length}, failed ${result.errors.length}. ` +
+                    sample +
+                    (result.errors.length > 3 ? '…' : '');
+                clearTimeout(removeErrorTimer);
+                // An error can follow a backend transaction that changed the
+                // live roster before returning its failure. Re-read that
+                // authoritative roster rather than leaving a stale row until
+                // the next 30-second poll.
+                try {
+                    appState.servers = await fetchServers();
+                } catch {
+                    removeError += ' Live roster could not be reconciled.';
+                }
+                removeErrorTimer = setTimeout(() => (removeError = ''), 8000);
+            }
+        } catch (e) {
+            removeError = 'Batch remove failed: ' + (e?.message ?? String(e));
+            clearTimeout(removeErrorTimer);
+            removeErrorTimer = setTimeout(() => (removeError = ''), 8000);
+        }
+    }
+
+    /**
+     * Force-update dispatch returns an immediate per-host acceptance result;
+     * terminal agent outcomes arrive separately over SSE. Both are transient
+     * toasts so they never displace the live server table.
+     */
+    function formatForceUpdateResult(result) {
+        const details = [
+            ...(result.results ?? []).map(
+                (item) =>
+                    `${item.host}: ${item.outcome}${item.version ? ` (${item.version})` : item.reason ? ` (${item.reason})` : ''}`,
+            ),
+            ...(result.errors ?? []).map((item) => `${item.host}: failed (${item.reason})`),
+        ];
+        return details.length ? details.join(' · ') : 'No servers accepted the force-update request.';
+    }
+
+    function notifyForceUpdateCompletion(result) {
+        const detail =
+            result.old_version || result.new_version
+                ? `${result.old_version ?? 'unknown'} → ${result.new_version ?? 'unknown'}`
+                : result.reason;
+        const message = `Force update ${result.outcome}: ${result.host}${detail ? ` (${detail})` : ''}`;
+        if (result.outcome === 'completed') toast.ok(message);
+        else if (result.outcome === 'duplicate') toast.info(message);
+        else toast.err(message);
+    }
+
+    let notifiedForceUpdateCompletions = new Set();
+    $effect(() => {
+        for (const [key, result] of appState.forceUpdateCompletions) {
+            if (notifiedForceUpdateCompletions.has(key)) continue;
+            notifiedForceUpdateCompletions.add(key);
+            notifyForceUpdateCompletion(result);
+        }
+    });
+
+    async function doBatchForceUpdate() {
+        const hosts = actionHosts;
+        if (hosts.length === 0) return;
+        try {
+            const result = await forceUpdateHosts(hosts);
+            const hasFailure =
+                (result.errors?.length ?? 0) > 0 || (result.results ?? []).some((item) => item.outcome !== 'accepted');
+            toast[hasFailure ? 'err' : 'ok'](`Force update request: ${formatForceUpdateResult(result)}`);
+        } catch (e) {
+            toast.err('Force update failed: ' + (e?.message ?? String(e)));
+        }
+    }
+
+    /** The toolbar count and action scope are the same live selection. */
+    let selectionCount = $derived(actionHosts.length);
 
     // Per-metric thresholds derived from config (same logic as ServerDetail).
     let perfCfg = $derived(appState.config?.performance ?? null);
@@ -294,28 +517,95 @@
         <div class="grid-toast">{removeError}</div>
     {/if}
 
+    {#if appState.servers.length && !sorted.length}
+        <div class="empty"><p>No servers match the current filter.</p></div>
+    {/if}
+
+    {#if appState.selectedHosts.size > 0}
+        <div class="batch-toolbar" role="region" aria-label="Batch actions" data-test="batch-toolbar">
+            <div class="batch-summary">
+                <strong>{selectionCount}</strong>
+                server{selectionCount === 1 ? '' : 's'} selected
+            </div>
+            <div class="batch-actions">
+                <button
+                    class="btn-brutal batch-btn"
+                    onclick={doBatchForceUpdate}
+                    disabled={actionHosts.length === 0}
+                    aria-label="Force update {selectionCount} selected servers"
+                >
+                    Force Update ({selectionCount})
+                </button>
+                <button
+                    class="btn-brutal batch-btn batch-btn-danger"
+                    onclick={requestBatchRemove}
+                    disabled={actionHosts.length === 0}
+                    aria-label="Permanently remove {selectionCount} selected servers"
+                >
+                    Remove ({selectionCount})
+                </button>
+                <button class="btn-brutal batch-btn-batch-cancel" onclick={clearSelection} aria-label="Clear selection">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    {/if}
+
     {#if !appState.servers.length}
         <div class="empty">
             <h2 class="serif">No servers registered</h2>
             <p>Waiting for agents to connect...</p>
         </div>
-    {:else if !sorted.length}
-        <div class="empty"><p>No servers match the current filter.</p></div>
-    {:else}
+    {:else if sorted.length}
         <div class="card">
             <table class="srv-tbl">
                 <thead>
                     <tr>
+                        <th class="sel-col">
+                            <input
+                                type="checkbox"
+                                class="srv-check"
+                                aria-label="Select all servers on this page"
+                                checked={selectAllState === 'all'}
+                                indeterminate={selectAllState === 'some'}
+                                disabled={visibleHosts.length === 0}
+                                onclick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectAllClick();
+                                }}
+                                onkeydown={(e) => {
+                                    if (e.key === ' ' || e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onSelectAllClick();
+                                    }
+                                }}
+                            />
+                        </th>
                         <th></th>
                         <th
                             onclick={() => sort('host')}
-                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'host' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Host {sortCol === 'host' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('status')}
-                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'status' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Status {sortCol === 'status' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
@@ -323,31 +613,66 @@
                         <th>Since</th>
                         <th
                             onclick={() => sort('sessions')}
-                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'sessions' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Sessions {sortCol === 'sessions' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('cpu')}
-                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'cpu' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >CPU {sortCol === 'cpu' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('mem')}
-                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'mem' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >MEM {sortCol === 'mem' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('delay')}
-                            class="sortable spark-col" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable spark-col"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
                         <th
                             onclick={() => sort('last_seen')}
-                            class="sortable" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } }}
+                            class="sortable"
+                            tabindex="0"
+                            onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.currentTarget.click();
+                                }
+                            }}
                             aria-sort={sortCol === 'last_seen' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Last Seen {sortCol === 'last_seen' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
@@ -375,11 +700,16 @@
                         {@const delayStyle = thresholdStyle(delayColor)}
                         {@const srvHistory = appState.serverMetrics.get(srv.host)}
                         <tr
-                            class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''}"
+                            class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
+                                srv.host,
+                            )
+                                ? 'row-sel'
+                                : ''}"
                             data-host={srv.host}
                             data-status={srv.status}
                             tabindex="0"
                             aria-expanded={expandedHosts.has(srv.host)}
+                            aria-selected={appState.selectedHosts.has(srv.host)}
                             onclick={() => toggleRow(srv.host)}
                             onkeydown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -388,6 +718,20 @@
                                 }
                             }}
                         >
+                            <td
+                                class="sel-col"
+                                onclick={(e) => e.stopPropagation()}
+                                onkeydown={(e) => e.stopPropagation()}
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="srv-check"
+                                    aria-label="Select {srv.host}"
+                                    checked={appState.selectedHosts.has(srv.host)}
+                                    onclick={(e) => onRowCheckboxClick(srv.host, e)}
+                                    onkeydown={(e) => onRowCheckboxKeydown(srv.host, e)}
+                                />
+                            </td>
                             <td><span class="dot {srv.status}"></span></td>
                             <td class="mono fw7">{srv.host.split('.')[0]}</td>
                             <td>
@@ -427,7 +771,9 @@
                                     data={srvHistory?.map((s) => s.inputDelay) ?? []}
                                     color={sparkColor(delayColor)}
                                 />
-                                {srv.perf?.input_delay_p95_ms != null ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms' : '—'}
+                                {srv.perf?.input_delay_p95_ms != null
+                                    ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms'
+                                    : '—'}
                             </td>
                             <td class="mono muted">{rel(srv.last_seen, now)}</td>
                             <td onclick={(e) => e.stopPropagation()}>
@@ -439,6 +785,7 @@
                                             appState.currentView = 'events';
                                         }}>History</button
                                     >
+                                    <NotificationExclusionAction host={srv.host} compact />
                                     <button
                                         class="btn-rm"
                                         onclick={() => requestRemoveServer(srv.host)}
@@ -451,7 +798,7 @@
                         </tr>
                         {#if expandedHosts.has(srv.host)}
                             <tr class="detail-row">
-                                <td colspan="11">
+                                <td colspan="12">
                                     <ServerDetail server={srv} {now} {onhistoryclick} onremove={requestRemoveServer} />
                                 </td>
                             </tr>
@@ -463,26 +810,23 @@
 
         <div class="pager">
             {#if totalPages > 1}
-                <button
-                    class="pager-btn btn-brutal"
-                    disabled={page === 0}
-                    onclick={() => page--}>← Prev</button
-                >
+                <button class="pager-btn btn-brutal" disabled={page === 0} onclick={() => page--}>← Prev</button>
                 <span class="pager-info"
                     >{page + 1} / {totalPages} <span class="pager-total">({sorted.length} servers)</span></span
                 >
-                <button
-                    class="pager-btn btn-brutal"
-                    disabled={page >= totalPages - 1}
-                    onclick={() => page++}>Next →</button
+                <button class="pager-btn btn-brutal" disabled={page >= totalPages - 1} onclick={() => page++}
+                    >Next →</button
                 >
             {/if}
             {#each PAGE_SIZES as sz}
                 <button
                     class="btn-brutal pager-pill"
                     class:active={pageSize === sz}
-                    onclick={() => { pageSize = sz; page = 0; }}
-                >{sz}</button>
+                    onclick={() => {
+                        pageSize = sz;
+                        page = 0;
+                    }}>{sz}</button
+                >
             {/each}
         </div>
     {/if}
@@ -496,6 +840,19 @@
         cancelLabel="Cancel"
         onconfirm={doRemoveServer}
         oncancel={() => (confirmRemoveHost = null)}
+    />
+{/if}
+
+{#if confirmBatchRemoveHosts}
+    {@const hostCount = confirmBatchRemoveHosts.length}
+    {@const namesList = confirmBatchRemoveHosts.join(', ')}
+    <ConfirmDialog
+        title="Permanently Remove {hostCount} Server{hostCount === 1 ? '' : 's'}"
+        message={`This will durable-tombstone ${hostCount} server${hostCount === 1 ? '' : 's'} and reject any future re-registration until restored: ${namesList}. This cannot be undone from the toolbar.`}
+        confirmLabel={`Remove ${hostCount}`}
+        cancelLabel="Cancel"
+        onconfirm={doBatchRemove}
+        oncancel={() => (confirmBatchRemoveHosts = null)}
     />
 {/if}
 
@@ -817,5 +1174,157 @@
     }
     .grace-cd--expired {
         color: var(--color-red);
+    }
+
+    /* ─── Batch operations (BatchOperations) ─────────────────────────────── */
+
+    /* The header and data cells share one fixed box so select-all aligns with each row. */
+    table.srv-tbl th.sel-col,
+    table.srv-tbl td.sel-col {
+        width: 32px;
+        min-width: 32px;
+        max-width: 32px;
+        box-sizing: border-box;
+        padding: 8px 4px !important;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .srv-check {
+        appearance: none;
+        -webkit-appearance: none;
+        display: block;
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        margin: 0 auto;
+        background: var(--color-card);
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: 3px;
+        position: relative;
+        box-shadow: 1px 1px 0 var(--color-shadow);
+        transition:
+            background 0.1s,
+            transform 0.05s;
+    }
+    .srv-check:hover:not(:disabled) {
+        transform: translate(-1px, -1px);
+        box-shadow: 2px 2px 0 var(--color-shadow);
+    }
+    .srv-check:active:not(:disabled) {
+        transform: translate(1px, 1px);
+        box-shadow: 0 0 0 var(--color-shadow);
+    }
+    .srv-check:checked {
+        background: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+    .srv-check:checked::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+    }
+    .srv-check:indeterminate {
+        background: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+    .srv-check:indeterminate::after {
+        content: '';
+        position: absolute;
+        left: 3px;
+        top: 6px;
+        width: 8px;
+        height: 2px;
+        background: #fff;
+    }
+    .srv-check:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+    .srv-check:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+    /* Row selection visual: subtle accent tint over the existing expanded-state pink */
+    .row-sel td {
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-card)) !important;
+    }
+    .row-sel.clickable:hover td {
+        background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface)) !important;
+    }
+
+    /* Batch action toolbar */
+    .batch-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        background: var(--color-card);
+        border: var(--spacing-bw) solid var(--color-accent);
+        border-radius: var(--radius-default);
+        box-shadow: 3px 3px 0 var(--color-shadow);
+        flex-wrap: wrap;
+    }
+    .batch-summary {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.78rem;
+        color: var(--color-fg);
+    }
+    .batch-summary strong {
+        font-weight: 700;
+        color: var(--color-accent);
+        font-size: 0.9rem;
+        margin-right: 4px;
+    }
+    .batch-summary-sub {
+        color: var(--color-muted);
+        margin-left: 6px;
+        font-size: 0.7rem;
+    }
+    .batch-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .batch-btn {
+        font-size: 0.72rem;
+        padding: 6px 14px;
+        background: var(--color-card);
+        color: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+    .batch-btn:hover:not(:disabled) {
+        background: var(--color-accent);
+        color: #fff;
+    }
+    .batch-btn:disabled {
+        opacity: 0.35;
+        pointer-events: none;
+    }
+    .batch-btn-danger {
+        color: var(--color-red);
+        border-color: var(--color-red);
+    }
+    .batch-btn-danger:hover:not(:disabled) {
+        background: var(--color-red);
+        color: #fff;
+    }
+    .batch-btn-batch-cancel {
+        font-size: 0.72rem;
+        padding: 6px 14px;
+        background: transparent;
+        color: var(--color-muted);
+        border-color: var(--color-border);
+    }
+    .batch-btn-batch-cancel:hover {
+        background: var(--color-surface);
+        color: var(--color-fg);
     }
 </style>

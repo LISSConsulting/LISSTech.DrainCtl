@@ -71,7 +71,7 @@
         {
             key: 'sessions',
             label: 'Sessions',
-            color: 'var(--color-red)',
+            color: 'var(--color-blue)',
             axis: 'right',
             lineOnly: true,
             show: () => showSessions,
@@ -85,7 +85,7 @@
     // inputDelay thresholds come from the alert sensitivity config.
     // Pages/sec, TCP Retrans, Disk Queue use sensible hardcoded defaults.
 
-    /** @type {Array<{key:string,p50Key:string,label:string,unit:string,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string,icon:import('svelte').Component}>} */
+    /** @type {Array<{key:string,p50Key?:string,label:string,unit:string,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string,icon:import('svelte').Component}>} */
     const HIC_CHARTS = [
         {
             key: 'inputDelay',
@@ -101,7 +101,6 @@
         },
         {
             key: 'pagesPerSec',
-            p50Key: 'p50PagesPerSec',
             label: 'Pages/sec',
             unit: '/sec',
             thresholds: { warn: 80, crit: 150 },
@@ -113,7 +112,6 @@
         },
         {
             key: 'tcpRetrans',
-            p50Key: 'p50TcpRetrans',
             label: 'TCP Retrans',
             unit: '/sec',
             thresholds: { warn: 10, crit: 25 },
@@ -125,7 +123,6 @@
         },
         {
             key: 'diskQueue',
-            p50Key: 'p50DiskQueue',
             label: 'Avg Disk Queue',
             unit: '',
             thresholds: { warn: 2, crit: 5 },
@@ -325,6 +322,7 @@
         const memPctMap = tsMap(series['mem_used_pct']);
         const sessMap = tsMap(series['sessions_total']);
         const idMap = tsMap(series['input_delay_p95_ms']);
+        const idP50Map = tsMap(series['input_delay_p50_ms']);
         const psMap = tsMap(series['pages_sec']);
         const trMap = tsMap(series['tcp_retrans_sec']);
         const dqMap = tsMap(series['disk_queue']);
@@ -343,7 +341,7 @@
                 pagesPerSec: psMap.get(ts) ?? 0,
                 tcpRetrans: trMap.get(ts) ?? 0,
                 diskQueue: dqMap.get(ts) ?? 0,
-                p50InputDelay: 0,
+                p50InputDelay: idP50Map.get(ts) ?? 0,
                 p50PagesPerSec: 0,
                 p50TcpRetrans: 0,
                 p50DiskQueue: 0,
@@ -420,7 +418,7 @@
         {
             label: 'SESS',
             value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
-            color: 'var(--color-red)',
+            color: 'var(--color-blue)',
             icon: Users,
             show: () => showSessions,
         },
@@ -441,9 +439,9 @@
         const discMap = tsMap(series['sessions_disconnected']);
         const maxMap = tsMap(series['sessions_max']);
         const scpuMap = tsMap(series['session_cpu_p95_pct'], 'max');
+        const scpuP50Map = tsMap(series['session_cpu_p50_pct'], 'max');
         const smemMap = tsMap(series['session_mem_p95_bytes'], 'max');
-        const scpuP50Map = tsMap(series['session_cpu_p50_pct']);
-        const smemP50Map = tsMap(series['session_mem_p50_bytes']);
+        const smemP50Map = tsMap(series['session_mem_p50_bytes'], 'max');
         return tot.t.map((ts) => {
             const a = Math.round(activeMap.get(ts) ?? 0);
             const d = Math.round(discMap.get(ts) ?? 0);
@@ -476,27 +474,33 @@
         const fpsAvg = tsMap(fps, 'avg');
         const fpsP50Map = tsMap(series['rfx_fps_out_p50']);
         const encMap = tsMap(series['rfx_encode_ms']);
+        const encP50Map = tsMap(series['rfx_encode_ms_p50']);
         const qualMap = tsMap(series['rfx_quality_pct']);
+        const qualP50Map = tsMap(series['rfx_quality_pct_p50']);
         const skipSrvMap = tsMap(series['rfx_skip_server_sec']);
+        const skipSrvP50Map = tsMap(series['rfx_skip_server_sec_p50']);
         const skipNetMap = tsMap(series['rfx_skip_net_sec']);
+        const skipNetP50Map = tsMap(series['rfx_skip_net_sec_p50']);
         const rttMap = tsMap(series['rfx_rtt_ms']);
+        const rttP50Map = tsMap(series['rfx_rtt_ms_p50']);
         const lossMap = tsMap(series['rfx_loss_pct']);
+        const lossP50Map = tsMap(series['rfx_loss_pct_p50']);
         return fps.t.map((ts) => ({
             ts,
             fpsOut: fpsAvg.get(ts) ?? 0,
             fpsOutP50: fpsP50Map.get(ts) ?? 0,
             encodeMs: encMap.get(ts) ?? 0,
-            encodeMsP50: 0,
+            encodeMsP50: encP50Map.get(ts) ?? 0,
             quality: qualMap.get(ts) ?? 0,
-            qualityP50: 0,
+            qualityP50: qualP50Map.get(ts) ?? 0,
             skipServer: skipSrvMap.get(ts) ?? 0,
-            skipServerP50: 0,
+            skipServerP50: skipSrvP50Map.get(ts) ?? 0,
             skipNet: skipNetMap.get(ts) ?? 0,
-            skipNetP50: 0,
+            skipNetP50: skipNetP50Map.get(ts) ?? 0,
             rtt: rttMap.get(ts) ?? 0,
-            rttP50: 0,
+            rttP50: rttP50Map.get(ts) ?? 0,
             loss: lossMap.get(ts) ?? 0,
-            lossP50: 0,
+            lossP50: lossP50Map.get(ts) ?? 0,
         }));
     }
 
@@ -844,10 +848,7 @@
                                 {/each}
                             </div>
                         </div>
-                        <div
-                            class="chart-body upper-chart"
-                            bind:clientWidth={loadContainerW}
-                        >
+                        <div class="chart-body upper-chart" bind:clientWidth={loadContainerW}>
                             {#if loadContainerW > 0}
                                 <LayerCake
                                     data={lcData}
@@ -908,7 +909,12 @@
                             {:else if history.length < 2}
                                 <div class="chart-overlay">
                                     {#if panOffsetMs > 0}
-                                        <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                        <button
+                                            class="back-to-live overlay-live"
+                                            onclick={() => {
+                                                panOffsetMs = 0;
+                                            }}>↺ LIVE</button
+                                        >
                                     {/if}
                                     <span>No retained history for this window</span>
                                 </div>
@@ -937,8 +943,8 @@
                     {#if showHicHelp}
                         <p class="chart-desc">
                             P95 health indicators across the fleet — input responsiveness, memory pressure, network
-                            reliability, and storage I/O. P95 highlights the worst-performing 5% of servers; P50 shows the
-                            median.
+                            reliability, and storage I/O. P95 highlights the worst-performing 5% of servers; P50 shows
+                            the median.
                         </p>
                     {/if}
 
@@ -973,7 +979,12 @@
                             <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
                         {:else if history.length === 0 && panOffsetMs > 0}
                             <div class="chart-overlay">
-                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <button
+                                    class="back-to-live overlay-live"
+                                    onclick={() => {
+                                        panOffsetMs = 0;
+                                    }}>↺ LIVE</button
+                                >
                                 <span>No retained history for this window</span>
                             </div>
                         {/if}
@@ -1040,7 +1051,12 @@
                             <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
                         {:else if sessionHistory.length === 0 && panOffsetMs > 0}
                             <div class="chart-overlay">
-                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <button
+                                    class="back-to-live overlay-live"
+                                    onclick={() => {
+                                        panOffsetMs = 0;
+                                    }}>↺ LIVE</button
+                                >
                                 <span>No retained history for this window</span>
                             </div>
                         {/if}
@@ -1069,8 +1085,8 @@
                     {#if showRfxHelp}
                         <p class="chart-desc">
                             What the users actually see: frame rates, encoding speed, visual quality, and the network
-                            between them. P95 shows the worst-affected sessions; P50 shows what a typical user experiences.
-                            The gap between them reveals how much spread there is across your fleet.
+                            between them. P95 shows the worst-affected sessions; P50 shows what a typical user
+                            experiences. The gap between them reveals how much spread there is across your fleet.
                         </p>
                     {/if}
 
@@ -1101,7 +1117,12 @@
                             <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
                         {:else if rfxHistoryProcessed.length === 0 && panOffsetMs > 0}
                             <div class="chart-overlay">
-                                <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                                <button
+                                    class="back-to-live overlay-live"
+                                    onclick={() => {
+                                        panOffsetMs = 0;
+                                    }}>↺ LIVE</button
+                                >
                                 <span>No retained history for this window</span>
                             </div>
                         {/if}

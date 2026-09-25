@@ -3,6 +3,8 @@
 package evtspike
 
 import (
+	"time"
+
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
@@ -25,12 +27,17 @@ type RecentSpikeEntry struct {
 }
 
 // DeriveState implements the priority-ordered state table in data-model.md §6.
-func DeriveState(enabled bool, enabledChannels, matureChannels int, startupErr error) string {
+// A detector continues scoring and reporting spikes during warm-up; only the
+// public state is held at training until both gates have passed.
+func DeriveState(enabled bool, enabledChannels, matureChannels int, warmupStartedAt, now time.Time, startupErr error) string {
 	if !enabled {
 		return StateDisabled
 	}
 	if startupErr != nil || enabledChannels == 0 {
 		return StateError
+	}
+	if warmupStartedAt.IsZero() || now.Before(warmupStartedAt.Add(warmupDuration)) {
+		return StateTraining
 	}
 	if matureChannels*2 >= enabledChannels {
 		return StateHealthy

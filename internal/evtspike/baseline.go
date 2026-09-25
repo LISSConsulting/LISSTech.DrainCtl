@@ -16,9 +16,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// SchemaVersion is bumped on any breaking change to BaselineFile so LoadBaseline
-// can reject mismatched files rather than silently misinterpret them.
-const SchemaVersion = 1
+// SchemaVersion is bumped when a BaselineFile needs a load migration. Version
+// 1 remains readable so existing learned baselines are retained while their
+// durable warm-up clock is initialized.
+const SchemaVersion = 2
 
 // maxBaselineFileSize caps how large a baseline file may grow before we
 // consider it tampered and refuse to load. 16 MB is ~60x the natural upper
@@ -51,10 +52,11 @@ type ChannelState struct {
 }
 
 type BaselineFile struct {
-	SchemaVersion int                     `json:"schema_version"`
-	WrittenAt     time.Time               `json:"written_at"`
-	Host          string                  `json:"host"`
-	Channels      map[string]ChannelState `json:"channels"`
+	SchemaVersion   int                     `json:"schema_version"`
+	WrittenAt       time.Time               `json:"written_at"`
+	WarmupStartedAt time.Time               `json:"warmup_started_at,omitempty"`
+	Host            string                  `json:"host"`
+	Channels        map[string]ChannelState `json:"channels"`
 }
 
 // WriteBaseline atomically serializes bf to path using the same pattern as
@@ -104,10 +106,19 @@ func WriteBaseline(path string, bf *BaselineFile) error {
 
 	src, _ := windows.UTF16PtrFromString(tmpPath)
 	dst, _ := windows.UTF16PtrFromString(path)
-	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
-		if renameErr := os.Rename(tmpPath, path); renameErr != nil {
-			return fmt.Errorf("rename baseline: %w (movefileex: %v)", renameErr, err)
+	var moveErr error
+	for range 5 {
+		moveErr = windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+		if moveErr == nil {
+			return nil
 		}
+		// A short-lived reader (AV, backup, or the dashboard's status probe)
+		// can deny replacement on Windows. Keep the complete temp file and
+		// retry rather than losing the durable warm-up clock.
+		time.Sleep(10 * time.Millisecond)
+	}
+	if renameErr := os.Rename(tmpPath, path); renameErr != nil {
+		return fmt.Errorf("rename baseline: %w (movefileex: %v)", renameErr, moveErr)
 	}
 
 	return nil
@@ -151,12 +162,16 @@ func LoadBaseline(path string) (*BaselineFile, error) {
 		return freshBaseline(), nil
 	}
 
-	// Strict schema equality: reject future AND malformed (zero/negative)
-	// versions. All three end up archived as .incompat-<ts>.bak.
-	if bf.SchemaVersion != SchemaVersion {
+	// Version 1 predates the durable warm-up clock. It is safely migrated in
+	// place by leaving WarmupStartedAt zero for Subsystem to infer from the
+	// persisted evidence, then writing schema version 2 immediately at start.
+	if bf.SchemaVersion != SchemaVersion && bf.SchemaVersion != 1 {
 		renamed := renameWithSuffix(path, "incompat")
 		slog.Warn("", "evtspike", "baseline_incompat", "path", path, "renamed", renamed, "schema_version", bf.SchemaVersion)
 		return freshBaseline(), nil
+	}
+	if bf.SchemaVersion == 1 {
+		bf.SchemaVersion = SchemaVersion
 	}
 
 	clampLoadedBaseline(&bf, path)
