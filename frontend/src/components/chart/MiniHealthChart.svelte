@@ -79,12 +79,20 @@
     // For autoScale (no natural threshold): 125% of peak only.
     let scaleMax = $derived(
         (() => {
-            if (history.length === 0) {
+            const values = [];
+            for (const h of history) {
+                for (const key of p50Key ? [valueKey, p50Key] : [valueKey]) {
+                    const raw = /** @type {any} */ (h)[key];
+                    if (raw == null || !Number.isFinite(Number(raw))) continue;
+                    values.push(transform(Number(raw)));
+                }
+            }
+            if (values.length === 0) {
                 if (autoScale) return 1;
                 if (invertThresholds) return Math.max(thresholds.warn * 2, 1);
                 return Math.max(thresholds.crit * 2, 1);
             }
-            const dataMax = Math.max(...history.map((h) => transform(/** @type {any} */ (h)[valueKey] ?? 0)), 0.01);
+            const dataMax = Math.max(...values, 0.01);
             if (autoScale) return Math.max(dataMax * 1.25, 1);
             if (invertThresholds) return Math.max(dataMax * 1.25, thresholds.warn * 1.5);
             return Math.max(dataMax * 1.25, thresholds.crit * 1.1);
@@ -130,44 +138,41 @@
         }),
     );
 
-    // ── Area + line SVG paths (transform applied) ─────────────────────────────
-    let paths = $derived(
-        (() => {
-            const n = history.length;
-            if (n < 2) return { line: '', area: '' };
-            const sMax = scaleMax;
-            const pts = history.map((h, i) => ({
-                x: xs(i, n),
-                y: ys(transform(/** @type {any} */ (h)[valueKey] ?? 0), sMax),
-            }));
-            // Higher-is-better metrics (FPS and frame quality) fill downward
-            // from the chart ceiling; latency/error metrics fill upward from
-            // zero. This keeps the P50 envelope nested inside the worse P95
-            // envelope regardless of threshold direction.
-            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
-            const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-            const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
-            return { line, area };
-        })(),
-    );
+    // Build one closed area per contiguous run. Missing values are gaps, not
+    // zeros — older agents legitimately omit newer RemoteFX percentile fields.
+    function buildPaths(key) {
+        if (!key || history.length < 2) return { line: '', area: '' };
+        const segments = [];
+        let current = [];
+        for (let i = 0; i < history.length; i++) {
+            const raw = /** @type {any} */ (history[i])[key];
+            if (raw == null || !Number.isFinite(Number(raw))) {
+                if (current.length >= 2) segments.push(current);
+                current = [];
+                continue;
+            }
+            current.push({ x: xs(i, history.length), y: ys(transform(Number(raw)), scaleMax) });
+        }
+        if (current.length >= 2) segments.push(current);
+        const baselineY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
+        const line = segments
+            .map((points) =>
+                points.map((point, i) => `${i === 0 ? 'M' : 'L'}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' '),
+            )
+            .join(' ');
+        const area = segments
+            .map((points) => {
+                const segmentLine = points
+                    .map((point, i) => `${i === 0 ? 'M' : 'L'}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+                    .join(' ');
+                return `${segmentLine} L${points[points.length - 1].x.toFixed(1)},${baselineY} L${points[0].x.toFixed(1)},${baselineY} Z`;
+            })
+            .join(' ');
+        return { line, area };
+    }
 
-    // ── P50 area + line paths (transform applied) ─────────────────────────────
-    let p50Paths = $derived(
-        (() => {
-            if (!p50Key) return { line: '', area: '' };
-            const n = history.length;
-            if (n < 2) return { line: '', area: '' };
-            const sMax = scaleMax;
-            const pts = history.map((h, i) => ({
-                x: xs(i, n),
-                y: ys(transform(/** @type {any} */ (h)[p50Key] ?? 0), sMax),
-            }));
-            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
-            const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-            const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
-            return { line, area };
-        })(),
-    );
+    let paths = $derived(buildPaths(valueKey));
+    let p50Paths = $derived(buildPaths(p50Key));
 
     /** Short datetime format based on the visible span; matches the shared
      * formatter used by DualAxisChart and InteractiveTimeChart so every
@@ -209,24 +214,27 @@
         (() => {
             const idx = appState.pinnedChartIndex ?? appState.hoveredChartIndex;
             const pt = idx !== null ? history[idx] : history[history.length - 1];
-            return transform(/** @type {any} */ (pt)?.[valueKey] ?? 0);
+            const raw = /** @type {any} */ (pt)?.[valueKey];
+            return raw == null || !Number.isFinite(Number(raw)) ? null : transform(Number(raw));
         })(),
     );
 
     let valueColor = $derived(
-        noThresholdZones
-            ? color
-            : invertThresholds
-              ? currentValue <= thresholds.crit
+        currentValue === null
+            ? 'var(--color-muted)'
+            : noThresholdZones
+              ? color
+              : invertThresholds
+                ? currentValue <= thresholds.crit
+                    ? 'var(--color-red)'
+                    : currentValue <= thresholds.warn
+                      ? 'var(--color-amber)'
+                      : 'var(--color-green)'
+                : currentValue >= thresholds.crit
                   ? 'var(--color-red)'
-                  : currentValue <= thresholds.warn
+                  : currentValue >= thresholds.warn
                     ? 'var(--color-amber)'
-                    : 'var(--color-green)'
-              : currentValue >= thresholds.crit
-                ? 'var(--color-red)'
-                : currentValue >= thresholds.warn
-                  ? 'var(--color-amber)'
-                  : 'var(--color-green)',
+                    : 'var(--color-green)',
     );
 
     // ── Synchronized hover ─────────────────────────────────────────────────────
@@ -305,7 +313,7 @@
             {#if unit}<span class="hic-unit">{unit}</span>{/if}
         </div>
         <div class="hic-current" style="color: {valueColor}; padding-right: {PR}px">
-            {fmt(currentValue)}
+            {currentValue === null ? '—' : fmt(currentValue)}
         </div>
     </div>
 

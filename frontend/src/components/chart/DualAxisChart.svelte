@@ -6,8 +6,8 @@
     /**
      * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
      *             raw: { cpu: number, mem: number, sessions: number } }} NormPoint
-     * @typedef {{ key: string, label: string, color: string, axis: string, lineOnly?: boolean }} SeriesDef
-     * @typedef {{ pct: number, label: string }} RightTick
+     * @typedef {{ key: string, label: string, color: string, axis: string, lineOnly?: boolean,
+     *             fillOpacity?: number, hideStroke?: boolean }} SeriesDef
      */
 
     /**
@@ -20,8 +20,8 @@
 
     const GRID_PCTS = [0, 25, 50, 75, 100];
 
-    // Sessions stays above filled metrics, but uses a restrained stroke and a
-    // narrow surface halo so it reads clearly without dominating the chart.
+    // Sessions is the first/back layer. Filled metric layers and threshold
+    // lines are painted afterward.
     /** @type {Record<string, { width: number, dash?: string, halo?: number }>} */
     const STROKE_CFG = {
         cpu: { width: 3.5 },
@@ -89,9 +89,9 @@
         })(),
     );
 
-    // Paint filled series first. Sessions stays out of this pass so its
-    // normalized right-axis line can be painted above fills and thresholds.
-    const LAYER_ORDER = ['mem', 'cpu', 'cpuP95'];
+    // Memory is the base metric fill. CPU P95 follows as a translucent
+    // envelope, then average CPU paints last as the primary foreground signal.
+    const LAYER_ORDER = ['mem', 'cpuP95', 'cpu'];
     let layerRenderOrder = $derived(
         [...SERIES]
             .filter((s) => s.key !== 'sessions')
@@ -223,14 +223,16 @@
     {#if visible[s.key] && allPaths[s.key]?.line}
         {@const cfg = STROKE_CFG[s.key] ?? { width: 3.5 }}
         {#if !s.lineOnly}
-            <path d={allPaths[s.key].area} fill={s.color} fill-opacity="1" />
-            <path
-                d={allPaths[s.key].line}
-                fill="none"
-                stroke-linejoin="round"
-                stroke-linecap="round"
-                style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
-            />
+            <path d={allPaths[s.key].area} fill={s.color} fill-opacity={s.fillOpacity ?? 1} />
+            {#if !s.hideStroke}
+                <path
+                    d={allPaths[s.key].line}
+                    fill="none"
+                    stroke-linejoin="round"
+                    stroke-linecap="round"
+                    style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
+                />
+            {/if}
         {:else}
             <path
                 d={allPaths[s.key].line}

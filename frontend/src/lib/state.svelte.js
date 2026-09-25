@@ -200,21 +200,21 @@ const persistReduceMotion = (v) => {
 
 /**
  * @typedef {Object} RfxSample
- * @property {number} ts              - Unix timestamp (ms)
- * @property {number} fpsOut          - P95 output frames/sec across fleet
- * @property {number} encodeMs        - P95 average encoding time ms across fleet
- * @property {number} quality         - P95 frame quality % across fleet
- * @property {number} rtt             - P95 TCP round-trip time ms across fleet
- * @property {number} loss            - P95 loss rate % across fleet
- * @property {number} skipServer      - P95 frames skipped/sec (server resources) across fleet
- * @property {number} skipNet         - P95 frames skipped/sec (network resources) across fleet
- * @property {number} [fpsOutP50]     - P50 output frames/sec across fleet
- * @property {number} [encodeMsP50]   - P50 average encoding time ms across fleet
- * @property {number} [qualityP50]    - P50 frame quality % across fleet
- * @property {number} [rttP50]        - P50 TCP round-trip time ms across fleet
- * @property {number} [lossP50]       - P50 loss rate % across fleet
- * @property {number} [skipServerP50] - P50 frames skipped/sec (server resources) across fleet
- * @property {number} [skipNetP50]    - P50 frames skipped/sec (network resources) across fleet
+ * @property {number} ts               - Unix timestamp (ms)
+ * @property {number} [fpsOut]         - Output FPS service P95 floor across reporting hosts
+ * @property {number} [encodeMs]       - P95 average encoding time ms across reporting hosts
+ * @property {number} [quality]        - Frame-quality service P95 floor across reporting hosts
+ * @property {number} [rtt]            - P95 TCP round-trip time ms across reporting hosts
+ * @property {number} [loss]           - P95 loss rate % across reporting hosts
+ * @property {number} [skipServer]     - P95 frames skipped/sec (server resources)
+ * @property {number} [skipNet]        - P95 frames skipped/sec (network resources)
+ * @property {number} [fpsOutP50]      - P50 output frames/sec across reporting hosts
+ * @property {number} [encodeMsP50]    - P50 average encoding time ms across reporting hosts
+ * @property {number} [qualityP50]     - P50 frame quality % across reporting hosts
+ * @property {number} [rttP50]         - P50 TCP round-trip time ms across reporting hosts
+ * @property {number} [lossP50]        - P50 loss rate % across reporting hosts
+ * @property {number} [skipServerP50]  - P50 frames skipped/sec (server resources)
+ * @property {number} [skipNetP50]     - P50 frames skipped/sec (network resources)
  */
 
 /**

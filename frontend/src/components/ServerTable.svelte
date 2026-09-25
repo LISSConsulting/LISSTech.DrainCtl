@@ -100,6 +100,27 @@
         return () => clearInterval(t);
     });
 
+    // Promote stale rows locally between successful API refreshes. Browser
+    // sleep/background throttling can resume the SSE connection before the
+    // next 30-second roster fetch completes; without this guard, the last
+    // reported Grace/Alert badge can survive for hours even though Last Seen
+    // is visibly stale. A fresh poll/SSE heartbeat replaces `off` normally.
+    $effect(() => {
+        const currentTime = now;
+        const configuredPoll = Number(appState.config?.poll_interval);
+        const pollSeconds = Number.isFinite(configuredPoll) && configuredPoll > 0 ? configuredPoll : 300;
+        const staleAfterMs = pollSeconds * 3 * 1000;
+        let changed = false;
+        const next = appState.servers.map((server) => {
+            if (server.status === 'off' || !server.last_seen) return server;
+            const lastSeen = new Date(server.last_seen).getTime();
+            if (!Number.isFinite(lastSeen) || currentTime - lastSeen < staleAfterMs) return server;
+            changed = true;
+            return { ...server, status: 'off' };
+        });
+        if (changed) appState.servers = next;
+    });
+
     const STATUS_ORDER = { alert: 0, warning: 1, grace: 2, off: 3, ok: 4 };
 
     /**
