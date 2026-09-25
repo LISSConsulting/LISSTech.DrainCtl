@@ -247,6 +247,7 @@
 <!-- ── Sessions: independent right-axis line, always above filled metrics ── -->
 {#if visible.sessions && allPaths.sessions?.line}
     {@const sessionCfg = STROKE_CFG.sessions}
+    <path d={allPaths.sessions.area} fill={SESSIONS_STROKE} fill-opacity="0.1" />
     <path
         d={allPaths.sessions.line}
         stroke="var(--color-surface)"
