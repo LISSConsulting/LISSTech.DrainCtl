@@ -214,6 +214,7 @@
             // when an older dashboard omitted them (defensive against future
             // backend rollbacks).
             if (snapshot.evtspike) {
+                snapshot.evtspike.channel_cooldown_minutes ??= {};
                 snapshot.evtspike.disabled_channels ??= [];
                 snapshot.evtspike.added_channels ??= [];
             }
@@ -305,6 +306,7 @@
         const defaults = EVTSPIKE_PRESETS[1];
         for (const knob of EVTSPIKE_KNOBS) config.evtspike[knob.key] = defaults[knob.key];
         config.evtspike.enabled = false;
+        config.evtspike.channel_cooldown_minutes = {};
         config.evtspike.disabled_channels = [];
         config.evtspike.added_channels = [];
         config.evtspike.security_channel_enabled = false;
@@ -358,8 +360,14 @@
         if (e.min_count < 1 || e.min_count > 10000) return 'Min events per bucket must be 1–10000';
         if (e.threshold < 1e-9 || e.threshold > 0.1) return 'Anomaly tail probability must be 0.000000001–0.1';
         if (e.cooldown_minutes < 1 || e.cooldown_minutes > 1440) return 'Cooldown must be 1–1440 minutes';
-        if (e.slot_maturity_observations < 1 || e.slot_maturity_observations > 100) {
-            return 'Slot maturity must be 1–100 observations';
+        const overrides = e.channel_cooldown_minutes ?? {};
+        if (Object.keys(overrides).length > 256) return 'Channel cooldown overrides are limited to 256 entries';
+        for (const [channel, minutes] of Object.entries(overrides)) {
+            if (!channel.trim() || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
+                return 'Each channel cooldown must use a non-empty channel name and 1–1440 minutes';
+        }
+        if (e.slot_maturity_observations < 1 || e.slot_maturity_observations > 10000) {
+            return 'Slot maturity must be 1–10000 observations';
         }
         if (e.persist_interval_seconds < 60 || e.persist_interval_seconds > 86400) {
             return 'Persistence interval must be 60–86400 seconds';
@@ -483,10 +491,10 @@
             tagline: 'Fewer, higher-confidence alerts',
             min_count: 20,
             threshold: 1e-5,
-            cooldown_minutes: 30,
-            slot_maturity_observations: 100,
+            cooldown_minutes: 120,
+            slot_maturity_observations: 1260,
             persist_interval_seconds: 3600,
-            half_life_buckets: 720,
+            half_life_buckets: 1260,
             prior_strength: 120,
             mean_per_bucket_prior: 0.2,
         },
@@ -496,10 +504,10 @@
             tagline: 'Balanced production defaults',
             min_count: 10,
             threshold: 1e-4,
-            cooldown_minutes: 10,
-            slot_maturity_observations: 90,
+            cooldown_minutes: 60,
+            slot_maturity_observations: 630,
             persist_interval_seconds: 900,
-            half_life_buckets: 360,
+            half_life_buckets: 630,
             prior_strength: 60,
             mean_per_bucket_prior: 0.1,
         },
@@ -509,10 +517,10 @@
             tagline: 'Earlier, more frequent detection',
             min_count: 5,
             threshold: 1e-3,
-            cooldown_minutes: 5,
-            slot_maturity_observations: 30,
+            cooldown_minutes: 15,
+            slot_maturity_observations: 315,
             persist_interval_seconds: 300,
-            half_life_buckets: 120,
+            half_life_buckets: 315,
             prior_strength: 20,
             mean_per_bucket_prior: 0.05,
         },
@@ -548,9 +556,9 @@
             key: 'slot_maturity_observations',
             label: 'Slot maturity',
             help: 'Observations needed before a time-of-week baseline is trusted; higher values train longer.',
-            unit: 'observations (1–100)',
+            unit: 'observations (1–10000)',
             min: 1,
-            max: 100,
+            max: 10000,
         },
         {
             key: 'persist_interval_seconds',
@@ -617,6 +625,25 @@
             .split(/\r?\n|,/)
             .map((channel) => channel.trim())
             .filter(Boolean);
+    }
+
+    function channelCooldownList(value) {
+        return Object.entries(value ?? {})
+            .map(([channel, minutes]) => `${channel}=${minutes}`)
+            .join('\n');
+    }
+
+    function updateChannelCooldowns(value) {
+        if (!config?.evtspike) return;
+        const overrides = {};
+        for (const line of value.split(/\r?\n/)) {
+            const [channel, minutes, ...extra] = line.split('=');
+            const name = channel?.trim();
+            const parsed = Number(minutes?.trim());
+            if (!name || extra.length || !Number.isInteger(parsed)) continue;
+            overrides[name] = parsed;
+        }
+        config.evtspike.channel_cooldown_minutes = overrides;
     }
 
     // ---------------------------------------------------------------------------
@@ -1405,6 +1432,17 @@
                                                         .split('\n')
                                                         .map((s) => s.trim())
                                                         .filter(Boolean))}></textarea>
+                                        </div>
+                                        <div class="evtspike-full-width">
+                                            <div class="settings-label">Channel cooldown overrides</div>
+                                            <div class="settings-hint">
+                                                Exact Windows Event Log channel name and cooldown minutes, one per line:
+                                                <code>Channel=Minutes</code>. Empty uses the global cooldown.
+                                            </div>
+                                            <textarea
+                                                class="settings-num evtspike-channels"
+                                                value={channelCooldownList(config.evtspike.channel_cooldown_minutes)}
+                                                oninput={(e) => updateChannelCooldowns(e.currentTarget.value)}></textarea>
                                         </div>
                                     </div>
                                     <label class="settings-check">

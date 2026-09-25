@@ -48,18 +48,19 @@ type notifyTargetWire struct {
 // non-nil empty arrays so the JSON never encodes `null` (the frontend
 // treats the absence of a pill row as "no exclusions", not "unknown").
 type evtspikeView struct {
-	Enabled                  bool     `json:"enabled"`
-	MinCount                 int      `json:"min_count"`
-	Threshold                float64  `json:"threshold"`
-	CooldownMinutes          int      `json:"cooldown_minutes"`
-	SlotMaturityObservations int      `json:"slot_maturity_observations"`
-	PersistIntervalSeconds   int      `json:"persist_interval_seconds"`
-	HalfLifeBuckets          int      `json:"half_life_buckets"`
-	PriorStrength            float64  `json:"prior_strength"`
-	MeanPerBucketPrior       float64  `json:"mean_per_bucket_prior"`
-	DisabledChannels         []string `json:"disabled_channels"`
-	AddedChannels            []string `json:"added_channels"`
-	SecurityChannelEnabled   bool     `json:"security_channel_enabled"`
+	Enabled                  bool           `json:"enabled"`
+	MinCount                 int            `json:"min_count"`
+	Threshold                float64        `json:"threshold"`
+	CooldownMinutes          int            `json:"cooldown_minutes"`
+	ChannelCooldownMinutes   map[string]int `json:"channel_cooldown_minutes"`
+	SlotMaturityObservations int            `json:"slot_maturity_observations"`
+	PersistIntervalSeconds   int            `json:"persist_interval_seconds"`
+	HalfLifeBuckets          int            `json:"half_life_buckets"`
+	PriorStrength            float64        `json:"prior_strength"`
+	MeanPerBucketPrior       float64        `json:"mean_per_bucket_prior"`
+	DisabledChannels         []string       `json:"disabled_channels"`
+	AddedChannels            []string       `json:"added_channels"`
+	SecurityChannelEnabled   bool           `json:"security_channel_enabled"`
 }
 
 // buildEvtSpikeView projects an on-disk EvtSpikeConfig into the operator-safe
@@ -83,11 +84,16 @@ func buildEvtSpikeView(cfg dc.EvtSpikeConfig) evtspikeView {
 		copy(cp, added)
 		added = cp
 	}
+	cooldowns := make(map[string]int, len(cfg.ChannelCooldownMinutes))
+	for channel, minutes := range cfg.ChannelCooldownMinutes {
+		cooldowns[channel] = minutes
+	}
 	return evtspikeView{
 		Enabled:                  cfg.Enabled,
 		MinCount:                 cfg.MinCount,
 		Threshold:                cfg.Threshold,
 		CooldownMinutes:          cfg.CooldownMinutes,
+		ChannelCooldownMinutes:   cooldowns,
 		SlotMaturityObservations: cfg.SlotMaturityObservations,
 		PersistIntervalSeconds:   cfg.PersistIntervalSeconds,
 		HalfLifeBuckets:          cfg.HalfLifeBuckets,
