@@ -308,9 +308,9 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 
 	// Attach any queued force-update command to the report response. The
 	// agent consumes the pending_command field on its side and runs the
-	// updater immediately. Older agents (pre-26.9.24) that don't know the
-	// field will simply ignore the extra JSON member; rolling upgrade is
-	// safe in either direction.
+	// updater immediately. Older agents (pre-26.9.17) that don't know the
+	// field ignore the extra JSON member; rolling upgrade is safe in either
+	// direction.
 	//
 	// Completion reports flow the opposite way: the agent posts its
 	// updater decision as a top-level `force_update` field on the report

@@ -376,14 +376,31 @@
      * toasts so they never displace the live server table.
      */
     function formatForceUpdateResult(result) {
-        const details = [
-            ...(result.results ?? []).map(
-                (item) =>
-                    `${item.host}: ${item.outcome}${item.version ? ` (${item.version})` : item.reason ? ` (${item.reason})` : ''}`,
-            ),
-            ...(result.errors ?? []).map((item) => `${item.host}: failed (${item.reason})`),
-        ];
-        return details.length ? details.join(' · ') : 'No servers accepted the force-update request.';
+        const groups = new Map();
+        const add = (outcome, host, version = '') => {
+            const current = groups.get(outcome) ?? { hosts: [], versions: new Set() };
+            current.hosts.push(host);
+            if (version) current.versions.add(version);
+            groups.set(outcome, current);
+        };
+        for (const item of result.results ?? []) add(item.outcome, item.host, item.version);
+        for (const item of result.errors ?? []) add('failed', item.host);
+
+        const order = ['accepted', 'duplicate', 'offline', 'unsupported', 'failed'];
+        const segments = [];
+        for (const outcome of order) {
+            const group = groups.get(outcome);
+            if (!group) continue;
+            const sample = group.hosts.slice(0, 2).join(', ');
+            const more = group.hosts.length > 2 ? `, +${group.hosts.length - 2}` : '';
+            const versions =
+                outcome === 'unsupported' && group.versions.size > 0 ? ` @ ${[...group.versions].join('/')}` : '';
+            segments.push(`${group.hosts.length} ${outcome}${versions}${sample ? `: ${sample}${more}` : ''}`);
+        }
+        const total = [...groups.values()].reduce((sum, group) => sum + group.hosts.length, 0);
+        return total > 0
+            ? `${total} server${total === 1 ? '' : 's'} · ${segments.join(' · ')}`
+            : 'No servers accepted the force-update request.';
     }
 
     function notifyForceUpdateCompletion(result) {
