@@ -729,10 +729,10 @@ Get-RDSHDrainMode | Format-List</code></pre>
                     </tr>
                     <tr>
                         <td><code>poll_interval</code></td>
-                        <td>60</td>
+                        <td>300</td>
                         <td>
-                            Seconds between polls. The service also uses real-time registry notifications for drain
-                            mode changes; this interval governs performance monitoring and session checks.
+                            Seconds between safety-net polls. Real-time registry notifications still detect drain-mode
+                            changes immediately; this interval governs periodic session and performance checks.
                         </td>
                     </tr>
                     <tr>
@@ -817,8 +817,8 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         <td><code>telemetry</code></td>
                         <td><em>see above</em></td>
                         <td>
-                            Background worker cadence: metric aggregation defaults to 60 seconds; retention sweeps
-                            default to every 15 minutes.
+                            Background worker cadence: metric aggregation defaults to 300 seconds; retention sweeps
+                            default to every 60 minutes.
                         </td>
                     </tr>
                     <tr>
@@ -1820,8 +1820,9 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
 
             <p>
                 Both files must be PEM-encoded. The service loads them on startup and skips auto-generation when both
-                are set. If the custom cert is invalid or expired, the service falls back to HTTP with a warning in the
-                event log.
+                are set. An invalid, expired, or mismatched custom certificate/key prevents the dashboard listener from
+                starting; DrainCtl never downgrades to HTTP. Correct or remove the configured paths, then restart the
+                service.
             </p>
 
             <p>You can also set the paths directly in <code>config.json</code>:</p>
@@ -2125,10 +2126,10 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     normal delivery.
                 </li>
                 <li>
-                    <strong>Force Update</strong> queues an immediate update check for each selected compatible agent
-                    (v26.9.17 or later). The command is durable and retries until the agent acknowledges it, including
-                    when an agent is temporarily offline. The dashboard reports terminal outcomes per host, including
-                    completion, no update available, unsupported version, and delivery or update failure.
+                    <strong>Force Update</strong> requires an online compatible agent (v26.9.17 or later). Once the
+                    dashboard accepts the command, it persists and retries delivery until the agent acknowledges it.
+                    Offline hosts are reported as offline and are not queued. The dashboard reports terminal outcomes
+                    per host, including completion, no update available, unsupported version, and update failure.
                 </li>
             </ul>
             <p>
@@ -2758,7 +2759,7 @@ drainctl service uninstall</code></pre>
                     <strong>Subscribes</strong> to Security Event ID 4657 via <code>EvtSubscribe</code> &mdash; knows
                     who made the change
                 </li>
-                <li><strong>Polls</strong> every poll interval (default 60 seconds) as a safety net</li>
+                <li><strong>Polls</strong> every poll interval (default 300 seconds) as a safety net</li>
                 <li>
                     <strong>Persists</strong> drain-mode transitions and performance metrics to a single SQLite database
                     (<code>drainctl.db</code>, WAL mode) under the DrainCtl data directory &mdash; the audit trail,
