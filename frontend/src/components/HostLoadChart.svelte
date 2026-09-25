@@ -2,11 +2,10 @@
     /**
      * HostLoadChart — per-host equivalent of MetricsChart's LOAD panel.
      *
-     * Renders a single dual-axis chart carrying CPU, CPU P95, Memory, and
-     * Sessions for one host, with window presets (1H/1D/3D/5D),
-     * drag-pan, wheel-zoom, series toggles, and a current-value readout.
-     * Mirrors the composition of Overview's LOAD chart so operators see
-     * the same visual grammar on the Server Detail drawer.
+     * Renders a single dual-axis chart carrying CPU average, a CPU P95
+     * background envelope, Memory, and Sessions for one host, with shared
+     * window presets through 30D, drag-pan, series toggles, and a current-value
+     * readout. Mirrors Overview's LOAD chart visual grammar.
      *
      * Fetches from /api/v1/metrics/{host} — each instance owns its fetch,
      * window, pan, and toggle state. The window preset persists per-instance
@@ -47,19 +46,57 @@
 
     // ── Series toggles ────────────────────────────────────────────────────
     let showCpu = $state(true);
-    let showCpuP95 = $state(false);
+    let showCpuP95 = $state(true);
     let showMem = $state(true);
     let showSessions = $state(true);
 
     const LOAD_SERIES = [
-        { key: 'cpu', label: 'CPU %', color: 'var(--color-accent)', axis: 'left', lineOnly: false,
-          show: () => showCpu, toggle: () => { showCpu = !showCpu; } },
-        { key: 'cpuP95', label: 'CPU P95', color: 'var(--color-amber)', axis: 'left', lineOnly: true,
-          show: () => showCpuP95, toggle: () => { showCpuP95 = !showCpuP95; } },
-        { key: 'mem', label: 'Memory %', color: 'var(--color-green)', axis: 'left', lineOnly: false,
-          show: () => showMem, toggle: () => { showMem = !showMem; } },
-        { key: 'sessions', label: 'Sessions', color: 'var(--color-blue)', axis: 'right', lineOnly: true,
-          show: () => showSessions, toggle: () => { showSessions = !showSessions; } },
+        {
+            key: 'cpu',
+            label: 'CPU %',
+            color: 'var(--color-accent)',
+            axis: 'left',
+            lineOnly: false,
+            show: () => showCpu,
+            toggle: () => {
+                showCpu = !showCpu;
+            },
+        },
+        {
+            key: 'cpuP95',
+            label: 'CPU P95',
+            color: 'var(--color-amber)',
+            axis: 'left',
+            lineOnly: false,
+            fillOpacity: 0.3,
+            hideStroke: true,
+            show: () => showCpuP95,
+            toggle: () => {
+                showCpuP95 = !showCpuP95;
+            },
+        },
+        {
+            key: 'mem',
+            label: 'Memory %',
+            color: 'var(--color-green)',
+            axis: 'left',
+            lineOnly: false,
+            show: () => showMem,
+            toggle: () => {
+                showMem = !showMem;
+            },
+        },
+        {
+            key: 'sessions',
+            label: 'Sessions',
+            color: 'var(--color-blue)',
+            axis: 'right',
+            lineOnly: true,
+            show: () => showSessions,
+            toggle: () => {
+                showSessions = !showSessions;
+            },
+        },
     ];
 
     // ── Config-derived thresholds ─────────────────────────────────────────
@@ -274,14 +311,34 @@
         activeIdx !== null ? (history[activeIdx] ?? history[history.length - 1]) : history[history.length - 1],
     );
     let loadCurrents = $derived([
-        { label: 'CPU', value: displayPoint ? `${(+displayPoint.cpu).toFixed(1)}%` : '—',
-          color: 'var(--color-accent)', icon: Cpu, show: () => showCpu },
-        { label: 'CPU P95', value: displayPoint ? `${(+(displayPoint.cpuP95 ?? displayPoint.cpu)).toFixed(1)}%` : '—',
-          color: 'var(--color-amber)', icon: Cpu, show: () => showCpuP95 },
-        { label: 'MEM', value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%` : '—',
-          color: 'var(--color-green)', icon: MemoryStick, show: () => showMem },
-        { label: 'SESS', value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
-          color: 'var(--color-blue)', icon: Users, show: () => showSessions },
+        {
+            label: 'CPU',
+            value: displayPoint ? `${(+displayPoint.cpu).toFixed(1)}%` : '—',
+            color: 'var(--color-accent)',
+            icon: Cpu,
+            show: () => showCpu,
+        },
+        {
+            label: 'CPU P95',
+            value: displayPoint ? `${(+(displayPoint.cpuP95 ?? displayPoint.cpu)).toFixed(1)}%` : '—',
+            color: 'var(--color-amber)',
+            icon: Cpu,
+            show: () => showCpuP95,
+        },
+        {
+            label: 'MEM',
+            value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%` : '—',
+            color: 'var(--color-green)',
+            icon: MemoryStick,
+            show: () => showMem,
+        },
+        {
+            label: 'SESS',
+            value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
+            color: 'var(--color-blue)',
+            icon: Users,
+            show: () => showSessions,
+        },
     ]);
 
     const Y_DOMAIN = [0, 100];
@@ -395,7 +452,12 @@
             {:else if history.length < 2}
                 <div class="chart-overlay">
                     {#if panOffsetMs > 0}
-                        <button class="back-to-live overlay-live" onclick={() => { panOffsetMs = 0; }}>↺ LIVE</button>
+                        <button
+                            class="back-to-live overlay-live"
+                            onclick={() => {
+                                panOffsetMs = 0;
+                            }}>↺ LIVE</button
+                        >
                     {/if}
                     <span>No retained history for this window</span>
                 </div>
@@ -589,7 +651,7 @@
     }
 
     .load-val-num {
-        font-size: 1.0rem;
+        font-size: 1rem;
         font-weight: 700;
         letter-spacing: -0.02em;
         line-height: 1;

@@ -30,7 +30,7 @@
 
     // ── Upper chart (LOAD): CPU %, CPU P95, Memory %, Sessions ────────────────
     let showCpu = $state(true);
-    let showCpuP95 = $state(false);
+    let showCpuP95 = $state(true);
     let showMem = $state(true);
     let showSessions = $state(true);
 
@@ -51,7 +51,9 @@
             label: 'CPU P95',
             color: 'var(--color-amber)',
             axis: 'left',
-            lineOnly: true,
+            lineOnly: false,
+            fillOpacity: 0.3,
+            hideStroke: true,
             show: () => showCpuP95,
             toggle: () => {
                 showCpuP95 = !showCpuP95;
@@ -811,11 +813,10 @@
                         </div>
                         {#if showLoadHelp}
                             <p class="chart-desc">
-                                Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
-                                across all cores on all hosts; memory is the percentage of physical RAM in use. The
-                                Sessions line (right axis) tracks how many users are connected fleet-wide — rising
-                                sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
-                                per-user cost is climbing.
+                                Fleet-average CPU and memory utilization with total connected sessions. Average CPU is
+                                the primary foreground area; CPU P95 is the translucent background envelope showing tail
+                                pressure. The Sessions area uses the right axis. A widening P95 band means short CPU
+                                bursts are rising even when sustained average load remains stable.
                             </p>
                         {/if}
                     </div>
