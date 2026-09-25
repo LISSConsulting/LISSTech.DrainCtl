@@ -26,7 +26,7 @@
     const STROKE_CFG = {
         cpu: { width: 3.5 },
         mem: { width: 3.5 },
-        sessions: { width: 2.25, halo: 1.25 },
+        sessions: { width: 3, halo: 1.5 },
     };
     const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 52%, var(--color-muted))';
 
