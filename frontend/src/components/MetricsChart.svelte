@@ -30,7 +30,7 @@
 
     // ── Upper chart (LOAD): CPU %, CPU P95, Memory %, Sessions ────────────────
     let showCpu = $state(true);
-    let showCpuP95 = $state(false);
+    let showCpuP95 = $state(true);
     let showMem = $state(true);
     let showSessions = $state(true);
 
@@ -51,7 +51,9 @@
             label: 'CPU P95',
             color: 'var(--color-amber)',
             axis: 'left',
-            lineOnly: true,
+            lineOnly: false,
+            fillOpacity: 0.92,
+            hideStroke: true,
             show: () => showCpuP95,
             toggle: () => {
                 showCpuP95 = !showCpuP95;
@@ -493,20 +495,20 @@
         const lossP50Map = tsMap(series['rfx_loss_pct_p50']);
         return fps.t.map((ts) => ({
             ts,
-            fpsOut: fpsAvg.get(ts) ?? 0,
-            fpsOutP50: fpsP50Map.get(ts) ?? 0,
-            encodeMs: encMap.get(ts) ?? 0,
-            encodeMsP50: encP50Map.get(ts) ?? 0,
-            quality: qualMap.get(ts) ?? 0,
-            qualityP50: qualP50Map.get(ts) ?? 0,
-            skipServer: skipSrvMap.get(ts) ?? 0,
-            skipServerP50: skipSrvP50Map.get(ts) ?? 0,
-            skipNet: skipNetMap.get(ts) ?? 0,
-            skipNetP50: skipNetP50Map.get(ts) ?? 0,
-            rtt: rttMap.get(ts) ?? 0,
-            rttP50: rttP50Map.get(ts) ?? 0,
-            loss: lossMap.get(ts) ?? 0,
-            lossP50: lossP50Map.get(ts) ?? 0,
+            fpsOut: fpsAvg.get(ts),
+            fpsOutP50: fpsP50Map.get(ts),
+            encodeMs: encMap.get(ts),
+            encodeMsP50: encP50Map.get(ts),
+            quality: qualMap.get(ts),
+            qualityP50: qualP50Map.get(ts),
+            skipServer: skipSrvMap.get(ts),
+            skipServerP50: skipSrvP50Map.get(ts),
+            skipNet: skipNetMap.get(ts),
+            skipNetP50: skipNetP50Map.get(ts),
+            rtt: rttMap.get(ts),
+            rttP50: rttP50Map.get(ts),
+            loss: lossMap.get(ts),
+            lossP50: lossP50Map.get(ts),
         }));
     }
 
@@ -811,11 +813,10 @@
                         </div>
                         {#if showLoadHelp}
                             <p class="chart-desc">
-                                Fleet-average CPU and memory utilization with total connected sessions. CPU is averaged
-                                across all cores on all hosts; memory is the percentage of physical RAM in use. The
-                                Sessions line (right axis) tracks how many users are connected fleet-wide — rising
-                                sessions with flat CPU/memory means headroom; rising CPU/memory with flat sessions means
-                                per-user cost is climbing.
+                                Fleet-average CPU and memory utilization with total connected sessions. Average CPU is
+                                the primary foreground area; CPU P95 is the translucent background envelope showing tail
+                                pressure. The Sessions area uses the right axis. A widening P95 band means short CPU
+                                bursts are rising even when sustained average load remains stable.
                             </p>
                         {/if}
                     </div>
