@@ -18,9 +18,9 @@
   <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"><img src="https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?style=for-the-badge&label=PSGALLERY&color=b87843&labelColor=2d1a1a" alt="Stable PSGallery release" /></a>
 </p>
 
-DrainCtl is stable for production deployment. Install one lightweight Windows service to see drain state, session
-pressure, performance health, and change attribution across an RDSH farm. Signed upgrades preserve your configuration,
-registered servers, and history.
+DrainCtl is stable for production deployment. Install a lightweight Windows service on each RDSH host and, when needed, a dashboard-only coordinator for fleet visibility. Signed upgrades preserve configuration, telemetry, removed-server tombstones, the force-update outbox, and EventSpike baseline and warm-up state.
+
+**Operator docs:** [landing page](https://lissconsulting.github.io/LISSTech.DrainCtl/) · [setup guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html)
 
 ```powershell
 Install-Module LISSTech.DrainCtl
@@ -37,61 +37,58 @@ A Windows service that watches `TSServerDrainMode` on RDSH hosts and tells you:
 - **When it changed** — append-only audit trail, persisted to local SQLite.
 - **What it cost you** — CPU, memory, input delay, sessions, RemoteFX, and event-log anomalies, each on a per-poll cycle with threshold alerts.
 
-Query from CLI, PowerShell, or your RMM. Answers come from a named pipe in under 1 ms. No agents, no cloud — and zero per-host config once a host is pointed at a dashboard.
+Query from CLI, PowerShell, or your RMM. Local answers come from a named pipe in under 1 ms; registered agents report to the dashboard for fleet operations. No cloud is required, and DNS SRV discovery eliminates per-host dashboard URLs when your domain publishes `_drainctl._tcp`.
 
 
 ---
 
-<h2 id="latest-release">▎ Latest release</h2>
+<h2 id="latest-release">▎ Latest release — v26.9.36</h2>
 
-The current release refreshes the supported build and runtime stack without changing operator workflows:
+v26.9.36 is the current stable release. It completes the fleet operator workflow and preserves state across in-place upgrades:
 
-- **Current Go runtime** — built and tested with Go 1.27.1.
-- **Updated telemetry storage** — SQLite 1.58.0 plus its maintained runtime dependencies.
-- **Current dashboard stack** — Svelte 5.57.0, Vite 8.2.2, Lucide 1.39.0, and pnpm 11.25.0.
-- **Maintained delivery tooling** — current GitHub Actions, pre-commit hooks, WiX 7 packages, and .NET SDK compatibility.
-- **Safe in-place upgrades** — signed releases retain configuration, registered hosts, and telemetry history.
+- **Dashboard-only coordinator** — listener, authentication, SQLite, and retention without local drain monitoring, collection, registration/reporting, notifications, or updater activity.
+- **Fleet server controls** — persistent multi-select; batch permanent removal with durable tombstones and restore from **Config → Servers**; per-server global **Mute/Notify**; and terminal Force Update outcomes.
+- **EventSpike controls** — seven-day durable warm-up that continues detecting, editable operator-safe detector fields, channel-specific cooldowns, and Chill / Steady / Vigilant presets that enable the detector.
+- **Retained telemetry** — fleet and host charts support short and long horizons without browser-local history.
+- **Safe upgrades** — configuration, telemetry, tombstones, the Force Update outbox, and EventSpike baseline/warm-up survive upgrades.
 
-[Download the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) or install the
-[PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl).
+[Download v26.9.36 or the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest), install the [PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl), or use the [operator guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html).
 ---
 
 <h2 id="toc">▎ Table of contents</h2>
 
-[Latest release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Notifications](#notifications) · [evtspike](#evtspike) · [Configuration](#configuration) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
+[Latest release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Notifications](#notifications) · [EventSpike](#evtspike) · [Configuration](#configuration) · [Telemetry & charts](#telemetry-charts) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
 
 ---
 
 <h2 id="architecture">▎ Architecture</h2>
 
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#a3475b', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d1a1a', 'secondaryColor': '#f5ebe8', 'tertiaryColor': '#fdf8f6', 'lineColor': '#2d1a1a', 'fontFamily': 'monospace', 'fontSize': '13px'}}}%%
 graph TB
-    subgraph SVC["DrainCtl Windows Service"]
-        RNK["RegNotifyChangeKeyValue"] -->|"registry changed"| CHECK["runCheck()"]
-        EVT["EvtSubscribe 4657"] -->|"who changed it"| CHECK
-        POLL["Poll Ticker 60s"] -->|"safety net"| CHECK
-        CFG["config.json watcher"] -->|"config changed"| RELOAD["ReloadConfig()"]
-        CHECK --> SESS["WTS Session Enum"]
-        SESS --> STORE["SQLite Telemetry Store<br/>(audit + metrics + maintenance)"]
-        CHECK --> PERF["PDH Counters"]
-        CHECK --> STORE
-        CHECK --> ELOG["Event Log + ETW"]
-        CHECK --> NOTIFY["Multi-target dispatch"]
-        NOTIFY --> WH["Webhook 1..N"]
-        NOTIFY --> NTFY["ntfy 1..M"]
-        NOTIFY --> EMAIL["SMTP"]
-        STORE --> PIPE["Named Pipe"]
-        AGG["Aggregator (5m + 1h)"] --> STORE
-        RET["Retention + WAL checkpoint"] --> STORE
+    subgraph AGENT["RDSH agent"]
+        RNK["Registry watcher"] --> CHECK["Drain / session check"]
+        EVT["Security 4657"] --> CHECK
+        CHECK --> STORE["SQLite telemetry"]
+        CHECK --> PERF["PDH + EventSpike"]
+        CHECK --> NOTIFY["Webhook / ntfy / SMTP"]
+        STORE --> PIPE["Named pipe"]
+        CHECK --> REPORT["Dashboard report"]
     end
 
-    CLI["drainctl.exe"] -->|"pipe"| PIPE
-    PS["PowerShell module"] -->|"pipe"| PIPE
-    RMM["RMM / script monitor"] --> CLI
+    subgraph DASH["Dashboard-only or dashboard host"]
+        AUTH["HTTPS + auth"] --> FLEET["Fleet API / SSE"]
+        FLEET --> DSTORE["SQLite: roster, telemetry,<br/>tombstones, update outbox"]
+        FLEET --> SETTINGS["Authoritative settings"]
+    end
 
-    CLI -.->|"fallback"| REG["Registry"]
-    PS -.->|"fallback"| REG
+    REPORT -->|"register, heartbeat, metrics"| FLEET
+    SETTINGS -->|"next poll / reload"| AGENT
+    FLEET -->|"Force Update command"| AGENT
+    CLI["drainctl.exe"] --> PIPE
+    PS["PowerShell module"] --> PIPE
+    OP["Browser operator"] --> AUTH
 ```
 
 ```mermaid
@@ -152,14 +149,27 @@ ETW provider               LISS Technologies-DrainCtl (Operational + Debug)
 Event log source           DrainCtl
 ```
 
-Unattended deploy:
+Register an agent with a dashboard:
 
 ```powershell
 msiexec /i LISSTech.DrainCtl.msi /qn `
   INSTALL_MODE=registration `
-  DASHBOARD_URL=https://dash.example.com:49470 `
-  WEBHOOK_URL=https://hooks.example.com/drain
+  DASHBOARD_URL=https://dash.example.com:49470
 ```
+
+Install a dashboard-only coordinator, then configure it before the first service start (or edit the hot-reloaded file):
+
+```powershell
+msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=dashboard DASHBOARD_PORT=49470
+
+$path = "$env:ProgramData\LISS Technologies\LISSTech DrainCtl\config.json"
+$config = Get-Content $path -Raw | ConvertFrom-Json
+$config.dashboard_only = $true
+$config | ConvertTo-Json -Depth 10 | Set-Content $path
+Restart-Service DrainCtl
+```
+
+Dashboard-only mode runs the listener, authentication, SQLite, and retention only. It does **not** monitor the coordinator's drain state, collect performance or EventSpike data, register or report as an agent, send notifications, or run the updater.
 
 > Upgrading from v26-pre-007? First service start auto-migrates `audit.jsonl` into the SQLite store and renames the source file. No manual steps.
 
@@ -327,7 +337,9 @@ Both accept `debug`, `info`, `warn`, `error`. CLI verbosity is separate (`--log-
 
 ### Dashboard-authoritative configuration
 
-When an agent is registered with a dashboard, the dashboard owns: grace period, session/perf thresholds, all of `performance.*`, `evtspike.enabled`, and the notification target list. Agents pull on every poll cycle and synchronously on local `config.json` reload — dashboard edits propagate within one poll, local edits don't diverge silently.
+For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, **Servers**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, fleet controls, and automatic-update policy. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
+
+The **Servers** tab keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and restore durable tombstones from the same tab. A removed agent cannot re-register until restored.
 
 ---
 
@@ -362,9 +374,9 @@ drainctl notify test
 | `cpu_warning` / `cpu_critical` | CPU above threshold (2 consecutive polls) |
 | `memory_warning` / `memory_critical` | Available memory below threshold (2 consecutive polls) |
 | `input_delay_warning` / `input_delay_critical` | Input delay P95 above threshold |
-| `event_spike` | Confirmed anomalous activity on a watched event-log channel (requires `evtspike.enabled: true`; not in the default trigger set) |
+| `event_spike` | Confirmed anomalous activity on a watched event-log channel while the detector is enabled |
 
-Omit `--triggers` to receive everything.
+Omit `--triggers` to receive every event type, including `event_spike`; configure an explicit list when a target should receive only selected alerts.
 
 ### Webhook payload
 
@@ -400,8 +412,8 @@ Opt-in event-log anomaly detector. Watches 54 curated Windows channels (Winlogon
 
 - 96 time-of-day slots × per-channel baseline. Robust update cap blocks a single flood from poisoning the model — a follow-on smaller anomaly still flags.
 - 2-of-3 confirmation across 10-second scoring windows. One-shot transients don't page.
-- Persists `baseline.json` every 15 min and on shutdown, including a durable warm-up start. Restarts cannot reset it.
-- The status remains **TRAINING** until at least seven elapsed days *and* at least half of subscribed channels are mature; confirmed spikes continue to score, emit, and notify during that interval.
+- Persists `baseline.json` every 15 min and on shutdown, including a durable warm-up start. Restarts and upgrades cannot reset it.
+- The status remains **TRAINING** for a durable seven-day warm-up while confirmed spikes continue to score, emit, and notify. Retrying or failed channel subscriptions neither observe nor mature slots.
 - Routes through the existing notification pipeline. Severity is set per-target, not by the detector.
 
 ### Enable
@@ -420,9 +432,9 @@ Opt-in event-log anomaly detector. Watches 54 curated Windows channels (Winlogon
 }
 ```
 
-`event_spike` is not in the default trigger set — existing targets that upgrade do not silently start receiving spike notifications. Explicit opt-in required.
+Enable the detector and include `event_spike` in a target's trigger list when that target should receive spike alerts. Scalar tunables hot-reload; channel-list changes restart the subsystem without discarding the persisted baseline.
 
-Scalar tunables hot-reload. Channel-list changes restart the subsystem.
+In the dashboard, **Chill**, **Steady**, and **Vigilant** presets each enable the detector; **Steady** is the default profile: minimum count `10`, threshold `1e-4`, 60-minute cooldown, 630 slot observations, 900-second persistence, 630-bucket half-life, prior `60`, and mean `0.1`.
 
 ### Channel tuning
 
@@ -480,7 +492,7 @@ ntfy uses priority 3 for `warning`, 4 for `alert`, with tags `["evtspike", <host
 | `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability threshold for "anomalous". |
 | `evtspike.min_count` | int | `10` | Lower observed-event floor; below this never flags. |
 | `evtspike.cooldown_minutes` | int | `60` | Default min time between spikes for the same `(host, channel)`; based on 81% of observed repeats arriving within one hour. |
-| `evtspike.channel_cooldown_minutes` | object | `{}` | Exact Windows Event Log channel-name to 1–1440 minute cooldown overrides (maximum 256); empty uses the default cooldown. |
+| `evtspike.channel_cooldown_minutes` | object | `{}` | Exact Windows Event Log channel-name overrides (1–1440 minutes; maximum 256). In the dashboard enter each override as `Channel=Minutes`; unmatched channels use `cooldown_minutes`. |
 | `evtspike.slot_maturity_observations` | int | `630` | Observations before a slot posterior is mature: seven visits at 90 observations/day. |
 | `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence. |
 | `evtspike.half_life_buckets` | int | `630` | Exponential-forgetting half-life in 10-s buckets. |
@@ -499,7 +511,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 
 - Atomic writes with cross-process mutex.
 - Auto-migrates from the v26-pre-007 registry layout on first run.
-- No service restart required for any documented change.
+- On registered agents, dashboard-authoritative fields are replaced by the dashboard; local-only fields such as `evtspike.baseline_path` remain local.
 
 ```json
 {
@@ -520,6 +532,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
     "collect_remotefx": false, "collect_per_session": true
   },
   "dashboard": { "url": "" },
+  "update": { "enabled": false, "channel": "stable", "poll_interval": "24h" },
   "notification_exclusions": ["rdsh01.example.test"],
   "notifications": [
     {
@@ -556,10 +569,11 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `poll_interval_seconds` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
 | `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
-| `dashboard_only` | bool | `false` | Run the HTTPS dashboard, SQLite storage, and authentication only. This host does not read local drain state, collect performance/event telemetry, register itself, or send drain notifications. |
+| `dashboard_only` | bool | `false` | Run listener, authentication, SQLite storage, and retention only—no local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, or updater. |
 | `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration; empty = SRV discovery. |
 | `dashboard.tls_cert` / `tls_key` | string | *(empty)* | PEM paths; auto-generated self-signed if empty. |
 | `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning. |
+| `update.enabled` / `channel` / `poll_interval` | bool / string / duration | `false` / `stable` / `24h` | Opt-in self-update policy for agents. Dashboard **System** settings distribute it to connected agents. |
 | `performance.enabled` | bool | `false` | Master switch for PDH counter collection. |
 | `performance.cpu_warn_pct` / `cpu_crit_pct` | int | `70` / `85` | CPU thresholds (`0` = use default, `-1` = disabled). |
 | `performance.mem_warn_pct` / `mem_crit_pct` | int | `20` / `10` | Memory % free thresholds. |
@@ -617,14 +631,19 @@ Authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener.
 
 The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`.
 
-### Dashboard charts
+<h2 id="telemetry-charts">▎ Telemetry & charts</h2>
 
 LayerCake + Svelte 5 frontend embedded into the service binary:
 
-- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / disk queue), **Health Indicators** (input-delay p95, session utilization), **Sessions** (active / disconnected / total), and **RemoteFX** (when `collect_remotefx` is on for any host). Window presets: `1H / 1D / 3D / 5D` (the 15M preset was retired in v26.119.10 — at default 60-s polling it added no resolution over 1H).
-- **Server Detail → HostLoadChart** — single-host multi-counter view of LOAD, stacked against drain-mode audit events on the same time axis.
-- **Event Spikes** — status pill and recent-spikes list on Server Detail.
+- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / disk queue), **Fleet Health Indicators** (input delay and session utilization), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host).
+- **Windows** — use `5M`, `15M` where the chart has sufficient source resolution, `1H`, `1D`, `3D`, `5D`, or `30D`. SQLite retained telemetry, not browser-local history, supplies the series.
+- **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values.
+- **Server Detail** — Host Load combines the host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes.
 - **Offline detection** — a registered host becomes offline after three consecutive expected heartbeats are missed. The timeout follows `poll_interval` (for example, 3 minutes at a 60-second interval).
+
+### Force Update
+
+From the Servers table, **Force Update** queues a durable command for each selected agent. It retries delivery until the agent acknowledges it, supports agents at v26.9.17 or later, and reports terminal `completed`, `failed`, `duplicate`, or `refused` outcomes in the dashboard. It is separate from the opt-in scheduled updater policy.
 
 ---
 
