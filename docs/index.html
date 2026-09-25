@@ -1585,7 +1585,7 @@
                             <h3>Install the dashboard</h3>
                             <p>Use the MSI wizard or your deployment system. Dashboard-only mode runs the listener, authentication, SQLite, and retention without local drain monitoring, performance or EventSpike collection, registration/reporting, notifications, or updater activity.</p>
                         </div>
-                        <code class="qs-code">INSTALL_MODE=dashboard</code>
+                        <code class="qs-code">INSTALL_MODE=dashboard DASHBOARD_ONLY=1</code>
                     </div>
                     <div class="qs-step">
                         <div class="qs-num">02</div>
@@ -2007,13 +2007,15 @@
                         <div class="install-kicker"><span>Fleet deploy</span></div>
                         <h3>Silent MSI</h3>
                         <p>
-                            Deploy the same signed MSI through RMM, SCCM, Intune, or GPO. Set the install mode and
-                            machine-owned properties without opening a wizard.
+                            Deploy the same signed MSI through RMM, SCCM, Intune, or GPO. <code>INSTALL_MODE=dashboard</code>
+                            enables the dashboard role; add <code>DASHBOARD_ONLY=1</code> when the coordinator must not
+                            monitor or report itself.
                         </p>
-                        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=dashboard</code>
+                        <code class="mono">msiexec /i LISSTech.DrainCtl.msi /qn INSTALL_MODE=dashboard DASHBOARD_ONLY=1</code>
                         <ul>
                             <li>Dashboard-only listener, auth, SQLite, and retention</li>
-                            <li>Or local monitoring agent role for session hosts</li>
+                            <li>Omit <code>DASHBOARD_ONLY=1</code> when the dashboard host should also monitor itself</li>
+                            <li>Use registration mode for session-host agents</li>
                             <li>CLI on system PATH and PowerShell module registered</li>
                             <li><a href="guide.html#install">MSI property reference</a></li>
                         </ul>

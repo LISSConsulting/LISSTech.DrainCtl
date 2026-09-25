@@ -515,11 +515,11 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 
 ```json
 {
-  "grace_period_minutes": 60,
+  "grace_period": 60,
   "retention_days": 90,
   "retention": { "metrics_days": 30, "audit_days": 365 },
   "telemetry": { "aggregator_interval_seconds": 300, "retention_interval_minutes": 60 },
-  "poll_interval_seconds": 300,
+  "poll_interval": 300,
   "memory_limit_mb": 32,
   "session_warning_threshold": 80,
   "performance": {
@@ -560,13 +560,13 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 
 | Key | Type | Default | What |
 |---|---|---|---|
-| `grace_period_minutes` | int | `60` | Minutes drain must persist before alerting. |
+| `grace_period` | int | `60` | Minutes drain must persist before alerting. |
 | `retention_days` | int | `90` | Legacy audit-retention knob, preserved for pre-007 installs. New `retention.*` fields supersede. |
 | `retention.metrics_days` | int | `30` | Hourly rollup retention, 1–365. Raw + 5-min tiers have fixed retention (25 h and 6 d) — only hourly is operator-tunable. |
 | `retention.audit_days` | int | `365` | Audit-record retention, 1–3650. |
 | `telemetry.aggregator_interval_seconds` | int | `300` | Tick interval for 5-min and hourly rollups. |
 | `telemetry.retention_interval_minutes` | int | `60` | Cadence of the retention + WAL-checkpoint worker. |
-| `poll_interval_seconds` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
+| `poll_interval` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
 | `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
 | `dashboard_only` | bool | `false` | Run listener, authentication, SQLite storage, and retention only—no local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, or updater. |
@@ -610,7 +610,7 @@ Telemetry: `…\drainctl.db` (SQLite, WAL). Service is the single writer; CLI op
 - `retention.metrics_days` (1–365) — hourly rollups, the long-horizon tier.
 - `retention.audit_days` (1–3650) — drain-mode audit events (including reconciliation rows).
 
-Retention worker runs every `telemetry.retention_interval_minutes` (default 15), deletes expired rows in chunks, then `PRAGMA incremental_vacuum`. The same worker owns a dedicated WAL-checkpoint connection — `PASSIVE` every pass, escalating to `TRUNCATE` when WAL > 16 MB.
+Retention worker runs every `telemetry.retention_interval_minutes` (default 60), deletes expired rows in chunks, then `PRAGMA incremental_vacuum`. The same worker owns a dedicated WAL-checkpoint connection — `PASSIVE` every pass, escalating to `TRUNCATE` when WAL > 16 MB.
 
 > **The DB file does not shrink on disk after a purge.** `incremental_vacuum` returns freed pages to SQLite's free-list; subsequent inserts reuse them. A stable file size after a large purge is expected — not a sign that retention is broken. Verify via the `maintenance_jobs` table or the dashboard maintenance widget. Full compaction (`VACUUM INTO`) is a planned follow-up.
 
