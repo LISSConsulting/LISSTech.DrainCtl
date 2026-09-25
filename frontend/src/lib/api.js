@@ -31,12 +31,12 @@ const BASE = '/api/v1';
  * @property {number}  [session_mem_p95_bytes]  - Per-session working set P95 in bytes (omitted when zero)
  * @property {number}  [session_mem_p50_bytes]  - Per-session working set P50 in bytes (omitted when zero)
  * @property {boolean} rfx_available            - true when RemoteFX counters are collected
- * @property {number}  [rfx_fps_out]            - RemoteFX output FPS P95
- * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS P50
- * @property {number}  [rfx_encode_ms]          - RemoteFX encode time P95 (ms)
- * @property {number}  [rfx_encode_ms_p50]      - RemoteFX encode time P50 (ms)
- * @property {number}  [rfx_quality_pct]        - RemoteFX frame quality P95 %
- * @property {number}  [rfx_quality_pct_p50]    - RemoteFX frame quality P50 %
+ * @property {number}  [rfx_fps_out]            - RemoteFX output FPS service P95 floor (numeric P5)
+ * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS median
+ * @property {number}  [rfx_encode_ms]           - RemoteFX encode time P95 (ms)
+ * @property {number}  [rfx_encode_ms_p50]       - RemoteFX encode time median (ms)
+ * @property {number}  [rfx_quality_pct]         - RemoteFX frame quality service P95 floor (numeric P5)
+ * @property {number}  [rfx_quality_pct_p50]     - RemoteFX frame quality median %
  * @property {number}  [rfx_rtt_ms]             - RemoteFX TCP round-trip time P95 (ms)
  * @property {number}  [rfx_rtt_ms_p50]         - RemoteFX TCP round-trip time P50 (ms)
  * @property {number}  [rfx_loss_pct]           - RemoteFX loss rate P95 %

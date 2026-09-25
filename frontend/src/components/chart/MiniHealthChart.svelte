@@ -140,7 +140,11 @@
                 x: xs(i, n),
                 y: ys(transform(/** @type {any} */ (h)[valueKey] ?? 0), sMax),
             }));
-            const bY = yChartBot.toFixed(1);
+            // Higher-is-better metrics (FPS and frame quality) fill downward
+            // from the chart ceiling; latency/error metrics fill upward from
+            // zero. This keeps the P50 envelope nested inside the worse P95
+            // envelope regardless of threshold direction.
+            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
             const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
             return { line, area };
@@ -158,7 +162,7 @@
                 x: xs(i, n),
                 y: ys(transform(/** @type {any} */ (h)[p50Key] ?? 0), sMax),
             }));
-            const bY = yChartBot.toFixed(1);
+            const bY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
             const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             const area = `${line} L${pts[n - 1].x.toFixed(1)},${bY} L${pts[0].x.toFixed(1)},${bY} Z`;
             return { line, area };
