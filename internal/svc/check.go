@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -13,6 +14,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
 )
 
@@ -21,7 +23,24 @@ import (
 // The handler owns the in-memory observation cache (transition detection,
 // live state duration) and the persistent SQLite audit writer (T026/T059);
 // drain-mode transitions are appended there, never to JSONL.
-func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, targets []dc.NotificationTarget, notifyState *dc.NotifyState, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState, evtSub *watcher.EventSubscriber, perfCollector *perfmon.Collector, perfTriggerState *perfmon.PerfTriggerState, evtSpikeSub *evtspike.Subsystem) {
+//
+// updaterSub is non-nil when the auto-update subsystem is active. The svc
+// loop passes it through so a force-update command can invoke the updater.
+func svcRunCheck(
+	ctx context.Context,
+	h *serviceHandler,
+	cfg *dc.ServiceConfig,
+	targets []dc.NotificationTarget,
+	exclusions []string,
+	notifyState *dc.NotifyState,
+	dashCfg *dc.DashboardConfig,
+	dashState *dashboard.ServerState,
+	evtSub *watcher.EventSubscriber,
+	perfCollector *perfmon.Collector,
+	perfTriggerState *perfmon.PerfTriggerState,
+	evtSpikeSub *evtspike.Subsystem,
+	updaterSub *updater.Subsystem,
+) {
 	checkStart := time.Now()
 	slog.Debug("diag: check=read_drain_mode")
 	state, err := dc.ReadDrainMode()
@@ -299,7 +318,7 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 			} else {
 				result.Message = savedMessage
 			}
-			dc.SendNotification(targets, notifyState, result, trigger, changedBy)
+			dc.SendNotificationWithExclusions(targets, exclusions, notifyState, result, trigger, changedBy)
 		}
 		result.Message = savedMessage
 	}
@@ -323,14 +342,62 @@ func svcRunCheck(ctx context.Context, h *serviceHandler, cfg *dc.ServiceConfig, 
 	if dashCfg != nil && dashCfg.URL != "" {
 		slog.Debug("diag: check=dashboard_report", "url", dashCfg.URL)
 		if dashState != nil {
-			if dashState.ReportLocal(result.Host, result) {
+			// Local path: dashboard runs in the same process. We still
+			// need to surface any pending force-update command to the
+			// agent, but we don't have an HTTP response to read it from
+			// — instead we ask the dashboard's ServerState directly via
+			// the consumePendingCommand helper exposed through the
+			// dashboard package. The helper is exported for this exact
+			// use case (the integration test for the force-update
+			// registry exercises the same call from a remote path so
+			// both stay in lock-step).
+			pending := consumeForceUpdatePending(dashState, result.Host)
+			var localCompletion *dashboard.ForceUpdateCompletion
+			if pending != nil && updaterSub != nil {
+				slog.Info("force_update=received",
+					"host", pending.Host,
+					"command_id", pending.CommandID,
+					"reason", pending.Reason)
+				outcome, decision, oldVer, newVer := triggerUpdateAndWait(ctx, updaterSub, pending)
+				localCompletion = &dashboard.ForceUpdateCompletion{
+					CommandID:  pending.CommandID,
+					Outcome:    outcome,
+					Reason:     decision,
+					OldVersion: oldVer,
+					NewVersion: newVer,
+				}
+			}
+			if dashState.ReportLocal(result.Host, result, toDashboardCompletion(localCompletion, result.Host)) {
 				slog.Debug("dashboard heartbeat (local)", "host", result.Host)
 			} else {
 				slog.Warn("dashboard heartbeat (local): host not registered", "host", result.Host)
 			}
 		} else {
 			slog.Debug("dashboard heartbeat sending", "url", dashCfg.URL)
-			dashboard.ReportState(ctx, dashCfg.URL, result)
+			repResult := dashboard.ReportState(ctx, dashCfg.URL, result)
+			// Process any pending force-update command the dashboard
+			// attached to the report response. The agent runs the
+			// updater immediately; the completion is posted back on the
+			// NEXT heartbeat (or this same round if the updater
+			// completes synchronously below the deadline) via
+			// ReportForceUpdateCompletion. The completion path is gated
+			// on updaterSub != nil — pre-26.9.24 builds drop the
+			// pending command silently because they can't act on it.
+			if repResult != nil && repResult.PendingCommand != nil && updaterSub != nil {
+				pending := repResult.PendingCommand
+				slog.Info("force_update=received",
+					"host", pending.Host,
+					"command_id", pending.CommandID,
+					"reason", pending.Reason)
+				outcome, decision, oldVer, newVer := triggerUpdateAndWait(ctx, updaterSub, pending)
+				dashboard.ReportForceUpdateCompletion(ctx, dashCfg.URL, pending.Host, dashboard.ForceUpdateCompletion{
+					CommandID:  pending.CommandID,
+					Outcome:    outcome,
+					Reason:     decision,
+					OldVersion: oldVer,
+					NewVersion: newVer,
+				})
+			}
 		}
 	}
 
@@ -368,18 +435,23 @@ func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
 // Values are clamped to their valid ranges so a misconfigured or compromised dashboard
 // cannot inject out-of-range values into the service.
 //
-// evtSpike, when non-nil, receives the remote EvtSpike toggle: remote overrides
-// the locally-loaded enabled flag so the dashboard's Event-log detector checkbox
-// propagates to every connected agent. Other EvtSpike fields (channels, baseline
-// path, detector tuning) remain local-only — the dashboard ConfigModal only
-// exposes the enabled flag.
+// evtSpike, when non-nil, receives the remote evtspike overlay: every
+// operator-safe field from the dashboard is layered on top of the
+// locally-loaded EvtSpikeConfig so the dashboard's ConfigModal controls
+// (enabled toggle, sensitivity knobs, channel lists, security-channel gate)
+// propagate to every connected agent. baseline_path stays admin-only on the
+// agent side so it is never overwritten by the dashboard.
 func applyRemoteConfig(
 	remote *dashboard.RemoteSettings,
 	cfg *dc.ServiceConfig,
 	targets *[]dc.NotificationTarget,
 	evtSpike *dc.EvtSpikeConfig,
+	exclusions ...*[]string,
 ) {
 	*targets = remote.Notifications
+	if len(exclusions) > 0 && exclusions[0] != nil {
+		*exclusions[0] = slices.Clone(remote.NotificationExclusions)
+	}
 	if remote.SessionWarningThreshold >= 0 {
 		t := remote.SessionWarningThreshold
 		if t > 100 {
@@ -410,8 +482,82 @@ func applyRemoteConfig(
 		cfg.Performance = *remote.Performance
 	}
 	if evtSpike != nil && remote.EvtSpike != nil {
-		evtSpike.Enabled = remote.EvtSpike.Enabled
+		overlayEvtSpikeFromRemote(evtSpike, remote.EvtSpike)
 	}
+}
+
+// overlayEvtSpikeFromRemote layers remote onto dst, clamping every field to
+// its documented bounds. baseline_path is intentionally left untouched so
+// the agent keeps its locally-configured baseline file location; the
+// dashboard never sends baseline_path over the wire.
+//
+// The runtime live-reload path in service_loop.go calls Subsystem.Reload
+// after this returns, which propagates the new scalars (MinCount, Threshold,
+// Cooldown, SlotMaturityObservations, HalfLifeBuckets → Rho) to every
+// running detector. Channel-set changes (DisabledChannels, AddedChannels,
+// SecurityChannelEnabled) trigger a stop+start cycle via Reload's
+// channelSetChanged branch — mature channels keep their learned state
+// because the baseline is flushed to disk before the restart and hydrated
+// back from the same file when subscriptions come back up.
+//
+// PersistIntervalSeconds is the one knob that is read on Reload but NOT
+// applied to the running persistence loop — see internal/evtspike
+// Subsystem.Reload's gamma update; the loop's tick source is captured at
+// Start. The agent picks the new cadence up at the next start, which is
+// the documented behaviour and matches the "hot scalars + restart for the
+// loop cadence" contract.
+func overlayEvtSpikeFromRemote(dst *dc.EvtSpikeConfig, remote *dashboard.RemoteEvtSpike) {
+	if dst == nil || remote == nil {
+		return
+	}
+	dst.Enabled = remote.Enabled
+
+	dst.MinCount = clampRemoteInt(remote.MinCount, dc.MinEvtSpikeMinCount, dc.MaxEvtSpikeMinCount, dst.MinCount)
+	dst.Threshold = clampRemoteFloat(remote.Threshold, dc.MinEvtSpikeThreshold, dc.MaxEvtSpikeThreshold, dst.Threshold)
+	dst.CooldownMinutes = clampRemoteInt(remote.CooldownMinutes, dc.MinEvtSpikeCooldownMinutes, dc.MaxEvtSpikeCooldownMinutes, dst.CooldownMinutes)
+	dst.SlotMaturityObservations = clampRemoteInt(remote.SlotMaturityObservations, dc.MinEvtSpikeSlotMaturityObservations, dc.MaxEvtSpikeSlotMaturityObservations, dst.SlotMaturityObservations)
+	dst.PersistIntervalSeconds = clampRemoteInt(remote.PersistIntervalSeconds, dc.MinEvtSpikePersistIntervalSeconds, dc.MaxEvtSpikePersistIntervalSeconds, dst.PersistIntervalSeconds)
+	dst.HalfLifeBuckets = clampRemoteInt(remote.HalfLifeBuckets, dc.MinEvtSpikeHalfLifeBuckets, dc.MaxEvtSpikeHalfLifeBuckets, dst.HalfLifeBuckets)
+	dst.PriorStrength = clampRemoteFloat(remote.PriorStrength, dc.MinEvtSpikePriorStrength, dc.MaxEvtSpikePriorStrength, dst.PriorStrength)
+	dst.MeanPerBucketPrior = clampRemoteFloat(remote.MeanPerBucketPrior, dc.MinEvtSpikeMeanPerBucketPrior, dc.MaxEvtSpikeMeanPerBucketPrior, dst.MeanPerBucketPrior)
+	dst.SecurityChannelEnabled = remote.SecurityChannelEnabled
+
+	// Slice fields: always replace (an empty slice on the wire means
+	// "drop everything") so the dashboard's "Clear" affordance works.
+	if remote.DisabledChannels != nil {
+		cp := append([]string(nil), remote.DisabledChannels...)
+		dst.DisabledChannels = cp
+	}
+	if remote.AddedChannels != nil {
+		cp := append([]string(nil), remote.AddedChannels...)
+		dst.AddedChannels = cp
+	}
+}
+
+func clampRemoteInt(v, min, max, fallback int) int {
+	if v == 0 {
+		return fallback
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func clampRemoteFloat(v, min, max, fallback float64) float64 {
+	if v == 0 {
+		return fallback
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 // effectiveUpdateConfig overlays the dashboard-managed self-update block on
@@ -422,4 +568,90 @@ func effectiveUpdateConfig(local dc.UpdateConfig, remote *dashboard.RemoteSettin
 		return *remote.Update
 	}
 	return local
+}
+
+// triggerUpdateAndWait runs the updater synchronously against the
+// dashboard's pending force-update command and translates the result
+// into the dashboard's ForceUpdateCompletion outcome vocabulary. The
+// returned strings map 1:1 to the documented outcomes:
+//   - completed: updater ran; decision is up_to_date | not_modified |
+//     no_stable_release | installer_spawned.
+//   - failed: updater errored (network, spawn, etc.). decision carries
+//     the error context.
+//   - refused: updater refused the remote release (signature,
+//     replay-fence, manifest, etc.). decision carries the stage.
+//   - duplicate: commandID was a replay within the idempotency
+//     window; no second execution.
+//
+// A bounded ctx prevents a network-bound updater from pinning the
+// service loop indefinitely; 60s is generous (typical tick finishes in
+// <2s) and aligns with the periodic poll's own client timeout of 30s
+// plus margin for verify + spawn.
+func triggerUpdateAndWait(ctx context.Context, updaterSub *updater.Subsystem, pending *dashboard.ForceUpdatePendingCommand) (outcome, decision, oldVer, newVer string) {
+	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	tickOutcome := updaterSub.TriggerCheckNow(runCtx, pending.CommandID)
+	switch tickOutcome.Decision {
+	case "duplicate":
+		return dashboard.ForceUpdateOutcomeDuplicate, tickOutcome.Reason, tickOutcome.OldVer, tickOutcome.NewVer
+	case "disabled":
+		// Operator disabled updater between dashboard's decision and our
+		// run. The dashboard said accepted because at enqueue time the
+		// host was up-to-date on the enabled flag; surface as
+		// "completed:disabled" so the UI can show "updater disabled".
+		return dashboard.ForceUpdateOutcomeFailed, "updater_disabled", tickOutcome.OldVer, tickOutcome.NewVer
+	case "up_to_date", "not_modified", "no_stable_release", "installer_spawned":
+		return dashboard.ForceUpdateOutcomeCompleted, tickOutcome.Decision, tickOutcome.OldVer, tickOutcome.NewVer
+	case "refused":
+		return dashboard.ForceUpdateOutcomeRefused, tickOutcome.Reason, tickOutcome.OldVer, tickOutcome.NewVer
+	case "error":
+		return dashboard.ForceUpdateOutcomeFailed, tickOutcome.Reason, tickOutcome.OldVer, tickOutcome.NewVer
+	case "cancelled":
+		return dashboard.ForceUpdateOutcomeFailed, "cancelled", tickOutcome.OldVer, tickOutcome.NewVer
+	default:
+		// Unknown decision: surface as failed with the raw value so an
+		// operator can correlate against the file log.
+		return dashboard.ForceUpdateOutcomeFailed, "unknown:" + tickOutcome.Decision, tickOutcome.OldVer, tickOutcome.NewVer
+	}
+}
+
+// consumeForceUpdatePending pulls the next queued force-update command
+// for host from the dashboard's in-process registry. Wraps the
+// ServerState.GetConsumeForceUpdate closure so the svc caller doesn't
+// have to nil-check the closure itself. Returns nil when no callback
+// is wired (which is the pre-subsystem-Start case in tests, plus any
+// code path that uses the dashboard package without going through
+// Subsystem.Start).
+func consumeForceUpdatePending(dashState *dashboard.ServerState, host string) *dashboard.ForceUpdatePendingCommand {
+	if dashState == nil {
+		return nil
+	}
+	f := dashState.GetConsumeForceUpdate()
+	if f == nil {
+		return nil
+	}
+	return f(host)
+}
+
+// toDashboardCompletion bridges the wire-side ForceUpdateCompletion
+// (used by ReportForceUpdateCompletion over HTTP) to the dashboard's
+// in-process completion payload (used by ReportLocal's SSE broadcast).
+// host is the canonical checked host; local updater completions have no host
+// field of their own, but the dashboard needs it to acknowledge the matching
+// durable outbox row before broadcasting the terminal event.
+// Returns nil for a nil input so callers can pass-through "no completion this
+// round" without an extra nil check at the call site.
+func toDashboardCompletion(c *dashboard.ForceUpdateCompletion, host string) *dashboard.ForceUpdateCompletionPayload {
+	if c == nil {
+		return nil
+	}
+	return &dashboard.ForceUpdateCompletionPayload{
+		Host:       host,
+		CommandID:  c.CommandID,
+		Outcome:    c.Outcome,
+		Reason:     c.Reason,
+		OldVersion: c.OldVersion,
+		NewVersion: c.NewVersion,
+	}
 }

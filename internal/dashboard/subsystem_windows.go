@@ -15,6 +15,7 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/lifecycle"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 // Compile-time assertion: *Subsystem satisfies lifecycle.Subsystem.
@@ -35,13 +36,16 @@ const dashboardShutdownTimeout = 5 * time.Second
 // http.Server drain (which Stop blocks on) is the externally observable
 // boundary, and the reapers are constructor-internal cleanup loops.
 type Subsystem struct {
-	cfg     dc.DashboardConfig
-	dataDir string
-	ms      metricsReader
-	as      auditReader
-	mnt     maintenanceReader
-	srv     serverReader
-	sps     eventSpikeReader
+	cfg                       dc.DashboardConfig
+	dataDir                   string
+	ms                        metricsReader
+	as                        auditReader
+	mnt                       maintenanceReader
+	srv                       serverReader
+	sps                       eventSpikeReader
+	removals                  removalWriter
+	outbox                    *telemetry.ForceUpdateOutboxStore
+	localForceUpdateSupported bool
 
 	ds    *DashboardServer
 	state *ServerState
@@ -52,16 +56,21 @@ type Subsystem struct {
 }
 
 // NewSubsystem constructs the dashboard subsystem. ms/as/mnt may be nil
-// (degraded mode); srv and sps are required since feature 009.
-func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader) *Subsystem {
+// (degraded mode); srv and sps are required since feature 009. removals
+// enforces durable server removal; outbox retains force-update commands across
+// dashboard restarts. localForceUpdateSupported is false in dashboard-only mode.
+func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader, removals removalWriter, outbox *telemetry.ForceUpdateOutboxStore, localForceUpdateSupported bool) *Subsystem {
 	return &Subsystem{
-		cfg:     cfg,
-		dataDir: dataDir,
-		ms:      ms,
-		as:      as,
-		mnt:     mnt,
-		srv:     srv,
-		sps:     sps,
+		cfg:                       cfg,
+		dataDir:                   dataDir,
+		ms:                        ms,
+		as:                        as,
+		mnt:                       mnt,
+		srv:                       srv,
+		sps:                       sps,
+		removals:                  removals,
+		outbox:                    outbox,
+		localForceUpdateSupported: localForceUpdateSupported,
 	}
 }
 
@@ -73,6 +82,23 @@ func (s *Subsystem) State() *ServerState { return s.state }
 // Server returns the underlying *DashboardServer for callers that need to
 // reach the broker or session store. Nil before a successful Start.
 func (s *Subsystem) Server() *DashboardServer { return s.ds }
+
+// SetLocalForceUpdateSupported changes eligibility for the local dashboard
+// host when dashboard_only is reloaded.
+func (s *Subsystem) SetLocalForceUpdateSupported(supported bool) {
+	s.localForceUpdateSupported = supported
+	if s.ds != nil {
+		s.ds.setLocalForceUpdateSupported(supported)
+	}
+}
+
+// UpdateHeartbeatInterval applies a poll-interval change without restarting
+// the dashboard listener.
+func (s *Subsystem) UpdateHeartbeatInterval(interval time.Duration) {
+	if s.ds != nil {
+		s.ds.setHeartbeatInterval(interval)
+	}
+}
 
 // Start performs the legacy-servers.json migration, sets up the HTTP
 // server (TLS, routes, listener) synchronously, then launches the Serve
@@ -90,6 +116,15 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	derived, cancel := context.WithCancel(ctx)
 
 	state := NewServerState(s.srv)
+	if s.removals != nil {
+		state.SetExclusionReader(s.removals)
+		state.SetRemovalWriter(s.removals)
+	}
+	forceUpdates, err := newPersistentForceUpdateState(derived, s.outbox)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("dashboard force-update outbox: %w", err)
+	}
 
 	ds := &DashboardServer{
 		state:                state,
@@ -101,7 +136,10 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		mnt:                  s.mnt,
 		spikes:               s.sps,
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
+		forceUpdates:         forceUpdates,
 	}
+	ds.setLocalForceUpdateSupported(s.localForceUpdateSupported)
+	ds.setHeartbeatInterval(s.cfg.HeartbeatInterval)
 	ds.wireServerStateCallbacks()
 
 	mux := http.NewServeMux()

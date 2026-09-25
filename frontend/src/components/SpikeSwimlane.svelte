@@ -37,6 +37,7 @@
         { key: '1day', label: '1D', ms: 24 * 60 * 60 * 1000 },
         { key: '3day', label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
         { key: '5day', label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
+        { key: '30day', label: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
     ];
     const DEFAULT_PRESET = '1day';
     const STORAGE_KEY = 'drainctl.spike-swimlane.preset';
@@ -184,6 +185,14 @@
         if (ds.enabled_channels > 0) {
             lines.push(`${ds.mature_channels}/${ds.enabled_channels} channels mature`);
         }
+        if (ds.state === 'training' && ds.warmup_started_at) {
+            const remainingMs = Date.parse(ds.warmup_started_at) + 7 * 24 * 60 * 60 * 1000 - Date.now();
+            if (remainingMs > 0) {
+                lines.push(`${Math.ceil(remainingMs / (24 * 60 * 60 * 1000))} day(s) remain in the 7-day warm-up`);
+            } else {
+                lines.push('7-day warm-up complete; awaiting channel readiness');
+            }
+        }
         if (ds.last_spike_at) lines.push(`Last spike: ${formatTs(ds.last_spike_at)}`);
         return lines.join('\n');
     }
@@ -306,9 +315,16 @@
         const rawStep = span / targetCount;
         // Round to a human step: 1m, 5m, 15m, 1h, 3h, 6h, 12h, 1d.
         const steps = [
-            60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000,
-            60 * 60_000, 3 * 60 * 60_000, 6 * 60 * 60_000, 12 * 60 * 60_000,
-            24 * 60 * 60_000, 2 * 24 * 60 * 60_000,
+            60_000,
+            5 * 60_000,
+            15 * 60_000,
+            30 * 60_000,
+            60 * 60_000,
+            3 * 60 * 60_000,
+            6 * 60 * 60_000,
+            12 * 60 * 60_000,
+            24 * 60 * 60_000,
+            2 * 24 * 60 * 60_000,
         ];
         const step = steps.find((s) => s >= rawStep) ?? steps[steps.length - 1];
         const fromMs = windowFrom.getTime();
@@ -376,12 +392,15 @@
                     class="pill evt-chip evt-{detectorStatus.state}"
                     title={evtTitle(detectorStatus)}
                     aria-label="Event-log detector: {EVT_LABEL[detectorStatus.state] ?? detectorStatus.state}"
-                >EVT {EVT_LABEL[detectorStatus.state] ?? detectorStatus.state}</span>
+                    >EVT {EVT_LABEL[detectorStatus.state] ?? detectorStatus.state}</span
+                >
             {/if}
             {#if lastOverall}
                 <span
                     class="sw-last-spike"
-                    title="Last spike in this window: {formatTs(lastOverall.window_end)} · {lastOverall.observed.toLocaleString()} events on {lastOverall.channel}"
+                    title="Last spike in this window: {formatTs(
+                        lastOverall.window_end,
+                    )} · {lastOverall.observed.toLocaleString()} events on {lastOverall.channel}"
                 >
                     <span class="sw-last-label">LAST SPIKE</span>
                     <span class="sw-last-time mono">{fmtShortTs(lastOverall._t)}</span>
@@ -462,19 +481,15 @@
                         onblur={onDotLeave}
                         tabindex="0"
                         role="button"
-                        aria-label="Spike on {spike.channel} at {formatTs(spike.window_end)}: {spike.observed} events vs expected {fmtNum(spike.expected)}"
+                        aria-label="Spike on {spike.channel} at {formatTs(
+                            spike.window_end,
+                        )}: {spike.observed} events vs expected {fmtNum(spike.expected)}"
                     />
                 {/each}
 
                 <!-- Hover marker line -->
                 {#if hovered}
-                    <line
-                        class="sw-hover-line"
-                        x1={hoverX}
-                        x2={hoverX}
-                        y1={MARGIN.top}
-                        y2={MARGIN.top + innerHeight}
-                    />
+                    <line class="sw-hover-line" x1={hoverX} x2={hoverX} y1={MARGIN.top} y2={MARGIN.top + innerHeight} />
                 {/if}
             </svg>
 
@@ -653,7 +668,6 @@
     .sw-status.err {
         color: var(--color-red);
     }
-
 
     /* Lane label sits at the top of its lane, above the dot strip. Left-
        aligned so long channel paths flow naturally rather than fighting a

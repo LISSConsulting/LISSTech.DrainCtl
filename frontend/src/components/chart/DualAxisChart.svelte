@@ -20,14 +20,15 @@
 
     const GRID_PCTS = [0, 25, 50, 75, 100];
 
-    // Per-series stroke config.
-    // lineOnly series get a bold dashed line; area series get solid strokes.
-    /** @type {Record<string, { width: number, dash?: string }>} */
+    // Per-series stroke config. Area series get solid strokes; line-only
+    // series are dashed so the independent Sessions scale remains distinct.
+    /** @type {Record<string, { width: number, dash?: string, halo?: number }>} */
     const STROKE_CFG = {
         cpu: { width: 3.5 },
         mem: { width: 3.5 },
-        sessions: { width: 3.5, dash: '10,5' },
+        sessions: { width: 4, dash: '10,5', halo: 3 },
     };
+    const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 72%, var(--color-fg))';
 
     /** Pick a short datetime format based on the visible time span. Mirrors
      * the formatter used in InteractiveTimeChart so every Overview chart
@@ -88,15 +89,17 @@
         })(),
     );
 
-    // Area series sorted highest-value-first so large areas render behind small ones
-    let areaRenderOrder = $derived(
-        (() => {
-            const last = normData[normData.length - 1];
-            if (!last) return SERIES;
-            return [...SERIES].sort(
-                (a, b) => /** @type {any} */ (last[b.key] ?? 0) - /** @type {any} */ (last[a.key] ?? 0),
-            );
-        })(),
+    // Paint filled series first. Sessions stays out of this pass so its
+    // normalized right-axis line can be painted above fills and thresholds.
+    const LAYER_ORDER = ['mem', 'cpu', 'cpuP95'];
+    let layerRenderOrder = $derived(
+        [...SERIES]
+            .filter((s) => s.key !== 'sessions')
+            .sort((a, b) => {
+                const ai = LAYER_ORDER.indexOf(a.key);
+                const bi = LAYER_ORDER.indexOf(b.key);
+                return (ai === -1 ? LAYER_ORDER.length : ai) - (bi === -1 ? LAYER_ORDER.length : bi);
+            }),
     );
 
     // ── Hover state ──
@@ -190,18 +193,20 @@
 <line x1={0} y1={0} x2={0} y2={$height} stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 <line x1={0} y1={$height} x2={$width} y2={$height} stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 
-<!-- ── Area fills: non-lineOnly series only, largest first ── -->
-{#each areaRenderOrder as s}
-    {#if !s.lineOnly && visible[s.key] && allPaths[s.key]?.line}
-        <path d={allPaths[s.key].area} fill={s.color} fill-opacity="1" />
-    {/if}
-{/each}
-
-<!-- ── Stroke lines ── -->
-{#each SERIES as s}
+<!-- ── Filled series and their strokes: memory → CPU → CPU P95 ── -->
+{#each layerRenderOrder as s}
     {#if visible[s.key] && allPaths[s.key]?.line}
         {@const cfg = STROKE_CFG[s.key] ?? { width: 3.5 }}
-        {#if s.lineOnly}
+        {#if !s.lineOnly}
+            <path d={allPaths[s.key].area} fill={s.color} fill-opacity="1" />
+            <path
+                d={allPaths[s.key].line}
+                fill="none"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+                style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
+            />
+        {:else}
             <path
                 d={allPaths[s.key].line}
                 stroke={s.color}
@@ -210,14 +215,6 @@
                 stroke-linejoin="round"
                 stroke-linecap="round"
                 stroke-dasharray={cfg.dash ?? ''}
-            />
-        {:else}
-            <path
-                d={allPaths[s.key].line}
-                fill="none"
-                stroke-linejoin="round"
-                stroke-linecap="round"
-                style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
             />
         {/if}
     {/if}
@@ -246,6 +243,30 @@
         >
     {/if}
 {/each}
+
+<!-- ── Sessions: independent right-axis line, always above filled metrics ── -->
+{#if visible.sessions && allPaths.sessions?.line}
+    {@const sessionCfg = STROKE_CFG.sessions}
+    <path
+        d={allPaths.sessions.line}
+        stroke="var(--color-surface)"
+        stroke-width={sessionCfg.width + (sessionCfg.halo ?? 0) * 2}
+        stroke-opacity="0.9"
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-dasharray={sessionCfg.dash ?? ''}
+    />
+    <path
+        d={allPaths.sessions.line}
+        stroke={SESSIONS_STROKE}
+        stroke-width={sessionCfg.width}
+        fill="none"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-dasharray={sessionCfg.dash ?? ''}
+    />
+{/if}
 
 <!-- ── X-axis labels ── -->
 {#each xLabels as xl}

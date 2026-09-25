@@ -115,6 +115,54 @@ func TestBroker_PublishDetectorStatus_PerHostIsolation(t *testing.T) {
 	}
 }
 
+func TestBroker_PublishDetectorStatus_EmitsReadinessChangesOnly(t *testing.T) {
+	b := NewBroker()
+	id, ch, _, err := b.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Unsubscribe(id)
+
+	warmupStart := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	status := evtspike.DetectorStatus{
+		Host:            "RDSH-04",
+		State:           evtspike.StateTraining,
+		EnabledChannels: 54,
+		MatureChannels:  1,
+		WarmupStartedAt: &warmupStart,
+	}
+	if !b.PublishDetectorStatus(status) {
+		t.Fatal("first training snapshot should emit")
+	}
+	if b.PublishDetectorStatus(status) {
+		t.Fatal("identical training snapshot should be suppressed")
+	}
+
+	status.MatureChannels = 2
+	if !b.PublishDetectorStatus(status) {
+		t.Fatal("maturity change during training should emit")
+	}
+	status.EnabledChannels = 53
+	if !b.PublishDetectorStatus(status) {
+		t.Fatal("subscribed-channel capacity change during training should emit")
+	}
+	warmupStart = warmupStart.Add(time.Hour)
+	status.WarmupStartedAt = &warmupStart
+	if !b.PublishDetectorStatus(status) {
+		t.Fatal("warm-up restart should emit")
+	}
+
+	lastSpike := warmupStart.Add(time.Minute)
+	status.LastSpikeAt = &lastSpike
+	if b.PublishDetectorStatus(status) {
+		t.Fatal("last spike alone should use recent_spike, not duplicate detector-status")
+	}
+
+	if events := drainBroker(t, ch); len(events) != 4 {
+		t.Fatalf("got %d detector_status events, want 4 status-surface changes", len(events))
+	}
+}
+
 // TestBroker_PublishRecentSpike_EmitsEveryCall verifies the recent_spike
 // dispatcher has no dedup — each confirmed spike must reach subscribers even
 // if two fire back-to-back on the same host and channel.

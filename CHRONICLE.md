@@ -6,6 +6,55 @@
 - Session capacity discovery now reads the policy and `RDP-Tcp` listener `MaxInstanceCount` locations before the legacy `UserSessionLimit`, and treats Windows' `0xffffffff` and `999999` unlimited sentinels as unknown capacity. Fleet utilization therefore uses the configured finite capacity instead of silently dividing by an unlimited sentinel or missing the listener value.
 - A configured limit of `9999` is also an unlimited sentinel in the deployed farm. It is normalized on local collection and remote report ingestion, and excluded at every fleet query tier so retained rows cannot poison the utilization denominator.
 - Auto-update no longer cancels the service immediately after `cmd.Start`. Installer spawn is not install success; MSI `ServiceControl` now exclusively owns stop/install/start, and the updater clears its ETag without advancing `highest_seen` so a later msiexec failure leaves the dashboard available and the same release retryable.
+## Servers-table multi-select and batch actions — 2026-09-24
+
+- Added a styled accessible checkbox column to the Servers table with a tri-state select-all header (`none | some | all`). Selecting a checkbox or the select-all control never expands the row — `stopPropagation` on both click and keydown handlers is mandatory because the row itself is a clickable expand trigger. Indeterminate state is driven off `eligibleHosts ∩ selection` (not just selection size) so a hidden filter can't lie about the count.
+- Selection is OWNED in `appState.selectedHosts` (a `Set<string>`) with single mutation paths through `setSelection` / `toggleSelection` / `dropSelection` / `clearSelection` / `pruneSelectionFor`. Every mutator assigns a fresh `Set` instance — Svelte 5 deep reactivity does NOT fire when you mutate an existing reactive Set in place, so this is enforced by API shape, not convention.
+- Reconciliation safety net: a `$effect` watches `appState.servers` and prunes any selected host that is no longer in the live list. The App.svelte SSE handler also calls `dropSelection` on every `server_deleted` and `server_permanently_removed` event so a removed host is gone from selection in the same tick — the toolbar can never operate on a stale or invisible row.
+- Permanent-remove confirm modal shows the EXACT count and comma-joined hostnames before invoking the batch endpoint. The batch response shape `{removed[], skipped[], errors[]}` drives per-row removal locally; the SSE event reconciles other browser sessions a moment later. We always drop the targeted hosts from selection even on errors so the operator doesn't double-click.
+- Force-update fan-out mints a fresh `crypto.randomUUID()` per host (with a Math.random fallback for environments without `crypto.randomUUID`) so 24-hour server-side idempotency dedupes correctly even when an operator clicks "Force update" twice on the same fleet. The toolbar renders per-host outcomes in a non-blocking toast with `accepted → green`, `offline → amber`, `unsupported → red`, `duplicate → muted`.
+## Event-spike operator controls + defaults analysis — 2026-09-24
+
+- The dashboard Settings modal now edits every operator-safe evtspike knob
+  (MinCount, Threshold, Cooldown, SlotMaturityObservations,
+  PersistIntervalSeconds, HalfLifeBuckets, PriorStrength, MeanPerBucketPrior,
+  DisabledChannels, AddedChannels, SecurityChannelEnabled) through a new
+  `EvtSpikeConfigPatch` API in `config.go`. `baseline_path` stays admin-only
+  in `config.json` and never appears on the wire. Out-of-range values return
+  400 with a field-level message; partial updates leave untouched knobs
+  intact (slice-replace semantics: nil = no change, `[]` = clear).
+- The agent remote-fetch contract expanded from `{enabled: bool}` to the full
+  operator-safe view (`RemoteEvtSpike` is now an alias of `evtspikeView`).
+  `applyRemoteConfig → overlayEvtSpikeFromRemote` clamps every knob on the
+  agent side so a misconfigured dashboard cannot push out-of-range values.
+- The ConfigModal gained a 3-level preset row (Chill / Steady / Vigilant)
+  modeled on the existing Alert Sensitivity (`FIRE_PRESETS`) pattern, plus
+  a collapsed "Customize settings manually" panel with inline units, range
+  hints, channel-list textareas, and a "Reset to defaults" button. The
+  new validation is wired into `save()` alongside the existing performance
+  threshold check.
+- Status-pill semantics are documented in `specs/008-sqlite-chart-consumers/
+  evtspike-defaults-analysis.md`. The owner selected a durable seven-day
+  warm-up: status remains `training` until the elapsed-time and existing
+  channel-readiness gates both pass, while scoring and confirmed spike
+  emission continue. `baseline.json` schema 2 persists the start immediately;
+  version-1 baseline migrations retain learned posteriors and use documented
+  age evidence before preserving a mature `healthy` status.
+- Notable contracts: `PersistIntervalSeconds` is captured by the running
+  persistence loop at Start, so a hot Reload updates `s.cfg` but does NOT
+  re-tick the loop until the next start. Channel-list changes
+  (Disabled/Added/SecurityChannelEnabled) trigger a stop+start cycle; the
+  baseline is flushed before and hydrated from disk after, so mature
+  channels keep their learned state.
+
+## Upgrade persistence, canonical runtime paths, and heartbeat timeout — 2026-09-24
+
+- The MSI's `config.json` component is now both `Permanent` and `NeverOverwrite`, preventing MajorUpgrade's old-product removal from deleting operator settings before the new product installs. Automatic-update packages now download beneath `%ProgramData%\LISS Technologies\LISSTech DrainCtl\updates\`; the deprecated `audit_path` setting is normalized to the canonical `drainctl.db`, and an event-spike baseline configured outside the product data root is migrated to the canonical `baseline.json`.
+- Dashboard status now marks a host offline after three missed reports using the configured `poll_interval`, replacing the fixed 10-minute timeout. Poll-interval hot reload updates the running dashboard's timeout without restarting its listener.
+
+## Dashboard CPU/memory layer order — 2026-09-24
+
+- Overview and per-host LOAD charts now render opaque series in a fixed back-to-front order: memory, CPU, CPU P95, sessions. Each area's stroke is painted with its fill, so a covered series no longer leaves a disconnected line through the metric above it. Sessions use a dedicated blue token in both light and dark themes, distinct from the CPU accent and CPU P95 amber.
 
 ## Runtime correctness hardening — 2026-08-06
 

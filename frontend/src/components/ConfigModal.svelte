@@ -16,7 +16,23 @@
     import TargetEditModal from './TargetEditModal.svelte';
     import TargetDeleteModal from './TargetDeleteModal.svelte';
     import ConfirmDialog from './ConfirmDialog.svelte';
-    import { Coffee, Save, X, Play, ChevronDown, ChevronRight, Settings, Award, Radio, ShieldAlert, Users, Activity, Siren, Wrench, Monitor, RefreshCw } from '@lucide/svelte';
+    import RemovedServersSettings from './RemovedServersSettings.svelte';
+    import {
+        Coffee,
+        Save,
+        X,
+        Play,
+        Settings,
+        Award,
+        Radio,
+        ShieldAlert,
+        Users,
+        Activity,
+        Siren,
+        Wrench,
+        Monitor,
+        RefreshCw,
+    } from '@lucide/svelte';
 
     let { onclose } = $props();
 
@@ -50,10 +66,7 @@
         if (!config || targetSaving) return;
         targetSaving = true;
         try {
-            const targets =
-                editIdx >= 0
-                    ? await updateNotificationTarget(editIdx, t)
-                    : await addNotificationTarget(t);
+            const targets = editIdx >= 0 ? await updateNotificationTarget(editIdx, t) : await addNotificationTarget(t);
             config.notifications = targets;
             if (original) original.notifications = JSON.parse(JSON.stringify(targets));
             appState.config = JSON.parse(JSON.stringify(config));
@@ -186,10 +199,7 @@
         return JOB_LONG[name] ?? name;
     }
 
-    // Maintenance section is collapsed by default — the ops info is useful
-    // but it's not what operators open Config for, so don't let it steal
-    // viewport at the bottom of the modal unless explicitly asked for.
-    let showMaintenance = $state(false);
+    // Maintenance status is always available on the System tab.
 
     $effect(() => {
         loadConfig();
@@ -199,8 +209,16 @@
         loading = true;
         try {
             const c = await fetchSettings();
-            config = JSON.parse(JSON.stringify(c));
-            original = JSON.parse(JSON.stringify(c));
+            const snapshot = JSON.parse(JSON.stringify(c));
+            // Normalise evtspike slice fields so textareas bind cleanly even
+            // when an older dashboard omitted them (defensive against future
+            // backend rollbacks).
+            if (snapshot.evtspike) {
+                snapshot.evtspike.disabled_channels ??= [];
+                snapshot.evtspike.added_channels ??= [];
+            }
+            config = snapshot;
+            original = JSON.parse(JSON.stringify(snapshot));
         } catch (e) {
             toast.err('Failed to load config: ' + e.message);
         } finally {
@@ -282,6 +300,82 @@
         { value: '72h0m0s', label: '3 days' },
     ];
 
+    function resetEvtSpikeToDefaults() {
+        if (!config?.evtspike) return;
+        const defaults = EVTSPIKE_PRESETS[1];
+        for (const knob of EVTSPIKE_KNOBS) config.evtspike[knob.key] = defaults[knob.key];
+        config.evtspike.enabled = false;
+        config.evtspike.disabled_channels = [];
+        config.evtspike.added_channels = [];
+        config.evtspike.security_channel_enabled = false;
+    }
+
+    function resetActiveTabToDefaults() {
+        if (!config) return;
+        switch (activeTab) {
+            case 'alerts':
+                config.poll_interval = 300;
+                config.grace_period = 60;
+                config.session_warning_threshold = 80;
+                if (config.performance) {
+                    const forceDisabled = config.performance.force_disabled;
+                    Object.assign(config.performance, {
+                        enabled: false,
+                        force_disabled: forceDisabled,
+                        sample_interval_sec: 60,
+                        cpu_warn_pct: 70,
+                        cpu_crit_pct: 85,
+                        mem_warn_pct: 80,
+                        mem_crit_pct: 90,
+                        input_delay_warn_ms: 50,
+                        input_delay_crit_ms: 100,
+                        input_delay_percentile: 'p95',
+                        load_alert_delay_sec: 120,
+                        input_delay_alert_delay_sec: 180,
+                        collect_per_session: true,
+                        collect_remotefx: false,
+                    });
+                }
+                break;
+            case 'spikes':
+                resetEvtSpikeToDefaults();
+                break;
+            case 'notifications':
+                config.notifications = [];
+                config.notification_exclusions = [];
+                break;
+            case 'system':
+                config.update = { enabled: false, channel: 'stable', poll_interval: '24h0m0s' };
+                appState.reduceMotion = false;
+                break;
+        }
+    }
+
+    /** Validate evtspike edits; returns null on success, error string otherwise. */
+    function validateEvtSpike() {
+        const e = config?.evtspike;
+        if (!e) return null;
+        if (e.min_count < 1 || e.min_count > 10000) return 'Min events per bucket must be 1–10000';
+        if (e.threshold < 1e-9 || e.threshold > 0.1) return 'Anomaly tail probability must be 0.000000001–0.1';
+        if (e.cooldown_minutes < 1 || e.cooldown_minutes > 1440) return 'Cooldown must be 1–1440 minutes';
+        if (e.slot_maturity_observations < 1 || e.slot_maturity_observations > 100) {
+            return 'Slot maturity must be 1–100 observations';
+        }
+        if (e.persist_interval_seconds < 60 || e.persist_interval_seconds > 86400) {
+            return 'Persistence interval must be 60–86400 seconds';
+        }
+        if (e.half_life_buckets < 60 || e.half_life_buckets > 10000) {
+            return 'EWMA half-life must be 60–10000 buckets';
+        }
+        if (e.prior_strength < 1 || e.prior_strength > 10000) {
+            return 'Prior strength must be 1–10000 observations';
+        }
+        if (e.mean_per_bucket_prior < 0 || e.mean_per_bucket_prior > 1000) {
+            return 'Prior mean must be 0–1000 events/bucket';
+        }
+        return null;
+    }
+
     // ---------------------------------------------------------------------------
     // Sustain window — bound directly to config.performance.load_alert_delay_sec
     // and input_delay_alert_delay_sec.  Backend computes consecutive polls.
@@ -290,7 +384,7 @@
     /** Format seconds as a human-readable label. */
     function fmtDuration(sec) {
         if (sec < 60) return sec + 's';
-        if (sec % 60 === 0) return (sec / 60) + 'm';
+        if (sec % 60 === 0) return sec / 60 + 'm';
         if (sec % 30 === 0) return (sec / 60).toFixed(1).replace('.0', '') + 'm';
         return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
     }
@@ -300,8 +394,15 @@
         return Math.max(1, Math.ceil(sustainSec / (intervalSec || 30)));
     }
 
-    let loadPolls = $derived(sustainToPolls(config?.performance?.load_alert_delay_sec || 60, config?.performance?.sample_interval_sec));
-    let delayPolls = $derived(sustainToPolls(config?.performance?.input_delay_alert_delay_sec || 90, config?.performance?.sample_interval_sec));
+    let loadPolls = $derived(
+        sustainToPolls(config?.performance?.load_alert_delay_sec || 60, config?.performance?.sample_interval_sec),
+    );
+    let delayPolls = $derived(
+        sustainToPolls(
+            config?.performance?.input_delay_alert_delay_sec || 90,
+            config?.performance?.sample_interval_sec,
+        ),
+    );
 
     let activeFireLevel = $derived.by(() => {
         if (!config) return -1;
@@ -348,7 +449,175 @@
         }
     }
 
-    let showManual = $state(false);
+    const CONFIG_TABS = [
+        { id: 'alerts', label: 'Alerts & Performance' },
+        { id: 'spikes', label: 'Event Spikes' },
+        { id: 'notifications', label: 'Notifications' },
+        { id: 'servers', label: 'Servers' },
+        { id: 'system', label: 'System' },
+    ];
+    let activeTab = $state('alerts');
+
+    function selectConfigTab(id) {
+        activeTab = id;
+    }
+
+    function handleTabKeydown(event, index) {
+        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const last = CONFIG_TABS.length - 1;
+        const next =
+            event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? last
+                  : (index + (event.key === 'ArrowRight' ? 1 : -1) + CONFIG_TABS.length) % CONFIG_TABS.length;
+        selectConfigTab(CONFIG_TABS[next].id);
+        requestAnimationFrame(() => document.getElementById(`config-tab-${CONFIG_TABS[next].id}`)?.focus());
+    }
+
+    const EVTSPIKE_PRESETS = [
+        {
+            level: 1,
+            label: 'Chill',
+            tagline: 'Fewer, higher-confidence alerts',
+            min_count: 20,
+            threshold: 1e-5,
+            cooldown_minutes: 30,
+            slot_maturity_observations: 100,
+            persist_interval_seconds: 3600,
+            half_life_buckets: 720,
+            prior_strength: 120,
+            mean_per_bucket_prior: 0.2,
+        },
+        {
+            level: 2,
+            label: 'Steady',
+            tagline: 'Balanced production defaults',
+            min_count: 10,
+            threshold: 1e-4,
+            cooldown_minutes: 10,
+            slot_maturity_observations: 90,
+            persist_interval_seconds: 900,
+            half_life_buckets: 360,
+            prior_strength: 60,
+            mean_per_bucket_prior: 0.1,
+        },
+        {
+            level: 3,
+            label: 'Vigilant',
+            tagline: 'Earlier, more frequent detection',
+            min_count: 5,
+            threshold: 1e-3,
+            cooldown_minutes: 5,
+            slot_maturity_observations: 30,
+            persist_interval_seconds: 300,
+            half_life_buckets: 120,
+            prior_strength: 20,
+            mean_per_bucket_prior: 0.05,
+        },
+    ];
+
+    const EVTSPIKE_KNOBS = [
+        {
+            key: 'min_count',
+            label: 'Minimum event count',
+            help: 'Requires at least this many events in a 10-second bucket; higher values ignore smaller bursts.',
+            unit: 'events per bucket (1–10000)',
+            min: 1,
+            max: 10000,
+        },
+        {
+            key: 'threshold',
+            label: 'Tail probability threshold',
+            help: 'Alerts when a burst is this statistically unlikely; lower values require stronger evidence.',
+            unit: 'probability (1e-9–0.1)',
+            min: 1e-9,
+            max: 0.1,
+            step: 'any',
+        },
+        {
+            key: 'cooldown_minutes',
+            label: 'Alert cooldown',
+            help: 'Suppresses repeat alerts after a confirmed spike; higher values reduce notification frequency.',
+            unit: 'minutes (1–1440)',
+            min: 1,
+            max: 1440,
+        },
+        {
+            key: 'slot_maturity_observations',
+            label: 'Slot maturity',
+            help: 'Observations needed before a time-of-week baseline is trusted; higher values train longer.',
+            unit: 'observations (1–100)',
+            min: 1,
+            max: 100,
+        },
+        {
+            key: 'persist_interval_seconds',
+            label: 'Baseline persistence cadence',
+            help: 'How often the learned baseline is written to disk; lower values reduce data loss after interruption.',
+            unit: 'seconds (60–86400)',
+            min: 60,
+            max: 86400,
+        },
+        {
+            key: 'half_life_buckets',
+            label: 'Baseline half-life',
+            help: 'How quickly older observations lose influence; lower values adapt faster to new normal activity.',
+            unit: '10-second buckets (60–10000)',
+            min: 60,
+            max: 10000,
+        },
+        {
+            key: 'prior_strength',
+            label: 'Prior strength',
+            help: 'Starting weight assigned to the baseline; higher values make early learning less reactive.',
+            unit: 'bucket-equivalents (1–10000)',
+            min: 1,
+            max: 10000,
+            step: 'any',
+        },
+        {
+            key: 'mean_per_bucket_prior',
+            label: 'Prior mean',
+            help: 'Expected events in each 10-second bucket before learning; higher values make sparse channels less sensitive.',
+            unit: 'events per bucket (0–1000)',
+            min: 0,
+            max: 1000,
+            step: 'any',
+        },
+    ];
+
+    function applyEvtSpikePreset(preset) {
+        if (!config?.evtspike) return;
+        for (const knob of EVTSPIKE_KNOBS) config.evtspike[knob.key] = preset[knob.key];
+        config.evtspike.enabled = true;
+    }
+
+    function isEvtSpikePresetActive(preset) {
+        const evtspike = config?.evtspike;
+        return !!evtspike && EVTSPIKE_KNOBS.every((knob) => evtspike[knob.key] === preset[knob.key]);
+    }
+
+    function evtSpikePresetValues(key) {
+        return EVTSPIKE_PRESETS.map((preset) => preset[key]);
+    }
+
+    function focusEvtSpikeInput(key) {
+        document.getElementById(`evtspike-${key}`)?.focus();
+    }
+
+    function channelList(value) {
+        return Array.isArray(value) ? value.join('\n') : '';
+    }
+
+    function updateChannelList(key, value) {
+        if (!config?.evtspike) return;
+        config.evtspike[key] = value
+            .split(/\r?\n|,/)
+            .map((channel) => channel.trim())
+            .filter(Boolean);
+    }
 
     // ---------------------------------------------------------------------------
     // Validation & actions
@@ -369,7 +638,7 @@
     /** @returns {Promise<boolean>} true on success */
     async function save() {
         if (!config) return false;
-        const err = validateThresholds();
+        const err = validateThresholds() ?? validateEvtSpike();
         if (err) {
             toast.err(err);
             return false;
@@ -503,532 +772,815 @@
             {#if loading}
                 <div style="text-align:center;padding:40px;color:var(--color-muted)">Loading...</div>
             {:else if config}
-                <!-- Global Alert Sensitivity -->
-                <div class="settings-group">
-                    <div class="section-header"><Coffee size={14} strokeWidth={2.5} /> Alert Sensitivity</div>
-                    <div class="fire-row">
-                        {#each FIRE_PRESETS as preset}
-                            <button
-                                class="fire-card fire-level-{preset.level} {activeFireLevel === preset.level
-                                    ? 'active'
-                                    : ''}"
-                                onclick={() => applyFirePreset(preset)}
-                            >
-                                {#if activeFireLevel === preset.level}
-                                    <span class="fire-seal fire-seal-{preset.level}"
-                                        ><Award size={20} strokeWidth={2.5} /></span
-                                    >
-                                {/if}
-                                <span class="fire-icon-wrap"
-                                    >{#each { length: preset.beans } as _}<svg
-                                            class="bean"
-                                            viewBox="0 0 20 24"
-                                            width="16"
-                                            height="19"
-                                            ><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor" /><path
-                                                d="M10 3 C8 8, 8 16, 10 21"
-                                                stroke="var(--color-surface)"
-                                                stroke-width="1.8"
-                                                fill="none"
-                                                stroke-linecap="round"
-                                            /></svg
-                                        >{/each}</span
-                                >
-                                <span class="fire-label">{preset.label}</span>
-                                <span class="fire-tagline"
-                                    >{preset.level === 1
-                                        ? 'Easy does it'
-                                        : preset.level === 2
-                                          ? 'Sleep with one eye open'
-                                          : 'No Sleep Till Brooklyn'}</span
-                                >
-                                <span class="fire-detail">
-                                    Poll {preset.poll_interval}s · Escalation {preset.grace_period}m · Sessions {preset.session_warning}%
-                                </span>
-                                <span class="fire-detail">
-                                    CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
-                                    · Delay {preset.delay_warn}/{preset.delay_crit}ms ({preset.delay_percentile.toUpperCase()})
-                                </span>
-                                <span class="fire-detail">
-                                    Sustain {fmtDuration(preset.load_sustain_sec)} / {fmtDuration(preset.delay_sustain_sec)}
-                                </span>
-                            </button>
-                        {/each}
-                    </div>
+                <div class="config-tabs" role="tablist" aria-label="Configuration sections">
+                    {#each CONFIG_TABS as tab, index (tab.id)}
+                        <button
+                            id="config-tab-{tab.id}"
+                            type="button"
+                            class:active={activeTab === tab.id}
+                            role="tab"
+                            aria-selected={activeTab === tab.id}
+                            aria-controls="config-panel-{tab.id}"
+                            tabindex={activeTab === tab.id ? 0 : -1}
+                            onclick={() => selectConfigTab(tab.id)}
+                            onkeydown={(event) => handleTabKeydown(event, index)}
+                        >
+                            {tab.label}
+                        </button>
+                    {/each}
                 </div>
 
-                <button class="fire-custom-toggle" onclick={() => (showManual = !showManual)}>
-                    {#if showManual}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
-                    Customize settings manually
-                </button>
-
-                {#if showManual}
-
-                    <!-- 1. Agent Poll Interval -->
-                    <div class="settings-group">
-                        <div class="section-header"><Radio size={14} strokeWidth={2.5} /> Agent Poll Interval</div>
-                        <div class="settings-hint">How often each agent reports drain state, sessions, and metrics to the dashboard.</div>
-                        <div class="repeat-pills">
-                            {#each [15, 30, 60] as p}
-                                <button
-                                    class="btn-brutal gp-pill"
-                                    class:active={config.poll_interval === p}
-                                    onclick={() => (config.poll_interval = p)}>{p < 60 ? p + 's' : p / 60 + 'm'}</button
-                                >
-                            {/each}
-                            <button
-                                class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={![15, 30, 60].includes(config.poll_interval)}
-                                onclick={() => pollIntervalAgentInput?.focus()}>Custom</button
-                            >
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-                            <input
-                                type="number"
-                                class="settings-num"
-                                bind:value={config.poll_interval}
-                                bind:this={pollIntervalAgentInput}
-                                min="10"
-                                max="86400"
-                            />
-                            <span class="settings-num-label">seconds (10–86400)</span>
-                        </div>
-                    </div>
-
-                    <!-- 2. Escalation Window -->
-                    <div class="settings-group">
-                        <div class="section-header"><ShieldAlert size={14} strokeWidth={2.5} /> Escalation Window</div>
-                        <div class="settings-hint">How long a server can stay in drain mode before its status escalates from Grace to Alert.</div>
-                        <div class="repeat-pills">
-                            {#each GRACE_PRESETS as p}
-                                <button
-                                    class="btn-brutal gp-pill"
-                                    class:active={config.grace_period === p}
-                                    onclick={() => (config.grace_period = p)}>{p < 60 ? p + 'm' : p / 60 + 'h'}</button
-                                >
-                            {/each}
-                            <button
-                                class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={!GRACE_PRESETS.includes(config.grace_period)}
-                                onclick={() => gracePeriodInput?.focus()}>Custom</button
-                            >
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px">
-                            <input
-                                type="number"
-                                class="settings-num"
-                                bind:value={config.grace_period}
-                                bind:this={gracePeriodInput}
-                                min="1"
-                                max="1440"
-                            />
-                            <span class="settings-num-label">minutes</span>
-                        </div>
-                    </div>
-
-                    <!-- 3. Session Warning -->
-                    <div class="settings-group">
-                        <div class="section-header"><Users size={14} strokeWidth={2.5} /> Session Warning Threshold</div>
-                        <div class="settings-hint">Alert when active sessions reach this percentage of the server's capacity.</div>
-                        <div class="repeat-pills">
-                            <button
-                                class="btn-brutal gp-pill gp-pill--off"
-                                class:active={config.session_warning_threshold === 0}
-                                onclick={() => (config.session_warning_threshold = 0)}>Off</button
-                            >
-                            {#each [70, 80, 90] as p}
-                                <button
-                                    class="btn-brutal gp-pill"
-                                    class:active={config.session_warning_threshold === p}
-                                    onclick={() => (config.session_warning_threshold = p)}>{p}%</button
-                                >
-                            {/each}
-                            <button
-                                class="btn-brutal gp-pill gp-pill--dashed"
-                                class:active={config.session_warning_threshold > 0 && ![70, 80, 90].includes(config.session_warning_threshold)}
-                                onclick={() => sessionWarnInput?.focus()}>Custom</button
-                            >
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-                            <input
-                                type="number"
-                                class="settings-num"
-                                bind:value={config.session_warning_threshold}
-                                bind:this={sessionWarnInput}
-                                min="0"
-                                max="100"
-                            />
-                            <span class="settings-num-label">%</span>
-                        </div>
-                    </div>
-
-                    <!-- 4. Performance Monitoring -->
-                    {#if config.performance}
+                {#if activeTab === 'alerts'}
+                    <div id="config-panel-alerts" role="tabpanel" aria-labelledby="config-tab-alerts">
+                        <!-- Global Alert Sensitivity -->
                         <div class="settings-group">
-                            <div class="section-header"><Activity size={14} strokeWidth={2.5} /> Performance Monitoring</div>
-                            <label class="settings-check">
+                            <div class="section-header"><Coffee size={14} strokeWidth={2.5} /> Alert Sensitivity</div>
+                            <div class="fire-row">
+                                {#each FIRE_PRESETS as preset}
+                                    <button
+                                        class="fire-card fire-level-{preset.level} {activeFireLevel === preset.level
+                                            ? 'active'
+                                            : ''}"
+                                        onclick={() => applyFirePreset(preset)}
+                                    >
+                                        {#if activeFireLevel === preset.level}
+                                            <span class="fire-seal fire-seal-{preset.level}"
+                                                ><Award size={20} strokeWidth={2.5} /></span
+                                            >
+                                        {/if}
+                                        <span class="fire-icon-wrap"
+                                            >{#each { length: preset.beans } as _}<svg
+                                                    class="bean"
+                                                    viewBox="0 0 20 24"
+                                                    width="16"
+                                                    height="19"
+                                                    ><ellipse cx="10" cy="12" rx="8" ry="11" fill="currentColor" /><path
+                                                        d="M10 3 C8 8, 8 16, 10 21"
+                                                        stroke="var(--color-surface)"
+                                                        stroke-width="1.8"
+                                                        fill="none"
+                                                        stroke-linecap="round"
+                                                    /></svg
+                                                >{/each}</span
+                                        >
+                                        <span class="fire-label">{preset.label}</span>
+                                        <span class="fire-tagline"
+                                            >{preset.level === 1
+                                                ? 'Easy does it'
+                                                : preset.level === 2
+                                                  ? 'Sleep with one eye open'
+                                                  : 'No Sleep Till Brooklyn'}</span
+                                        >
+                                        <span class="fire-detail">
+                                            Poll {preset.poll_interval}s · Escalation {preset.grace_period}m · Sessions {preset.session_warning}%
+                                        </span>
+                                        <span class="fire-detail">
+                                            CPU {preset.cpu_warn}/{preset.cpu_crit}% · Mem {preset.mem_warn}/{preset.mem_crit}%
+                                            · Delay {preset.delay_warn}/{preset.delay_crit}ms ({preset.delay_percentile.toUpperCase()})
+                                        </span>
+                                        <span class="fire-detail">
+                                            Sustain {fmtDuration(preset.load_sustain_sec)} / {fmtDuration(
+                                                preset.delay_sustain_sec,
+                                            )}
+                                        </span>
+                                    </button>
+                                {/each}
+                            </div>
+                        </div>
+
+                        <!-- Manual alert controls remain visible alongside the presets. -->
+                        <!-- 1. Agent Poll Interval -->
+                        <div class="settings-group">
+                            <div class="section-header">
+                                <Radio size={14} strokeWidth={2.5} /> Agent Poll Interval
+                            </div>
+                            <div class="settings-hint">
+                                How often each agent reports drain state, sessions, and metrics to the dashboard.
+                            </div>
+                            <div class="repeat-pills">
+                                {#each [15, 30, 60] as p}
+                                    <button
+                                        class="btn-brutal gp-pill"
+                                        class:active={config.poll_interval === p}
+                                        onclick={() => (config.poll_interval = p)}
+                                        >{p < 60 ? p + 's' : p / 60 + 'm'}</button
+                                    >
+                                {/each}
+                                <button
+                                    class="btn-brutal gp-pill gp-pill--dashed"
+                                    class:active={![15, 30, 60].includes(config.poll_interval)}
+                                    onclick={() => pollIntervalAgentInput?.focus()}>Custom</button
+                                >
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                                 <input
-                                    type="checkbox"
-                                    bind:checked={config.performance.enabled}
-                                    disabled={config.performance.force_disabled}
+                                    type="number"
+                                    class="settings-num"
+                                    bind:value={config.poll_interval}
+                                    bind:this={pollIntervalAgentInput}
+                                    min="10"
+                                    max="86400"
                                 />
-                                Enable performance monitoring{config.performance.force_disabled
-                                    ? ' (disabled by server policy)'
-                                    : ''}
-                            </label>
-                            {#if config.performance.enabled && !config.performance.force_disabled}
-                                <!-- Poll Interval -->
-                                <div class="subsection" style="margin-top:8px">
-                                    <div class="settings-label">Poll Interval</div>
-                                    <div class="settings-hint">How often each server is sampled for CPU, memory, and input delay.</div>
-                                    <div class="repeat-pills">
-                                        {#each POLL_INTERVAL_PRESETS as p}
-                                            <button
-                                                class="btn-brutal gp-pill"
-                                                class:active={config.performance.sample_interval_sec === p}
-                                                onclick={() => (config.performance.sample_interval_sec = p)}>{p}s</button
-                                            >
-                                        {/each}
-                                        <button
-                                            class="btn-brutal gp-pill gp-pill--dashed"
-                                            class:active={!POLL_INTERVAL_PRESETS.includes(config.performance.sample_interval_sec)}
-                                            onclick={() => pollIntervalInput?.focus()}>Custom</button
-                                        >
-                                    </div>
-                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-                                        <input
-                                            type="number"
-                                            class="settings-num"
-                                            bind:value={config.performance.sample_interval_sec}
-                                            bind:this={pollIntervalInput}
-                                            min="10"
-                                            max="300"
-                                        />
-                                        <span class="settings-num-label">seconds (10–300)</span>
-                                    </div>
-                                </div>
+                                <span class="settings-num-label">seconds (10–86400)</span>
+                            </div>
+                        </div>
 
-                                <!-- Thresholds: CPU + Memory side by side -->
-                                <div class="subsection">
-                                <div class="settings-cfg-grid">
-                                    <div>
-                                        <div class="settings-label">CPU Thresholds</div>
-                                        <div class="settings-hint">Alert when CPU stays above these levels.</div>
-                                        <div class="repeat-pills">
-                                            <button class="btn-brutal gp-pill gp-pill--off"
-                                                class:active={config.performance.cpu_warn_pct === -1 && config.performance.cpu_crit_pct === -1}
-                                                onclick={() => { config.performance.cpu_warn_pct = -1; config.performance.cpu_crit_pct = -1; }}>Off</button>
-                                            {#each [[60,80],[70,90],[80,95]] as [w,c]}
-                                                <button class="btn-brutal gp-pill"
-                                                    class:active={config.performance.cpu_warn_pct === w && config.performance.cpu_crit_pct === c}
-                                                    onclick={() => { config.performance.cpu_warn_pct = w; config.performance.cpu_crit_pct = c; }}>{w}/{c}%</button>
-                                            {/each}
-                                        </div>
-                                        <div class="threshold-row" style="margin-top:4px">
-                                            <span class="settings-num-label threshold-lbl">Warn</span>
-                                            <input type="number" class="settings-num" bind:value={config.performance.cpu_warn_pct} min="-1" max="100" />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                            <span class="settings-num-label threshold-lbl">Crit</span>
-                                            <input type="number" class="settings-num" bind:value={config.performance.cpu_crit_pct} min="-1" max="100" />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div class="settings-label">Memory Thresholds</div>
-                                        <div class="settings-hint">Alert when memory stays above these levels.</div>
-                                        <div class="repeat-pills">
-                                            <button class="btn-brutal gp-pill gp-pill--off"
-                                                class:active={config.performance.mem_warn_pct === -1 && config.performance.mem_crit_pct === -1}
-                                                onclick={() => { config.performance.mem_warn_pct = -1; config.performance.mem_crit_pct = -1; }}>Off</button>
-                                            {#each [[65,85],[75,90],[80,95]] as [w,c]}
-                                                <button class="btn-brutal gp-pill"
-                                                    class:active={config.performance.mem_warn_pct === w && config.performance.mem_crit_pct === c}
-                                                    onclick={() => { config.performance.mem_warn_pct = w; config.performance.mem_crit_pct = c; }}>{w}/{c}%</button>
-                                            {/each}
-                                        </div>
-                                        <div class="threshold-row" style="margin-top:4px">
-                                            <span class="settings-num-label threshold-lbl">Warn</span>
-                                            <input type="number" class="settings-num" bind:value={config.performance.mem_warn_pct} min="-1" max="100" />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                            <span class="settings-num-label threshold-lbl">Crit</span>
-                                            <input type="number" class="settings-num" bind:value={config.performance.mem_crit_pct} min="-1" max="100" />
-                                            <span class="settings-num-label threshold-unit">%</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="settings-label" style="margin-top:20px">Input Delay Thresholds</div>
-                                <div class="settings-hint">Alert when user input latency stays above these levels.</div>
-                                <div class="repeat-pills">
-                                    <button class="btn-brutal gp-pill gp-pill--off"
-                                        class:active={config.performance.input_delay_warn_ms === -1 && config.performance.input_delay_crit_ms === -1}
-                                        onclick={() => { config.performance.input_delay_warn_ms = -1; config.performance.input_delay_crit_ms = -1; }}>Off</button>
-                                    {#each [[25,60],[50,100],[75,150]] as [w,c]}
-                                        <button class="btn-brutal gp-pill"
-                                            class:active={config.performance.input_delay_warn_ms === w && config.performance.input_delay_crit_ms === c}
-                                            onclick={() => { config.performance.input_delay_warn_ms = w; config.performance.input_delay_crit_ms = c; }}>{w}/{c}ms</button>
-                                    {/each}
-                                </div>
-                                <div class="threshold-row" style="margin-top:4px">
-                                    <span class="settings-num-label threshold-lbl">Warn</span>
-                                    <input type="number" class="settings-num" bind:value={config.performance.input_delay_warn_ms} min="-1" />
-                                    <span class="settings-num-label threshold-unit">ms</span>
-                                    <span class="settings-num-label threshold-lbl">Crit</span>
-                                    <input type="number" class="settings-num" bind:value={config.performance.input_delay_crit_ms} min="-1" />
-                                    <span class="settings-num-label threshold-unit">ms</span>
-                                </div>
-                                <div class="threshold-row" style="margin-top:8px">
-                                    <span class="settings-num-label threshold-lbl">Percentile</span>
+                        <!-- 2. Escalation Window -->
+                        <div class="settings-group">
+                            <div class="section-header">
+                                <ShieldAlert size={14} strokeWidth={2.5} /> Escalation Window
+                            </div>
+                            <div class="settings-hint">
+                                How long a server can stay in drain mode before its status escalates from Grace to
+                                Alert.
+                            </div>
+                            <div class="repeat-pills">
+                                {#each GRACE_PRESETS as p}
                                     <button
-                                        class="btn-brutal pctl-pill"
-                                        class:active={config.performance.input_delay_percentile === 'p50'}
-                                        onclick={() => config.performance.input_delay_percentile = 'p50'}
-                                    >P50</button>
-                                    <button
-                                        class="btn-brutal pctl-pill"
-                                        class:active={config.performance.input_delay_percentile === 'p95'}
-                                        onclick={() => config.performance.input_delay_percentile = 'p95'}
-                                    >P95</button>
-                                </div>
-                                </div>
+                                        class="btn-brutal gp-pill"
+                                        class:active={config.grace_period === p}
+                                        onclick={() => (config.grace_period = p)}
+                                        >{p < 60 ? p + 'm' : p / 60 + 'h'}</button
+                                    >
+                                {/each}
+                                <button
+                                    class="btn-brutal gp-pill gp-pill--dashed"
+                                    class:active={!GRACE_PRESETS.includes(config.grace_period)}
+                                    onclick={() => gracePeriodInput?.focus()}>Custom</button
+                                >
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <input
+                                    type="number"
+                                    class="settings-num"
+                                    bind:value={config.grace_period}
+                                    bind:this={gracePeriodInput}
+                                    min="1"
+                                    max="1440"
+                                />
+                                <span class="settings-num-label">minutes</span>
+                            </div>
+                        </div>
 
-                                <!-- Alert Sustain Window -->
-                                <div class="subsection">
-                                <div class="settings-label">Alert Sustain Window</div>
-                                <div class="settings-hint">How long a metric must breach its threshold before an alert fires.</div>
-                                <div class="settings-cfg-grid">
-                                    <div>
-                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">CPU / Memory</div>
+                        <!-- 3. Session Warning -->
+                        <div class="settings-group">
+                            <div class="section-header">
+                                <Users size={14} strokeWidth={2.5} /> Session Warning Threshold
+                            </div>
+                            <div class="settings-hint">
+                                Alert when active sessions reach this percentage of the server's capacity.
+                            </div>
+                            <div class="repeat-pills">
+                                <button
+                                    class="btn-brutal gp-pill gp-pill--off"
+                                    class:active={config.session_warning_threshold === 0}
+                                    onclick={() => (config.session_warning_threshold = 0)}>Off</button
+                                >
+                                {#each [70, 80, 90] as p}
+                                    <button
+                                        class="btn-brutal gp-pill"
+                                        class:active={config.session_warning_threshold === p}
+                                        onclick={() => (config.session_warning_threshold = p)}>{p}%</button
+                                    >
+                                {/each}
+                                <button
+                                    class="btn-brutal gp-pill gp-pill--dashed"
+                                    class:active={config.session_warning_threshold > 0 &&
+                                        ![70, 80, 90].includes(config.session_warning_threshold)}
+                                    onclick={() => sessionWarnInput?.focus()}>Custom</button
+                                >
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                <input
+                                    type="number"
+                                    class="settings-num"
+                                    bind:value={config.session_warning_threshold}
+                                    bind:this={sessionWarnInput}
+                                    min="0"
+                                    max="100"
+                                />
+                                <span class="settings-num-label">%</span>
+                            </div>
+                        </div>
+
+                        <!-- 4. Performance Monitoring -->
+                        {#if config.performance}
+                            <div class="settings-group">
+                                <div class="section-header">
+                                    <Activity size={14} strokeWidth={2.5} /> Performance Monitoring
+                                </div>
+                                <label class="settings-check">
+                                    <input
+                                        type="checkbox"
+                                        bind:checked={config.performance.enabled}
+                                        disabled={config.performance.force_disabled}
+                                    />
+                                    Enable performance monitoring{config.performance.force_disabled
+                                        ? ' (disabled by server policy)'
+                                        : ''}
+                                </label>
+                                {#if config.performance.enabled && !config.performance.force_disabled}
+                                    <!-- Poll Interval -->
+                                    <div class="subsection" style="margin-top:8px">
+                                        <div class="settings-label">Poll Interval</div>
+                                        <div class="settings-hint">
+                                            How often each server is sampled for CPU, memory, and input delay.
+                                        </div>
+
                                         <div class="repeat-pills">
-                                            {#each SUSTAIN_PRESETS as s}
+                                            {#each POLL_INTERVAL_PRESETS as p}
                                                 <button
                                                     class="btn-brutal gp-pill"
-                                                    class:active={config.performance.load_alert_delay_sec === s}
-                                                    onclick={() => (config.performance.load_alert_delay_sec = s)}>{fmtDuration(s)}</button
+                                                    class:active={config.performance.sample_interval_sec === p}
+                                                    onclick={() => (config.performance.sample_interval_sec = p)}
+                                                    >{p}s</button
                                                 >
                                             {/each}
                                             <button
                                                 class="btn-brutal gp-pill gp-pill--dashed"
-                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.load_alert_delay_sec)}
-                                                onclick={() => loadSustainInput?.focus()}>Custom</button
+                                                class:active={!POLL_INTERVAL_PRESETS.includes(
+                                                    config.performance.sample_interval_sec,
+                                                )}
+                                                onclick={() => pollIntervalInput?.focus()}>Custom</button
                                             >
                                         </div>
                                         <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                                             <input
                                                 type="number"
                                                 class="settings-num"
-                                                bind:value={config.performance.load_alert_delay_sec}
-                                                bind:this={loadSustainInput}
+                                                bind:value={config.performance.sample_interval_sec}
+                                                bind:this={pollIntervalInput}
                                                 min="10"
-                                                step="10"
+                                                max="300"
                                             />
-                                            <span class="settings-num-label">seconds</span>
-                                            <span class="settings-hint" style="margin-bottom:0">({loadPolls} poll{loadPolls === 1 ? '' : 's'})</span>
+                                            <span class="settings-num-label">seconds (10–300)</span>
                                         </div>
                                     </div>
-                                    <div>
-                                        <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">Input Delay</div>
+
+                                    <!-- Thresholds: CPU + Memory side by side -->
+                                    <div class="subsection">
+                                        <div class="settings-cfg-grid">
+                                            <div>
+                                                <div class="settings-label">CPU Thresholds</div>
+                                                <div class="settings-hint">
+                                                    Alert when CPU stays above these levels.
+                                                </div>
+                                                <div class="repeat-pills">
+                                                    <button
+                                                        class="btn-brutal gp-pill gp-pill--off"
+                                                        class:active={config.performance.cpu_warn_pct === -1 &&
+                                                            config.performance.cpu_crit_pct === -1}
+                                                        onclick={() => {
+                                                            config.performance.cpu_warn_pct = -1;
+                                                            config.performance.cpu_crit_pct = -1;
+                                                        }}>Off</button
+                                                    >
+                                                    {#each [[60, 80], [70, 90], [80, 95]] as [w, c]}
+                                                        <button
+                                                            class="btn-brutal gp-pill"
+                                                            class:active={config.performance.cpu_warn_pct === w &&
+                                                                config.performance.cpu_crit_pct === c}
+                                                            onclick={() => {
+                                                                config.performance.cpu_warn_pct = w;
+                                                                config.performance.cpu_crit_pct = c;
+                                                            }}>{w}/{c}%</button
+                                                        >
+                                                    {/each}
+                                                </div>
+                                                <div class="threshold-row" style="margin-top:4px">
+                                                    <span class="settings-num-label threshold-lbl">Warn</span>
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.cpu_warn_pct}
+                                                        min="-1"
+                                                        max="100"
+                                                    />
+                                                    <span class="settings-num-label threshold-unit">%</span>
+                                                    <span class="settings-num-label threshold-lbl">Crit</span>
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.cpu_crit_pct}
+                                                        min="-1"
+                                                        max="100"
+                                                    />
+                                                    <span class="settings-num-label threshold-unit">%</span>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="settings-label">Memory Thresholds</div>
+                                                <div class="settings-hint">
+                                                    Alert when memory stays above these levels.
+                                                </div>
+                                                <div class="repeat-pills">
+                                                    <button
+                                                        class="btn-brutal gp-pill gp-pill--off"
+                                                        class:active={config.performance.mem_warn_pct === -1 &&
+                                                            config.performance.mem_crit_pct === -1}
+                                                        onclick={() => {
+                                                            config.performance.mem_warn_pct = -1;
+                                                            config.performance.mem_crit_pct = -1;
+                                                        }}>Off</button
+                                                    >
+                                                    {#each [[65, 85], [75, 90], [80, 95]] as [w, c]}
+                                                        <button
+                                                            class="btn-brutal gp-pill"
+                                                            class:active={config.performance.mem_warn_pct === w &&
+                                                                config.performance.mem_crit_pct === c}
+                                                            onclick={() => {
+                                                                config.performance.mem_warn_pct = w;
+                                                                config.performance.mem_crit_pct = c;
+                                                            }}>{w}/{c}%</button
+                                                        >
+                                                    {/each}
+                                                </div>
+                                                <div class="threshold-row" style="margin-top:4px">
+                                                    <span class="settings-num-label threshold-lbl">Warn</span>
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.mem_warn_pct}
+                                                        min="-1"
+                                                        max="100"
+                                                    />
+                                                    <span class="settings-num-label threshold-unit">%</span>
+                                                    <span class="settings-num-label threshold-lbl">Crit</span>
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.mem_crit_pct}
+                                                        min="-1"
+                                                        max="100"
+                                                    />
+                                                    <span class="settings-num-label threshold-unit">%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="settings-label" style="margin-top:20px">Input Delay Thresholds</div>
+                                        <div class="settings-hint">
+                                            Alert when user input latency stays above these levels.
+                                        </div>
                                         <div class="repeat-pills">
-                                            {#each SUSTAIN_PRESETS as s}
+                                            <button
+                                                class="btn-brutal gp-pill gp-pill--off"
+                                                class:active={config.performance.input_delay_warn_ms === -1 &&
+                                                    config.performance.input_delay_crit_ms === -1}
+                                                onclick={() => {
+                                                    config.performance.input_delay_warn_ms = -1;
+                                                    config.performance.input_delay_crit_ms = -1;
+                                                }}>Off</button
+                                            >
+                                            {#each [[25, 60], [50, 100], [75, 150]] as [w, c]}
                                                 <button
                                                     class="btn-brutal gp-pill"
-                                                    class:active={config.performance.input_delay_alert_delay_sec === s}
-                                                    onclick={() => (config.performance.input_delay_alert_delay_sec = s)}>{fmtDuration(s)}</button
+                                                    class:active={config.performance.input_delay_warn_ms === w &&
+                                                        config.performance.input_delay_crit_ms === c}
+                                                    onclick={() => {
+                                                        config.performance.input_delay_warn_ms = w;
+                                                        config.performance.input_delay_crit_ms = c;
+                                                    }}>{w}/{c}ms</button
                                                 >
                                             {/each}
-                                            <button
-                                                class="btn-brutal gp-pill gp-pill--dashed"
-                                                class:active={!SUSTAIN_PRESETS.includes(config.performance.input_delay_alert_delay_sec)}
-                                                onclick={() => delaySustainInput?.focus()}>Custom</button
-                                            >
                                         </div>
-                                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                        <div class="threshold-row" style="margin-top:4px">
+                                            <span class="settings-num-label threshold-lbl">Warn</span>
                                             <input
                                                 type="number"
                                                 class="settings-num"
-                                                bind:value={config.performance.input_delay_alert_delay_sec}
-                                                bind:this={delaySustainInput}
-                                                min="10"
-                                                step="10"
+                                                bind:value={config.performance.input_delay_warn_ms}
+                                                min="-1"
                                             />
-                                            <span class="settings-num-label">seconds</span>
-                                            <span class="settings-hint" style="margin-bottom:0">({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span>
+                                            <span class="settings-num-label threshold-unit">ms</span>
+                                            <span class="settings-num-label threshold-lbl">Crit</span>
+                                            <input
+                                                type="number"
+                                                class="settings-num"
+                                                bind:value={config.performance.input_delay_crit_ms}
+                                                min="-1"
+                                            />
+                                            <span class="settings-num-label threshold-unit">ms</span>
+                                        </div>
+                                        <div class="threshold-row" style="margin-top:8px">
+                                            <span class="settings-num-label threshold-lbl">Percentile</span>
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p50'}
+                                                onclick={() => (config.performance.input_delay_percentile = 'p50')}
+                                                >P50</button
+                                            >
+                                            <button
+                                                class="btn-brutal pctl-pill"
+                                                class:active={config.performance.input_delay_percentile === 'p95'}
+                                                onclick={() => (config.performance.input_delay_percentile = 'p95')}
+                                                >P95</button
+                                            >
                                         </div>
                                     </div>
-                                </div>
-                                </div>
 
-                                <div style="margin-top:10px">
-                                    <label class="settings-check">
-                                        <input type="checkbox" bind:checked={config.performance.collect_per_session} />
-                                        Per-session CPU accounting
-                                    </label>
-                                    <label class="settings-check">
-                                        <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
-                                        RemoteFX monitoring
-                                    </label>
-                                </div>
-                            {/if}
-                        </div>
-                    {/if}
-                {/if}
+                                    <!-- Alert Sustain Window -->
+                                    <div class="subsection">
+                                        <div class="settings-label">Alert Sustain Window</div>
+                                        <div class="settings-hint">
+                                            How long a metric must breach its threshold before an alert fires.
+                                        </div>
+                                        <div class="settings-cfg-grid">
+                                            <div>
+                                                <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">
+                                                    CPU / Memory
+                                                </div>
+                                                <div class="repeat-pills">
+                                                    {#each SUSTAIN_PRESETS as s}
+                                                        <button
+                                                            class="btn-brutal gp-pill"
+                                                            class:active={config.performance.load_alert_delay_sec === s}
+                                                            onclick={() =>
+                                                                (config.performance.load_alert_delay_sec = s)}
+                                                            >{fmtDuration(s)}</button
+                                                        >
+                                                    {/each}
+                                                    <button
+                                                        class="btn-brutal gp-pill gp-pill--dashed"
+                                                        class:active={!SUSTAIN_PRESETS.includes(
+                                                            config.performance.load_alert_delay_sec,
+                                                        )}
+                                                        onclick={() => loadSustainInput?.focus()}>Custom</button
+                                                    >
+                                                </div>
+                                                <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.load_alert_delay_sec}
+                                                        bind:this={loadSustainInput}
+                                                        min="10"
+                                                        step="10"
+                                                    />
+                                                    <span class="settings-num-label">seconds</span>
+                                                    <span class="settings-hint" style="margin-bottom:0"
+                                                        >({loadPolls} poll{loadPolls === 1 ? '' : 's'})</span
+                                                    >
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="settings-num-label threshold-lbl" style="margin-bottom:4px">
+                                                    Input Delay
+                                                </div>
+                                                <div class="repeat-pills">
+                                                    {#each SUSTAIN_PRESETS as s}
+                                                        <button
+                                                            class="btn-brutal gp-pill"
+                                                            class:active={config.performance
+                                                                .input_delay_alert_delay_sec === s}
+                                                            onclick={() =>
+                                                                (config.performance.input_delay_alert_delay_sec = s)}
+                                                            >{fmtDuration(s)}</button
+                                                        >
+                                                    {/each}
+                                                    <button
+                                                        class="btn-brutal gp-pill gp-pill--dashed"
+                                                        class:active={!SUSTAIN_PRESETS.includes(
+                                                            config.performance.input_delay_alert_delay_sec,
+                                                        )}
+                                                        onclick={() => delaySustainInput?.focus()}>Custom</button
+                                                    >
+                                                </div>
+                                                <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                                                    <input
+                                                        type="number"
+                                                        class="settings-num"
+                                                        bind:value={config.performance.input_delay_alert_delay_sec}
+                                                        bind:this={delaySustainInput}
+                                                        min="10"
+                                                        step="10"
+                                                    />
+                                                    <span class="settings-num-label">seconds</span>
+                                                    <span class="settings-hint" style="margin-bottom:0"
+                                                        >({delayPolls} poll{delayPolls === 1 ? '' : 's'})</span
+                                                    >
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                <!-- Event Log Anomaly Detection -->
-                {#if config.evtspike}
-                    <div class="settings-group">
-                        <div class="section-header"><Siren size={14} strokeWidth={2.5} /> Event Log Anomaly Detection</div>
-                        <div class="settings-hint">Watches Windows event-log channels and fires notifications on the event_spike trigger when a confirmed anomaly is detected.</div>
-                        <label class="settings-check">
-                            <input type="checkbox" bind:checked={config.evtspike.enabled} />
-                            Enable detector
-                        </label>
-                    </div>
-                {/if}
-
-                <!-- Automatic Updates -->
-                {#if config.update}
-                    <div class="settings-group">
-                        <div class="section-header"><RefreshCw size={14} strokeWidth={2.5} /> Automatic Updates</div>
-                        <div class="settings-hint">
-                            Keep connected agents on a signed DrainCtl release. Enabling or changing this policy is
-                            applied without restarting the service.
-                        </div>
-                        <label class="settings-check">
-                            <input type="checkbox" bind:checked={config.update.enabled} />
-                            Automatically install updates
-                        </label>
-                        {#if config.update.enabled}
-                            <div class="subsection" style="margin-top:12px">
-                                <div class="settings-label">Release Channel</div>
-                                <div class="repeat-pills">
-                                    <button
-                                        type="button"
-                                        class="btn-brutal gp-pill"
-                                        class:active={config.update.channel === 'stable'}
-                                        onclick={() => (config.update.channel = 'stable')}>Stable</button
-                                    >
-                                    <button
-                                        type="button"
-                                        class="btn-brutal gp-pill"
-                                        class:active={config.update.channel === 'prerelease'}
-                                        onclick={() => (config.update.channel = 'prerelease')}>Prerelease</button
-                                    >
-                                </div>
-                                <div class="settings-label">Check Frequency</div>
-                                <div class="repeat-pills">
-                                    {#each UPDATE_INTERVAL_PRESETS as preset}
-                                        <button
-                                            type="button"
-                                            class="btn-brutal gp-pill"
-                                            class:active={config.update.poll_interval === preset.value}
-                                            onclick={() => (config.update.poll_interval = preset.value)}
-                                            >{preset.label}</button
-                                        >
-                                    {/each}
-                                    {#if !UPDATE_INTERVAL_PRESETS.some((preset) => preset.value === config.update.poll_interval)}
-                                        <button type="button" class="btn-brutal gp-pill active" disabled>
-                                            {config.update.poll_interval}
-                                        </button>
-                                    {/if}
-                                </div>
-                                {#if config.update.channel === 'prerelease'}
-                                    <div class="settings-hint">
-                                        Prerelease may install preview builds. Use Stable for production servers.
+                                    <div style="margin-top:10px">
+                                        <label class="settings-check">
+                                            <input
+                                                type="checkbox"
+                                                bind:checked={config.performance.collect_per_session}
+                                            />
+                                            Per-session CPU accounting
+                                        </label>
+                                        <label class="settings-check">
+                                            <input type="checkbox" bind:checked={config.performance.collect_remotefx} />
+                                            RemoteFX monitoring
+                                        </label>
                                     </div>
                                 {/if}
                             </div>
                         {/if}
                     </div>
-                {/if}
-
-                <!-- Display preferences -->
-                <div class="settings-group">
-                    <div class="section-header"><Monitor size={14} strokeWidth={2.5} /> Display</div>
-                    <div class="settings-hint">
-                        Flip on over RDP to cut compositor cost — disables UI animations, chart-overlay backdrop
-                        blur, and modal transitions. Remembered per browser; initial value respects
-                        <code>prefers-reduced-motion</code>.
-                    </div>
-                    <label class="settings-check">
-                        <input
-                            type="checkbox"
-                            checked={appState.reduceMotion}
-                            onchange={(e) => (appState.reduceMotion = e.currentTarget.checked)}
-                        />
-                        Reduce motion
-                    </label>
-                </div>
-
-                <!-- Notification Targets -->
-                <NotificationTargets bind:targets={config.notifications} bind:editTarget bind:editIdx bind:deleteIdx />
-
-                <!-- Maintenance jobs — background housekeeping (aggregators,
-                     retention, drift reconciliation). Formerly lived in the
-                     footer; moved here so the idle dashboard stays quiet.
-                     Collapsed by default — not what operators open Config for. -->
-                <div class="modal-section maint-section">
-                    <button
-                        type="button"
-                        class="maint-toggle"
-                        onclick={() => (showMaintenance = !showMaintenance)}
-                        aria-expanded={showMaintenance}
-                    >
-                        {#if showMaintenance}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
-                        <Wrench size={14} strokeWidth={2.5} />
-                        <span>Maintenance</span>
-                    </button>
-                    {#if showMaintenance}
-                        <p class="section-hint">
-                            Background jobs the service runs against the SQLite telemetry store. Fetched live while
-                            this modal is open.
-                        </p>
-                        {#if maintenanceError}
-                            <div class="maint-row maint-error">{maintenanceError}</div>
-                        {:else if maintenanceLoading && orderedMaintJobs.length === 0}
-                            <div class="maint-row maint-loading">Loading maintenance status…</div>
-                        {:else if orderedMaintJobs.length === 0}
-                            <div class="maint-row maint-loading">No jobs reported.</div>
-                        {:else}
-                            <ul class="maint-list">
-                                {#each orderedMaintJobs as job (job.name)}
-                                    <li class="maint-row">
-                                        <span class="maint-glyph maint-{jobStateClass(job)}" aria-hidden="true"
-                                            >{jobGlyph(job)}</span
+                {:else if activeTab === 'spikes'}
+                    <div id="config-panel-spikes" role="tabpanel" aria-labelledby="config-tab-spikes">
+                        {#if config.evtspike}
+                            <div class="settings-group">
+                                <div class="section-header">
+                                    <Siren size={14} strokeWidth={2.5} /> Event Log Anomaly Detection
+                                </div>
+                                <div class="settings-hint">
+                                    Watches Windows event-log channels and fires notifications on the event_spike
+                                    trigger when a confirmed anomaly is detected.
+                                </div>
+                                <div class="fire-row">
+                                    {#each EVTSPIKE_PRESETS as preset}
+                                        <button
+                                            type="button"
+                                            class="fire-card fire-level-{preset.level} {isEvtSpikePresetActive(preset)
+                                                ? 'active'
+                                                : ''}"
+                                            onclick={() => applyEvtSpikePreset(preset)}
                                         >
-                                        <span class="maint-label">{jobLabel(job.name)}</span>
-                                        <span class="maint-outcome maint-{jobStateClass(job)}">{job.outcome}</span>
-                                        <span class="maint-meta">
-                                            {#if job.finished}
-                                                <span>{rel(job.finished, maintNowMs)}</span>
+                                            {#if isEvtSpikePresetActive(preset)}
+                                                <span class="fire-seal fire-seal-{preset.level}"
+                                                    ><Award size={20} strokeWidth={2.5} /></span
+                                                >
                                             {/if}
-                                            {#if job.duration_ms != null}
-                                                <span>· {job.duration_ms} ms</span>
-                                            {/if}
-                                            {#if job.rows_affected != null}
-                                                <span>· {job.rows_affected.toLocaleString()} rows</span>
-                                            {/if}
-                                            {#if job.overdue}
-                                                <span class="maint-warn">· overdue</span>
-                                            {/if}
-                                        </span>
-                                        {#if job.outcome === 'failure' && job.reason}
-                                            <div class="maint-reason">{job.reason}</div>
-                                        {/if}
-                                    </li>
+                                            <span class="fire-icon-wrap"><Siren size={20} strokeWidth={2.5} /></span>
+                                            <span class="fire-label">{preset.label}</span>
+                                            <span class="fire-tagline">{preset.tagline}</span>
+                                            <span class="fire-detail"
+                                                >Minimum {preset.min_count} events · tail p ≤ {preset.threshold}</span
+                                            >
+                                            <span class="fire-detail"
+                                                >Cooldown {preset.cooldown_minutes}m · maturity {preset.slot_maturity_observations}
+                                                observations</span
+                                            >
+                                            <span class="fire-detail"
+                                                >EWMA half-life {preset.half_life_buckets} buckets</span
+                                            >
+                                        </button>
+                                    {/each}
+                                </div>
+                                <label class="settings-check">
+                                    <input type="checkbox" bind:checked={config.evtspike.enabled} />
+                                    Enable detector
+                                </label>
+                            </div>
+
+                            <div class="settings-group">
+                                {#each EVTSPIKE_KNOBS as knob}
+                                    <div class="subsection">
+                                        <div class="settings-label">{knob.label}</div>
+                                        <div class="settings-hint">{knob.help}</div>
+                                        <div class="repeat-pills">
+                                            {#each EVTSPIKE_PRESETS as preset}
+                                                <button
+                                                    type="button"
+                                                    class="btn-brutal gp-pill"
+                                                    class:active={config.evtspike[knob.key] === preset[knob.key]}
+                                                    title="{preset.label}: {preset[knob.key]}"
+                                                    onclick={() => (config.evtspike[knob.key] = preset[knob.key])}
+                                                >
+                                                    {preset[knob.key]}
+                                                </button>
+                                            {/each}
+                                            <button
+                                                type="button"
+                                                class="btn-brutal gp-pill gp-pill--dashed"
+                                                class:active={!evtSpikePresetValues(knob.key).includes(
+                                                    config.evtspike[knob.key],
+                                                )}
+                                                onclick={() => focusEvtSpikeInput(knob.key)}
+                                            >
+                                                Custom
+                                            </button>
+                                        </div>
+                                        <div class="threshold-row">
+                                            <input
+                                                id="evtspike-{knob.key}"
+                                                type="number"
+                                                class="settings-num"
+                                                value={config.evtspike[knob.key]}
+                                                min={knob.min}
+                                                max={knob.max}
+                                                step={knob.step ?? 1}
+                                                oninput={(event) =>
+                                                    (config.evtspike[knob.key] = Number(event.currentTarget.value))}
+                                            />
+                                            <span class="settings-num-label">{knob.unit}</span>
+                                        </div>
+                                    </div>
                                 {/each}
-                            </ul>
+
+                                <div class="subsection">
+                                    <div class="settings-label">Channels</div>
+                                    <div class="settings-cfg-grid">
+                                        <div class="evtspike-full-width">
+                                            <div class="settings-label">Disabled channels</div>
+                                            <div class="settings-hint">
+                                                Curated Windows event-log channels to suppress, one per line. Added
+                                                channels override this list.
+                                            </div>
+                                            <textarea
+                                                class="settings-num evtspike-channels"
+                                                value={(config.evtspike.disabled_channels ?? []).join('\n')}
+                                                oninput={(e) =>
+                                                    (config.evtspike.disabled_channels = e.currentTarget.value
+                                                        .split('\n')
+                                                        .map((s) => s.trim())
+                                                        .filter(Boolean))}></textarea>
+                                        </div>
+                                        <div class="evtspike-full-width">
+                                            <div class="settings-label">Added channels</div>
+                                            <div class="settings-hint">
+                                                Extra application-specific event-log channels to subscribe, one per
+                                                line.
+                                            </div>
+                                            <textarea
+                                                class="settings-num evtspike-channels"
+                                                value={(config.evtspike.added_channels ?? []).join('\n')}
+                                                oninput={(e) =>
+                                                    (config.evtspike.added_channels = e.currentTarget.value
+                                                        .split('\n')
+                                                        .map((s) => s.trim())
+                                                        .filter(Boolean))}></textarea>
+                                        </div>
+                                    </div>
+                                    <label class="settings-check">
+                                        <input
+                                            type="checkbox"
+                                            bind:checked={config.evtspike.security_channel_enabled}
+                                        />
+                                        Subscribe to the Windows <strong>Security</strong> log
+                                    </label>
+                                    <div class="settings-hint">
+                                        Requires <code>SeSecurityPrivilege</code> on the service account.
+                                    </div>
+                                </div>
+                            </div>
                         {/if}
-                    {/if}
-                </div>
+                    </div>
+                {:else if activeTab === 'notifications'}
+                    <div id="config-panel-notifications" role="tabpanel" aria-labelledby="config-tab-notifications">
+                        <NotificationTargets
+                            bind:targets={config.notifications}
+                            bind:editTarget
+                            bind:editIdx
+                            bind:deleteIdx
+                        />
+                    </div>
+                {:else if activeTab === 'servers'}
+                    <div id="config-panel-servers" role="tabpanel" aria-labelledby="config-tab-servers">
+                        <RemovedServersSettings />
+                    </div>
+                {:else if activeTab === 'system'}
+                    <div id="config-panel-system" role="tabpanel" aria-labelledby="config-tab-system">
+                        <!-- Automatic Updates -->
+                        {#if config.update}
+                            <div class="settings-group">
+                                <div class="section-header">
+                                    <RefreshCw size={14} strokeWidth={2.5} /> Automatic Updates
+                                </div>
+                                <div class="settings-hint">
+                                    Keep connected agents on a signed DrainCtl release. Enabling or changing this policy
+                                    is applied without restarting the service.
+                                </div>
+                                <label class="settings-check">
+                                    <input type="checkbox" bind:checked={config.update.enabled} />
+                                    Automatically install updates
+                                </label>
+                                {#if config.update.enabled}
+                                    <div class="subsection" style="margin-top:12px">
+                                        <div class="settings-label">Release Channel</div>
+                                        <div class="repeat-pills">
+                                            <button
+                                                type="button"
+                                                class="btn-brutal gp-pill"
+                                                class:active={config.update.channel === 'stable'}
+                                                onclick={() => (config.update.channel = 'stable')}>Stable</button
+                                            >
+                                            <button
+                                                type="button"
+                                                class="btn-brutal gp-pill"
+                                                class:active={config.update.channel === 'prerelease'}
+                                                onclick={() => (config.update.channel = 'prerelease')}
+                                                >Prerelease</button
+                                            >
+                                        </div>
+                                        <div class="settings-label">Check Frequency</div>
+                                        <div class="repeat-pills">
+                                            {#each UPDATE_INTERVAL_PRESETS as preset}
+                                                <button
+                                                    type="button"
+                                                    class="btn-brutal gp-pill"
+                                                    class:active={config.update.poll_interval === preset.value}
+                                                    onclick={() => (config.update.poll_interval = preset.value)}
+                                                    >{preset.label}</button
+                                                >
+                                            {/each}
+                                            {#if !UPDATE_INTERVAL_PRESETS.some((preset) => preset.value === config.update.poll_interval)}
+                                                <button type="button" class="btn-brutal gp-pill active" disabled>
+                                                    {config.update.poll_interval}
+                                                </button>
+                                            {/if}
+                                        </div>
+                                        {#if config.update.channel === 'prerelease'}
+                                            <div class="settings-hint">
+                                                Prerelease may install preview builds. Use Stable for production
+                                                servers.
+                                            </div>
+                                        {/if}
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
+
+                        <!-- Display preferences -->
+                        <div class="settings-group">
+                            <div class="section-header"><Monitor size={14} strokeWidth={2.5} /> Display</div>
+                            <div class="settings-hint">
+                                Flip on over RDP to cut compositor cost — disables UI animations, chart-overlay backdrop
+                                blur, and modal transitions. Remembered per browser; initial value respects
+                                <code>prefers-reduced-motion</code>.
+                            </div>
+                            <label class="settings-check">
+                                <input
+                                    type="checkbox"
+                                    checked={appState.reduceMotion}
+                                    onchange={(e) => (appState.reduceMotion = e.currentTarget.checked)}
+                                />
+                                Reduce motion
+                            </label>
+                        </div>
+
+                        <div class="modal-section maint-section">
+                            <div class="section-header"><Wrench size={14} strokeWidth={2.5} /> Maintenance</div>
+                            <p class="section-hint">
+                                Background jobs the service runs against the SQLite telemetry store. Fetched live while
+                                this modal is open.
+                            </p>
+                            {#if maintenanceError}
+                                <div class="maint-row maint-error">{maintenanceError}</div>
+                            {:else if maintenanceLoading && orderedMaintJobs.length === 0}
+                                <div class="maint-row maint-loading">Loading maintenance status…</div>
+                            {:else if orderedMaintJobs.length === 0}
+                                <div class="maint-row maint-loading">No jobs reported.</div>
+                            {:else}
+                                <ul class="maint-list">
+                                    {#each orderedMaintJobs as job (job.name)}
+                                        <li class="maint-row">
+                                            <span class="maint-glyph maint-{jobStateClass(job)}" aria-hidden="true"
+                                                >{jobGlyph(job)}</span
+                                            >
+                                            <span class="maint-label">{jobLabel(job.name)}</span>
+                                            <span class="maint-outcome maint-{jobStateClass(job)}">{job.outcome}</span>
+                                            <span class="maint-meta">
+                                                {#if job.finished}
+                                                    <span>{rel(job.finished, maintNowMs)}</span>
+                                                {/if}
+                                                {#if job.duration_ms != null}
+                                                    <span>· {job.duration_ms} ms</span>
+                                                {/if}
+                                                {#if job.rows_affected != null}
+                                                    <span>· {job.rows_affected.toLocaleString()} rows</span>
+                                                {/if}
+                                                {#if job.overdue}
+                                                    <span class="maint-warn">· overdue</span>
+                                                {/if}
+                                            </span>
+                                            {#if job.outcome === 'failure' && job.reason}
+                                                <div class="maint-reason">{job.reason}</div>
+                                            {/if}
+                                        </li>
+                                    {/each}
+                                </ul>
+                            {/if}
+                        </div>
+                    </div>
+                {/if}
 
                 <!-- Actions bar -->
                 <div class="settings-actions-wrap">
                     <div class="settings-actions">
-                        <button class="btn-brutal btn-test" onclick={sendTest} disabled={testing}>
-                            <Play size={14} />
-                            {testing ? 'Sending...' : 'Send Test'}
-                        </button>
                         <div style="display:flex;gap:8px">
+                            <button
+                                type="button"
+                                class="btn-brutal btn-secondary"
+                                onclick={resetActiveTabToDefaults}
+                                disabled={activeTab === 'servers'}
+                                title={activeTab === 'servers'
+                                    ? 'No configurable defaults on this tab'
+                                    : 'Reset this tab'}
+                            >
+                                Defaults
+                            </button>
+                            {#if activeTab === 'notifications'}
+                                <button class="btn-brutal btn-test" onclick={sendTest} disabled={testing}>
+                                    <Play size={14} />
+                                    {testing ? 'Sending...' : 'Send Test'}
+                                </button>
+                            {/if}
                             <button class="btn-brutal btn-save" onclick={save} disabled={saving || !dirty}>
                                 <Save size={14} />
                                 {saving ? 'Saving...' : 'Save'}
@@ -1150,9 +1702,46 @@
         flex: 1;
     }
     .settings-title {
-        margin-bottom: 24px;
         display: flex;
         align-items: center;
+        margin-bottom: 24px;
+    }
+    .config-tabs {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        margin: 0 -4px 20px;
+        padding: 12px 4px 10px;
+        overflow-x: auto;
+        background: transparent;
+        border-bottom: 0;
+    }
+    .config-tabs button {
+        flex: none;
+        padding: 6px 9px;
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-default);
+        background: var(--color-surface);
+        box-shadow: 2px 2px 0 var(--color-shadow);
+        color: var(--color-muted);
+        cursor: pointer;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .config-tabs button:hover,
+    .config-tabs button:focus-visible {
+        color: var(--color-fg);
+        border-color: var(--color-accent);
+    }
+    .config-tabs button.active {
+        background: var(--color-accent);
+        border-color: var(--color-accent);
+        color: #fff;
+        box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 35%, var(--color-shadow));
     }
     .settings-close {
         background: none;
@@ -1205,28 +1794,6 @@
     }
     .settings-check input[type='checkbox'] {
         accent-color: var(--color-accent);
-    }
-
-    /* Maintenance section — collapsed by default. Toggle mirrors the
-       "Customize settings manually" pattern so operators recognise the
-       chevron + label affordance. */
-    .maint-toggle {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 0 2px;
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: var(--color-accent);
-        font-family: inherit;
-        font-size: 0.78rem;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }
-    .maint-toggle:hover {
-        color: var(--color-fg);
     }
 
     /* Maintenance job list — same vocabulary as the old footer widget, but
@@ -1564,23 +2131,6 @@
         line-height: 1.5;
         font-weight: 500;
     }
-    .fire-custom-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.72rem;
-        font-weight: 600;
-        color: var(--color-muted);
-        padding: 4px 0;
-        transition: color 0.1s linear;
-    }
-    .fire-custom-toggle:hover {
-        color: var(--color-accent);
-    }
 
     .settings-actions-wrap {
         margin-top: 16px;
@@ -1625,7 +2175,8 @@
         border-style: dashed;
         font-size: 0.7rem;
     }
-    .gp-pill, .pctl-pill {
+    .gp-pill,
+    .pctl-pill {
         font-size: 0.72rem;
         font-weight: 600;
         padding: 5px 12px;
@@ -1633,13 +2184,16 @@
         background: var(--color-card);
         box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 20%, transparent);
     }
-    .gp-pill:hover, .pctl-pill:hover {
+    .gp-pill:hover,
+    .pctl-pill:hover {
         box-shadow: 3px 3px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
     }
-    .gp-pill:active, .pctl-pill:active {
+    .gp-pill:active,
+    .pctl-pill:active {
         box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-accent) 15%, transparent);
     }
-    .gp-pill.active, .pctl-pill.active {
+    .gp-pill.active,
+    .pctl-pill.active {
         background: var(--color-accent);
         color: #fff;
         border-color: var(--color-accent);
@@ -1658,6 +2212,23 @@
         background: var(--color-subtle);
         color: var(--color-bg);
         border-color: var(--color-subtle);
+    }
+    .evtspike-full-width {
+        grid-column: 1 / -1;
+    }
+    .evtspike-channels {
+        width: 100%;
+        min-height: 72px;
+        resize: vertical;
+    }
+    .evtspike-reset-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .evtspike-reset-row .settings-hint {
+        margin: 0;
     }
     .btn-save {
         display: inline-flex;

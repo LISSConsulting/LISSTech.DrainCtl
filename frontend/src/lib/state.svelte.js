@@ -26,7 +26,7 @@ const MAX_RECENT_SPIKES = 50;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.7';
+const MOCK_VERSION = '3.8';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -97,6 +97,7 @@ export const OVERVIEW_WINDOW_PRESETS = [
     { key: '1day', label: '1D', ms: 24 * 60 * 60 * 1000 },
     { key: '3day', label: '3D', ms: 3 * 24 * 60 * 60 * 1000 },
     { key: '5day', label: '5D', ms: 5 * 24 * 60 * 60 * 1000 },
+    { key: '30day', label: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
 function lsGetReduceMotion() {
@@ -275,6 +276,31 @@ let detectorStatuses = $state(new Map());
  * @type {Map<string, RecentSpike[]>}
  */
 let recentSpikes = $state(new Map());
+
+/**
+ * Hosts currently selected for a batch action in the Servers table.
+ *
+ * Selection is OWNED by the ServerTable component; this module only stores
+ * the set so that helpers (pruneSelectionFor, clearSelection) can be called
+ * from SSE handlers and cross-component paths without prop-drilling.
+ *
+ * Invariant: every entry must correspond to a host in `servers`. Callers
+ * MUST reconcile via `pruneSelectionFor(liveHosts)` whenever the live server
+ * list changes. Filtering and pagination deliberately preserve selection.
+ * @type {Set<string>}
+ */
+let selectedHosts = $state(/** @type {Set<string>} */ (new Set()));
+
+/** Incremented after a durable removal or restore SSE event. */
+let removedServersRevision = $state(0);
+
+/**
+ * Recent terminal force-update outcomes keyed by `${command_id}:${host}`.
+ * This is session-only operational feedback, not retained command history.
+ * Entries are capped by `recordForceUpdateCompletion`.
+ * @type {Map<string, {command_id:string, host:string, outcome:'completed'|'failed'|'duplicate'|'refused', reason?:string, old_version?:string, new_version?:string, decided_at?:string}>}
+ */
+let forceUpdateCompletions = $state(new Map());
 
 // UI state
 let connected = $state(false);
@@ -540,6 +566,31 @@ export const appState = {
     get recentSpikes() {
         return recentSpikes;
     },
+    /**
+     * Recent terminal force-update outcomes. Mutate via
+     * `recordForceUpdateCompletion` so the Map remains bounded and reactive.
+     */
+    get forceUpdateCompletions() {
+        return forceUpdateCompletions;
+    },
+
+    /**
+     * Set of hosts currently selected for a Servers-table batch action.
+     * Mutate via the `selection` helper exports below (setSelection,
+     * toggleSelection, pruneSelectionFor, clearSelection) so that the new
+     * Set instance preserves Svelte 5 deep reactivity.
+     * @type {Set<string>}
+     */
+
+    get removedServersRevision() {
+        return removedServersRevision;
+    },
+    notifyRemovedServersChanged() {
+        removedServersRevision++;
+    },
+    get selectedHosts() {
+        return selectedHosts;
+    },
 
     // UI state
     get connected() {
@@ -750,6 +801,82 @@ export function removeServerMetrics(host) {
     serverMetrics = next;
 }
 
+// ---------------------------------------------------------------------------
+// Servers-table selection helpers (BatchOperations)
+//
+// These helpers own the single mutation path for `selectedHosts`. They always
+// assign a fresh Set instance so Svelte 5 deep reactivity fires; never
+// mutate the existing Set in place.
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace the selection set entirely. Pass an empty array to clear.
+ * @param {Iterable<string>} hosts
+ */
+export function setSelection(hosts) {
+    selectedHosts = new Set(hosts);
+}
+
+/**
+ * Toggle one host in/out of the selection. Adding a host that is not in the
+ * current `servers` list is allowed (the toolbar reconciles on the next
+ * render) but the canonical prune-on-list-change is `pruneSelectionFor`.
+ * @param {string} host
+ */
+export function toggleSelection(host) {
+    const next = new Set(selectedHosts);
+    if (next.has(host)) next.delete(host);
+    else next.add(host);
+    selectedHosts = next;
+}
+
+/**
+ * Drop any selected hosts that are not in the supplied live-hosts set.
+ *
+ * Call this whenever the source-of-truth server list changes:
+ *   - SSE `server_deleted` / `server_permanently_removed` (per-host)
+ *   - full /servers poll refresh (pass the new list's hosts)
+ *
+ * Filtering and pagination do not call this helper: they only change visible
+ * rows and must retain selection for batch actions.
+ * @param {Iterable<string>} liveHosts
+ * @returns {boolean} true when at least one selection entry was pruned.
+ */
+export function pruneSelectionFor(liveHosts) {
+    if (selectedHosts.size === 0) return false;
+    const live = liveHosts instanceof Set ? liveHosts : new Set(liveHosts);
+    let changed = false;
+    const next = new Set();
+    for (const host of selectedHosts) {
+        if (live.has(host)) next.add(host);
+        else changed = true;
+    }
+    if (changed) selectedHosts = next;
+    return changed;
+}
+
+/**
+ * Remove a single host from the selection (e.g. immediately after its row
+ * disappears via SSE; cheaper than a full prune when the caller already
+ * knows the host).
+ * @param {string} host
+ */
+export function dropSelection(host) {
+    if (!selectedHosts.has(host)) return;
+    const next = new Set(selectedHosts);
+    next.delete(host);
+    selectedHosts = next;
+}
+
+/**
+ * Clear all selected hosts. Used by toolbar's "Cancel" action and after a
+ * successful batch action.
+ */
+export function clearSelection() {
+    if (selectedHosts.size === 0) return;
+    selectedHosts = new Set();
+}
+
 /**
  * Set the evtspike detector status for a host. Creates a new Map to preserve
  * Svelte 5 deep reactivity. Called by SSE `detector_status` events and by the
@@ -825,4 +952,42 @@ export function seedServerMetrics(seedData) {
         changed = true;
     }
     if (changed) serverMetrics = next;
+}
+
+/**
+ * Update the in-memory settings snapshot after a host-wide notification toggle.
+ * The SSE settings_update remains the cross-client authority; this applies the
+ * initiating operator's result without waiting for that event to arrive.
+ * @param {string} host
+ * @param {boolean} excluded
+ */
+export function setNotificationExclusion(host, excluded) {
+    if (!config) return;
+    const canonical = host.trim().replace(/\.$/, '').toLowerCase();
+    if (!canonical) return;
+    const current = Array.isArray(config.notification_exclusions) ? config.notification_exclusions : [];
+    const withoutHost = current.filter((item) => item.trim().replace(/\.$/, '').toLowerCase() !== canonical);
+    config = {
+        ...config,
+        notification_exclusions: excluded ? [...withoutHost, canonical] : withoutHost,
+    };
+}
+
+const MAX_FORCE_UPDATE_COMPLETIONS = 50;
+
+/**
+ * Record or replace one terminal force-update outcome. The command and host
+ * together identify an attempted update, allowing retries for the same host
+ * while deduplicating repeated SSE delivery.
+ * @param {{command_id:string, host:string, outcome:'completed'|'failed'|'duplicate'|'refused', reason?:string, old_version?:string, new_version?:string, decided_at?:string}} completion
+ */
+export function recordForceUpdateCompletion(completion) {
+    const key = `${completion.command_id}:${completion.host}`;
+    const next = new Map(forceUpdateCompletions);
+    next.delete(key);
+    next.set(key, completion);
+    while (next.size > MAX_FORCE_UPDATE_COMPLETIONS) {
+        next.delete(next.keys().next().value);
+    }
+    forceUpdateCompletions = next;
 }

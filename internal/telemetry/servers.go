@@ -7,8 +7,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// CanonicalHostname is the single storage identity for dashboard hosts.
+// SQLite's historical rows may retain their original spelling, so every
+// lookup also uses COLLATE NOCASE until those rows age out.
+func CanonicalHostname(hostname string) string {
+	return strings.ToUpper(strings.TrimSpace(hostname))
+}
 
 // ServerInfo is the telemetry-layer representation of a registered server.
 // LastResultJSON is an opaque JSON blob — the dashboard layer marshals a
@@ -37,11 +45,13 @@ func NewServerStore(db *DB) *ServerStore {
 // preserves the original registered_at on re-registration — matches the legacy
 // ServerState.Register behaviour.
 func (s *ServerStore) Register(ctx context.Context, hostname string) error {
+	hostname = CanonicalHostname(hostname)
 	nowMs := time.Now().UTC().UnixMilli()
 	_, err := s.db.writer.ExecContext(ctx,
-		`INSERT OR IGNORE INTO servers (hostname, registered_at_ms, last_seen_ms, last_result_json)
-		 VALUES (?, ?, 0, NULL)`,
-		hostname, nowMs)
+		`INSERT INTO servers (hostname, registered_at_ms, last_seen_ms, last_result_json)
+		 SELECT ?, ?, 0, NULL
+		 WHERE NOT EXISTS (SELECT 1 FROM servers WHERE hostname = ? COLLATE NOCASE)`,
+		hostname, nowMs, hostname)
 	if err != nil {
 		return fmt.Errorf("telemetry: servers register: %w", err)
 	}
@@ -50,7 +60,7 @@ func (s *ServerStore) Register(ctx context.Context, hostname string) error {
 
 // Remove deletes the row for hostname. Returns (found, error).
 func (s *ServerStore) Remove(ctx context.Context, hostname string) (bool, error) {
-	res, err := s.db.writer.ExecContext(ctx, `DELETE FROM servers WHERE hostname = ?`, hostname)
+	res, err := s.db.writer.ExecContext(ctx, `DELETE FROM servers WHERE hostname = ? COLLATE NOCASE`, CanonicalHostname(hostname))
 	if err != nil {
 		return false, fmt.Errorf("telemetry: servers remove: %w", err)
 	}
@@ -65,7 +75,7 @@ func (s *ServerStore) Remove(ctx context.Context, hostname string) (bool, error)
 func (s *ServerStore) IsRegistered(ctx context.Context, hostname string) (bool, error) {
 	var one int
 	err := s.db.reader.QueryRowContext(ctx,
-		`SELECT 1 FROM servers WHERE hostname = ?`, hostname).Scan(&one)
+		`SELECT 1 FROM servers WHERE hostname = ? COLLATE NOCASE`, CanonicalHostname(hostname)).Scan(&one)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -80,8 +90,8 @@ func (s *ServerStore) IsRegistered(ctx context.Context, hostname string) (bool, 
 func (s *ServerStore) Update(ctx context.Context, hostname, lastResultJSON string) (bool, error) {
 	nowMs := time.Now().UTC().UnixMilli()
 	res, err := s.db.writer.ExecContext(ctx,
-		`UPDATE servers SET last_seen_ms = ?, last_result_json = ? WHERE hostname = ?`,
-		nowMs, lastResultJSON, hostname)
+		`UPDATE servers SET last_seen_ms = ?, last_result_json = ? WHERE hostname = ? COLLATE NOCASE`,
+		nowMs, lastResultJSON, CanonicalHostname(hostname))
 	if err != nil {
 		return false, fmt.Errorf("telemetry: servers update: %w", err)
 	}
@@ -95,12 +105,13 @@ func (s *ServerStore) Update(ctx context.Context, hostname, lastResultJSON strin
 // Get returns the row for hostname, or nil when unregistered.
 func (s *ServerStore) Get(ctx context.Context, hostname string) (*ServerInfo, error) {
 	var (
+		storedHostname           string
 		registeredMs, lastSeenMs int64
 		lastResultJSON           sql.NullString
 	)
 	err := s.db.reader.QueryRowContext(ctx,
-		`SELECT registered_at_ms, last_seen_ms, last_result_json FROM servers WHERE hostname = ?`,
-		hostname).Scan(&registeredMs, &lastSeenMs, &lastResultJSON)
+		`SELECT hostname, registered_at_ms, last_seen_ms, last_result_json FROM servers WHERE hostname = ? COLLATE NOCASE`,
+		CanonicalHostname(hostname)).Scan(&storedHostname, &registeredMs, &lastSeenMs, &lastResultJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -108,7 +119,7 @@ func (s *ServerStore) Get(ctx context.Context, hostname string) (*ServerInfo, er
 		return nil, fmt.Errorf("telemetry: servers get: %w", err)
 	}
 	return &ServerInfo{
-		Hostname:       hostname,
+		Hostname:       storedHostname,
 		RegisteredAt:   time.UnixMilli(registeredMs).UTC(),
 		LastSeen:       optionalTime(lastSeenMs),
 		LastResultJSON: lastResultJSON.String,
@@ -150,8 +161,8 @@ func (s *ServerStore) All(ctx context.Context) ([]ServerInfo, error) {
 // — production code should go through Update, which stamps time.Now().
 func (s *ServerStore) BackdateLastSeen(ctx context.Context, hostname string, ts time.Time) error {
 	_, err := s.db.writer.ExecContext(ctx,
-		`UPDATE servers SET last_seen_ms = ? WHERE hostname = ?`,
-		ts.UTC().UnixMilli(), hostname)
+		`UPDATE servers SET last_seen_ms = ? WHERE hostname = ? COLLATE NOCASE`,
+		ts.UTC().UnixMilli(), CanonicalHostname(hostname))
 	if err != nil {
 		return fmt.Errorf("telemetry: servers backdate_last_seen: %w", err)
 	}
@@ -185,7 +196,7 @@ func (s *ServerStore) Import(ctx context.Context, infos []ServerInfo) (int, erro
 		if info.LastResultJSON != "" {
 			lastResult = info.LastResultJSON
 		}
-		res, err := stmt.ExecContext(ctx, info.Hostname,
+		res, err := stmt.ExecContext(ctx, CanonicalHostname(info.Hostname),
 			info.RegisteredAt.UTC().UnixMilli(),
 			info.LastSeen.UTC().UnixMilli(),
 			lastResult)

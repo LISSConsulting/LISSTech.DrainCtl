@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -31,15 +32,16 @@ var openapiSpec []byte
 
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state        *ServerState
-	cfg          dc.DashboardConfig
-	server       *http.Server
-	fingerprint  string        // SHA-256 fingerprint of the TLS certificate
-	sessionStore *SessionStore // in-memory dashboard session store
-	broker       *Broker       // SSE event broker for real-time updates
-	ms           metricsReader
-	as           auditReader
-	mnt          maintenanceReader
+	state                  *ServerState
+	cfg                    dc.DashboardConfig
+	server                 *http.Server
+	fingerprint            string        // SHA-256 fingerprint of the TLS certificate
+	sessionStore           *SessionStore // in-memory dashboard session store
+	broker                 *Broker       // SSE event broker for real-time updates
+	ms                     metricsReader
+	as                     auditReader
+	mnt                    maintenanceReader
+	heartbeatIntervalNanos atomic.Int64
 
 	// testNotifyFunc, if non-nil, is called by handleNotifyTest instead of
 	// LoadConfig+SendTestNotification. Used in tests to avoid filesystem access.
@@ -55,10 +57,14 @@ type DashboardServer struct {
 	// (no-op for that field). nil threshold/gracePeriod/pollInterval mean the fields were absent.
 	testPutSettingsFunc func(notifications *[]dc.NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *dc.PerformanceConfig) error
 
-	// testPutEvtSpikeEnabledFunc, if non-nil, is called by handlePutSettings
-	// instead of dc.UpdateEvtSpikeEnabled for the evtspike.enabled flag. Nil
-	// enabled means the field was absent from the request body (no-op).
-	testPutEvtSpikeEnabledFunc func(enabled *bool) error
+	// testToggleNotificationExclusionFunc replaces the durable toggle in
+	// handler tests while preserving its canonical-host boundary.
+	testToggleNotificationExclusionFunc func(host string) (excluded bool, err error)
+
+	// testPutEvtSpikeFunc, if non-nil, is called by handlePutSettings
+	// instead of dc.UpdateEvtSpike for the operator-safe evtspike fields.
+	// Nil patch means the field was absent from the request body (no-op).
+	testPutEvtSpikeFunc func(patch *dc.EvtSpikeConfigPatch) error
 
 	// testPutUpdateConfigFunc, if non-nil, is called by handlePutSettings
 	// instead of dc.UpdateUpdateConfig for the automatic-update block.
@@ -83,6 +89,35 @@ type DashboardServer struct {
 	// this map so GET /api/evtspike/status?host=<remote> reflects reality.
 	remoteEvtSpikeStatusMu sync.RWMutex
 	remoteEvtSpikeStatus   map[string]evtspike.DetectorStatus
+
+	// forceUpdates is the pending-command registry for
+	// POST /api/v1/servers/{host}/force-update. One entry per host
+	// captures the queued command; the report handler consumes the
+	// oldest undelivered command per host and attaches it to the
+	// agent's next /api/v1/report response. See forceupdate.go for
+	// the registry contract and idempotency guarantees.
+	forceUpdates *forceUpdateState
+	// localForceUpdateSupported is false on dashboard-only management hosts.
+	// It prevents a stale persisted local server record from advertising an
+	// updater that this process intentionally does not construct.
+	localForceUpdateSupported atomic.Bool
+}
+
+const missedHeartbeatLimit = 3
+
+func (ds *DashboardServer) setHeartbeatInterval(interval time.Duration) {
+	ds.heartbeatIntervalNanos.Store(int64(interval))
+}
+
+func (ds *DashboardServer) staleAfter() time.Duration {
+	interval := time.Duration(ds.heartbeatIntervalNanos.Load())
+	if interval <= 0 {
+		interval = time.Duration(dc.DefaultPollInterval) * time.Second
+	}
+	return missedHeartbeatLimit * interval
+}
+func (ds *DashboardServer) setLocalForceUpdateSupported(supported bool) {
+	ds.localForceUpdateSupported.Store(supported)
 }
 
 // wireServerStateCallbacks installs the SSE/metrics/spike callbacks that bridge
@@ -117,6 +152,39 @@ func (ds *DashboardServer) wireServerStateCallbacks() {
 		ds.evtspikeStatus = f
 	}
 	state.GetRemoteEvtSpikeStatus = ds.RemoteEvtSpikeStatus
+
+	// Wire local-report force-update consumption: the service's svc
+	// loop reads this closure to pull the next pending command without
+	// going through HTTP (the dashboard runs in the same process for
+	// the local-report path). The closure translates the in-package
+	// forceUpdateCommand type to the wire-side ForceUpdatePendingCommand
+	// type so the consumer (internal/svc) doesn't have to import the
+	// dashboard's private registry types.
+	state.ConsumeForceUpdate = func(host string) *ForceUpdatePendingCommand {
+		cmd := ds.forceUpdates.Consume(strings.ToLower(host))
+		if cmd == nil {
+			return nil
+		}
+		return &ForceUpdatePendingCommand{
+			CommandID:    cmd.CommandID,
+			Host:         cmd.Host,
+			Reason:       cmd.Reason,
+			AcceptedAt:   cmd.AcceptedAt,
+			AgentVersion: cmd.AgentVersion,
+		}
+	}
+
+	// Wire local force-update completion: when the local agent reports
+	// its updater decision via ReportLocal (no HTTP path), acknowledge the
+	// matching durable command before publishing the same SSE event used by
+	// handleReport. The canonical host comes from svc's checked result.
+	state.OnLocalForceUpdateCompletion = func(payload ForceUpdateCompletionPayload) {
+		if payload.CommandID == "" || payload.Host == "" {
+			return
+		}
+		ds.forceUpdates.Acknowledge(strings.ToLower(payload.Host), payload.CommandID)
+		ds.broadcastForceUpdateCompletion(payload.Host, payload)
+	}
 
 	// Wire metrics ingest for both HTTP and local-report paths.
 	if ms != nil {
@@ -237,8 +305,20 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
 	mux.Handle("GET /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleGetServer))))
 	mux.Handle("DELETE /api/v1/servers/{host}", rlw(rs(http.HandlerFunc(ds.handleDeleteServer))))
+	// Durable permanent-removal surface — defined and owned by
+	// `handlePermanentRemove*` / `handleRestore*` / `handleListRemovedServers`.
+	// Routes are additive: the legacy DELETE above is preserved unchanged.
+	mux.Handle("POST /api/v1/servers/{host}/permanent-remove", rlw(rs(http.HandlerFunc(ds.handlePermanentRemoveServer))))
+	mux.Handle("POST /api/v1/servers/permanent-remove", rlw(rs(http.HandlerFunc(ds.handlePermanentRemoveBatch))))
+	mux.Handle("POST /api/v1/servers/{host}/restore", rlw(rs(http.HandlerFunc(ds.handleRestoreServer))))
+	mux.Handle("POST /api/v1/servers/restore", rlw(rs(http.HandlerFunc(ds.handleRestoreBatch))))
+	mux.Handle("GET /api/v1/servers/removed", rlw(rs(http.HandlerFunc(ds.handleListRemovedServers))))
+	// Batch operations issue this authenticated route once per host.
+	mux.Handle("POST /api/v1/servers/{host}/force-update", rlw(rs(http.HandlerFunc(ds.handleForceUpdate))))
 	mux.Handle("GET /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handleGetSettings))))
 	mux.Handle("PUT /api/v1/settings", rlw(rs(http.HandlerFunc(ds.handlePutSettings))))
+	mux.Handle("GET /api/v1/settings/notification-exclusions", rlw(rs(http.HandlerFunc(ds.handleGetNotificationExclusions))))
+	mux.Handle("POST /api/v1/settings/notification-exclusions/{host}", rlw(rs(http.HandlerFunc(ds.handleToggleNotificationExclusion))))
 	// Per-target CRUD — atomic add/edit/delete that bypasses the bulk PUT and
 	// returns the updated targets list (with has_secret) in one round-trip.
 	mux.Handle("POST /api/v1/settings/notifications", rlw(rs(http.HandlerFunc(ds.handleAddNotificationTarget))))

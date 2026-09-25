@@ -36,6 +36,7 @@ type DetectorStatus struct {
 	State           string     `json:"state"`
 	EnabledChannels int        `json:"enabled_channels"`
 	MatureChannels  int        `json:"mature_channels"`
+	WarmupStartedAt *time.Time `json:"warmup_started_at,omitempty"`
 	ErrorReason     string     `json:"error_reason,omitempty"`
 	LastSpikeAt     *time.Time `json:"last_spike_at,omitempty"`
 }

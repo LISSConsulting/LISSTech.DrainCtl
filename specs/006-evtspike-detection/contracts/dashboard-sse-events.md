@@ -20,6 +20,7 @@ Returns the current detector status for one registered server.
   "state": "healthy",
   "enabled_channels": 54,
   "mature_channels": 41,
+  "warmup_started_at": "2026-04-09T14:22:52-05:00",
   "last_spike_at": "2026-04-16T14:22:52-05:00"
 }
 ```
@@ -30,6 +31,7 @@ Returns the current detector status for one registered server.
 > **Disabled feature**: when evtspike is disabled in configuration, this endpoint returns **200** with `state: "disabled"` in the `DetectorStatus` body — not 503. HTTP 503 would imply "retry later"; a deliberately disabled feature is a permanent configuration state. The `DetectorStatus.State` field is the correct signal for the UI.
 
 **Omit optional fields** when zero-valued:
+- `warmup_started_at` omitted when the detector is disabled.
 - `error_reason` omitted unless `state == "error"`.
 - `last_spike_at` omitted if no spike has ever been seen.
 
@@ -67,14 +69,17 @@ Dashboard clients subscribe to the existing `/api/events` SSE stream (per the in
 
 ### `event: detector_status`
 
-Fired when a server's detector transitions between states (`disabled` → `training` → `healthy`, or → `error`).
+Fired when a server's detector transitions between states (`disabled` → `training` → `healthy`, or → `error`). `training` holds until **both** the durable seven-day warm-up and the channel-readiness gate complete. The detector continues scoring and emits confirmed `recent_spike` events throughout warm-up.
 
 ```
 event: detector_status
-data: {"host":"RDSH-04","state":"training","enabled_channels":54,"mature_channels":0}
+data: {"host":"RDSH-04","state":"training","enabled_channels":54,"mature_channels":54,"warmup_started_at":"2026-04-16T14:22:52-05:00"}
 ```
 
-**Not fired** on per-bucket or per-window events. Transitions only.
+**Not fired** for identical status snapshots. A changed subscription count,
+mature-channel count, warm-up start, error detail, or state emits so connected
+clients see training progress without receiving the scorer's unchanged
+ten-second snapshots.
 
 ### `event: recent_spike`
 

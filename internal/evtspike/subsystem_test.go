@@ -101,6 +101,12 @@ func TestSubsystem_SustainedBurst_FiresOnSpikeOncePerCooldown(t *testing.T) {
 	}
 
 	base := time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC)
+	s.mu.Lock()
+	s.warmupStartedAt = time.Now()
+	s.mu.Unlock()
+	if s.Status().State != StateTraining {
+		t.Fatalf("precondition: detector must remain training during its seven-day warm-up, got %q", s.Status().State)
+	}
 	trainOneChannel(d, base, 200, 1)
 
 	// 2-of-3 anomalous pattern: bucket 0 spike, bucket 1 normal, bucket 2 spike.
@@ -716,7 +722,10 @@ func TestSubsystem_PersistenceTicker_WritesOnAdvance(t *testing.T) {
 	s.OnSpike = func(SpikePayload) {}
 
 	tickCh := make(chan time.Time)
+	loopReady := make(chan struct{})
+	var loopReadyOnce sync.Once
 	s.PersistTickSource = func(time.Duration) (<-chan time.Time, func()) {
+		loopReadyOnce.Do(func() { close(loopReady) })
 		return tickCh, func() {}
 	}
 
@@ -734,6 +743,7 @@ func TestSubsystem_PersistenceTicker_WritesOnAdvance(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	defer s.Stop()
+	<-loopReady
 
 	// First tick: advance the mock clock 15 minutes and signal persistenceLoop.
 	// Use a synchronous send to ensure the loop has consumed the tick before we
@@ -1367,6 +1377,127 @@ func TestStatus_MatureChannelsExcludesRetrying(t *testing.T) {
 	st := s.Status()
 	if st.MatureChannels != 1 {
 		t.Errorf("MatureChannels=%d, want 1 (only subscribed channels count)", st.MatureChannels)
+	}
+}
+
+func markAllChannelsMature(s *Subsystem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.detectors {
+		d.Slots[0].N = d.Cfg.SlotMaturityObservations
+	}
+}
+
+func TestStatus_SevenDayWarmupPersistsAcrossRestart(t *testing.T) {
+	day0 := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	first := testSubsystem(t, "TEST-HOST")
+	first.Now = func() time.Time { return day0 }
+	first.OnSpike = func(SpikePayload) {}
+
+	if err := first.Start(context.Background()); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	markAllChannelsMature(first)
+	if got := first.Status().State; got != StateTraining {
+		t.Fatalf("new mature detector state = %q, want training before day 7", got)
+	}
+	cfg := first.cfg
+	first.Stop()
+
+	beforeDay7 := New(cfg, "TEST-HOST")
+	beforeDay7.Subscribe = noopSubscribe
+	beforeDay7.Now = func() time.Time { return day0.Add(6*24*time.Hour + 23*time.Hour) }
+	beforeDay7.OnSpike = func(SpikePayload) {}
+	if err := beforeDay7.Start(context.Background()); err != nil {
+		t.Fatalf("restart before day 7: %v", err)
+	}
+	if got := beforeDay7.Status().State; got != StateTraining {
+		t.Fatalf("restarted detector state = %q, want training before day 7", got)
+	}
+	beforeDay7.Stop()
+
+	day7 := New(cfg, "TEST-HOST")
+	day7.Subscribe = noopSubscribe
+	day7.Now = func() time.Time { return day0.Add(7 * 24 * time.Hour) }
+	day7.OnSpike = func(SpikePayload) {}
+	if err := day7.Start(context.Background()); err != nil {
+		t.Fatalf("restart on day 7: %v", err)
+	}
+	defer day7.Stop()
+	if got := day7.Status().State; got != StateHealthy {
+		t.Errorf("restarted mature detector state = %q, want healthy on day 7", got)
+	}
+}
+
+func TestScoreOncePublishesHealthyAfterWarmup(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	s := testSubsystem(t, "TEST-HOST")
+	s.Now = func() time.Time { return now }
+	s.OnSpike = func(SpikePayload) {}
+	s.initChannels(context.Background(), nil)
+	markAllChannelsMature(s)
+	s.mu.Lock()
+	s.warmupStartedAt = now.Add(-warmupDuration)
+	s.mu.Unlock()
+
+	statuses := make(chan DetectorStatus, 1)
+	s.OnStatusChange = func(status DetectorStatus) { statuses <- status }
+	s.scoreOnce(now)
+
+	select {
+	case status := <-statuses:
+		if status.State != StateHealthy {
+			t.Errorf("score status = %q, want healthy after both gates pass", status.State)
+		}
+	default:
+		t.Fatal("scoreOnce did not publish the warm-up completion transition")
+	}
+}
+
+func TestStatus_MigratesMatureV1BaselineWithoutResettingIt(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	legacy := &BaselineFile{
+		SchemaVersion: 1,
+		WrittenAt:     now.Add(-time.Minute),
+		Host:          "TEST-HOST",
+		Channels: map[string]ChannelState{
+			"Application": {},
+		},
+	}
+	channel := legacy.Channels["Application"]
+	channel.Slots[0].N = 7 * 90 // at most 90 observations per 15-minute slot per day
+	legacy.Channels["Application"] = channel
+	if err := WriteBaseline(path, legacy); err != nil {
+		t.Fatalf("WriteBaseline legacy: %v", err)
+	}
+
+	s := testSubsystem(t, "TEST-HOST")
+	s.cfg.BaselinePath = path
+	s.baselinePath = path
+	s.Now = func() time.Time { return now }
+	s.OnSpike = func(SpikePayload) {}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start from legacy baseline: %v", err)
+	}
+	defer s.Stop()
+	markAllChannelsMature(s)
+
+	if got := s.Status().State; got != StateHealthy {
+		t.Fatalf("mature legacy baseline state = %q, want healthy", got)
+	}
+	if got := s.Status().WarmupStartedAt; got == nil || !got.Equal(now.Add(-warmupDuration)) {
+		t.Errorf("WarmupStartedAt = %v, want %v", got, now.Add(-warmupDuration))
+	}
+	migrated, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline migrated: %v", err)
+	}
+	if migrated.SchemaVersion != SchemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d", migrated.SchemaVersion, SchemaVersion)
+	}
+	if !migrated.WarmupStartedAt.Equal(now.Add(-warmupDuration)) {
+		t.Errorf("persisted WarmupStartedAt = %v, want %v", migrated.WarmupStartedAt, now.Add(-warmupDuration))
 	}
 }
 

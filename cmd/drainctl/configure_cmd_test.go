@@ -26,6 +26,7 @@ func flagsCmd(t *testing.T, args []string) *cobra.Command {
 	cmd.Flags().Int("poll-interval", dc.DefaultPollInterval, "")
 	cmd.Flags().Int("retention-days", dc.DefaultRetentionDays, "")
 	cmd.Flags().Bool("auto-pin", false, "")
+	cmd.Flags().Bool("dashboard-only", false, "")
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
@@ -202,6 +203,19 @@ func TestRunConfigureFlags_ServiceSettings(t *testing.T) {
 	}
 	if cfg.SessionWarningThreshold != 90 {
 		t.Errorf("SessionWarningThreshold = %d, want 90", cfg.SessionWarningThreshold)
+	}
+}
+
+func TestRunConfigureFlags_DashboardOnly(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+
+	cfg := dc.DefaultConfig()
+	cmd := flagsCmd(t, []string{"--dashboard-only"})
+	if err := runConfigureFlags(cmd, cfg); err != nil {
+		t.Fatalf("runConfigureFlags: %v", err)
+	}
+	if !cfg.DashboardOnly {
+		t.Error("DashboardOnly = false, want true after --dashboard-only")
 	}
 }
 

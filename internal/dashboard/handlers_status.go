@@ -16,10 +16,6 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 )
 
-// staleThreshold is the maximum time since a server's last report before it is
-// considered offline. Matches the STALE constant (600 000 ms) in the dashboard UI.
-const staleThreshold = 10 * time.Minute
-
 // handleUI serves the embedded SPA index.html.
 // It generates a per-request nonce and injects it into both the Content-Security-Policy
 // header and the theme flash-prevention inline <script> tag in index.html.
@@ -56,9 +52,8 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 // Returns version, registered server count, and per-status counts.
 // Useful for load-balancer health checks and external monitoring.
 //
-// A server is counted as "offline" when its last report is older than
-// staleThreshold, regardless of the last-reported status. This matches the
-// dashboard UI's staleness check so the API and UI always agree.
+// A server is counted as offline after three expected reports have been
+// missed, regardless of its last-reported status.
 func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	servers := ds.state.All()
 	now := time.Now()
@@ -69,7 +64,7 @@ func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) 
 			unknown++
 			continue
 		}
-		if !s.LastSeen.IsZero() && now.Sub(s.LastSeen) > staleThreshold {
+		if !s.LastSeen.IsZero() && now.Sub(s.LastSeen) >= ds.staleAfter() {
 			offline++
 			continue
 		}
