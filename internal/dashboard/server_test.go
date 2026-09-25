@@ -3121,6 +3121,7 @@ func TestMetricsHandler_ContractShape(t *testing.T) {
 			Avg []float64 `json:"avg"`
 			Min []float64 `json:"min"`
 			Max []float64 `json:"max"`
+			P50 []float64 `json:"p50"`
 		} `json:"series"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -3143,15 +3144,15 @@ func TestMetricsHandler_ContractShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("series.cpu_pct missing; got keys=%v", resp.Series)
 	}
-	if len(cpu.T) != 3 || len(cpu.Avg) != 3 || len(cpu.Min) != 3 || len(cpu.Max) != 3 {
-		t.Fatalf("series arrays wrong length: t=%d avg=%d min=%d max=%d",
-			len(cpu.T), len(cpu.Avg), len(cpu.Min), len(cpu.Max))
+	if len(cpu.T) != 3 || len(cpu.Avg) != 3 || len(cpu.Min) != 3 || len(cpu.Max) != 3 || len(cpu.P50) != 3 {
+		t.Fatalf("series arrays wrong length: t=%d avg=%d min=%d max=%d p50=%d",
+			len(cpu.T), len(cpu.Avg), len(cpu.Min), len(cpu.Max), len(cpu.P50))
 	}
-	// Contract: for raw tier, avg == min == max == original value (http-metrics.md).
+	// Contract: for raw tier, avg == min == max == p50 == original value.
 	for i := range cpu.T {
-		if cpu.Avg[i] != cpu.Min[i] || cpu.Avg[i] != cpu.Max[i] {
-			t.Errorf("raw tier avg/min/max should be equal at i=%d: avg=%v min=%v max=%v",
-				i, cpu.Avg[i], cpu.Min[i], cpu.Max[i])
+		if cpu.Avg[i] != cpu.Min[i] || cpu.Avg[i] != cpu.Max[i] || cpu.Avg[i] != cpu.P50[i] {
+			t.Errorf("raw tier stats should be equal at i=%d: avg=%v min=%v max=%v p50=%v",
+				i, cpu.Avg[i], cpu.Min[i], cpu.Max[i], cpu.P50[i])
 		}
 	}
 }
@@ -4409,6 +4410,7 @@ type counterTestSeries struct {
 	Avg []float64 `json:"avg"`
 	Min []float64 `json:"min"`
 	Max []float64 `json:"max"`
+	P50 []float64 `json:"p50"`
 }
 
 // metricsTestResp mirrors the full JSON wire format of GET /api/v1/metrics/{host}.

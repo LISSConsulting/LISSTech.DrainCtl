@@ -607,13 +607,16 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
 
 /**
  * CounterSeries is one counter's parallel arrays inside a metrics response.
- * For tier=raw, avg === min === max === the raw sample value.
+ * P50 is the exact median across participating fleet-host values per bucket;
+ * for a single host it equals avg. For tier=raw, avg === min === max === p50
+ * === the raw sample value.
  *
  * @typedef {Object} CounterSeries
- * @property {number[]} t   - Unix-ms timestamps (parallel to avg/min/max).
+ * @property {number[]} t   - Unix-ms timestamps (parallel to avg/min/max/p50).
  * @property {number[]} avg
  * @property {number[]} min
  * @property {number[]} max
+ * @property {number[]} p50
  */
 
 /**
