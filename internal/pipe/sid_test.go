@@ -5,7 +5,10 @@ package pipe
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestCallerIsPrivileged(t *testing.T) {
@@ -53,5 +56,77 @@ func TestCallerIsPrivileged(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTokenIsAdministratorDuplicatesPrimaryToken(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &token); err != nil {
+		t.Fatalf("OpenProcessToken(current process): %v", err)
+	}
+	defer func() { _ = token.Close() }()
+
+	adminSID, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid(Administrators): %v", err)
+	}
+
+	_, err = tokenIsAdministrator(token, adminSID)
+	if errors.Is(err, windows.ERROR_NO_IMPERSONATION_TOKEN) {
+		t.Fatalf("tokenIsAdministrator returned ERROR_NO_IMPERSONATION_TOKEN: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("tokenIsAdministrator: %v", err)
+	}
+}
+
+func TestTokenIsAdministratorReturnsDuplicateError(t *testing.T) {
+	oldDuplicateTokenEx := duplicateTokenEx
+	duplicateTokenEx = func(
+		windows.Token,
+		uint32,
+		*windows.SecurityAttributes,
+		uint32,
+		uint32,
+		*windows.Token,
+	) error {
+		return windows.ERROR_ACCESS_DENIED
+	}
+	t.Cleanup(func() { duplicateTokenEx = oldDuplicateTokenEx })
+
+	isAdmin, err := tokenIsAdministrator(0, nil)
+	if isAdmin {
+		t.Fatal("tokenIsAdministrator returned admin membership after DuplicateTokenEx failure")
+	}
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("tokenIsAdministrator error = %v, want wrapped ERROR_ACCESS_DENIED", err)
+	}
+	if !strings.Contains(err.Error(), "DuplicateTokenEx") {
+		t.Fatalf("tokenIsAdministrator error = %q, want DuplicateTokenEx context", err)
+	}
+}
+
+func TestTokenIsAdministratorReturnsMemberError(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &token); err != nil {
+		t.Fatalf("OpenProcessToken(current process): %v", err)
+	}
+	defer func() { _ = token.Close() }()
+
+	oldTokenIsMember := tokenIsMember
+	tokenIsMember = func(windows.Token, *windows.SID) (bool, error) {
+		return false, windows.ERROR_ACCESS_DENIED
+	}
+	t.Cleanup(func() { tokenIsMember = oldTokenIsMember })
+
+	isAdmin, err := tokenIsAdministrator(token, nil)
+	if isAdmin {
+		t.Fatal("tokenIsAdministrator returned admin membership after Token.IsMember failure")
+	}
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("tokenIsAdministrator error = %v, want wrapped ERROR_ACCESS_DENIED", err)
+	}
+	if !strings.Contains(err.Error(), "Token.IsMember") {
+		t.Fatalf("tokenIsAdministrator error = %q, want Token.IsMember context", err)
 	}
 }

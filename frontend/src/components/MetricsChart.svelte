@@ -1,4 +1,5 @@
 <script>
+    import { untrack } from 'svelte';
     import { fly } from 'svelte/transition';
     import { LayerCake, Svg } from 'layercake';
     import {
@@ -153,11 +154,15 @@
     // ── Fleet retained-history fetch ──────────────────────────────────────────
     /** @type {import('../lib/api.js').MetricsResponse|null} */
     let fleetResponse = $state(null);
+    let fleetResponseKey = $state(null);
     let fleetLoading = $state(false);
     let fleetError = $state(false);
 
+    /** Stable roster identity; server status and perf updates do not change it. */
+    let rosterHostKey = $derived(JSON.stringify(appState.servers.map((server) => server.host).sort()));
     /** Sorted live roster used by the Overview-only host filter. */
-    let overviewHosts = $derived(appState.servers.map((server) => server.host).sort());
+    let overviewHosts = $derived(JSON.parse(rosterHostKey));
+    let selectedOverviewHostKey = $derived(JSON.stringify([...appState.overviewSelectedHosts].sort()));
     let overviewFiltering = $derived(appState.overviewSelectedHosts.size > 0);
     let overviewFilterSummary = $derived(
         overviewFiltering
@@ -226,35 +231,61 @@
     const DRAG_THRESHOLD_PX = 12;
     /** @type {HTMLDivElement|null} */
     let loadChartBodyEl = $state(null);
+    let liveRefreshTick = $state(0);
+    let fleetQueryKey = $derived(
+        JSON.stringify({
+            windowMs: appState.overviewWindowMs,
+            panOffsetMs,
+            selectedHosts: JSON.parse(selectedOverviewHostKey),
+            rosterHosts: JSON.parse(rosterHostKey),
+        }),
+    );
 
     $effect(() => {
-        const windowMs = appState.overviewWindowMs;
-        const offset = panOffsetMs;
-        const rosterSize = appState.servers.length;
-        const selectedHosts = appState.overviewSelectedHosts;
-        if (rosterSize === 0) {
+        if (panOffsetMs !== 0) return;
+        const refreshInterval = window.setInterval(() => {
+            liveRefreshTick += 1;
+        }, 30_000);
+        return () => {
+            window.clearInterval(refreshInterval);
+        };
+    });
+
+    $effect(() => {
+        const queryKey = fleetQueryKey;
+        const query = JSON.parse(queryKey);
+        const refreshTick = query.panOffsetMs === 0 ? liveRefreshTick : null;
+        if (query.rosterHosts.length === 0) {
             fleetResponse = null;
+            fleetResponseKey = null;
             fleetLoading = false;
             fleetError = false;
             return;
         }
+
         const ac = new AbortController();
-        fleetLoading = true;
+        const { response, responseKey } = untrack(() => ({
+            response: fleetResponse,
+            responseKey: fleetResponseKey,
+        }));
+        const hasCurrentResponse = response !== null && responseKey === queryKey;
+        fleetLoading = !hasCurrentResponse;
         fleetError = false;
-        const now = new Date();
-        const to = new Date(now.getTime() - offset);
-        const from = new Date(to.getTime() - windowMs);
-        fetchFleetMetrics(from, to, 'auto', undefined, ac.signal, selectedHosts)
+
+        const to = new Date(Date.now() - query.panOffsetMs);
+        const from = new Date(to.getTime() - query.windowMs);
+        fetchFleetMetrics(from, to, 'auto', undefined, ac.signal, query.selectedHosts)
             .then((data) => {
-                if (!ac.signal.aborted) {
+                if (!ac.signal.aborted && (refreshTick === null || refreshTick === liveRefreshTick)) {
                     fleetResponse = data;
+                    fleetResponseKey = queryKey;
                     fleetLoading = false;
                 }
             })
             .catch(() => {
-                if (!ac.signal.aborted) {
-                    fleetError = true;
+                if (!ac.signal.aborted && (refreshTick === null || refreshTick === liveRefreshTick)) {
                     fleetLoading = false;
+                    fleetError = !hasCurrentResponse;
                 }
             });
         return () => {

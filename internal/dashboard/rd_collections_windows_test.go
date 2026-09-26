@@ -5,6 +5,7 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -118,6 +119,82 @@ func TestRDCollectionPowerShellSerializesRecordsArray(t *testing.T) {
 	}
 	if !strings.Contains(rdCollectionPowerShell, "ConvertTo-Json -InputObject $records -Compress") {
 		t.Fatal("PowerShell script does not serialize the records array directly")
+	}
+}
+
+func TestRunRDCollectionCommandIncludesTrimmedStderrOnFailure(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "echo   RemoteDesktop module is missing   1>&2 & exit 1")
+
+	_, err := runRDCollectionCommand(cmd)
+
+	if err == nil {
+		t.Fatal("runRDCollectionCommand succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "RemoteDesktop module is missing") {
+		t.Fatalf("error = %q, want stderr diagnostic", err)
+	}
+	if strings.Contains(err.Error(), "   RemoteDesktop") {
+		t.Fatalf("error = %q, stderr diagnostic was not trimmed", err)
+	}
+}
+
+func TestWrapRDCollectionCommandErrorBoundsStderr(t *testing.T) {
+	exitErr := errors.New("exit status 1")
+	stderr := strings.Repeat("x", rdCollectionCommandStderrMaxSize+1)
+
+	err := wrapRDCollectionCommandError(exitErr, stderr)
+
+	if !errors.Is(err, exitErr) {
+		t.Fatalf("error = %v, does not wrap exit error", err)
+	}
+	diagnostic := strings.TrimPrefix(err.Error(), "discover RD Session Collections: exit status 1: ")
+	if len(diagnostic) != rdCollectionCommandStderrMaxSize {
+		t.Fatalf("diagnostic length = %d, want %d", len(diagnostic), rdCollectionCommandStderrMaxSize)
+	}
+}
+
+func TestWrapRDCollectionCommandErrorOmitsEmptyStderr(t *testing.T) {
+	exitErr := errors.New("exit status 1")
+
+	err := wrapRDCollectionCommandError(exitErr, " \r\n\t ")
+
+	if !errors.Is(err, exitErr) {
+		t.Fatalf("error = %v, does not wrap exit error", err)
+	}
+	if err.Error() != "discover RD Session Collections: exit status 1" {
+		t.Fatalf("error = %q, want only wrapped exit error", err)
+	}
+}
+
+func TestRunRDCollectionCommandKeepsSuccessJSONOnStdout(t *testing.T) {
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", `[Console]::Out.WriteLine('[{"host":"rd01.example.test","collection":"Apps"}]'); [Console]::Error.WriteLine('discovery warning')`)
+
+	data, err := runRDCollectionCommand(cmd)
+
+	if err != nil {
+		t.Fatalf("runRDCollectionCommand: %v", err)
+	}
+	records, err := decodeRDCollectionRecords(data)
+	if err != nil {
+		t.Fatalf("decodeRDCollectionRecords(%q): %v", data, err)
+	}
+	if len(records) != 1 || records[0].Host != "rd01.example.test" || records[0].Collection != "Apps" {
+		t.Fatalf("records = %#v, want stdout JSON record", records)
+	}
+}
+
+func TestRunRDCollectionCommandHonorsContextTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "cmd.exe", "/c", "ping -n 3 127.0.0.1 >nul")
+
+	_, err := runRDCollectionCommand(cmd)
+
+	if err == nil {
+		t.Fatal("runRDCollectionCommand succeeded, want timeout error")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("context error = %v, want deadline exceeded", ctx.Err())
 	}
 }
 
