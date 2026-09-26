@@ -32,9 +32,9 @@ const dashboardShutdownTimeout = 5 * time.Second
 //
 // Transitively-owned goroutines (SessionStore reaper, NegotiateMiddleware
 // SSPI reaper) are started by their constructors with the derived ctx and
-// exit on Stop's cancel. The HTTP drain and RD Session Collection resolver are
-// joined to the subsystem's wg; the reapers remain constructor-internal
-// cleanup loops.
+// exit on Stop's cancel. The HTTP drain, RD Session Collection resolver, and
+// stale-host transition worker are joined to the subsystem's wg; the reapers
+// remain constructor-internal cleanup loops.
 type Subsystem struct {
 	cfg                       dc.DashboardConfig
 	dataDir                   string
@@ -152,6 +152,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		mnt:                  s.mnt,
 		spikes:               s.sps,
 		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
+		staleTransitions:     make(map[string]struct{}),
 		forceUpdates:         forceUpdates,
 	}
 	ds.setLocalForceUpdateSupported(s.localForceUpdateSupported)
@@ -205,7 +206,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	s.state = state
 	s.cancel = cancel
 
-	s.wg.Add(3)
+	s.wg.Add(4)
 	go func() {
 		defer s.wg.Done()
 		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
@@ -216,6 +217,10 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		rdCollections.Run(derived, s.cfg.RDConnectionBroker)
+	}()
+	go func() {
+		defer s.wg.Done()
+		ds.runStaleHostTransitions(derived)
 	}()
 	go func() {
 		defer s.wg.Done()
