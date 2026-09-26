@@ -228,6 +228,7 @@ drainctl dashboard            Dashboard helpers (cert info, etc.)
 drainctl configure            Interactive/flag-driven config editor
 drainctl sessions             Show live RDSH session enumeration
 drainctl baseline reset       Wipe the evtspike anomaly-detector baseline
+drainctl broker-setup         Probe and save RD Connection Broker discovery
 ```
 
 **Global flags**
@@ -337,9 +338,23 @@ Both accept `debug`, `info`, `warn`, `error`. CLI verbosity is separate (`--log-
 
 ### Dashboard-authoritative configuration
 
-For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, **Servers**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, removed-server recovery, and automatic-update policy. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
+For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, and automatic-update policy. The **Servers** tab supports removed-server recovery and displays the current broker. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
 
-The live **Servers** view groups recognized hostnames under their conservatively derived RD Session Pool; a hostname that cannot be recognized is shown under **Ungrouped**. It keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and issue Force Update. Durable tombstones are listed and restored under **Config → Servers**. A removed agent cannot re-register until restored.
+The live **Servers** view groups hosts by their authoritative RD Connection Broker session-collection membership. Hosts with no assigned collection, or when discovery is unavailable, appear under **Ungrouped**. **Config → Servers** displays the current **RD Connection Broker** but cannot change it. Discovery imports the `RemoteDesktop` PowerShell module and uses `Get-RDSessionCollection` plus `Get-RDSessionHost`; the DrainCtl service identity needs the module and appropriate administrative/RDS-management rights on the selected Connection Broker. If a refresh fails, the dashboard retains the last good membership map.
+
+### Validate and save a Connection Broker
+
+Use the elevated, running-service path to prove collection discovery before persisting the broker:
+
+```powershell
+drainctl broker-setup --connection-broker rdc-broker.example.test
+# Blank means the local machine running the DrainCtl service:
+drainctl broker-setup
+```
+
+Blank succeeds only when that local DrainCtl service host is the Connection Broker. `broker-setup` calls the running DrainCtl service over its privileged named pipe, so `Get-RDSessionCollection` and `Get-RDSessionHost` run under the actual service identity, not the interactive administrator. It imports the `RemoteDesktop` module and requires appropriate administrative/RDS-management rights on the selected broker. The command probes first and saves only after a successful probe; it never creates accounts, changes group membership or permissions, installs Windows features, or changes the service identity. Manual `config.json` editing remains an advanced administrator-controlled path.
+
+The supported installer service identity is currently `LocalSystem`; it accesses a remote broker as `DOMAIN\DASHBOARDHOST$`. RDSH agents also remain `LocalSystem`. gMSA support is future work and requires installer, ACL, and privilege support; Microsoft's [Manage Group Managed Service Accounts guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/manage-group-managed-service-accounts) is a future-planning reference only.
 
 ---
 
@@ -531,7 +546,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
     "load_alert_delay_sec": 120, "input_delay_alert_delay_sec": 180,
     "collect_remotefx": false, "collect_per_session": true
   },
-  "dashboard": { "url": "" },
+  "dashboard": { "url": "", "rd_connection_broker": "" },
   "update": { "enabled": false, "channel": "stable", "poll_interval": "24h" },
   "notification_exclusions": ["rdsh01.example.test"],
   "notifications": [
@@ -570,7 +585,7 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
 | `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
 | `dashboard_only` | bool | `false` | Run listener, authentication, SQLite storage, and retention only—no local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, or updater. |
-| `dashboard.url` | string | *(empty)* | Dashboard URL for auto-registration; empty = SRV discovery. |
+| `dashboard.rd_connection_broker` | string | *(empty)* | Config/runtime field: `RDConnectionBroker`. This RD Connection Broker hostname drives authoritative session-collection discovery; blank means the local machine running the DrainCtl service and works only when that host is the broker. The dashboard displays it read-only; use elevated `drainctl broker-setup --connection-broker HOST` to change it. Manual `config.json` editing is an advanced administrator-controlled path. |
 | `dashboard.tls_cert` / `tls_key` | string | *(empty)* | PEM paths; auto-generated self-signed if empty. |
 | `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning. |
 | `update.enabled` / `channel` / `poll_interval` | bool / string / duration | `false` / `stable` / `24h` | Opt-in self-update policy for agents. Dashboard **System** settings distribute it to connected agents. |

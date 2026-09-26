@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 // Bump this string whenever the mock fleet definition changes.
 // state.svelte.js reads the matching constant and auto-clears stale localStorage.
-export const MOCK_VERSION = '3.8';
+export const MOCK_VERSION = '3.9';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -76,65 +76,408 @@ const isoFuture = (minutes) => new Date(Date.now() + minutes * 60_000).toISOStri
 //   off    → 0                          (5 servers)
 const SERVERS = [
     // ── 8 alert — at/near capacity (RDSH01–RDSH08) ──────────────────────────
-    { host: 'RDSH01.contoso.com', role: 'primary', maxSessions: 120, initStatus: 'alert', initSessions: 117 },
-    { host: 'RDSH02.contoso.com', role: 'primary', maxSessions: 120, initStatus: 'alert', initSessions: 113 },
-    { host: 'RDSH03.contoso.com', role: 'primary', maxSessions: 120, initStatus: 'alert', initSessions: 110 },
-    { host: 'RDSH04.contoso.com', role: 'primary', maxSessions: 120, initStatus: 'alert', initSessions: 107 },
-    { host: 'RDSH05.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'alert', initSessions: 103 },
-    { host: 'RDSH06.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'alert', initSessions: 100 },
-    { host: 'RDSH07.contoso.com', role: 'secondary', maxSessions: 100, initStatus: 'alert', initSessions: 97 },
-    { host: 'RDSH08.contoso.com', role: 'secondary', maxSessions: 100, initStatus: 'alert', initSessions: 93 },
+    {
+        host: 'RDSH01.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 120,
+        initStatus: 'alert',
+        initSessions: 117,
+    },
+    {
+        host: 'RDSH02.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'primary',
+        maxSessions: 120,
+        initStatus: 'alert',
+        initSessions: 113,
+    },
+    {
+        host: 'RDSH03.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 120,
+        initStatus: 'alert',
+        initSessions: 110,
+    },
+    {
+        host: 'RDSH04.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'primary',
+        maxSessions: 120,
+        initStatus: 'alert',
+        initSessions: 107,
+    },
+    {
+        host: 'RDSH05.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'alert',
+        initSessions: 103,
+    },
+    {
+        host: 'RDSH06.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'alert',
+        initSessions: 100,
+    },
+    {
+        host: 'RDSH07.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 100,
+        initStatus: 'alert',
+        initSessions: 97,
+    },
+    {
+        host: 'RDSH08.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'secondary',
+        maxSessions: 100,
+        initStatus: 'alert',
+        initSessions: 93,
+    },
 
     // ── 12 grace — draining, mid-heavy load (RDSH09–RDSH20) ─────────────────
-    { host: 'RDSH09.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'grace', initSessions: 82 },
-    { host: 'RDSH10.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'grace', initSessions: 76 },
-    { host: 'RDSH11.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'grace', initSessions: 71 },
-    { host: 'RDSH12.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 67 },
-    { host: 'RDSH13.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 64 },
-    { host: 'RDSH14.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 69 },
-    { host: 'RDSH15.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 61 },
-    { host: 'RDSH16.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 74 },
-    { host: 'RDSH17.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'grace', initSessions: 66 },
-    { host: 'RDSH18.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'grace', initSessions: 52 },
-    { host: 'RDSH19.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'grace', initSessions: 48 },
-    { host: 'RDSH20.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'grace', initSessions: 46 },
+    {
+        host: 'RDSH09.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'grace',
+        initSessions: 82,
+    },
+    {
+        host: 'RDSH10.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'grace',
+        initSessions: 76,
+    },
+    {
+        host: 'RDSH11.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'grace',
+        initSessions: 71,
+    },
+    {
+        host: 'RDSH12.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 67,
+    },
+    {
+        host: 'RDSH13.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 64,
+    },
+    {
+        host: 'RDSH14.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 69,
+    },
+    {
+        host: 'RDSH15.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 61,
+    },
+    {
+        host: 'RDSH16.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 74,
+    },
+    {
+        host: 'RDSH17.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'grace',
+        initSessions: 66,
+    },
+    {
+        host: 'RDSH18.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'grace',
+        initSessions: 52,
+    },
+    {
+        host: 'RDSH19.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'grace',
+        initSessions: 48,
+    },
+    {
+        host: 'RDSH20.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'grace',
+        initSessions: 46,
+    },
 
     // ── 25 ok — healthy fleet, varied load (RDSH21–RDSH45) ──────────────────
     // 8 heavy-ok (primary / secondary, 70–95 sessions)
-    { host: 'RDSH21.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'ok', initSessions: 94 },
-    { host: 'RDSH22.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'ok', initSessions: 90 },
-    { host: 'RDSH23.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'ok', initSessions: 87 },
-    { host: 'RDSH24.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'ok', initSessions: 83 },
-    { host: 'RDSH25.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'ok', initSessions: 79 },
-    { host: 'RDSH26.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 75 },
-    { host: 'RDSH27.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 73 },
-    { host: 'RDSH28.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 70 },
+    {
+        host: 'RDSH21.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'ok',
+        initSessions: 94,
+    },
+    {
+        host: 'RDSH22.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'ok',
+        initSessions: 90,
+    },
+    {
+        host: 'RDSH23.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'ok',
+        initSessions: 87,
+    },
+    {
+        host: 'RDSH24.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'ok',
+        initSessions: 83,
+    },
+    {
+        host: 'RDSH25.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'ok',
+        initSessions: 79,
+    },
+    {
+        host: 'RDSH26.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 75,
+    },
+    {
+        host: 'RDSH27.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 73,
+    },
+    {
+        host: 'RDSH28.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 70,
+    },
     // 12 mid-ok (secondary / standby, 35–65 sessions)
-    { host: 'RDSH29.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 65 },
-    { host: 'RDSH30.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 62 },
-    { host: 'RDSH31.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 59 },
-    { host: 'RDSH32.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 55 },
-    { host: 'RDSH33.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'ok', initSessions: 53 },
-    { host: 'RDSH34.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 50 },
-    { host: 'RDSH35.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 47 },
-    { host: 'RDSH36.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 45 },
-    { host: 'RDSH37.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 43 },
-    { host: 'RDSH38.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 41 },
-    { host: 'RDSH39.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 38 },
-    { host: 'RDSH40.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 35 },
+    {
+        host: 'RDSH29.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 65,
+    },
+    {
+        host: 'RDSH30.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 62,
+    },
+    {
+        host: 'RDSH31.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 59,
+    },
+    {
+        host: 'RDSH32.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 55,
+    },
+    {
+        host: 'RDSH33.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'ok',
+        initSessions: 53,
+    },
+    {
+        host: 'RDSH34.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 50,
+    },
+    {
+        host: 'RDSH35.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 47,
+    },
+    {
+        host: 'RDSH36.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 45,
+    },
+    {
+        host: 'RDSH37.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 43,
+    },
+    {
+        host: 'RDSH38.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 41,
+    },
+    {
+        host: 'RDSH39.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 38,
+    },
+    {
+        host: 'RDSH40.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 35,
+    },
     // 5 light-ok (standby, 11–28 sessions)
-    { host: 'RDSH41.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 28 },
-    { host: 'RDSH42.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 23 },
-    { host: 'RDSH43.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 19 },
+    {
+        host: 'RDSH41.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 28,
+    },
+    {
+        host: 'RDSH42.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 23,
+    },
+    {
+        host: 'RDSH43.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 19,
+    },
     { host: 'RDSH44.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 14 },
-    { host: 'RDSH45.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'ok', initSessions: 11 },
+    {
+        host: 'RDSH45.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'ok',
+        initSessions: 11,
+    },
 
     // ── 5 offline (RDSH46–RDSH50) ────────────────────────────────────────────
-    { host: 'RDSH46.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'off', initSessions: 0 },
-    { host: 'RDSH47.contoso.com', role: 'standby', maxSessions: 50, initStatus: 'off', initSessions: 0 },
-    { host: 'RDSH48.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'off', initSessions: 0 },
-    { host: 'RDSH49.contoso.com', role: 'secondary', maxSessions: 75, initStatus: 'off', initSessions: 0 },
-    { host: 'RDSH50.contoso.com', role: 'primary', maxSessions: 100, initStatus: 'off', initSessions: 0 },
+    {
+        host: 'RDSH46.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'off',
+        initSessions: 0,
+    },
+    {
+        host: 'RDSH47.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'standby',
+        maxSessions: 50,
+        initStatus: 'off',
+        initSessions: 0,
+    },
+    {
+        host: 'RDSH48.contoso.com',
+        rd_session_collection: 'Engineering Apps',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'off',
+        initSessions: 0,
+    },
+    {
+        host: 'RDSH49.contoso.com',
+        rd_session_collection: 'Customer Service',
+        role: 'secondary',
+        maxSessions: 75,
+        initStatus: 'off',
+        initSessions: 0,
+    },
+    {
+        host: 'RDSH50.contoso.com',
+        rd_session_collection: 'Accounting Desktop',
+        role: 'primary',
+        maxSessions: 100,
+        initStatus: 'off',
+        initSessions: 0,
+    },
 ];
 
 const ADMINS = ['admin@contoso', 'svc-rds@contoso', 'jsmith@contoso', ''];
@@ -168,6 +511,8 @@ const MAX_PERF_HISTORY = 60;
 let mockSettings = {
     grace_period: 45,
     session_warning_threshold: 80,
+    poll_interval: 300,
+    rd_connection_broker: 'rdcb.contoso.com',
     performance: {
         enabled: true,
         force_disabled: false,
@@ -765,12 +1110,14 @@ function serverView(host) {
     const stateDurationSeconds = s.stateChangedAt
         ? Math.round((Date.now() - new Date(s.stateChangedAt).getTime()) / 1000)
         : null;
-    const maxSessions = SERVERS.find((d) => d.host === host)?.maxSessions ?? 0;
+    const definition = SERVERS.find((d) => d.host === host);
+    const maxSessions = definition?.maxSessions ?? 0;
     const sessActive = s.sessions;
     const sessDisc = s.sessionsDisconnected ?? 0;
     const sessTotal = sessActive + sessDisc;
     return {
         host,
+        rd_session_collection: definition?.rd_session_collection,
         status: s.status,
         drain_mode:
             s.status === 'ok' || s.status === 'warning'
@@ -1422,7 +1769,19 @@ function handleRequest(method, pathname, body, query = {}) {
             // strips notifications from this payload now (they're saved via the
             // per-target endpoints), but be defensive here for older clients.
             const incoming = body.notifications;
-            mockSettings = { ...mockSettings, ...body };
+            if (body.rd_connection_broker != null) {
+                return {
+                    status: 400,
+                    body: {
+                        error: 'rd_connection_broker is read-only; use drainctl broker-setup --connection-broker HOST',
+                    },
+                };
+            }
+            const { rd_connection_broker: _broker, ...settingsPatch } = body;
+            mockSettings = {
+                ...mockSettings,
+                ...settingsPatch,
+            };
             if (incoming === undefined) mockSettings.notifications = mockSettings.notifications;
             // Strip secrets before broadcast — mirrors the real backend's broadcastSettingsUpdate
             const redacted = {

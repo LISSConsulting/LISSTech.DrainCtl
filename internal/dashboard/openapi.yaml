@@ -474,6 +474,10 @@ components:
         perf:
           $ref: "#/components/schemas/PerfSnapshot"
           nullable: true
+        rd_session_collection:
+          type: string
+          description: "Authoritative RD Connection Broker session-collection membership. Omitted when discovery is unavailable or the server is unassigned."
+
 
 
     EventSpike:
@@ -1007,6 +1011,15 @@ components:
           minimum: 1
           maximum: 1440
           description: "Minutes."
+        poll_interval:
+          type: integer
+          minimum: 10
+          maximum: 86400
+          description: "Safety-net poll interval in seconds. Default 300."
+        rd_connection_broker:
+          type: string
+          description: "RD Connection Broker hostname used for session-collection discovery. Empty uses the local host."
+
         performance:
           $ref: "#/components/schemas/PerformanceConfig"
         update:
@@ -1038,6 +1051,11 @@ components:
           minimum: 1
           maximum: 1440
           nullable: true
+        rd_connection_broker:
+          type: string
+          nullable: true
+          description: "RD Connection Broker hostname. Empty string uses the local host; absent leaves the setting unchanged."
+
         performance:
           $ref: "#/components/schemas/PerformanceConfig"
           nullable: true
@@ -1833,7 +1851,7 @@ paths:
     get:
       tags: [settings]
       summary: Get dashboard settings
-      description: Returns notification targets, thresholds, performance, and automatic-update policy.
+      description: Returns notification targets, thresholds, performance, automatic-update policy, and the RD Connection Broker used for authoritative session-collection discovery.
       operationId: getSettings
       security:
         - session: []

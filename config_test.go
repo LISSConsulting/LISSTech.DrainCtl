@@ -580,6 +580,52 @@ func TestValidate_DashboardGroupPreservesNormal(t *testing.T) {
 	}
 }
 
+func TestValidate_DashboardRDConnectionBrokerTrimsWhitespace(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Dashboard.RDConnectionBroker = "  rdc-broker.example.test  "
+
+	cfg.Validate()
+
+	if cfg.Dashboard.RDConnectionBroker != "rdc-broker.example.test" {
+		t.Errorf("RDConnectionBroker = %q, want trimmed value", cfg.Dashboard.RDConnectionBroker)
+	}
+}
+
+func TestLoadConfig_InvalidRDConnectionBrokerIsCleared(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.Dashboard.RDConnectionBroker = "invalid_broker.example.test"
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(DefaultConfigPath()), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(DefaultConfigPath(), data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Dashboard.RDConnectionBroker != "" {
+		t.Errorf("RDConnectionBroker = %q, want invalid value cleared", got.Dashboard.RDConnectionBroker)
+	}
+}
+
+func TestConfig_DashboardRDConnectionBrokerAbsentDefaultsEmpty(t *testing.T) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(`{"dashboard":{"enabled":true}}`), &cfg); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	if cfg.Dashboard.RDConnectionBroker != "" {
+		t.Errorf("RDConnectionBroker = %q, want empty for legacy config", cfg.Dashboard.RDConnectionBroker)
+	}
+}
+
 // ── Validate — grace period range ────────────────────────────────────────────
 
 func TestValidate_GracePeriodClamped(t *testing.T) {
@@ -894,6 +940,7 @@ func TestToDashboardConfig_CopiesFields(t *testing.T) {
 	cfg.Dashboard.Port = 12345
 	cfg.Dashboard.Group = "RDS Admins"
 	cfg.Dashboard.URL = "https://dash:49470"
+	cfg.Dashboard.RDConnectionBroker = "rdc-broker.example.test"
 	cfg.Dashboard.TLSFingerprint = "aa:bb:cc"
 	dash := cfg.ToDashboardConfig()
 	if !dash.Enabled {
@@ -907,6 +954,9 @@ func TestToDashboardConfig_CopiesFields(t *testing.T) {
 	}
 	if dash.URL != "https://dash:49470" {
 		t.Errorf("URL = %q, want \"https://dash:49470\"", dash.URL)
+	}
+	if dash.RDConnectionBroker != "rdc-broker.example.test" {
+		t.Errorf("RDConnectionBroker = %q, want rdc-broker.example.test", dash.RDConnectionBroker)
 	}
 	if dash.TLSFingerprint != "aa:bb:cc" {
 		t.Errorf("TLSFingerprint = %q, want \"aa:bb:cc\"", dash.TLSFingerprint)
@@ -1202,7 +1252,7 @@ func TestUpdateNotifySettings_AllNilIsNoOp(t *testing.T) {
 	}
 
 	if err := UpdateNotifySettings(nil, nil, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateNotifySettings(nil,nil,nil): %v", err)
+		t.Fatalf("UpdateNotifySettings(nil,nil,nil,nil,nil): %v", err)
 	}
 
 	got, err := LoadConfig()
@@ -1245,6 +1295,46 @@ func TestUpdateNotifySettings_UpdatesAllFields(t *testing.T) {
 	}
 	if got.GracePeriod != 90 {
 		t.Errorf("GracePeriod = %d, want 90", got.GracePeriod)
+	}
+}
+
+func TestPersistRDConnectionBroker_NormalizesAndPersists(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	if err := PersistRDConnectionBroker("  rdc-broker.example.test  "); err != nil {
+		t.Fatalf("PersistRDConnectionBroker: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Dashboard.RDConnectionBroker != "rdc-broker.example.test" {
+		t.Errorf("RDConnectionBroker = %q, want normalized broker", got.Dashboard.RDConnectionBroker)
+	}
+}
+
+func TestPersistRDConnectionBroker_RejectsInvalidWithoutMutation(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	cfg.Dashboard.RDConnectionBroker = "existing-broker.example.test"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	if err := PersistRDConnectionBroker("invalid_broker.example.test"); err == nil {
+		t.Fatal("PersistRDConnectionBroker accepted an invalid broker")
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Dashboard.RDConnectionBroker != "existing-broker.example.test" {
+		t.Errorf("RDConnectionBroker = %q, want existing value preserved", got.Dashboard.RDConnectionBroker)
 	}
 }
 

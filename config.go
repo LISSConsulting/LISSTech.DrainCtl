@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -91,6 +92,21 @@ const (
 	// dpapiPrefix marks a secret as DPAPI-encrypted in config.json.
 	dpapiPrefix = "dpapi:"
 )
+
+var rfc1123HostnameRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
+
+// NormalizeRDConnectionBroker trims broker and verifies that it is empty or an
+// RFC 1123 hostname/FQDN no longer than 253 characters.
+func NormalizeRDConnectionBroker(broker string) (string, error) {
+	broker = strings.TrimSpace(broker)
+	if broker == "" {
+		return "", nil
+	}
+	if len(broker) > 253 || !rfc1123HostnameRE.MatchString(broker) {
+		return "", errors.New("must be empty or an RFC 1123 hostname (max 253 characters)")
+	}
+	return broker, nil
+}
 
 // ── Trigger type ──────────────────────────────────────────────────────────
 
@@ -322,15 +338,16 @@ const (
 
 // DashboardJSON holds dashboard settings in config.json.
 type DashboardJSON struct {
-	Enabled        bool   `json:"enabled"`
-	Port           int    `json:"port"`
-	Group          string `json:"group"`
-	URL            string `json:"url,omitempty"`
-	TLSCert        string `json:"tls_cert,omitempty"`        // path to PEM certificate file
-	TLSKey         string `json:"tls_key,omitempty"`         // path to PEM private key file
-	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // SHA-256 cert fingerprint for pinning (agent-side)
-	AutoPin        *bool  `json:"auto_pin,omitempty"`        // auto-pin dashboard cert on register (default false)
-	FetchInterval  int    `json:"fetch_interval,omitempty"`  // seconds between config fetches from dashboard (default 300)
+	Enabled            bool   `json:"enabled"`
+	Port               int    `json:"port"`
+	Group              string `json:"group"`
+	URL                string `json:"url,omitempty"`
+	RDConnectionBroker string `json:"rd_connection_broker,omitempty"` // empty = local host
+	TLSCert            string `json:"tls_cert,omitempty"`             // path to PEM certificate file
+	TLSKey             string `json:"tls_key,omitempty"`              // path to PEM private key file
+	TLSFingerprint     string `json:"tls_fingerprint,omitempty"`      // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin            *bool  `json:"auto_pin,omitempty"`             // auto-pin dashboard cert on register (default false)
+	FetchInterval      int    `json:"fetch_interval,omitempty"`       // seconds between config fetches from dashboard (default 300)
 }
 
 // ── Runtime config structs (converted from Config) ──────────────────────
@@ -348,16 +365,17 @@ type ServiceConfig struct {
 
 // DashboardConfig holds runtime dashboard parameters.
 type DashboardConfig struct {
-	Enabled           bool
-	Port              int
-	Group             string
-	URL               string        // agent-side: dashboard URL to report to
-	TLSCert           string        // path to PEM certificate file
-	TLSKey            string        // path to PEM private key file
-	TLSFingerprint    string        // SHA-256 cert fingerprint for pinning (agent-side)
-	AutoPin           bool          // auto-pin dashboard cert on register (default false)
-	FetchInterval     time.Duration // interval between config fetches from dashboard
-	HeartbeatInterval time.Duration // expected interval between agent reports
+	Enabled            bool
+	Port               int
+	Group              string
+	URL                string        // agent-side: dashboard URL to report to
+	RDConnectionBroker string        // empty = local host
+	TLSCert            string        // path to PEM certificate file
+	TLSKey             string        // path to PEM private key file
+	TLSFingerprint     string        // SHA-256 cert fingerprint for pinning (agent-side)
+	AutoPin            bool          // auto-pin dashboard cert on register (default false)
+	FetchInterval      time.Duration // interval between config fetches from dashboard
+	HeartbeatInterval  time.Duration // expected interval between agent reports
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────
@@ -405,16 +423,17 @@ func (c *Config) ToServiceConfig() ServiceConfig {
 // ToDashboardConfig converts the JSON config to runtime DashboardConfig.
 func (c *Config) ToDashboardConfig() DashboardConfig {
 	return DashboardConfig{
-		Enabled:           c.Dashboard.Enabled,
-		Port:              c.Dashboard.Port,
-		Group:             c.Dashboard.Group,
-		URL:               c.Dashboard.URL,
-		TLSCert:           c.Dashboard.TLSCert,
-		TLSKey:            c.Dashboard.TLSKey,
-		TLSFingerprint:    c.Dashboard.TLSFingerprint,
-		AutoPin:           c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
-		FetchInterval:     c.dashFetchInterval(),
-		HeartbeatInterval: time.Duration(c.PollInterval) * time.Second,
+		Enabled:            c.Dashboard.Enabled,
+		Port:               c.Dashboard.Port,
+		Group:              c.Dashboard.Group,
+		URL:                c.Dashboard.URL,
+		RDConnectionBroker: c.Dashboard.RDConnectionBroker,
+		TLSCert:            c.Dashboard.TLSCert,
+		TLSKey:             c.Dashboard.TLSKey,
+		TLSFingerprint:     c.Dashboard.TLSFingerprint,
+		AutoPin:            c.Dashboard.AutoPin != nil && *c.Dashboard.AutoPin,
+		FetchInterval:      c.dashFetchInterval(),
+		HeartbeatInterval:  time.Duration(c.PollInterval) * time.Second,
 	}
 }
 
@@ -499,6 +518,11 @@ func (c *Config) Validate() {
 		c.Dashboard.Port = DefaultDashboardPort
 	}
 	c.Dashboard.Group = strings.TrimSpace(c.Dashboard.Group)
+	broker, err := NormalizeRDConnectionBroker(c.Dashboard.RDConnectionBroker)
+	if err != nil {
+		slog.Default().Warn("invalid RD Connection Broker ignored", "requested", c.Dashboard.RDConnectionBroker, "error", err)
+	}
+	c.Dashboard.RDConnectionBroker = broker
 	if c.Dashboard.Group == "" {
 		c.Dashboard.Group = DefaultDashboardGroup
 	}
@@ -1133,6 +1157,22 @@ func readModifyWrite(f func(*Config) error) error {
 	})
 }
 
+// PersistRDConnectionBroker atomically updates the dashboard Connection Broker.
+// Callers MUST first successfully probe the broker while running under the
+// service identity; this helper only validates and persists that proven value.
+// The broker is normalized and validated before the locked read-modify-write so
+// invalid input cannot cause a config-file mutation.
+func PersistRDConnectionBroker(broker string) error {
+	normalized, err := NormalizeRDConnectionBroker(broker)
+	if err != nil {
+		return fmt.Errorf("rd connection broker: %w", err)
+	}
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Dashboard.RDConnectionBroker = normalized
+		return nil
+	})
+}
+
 // restrictConfigACL limits config files to SYSTEM and Administrators. Runtime
 // callers skip this when not elevated so local development does not lock the
 // developer out of config.json.
@@ -1170,7 +1210,7 @@ func isElevated() bool {
 }
 
 // UpdateNotifySettings atomically updates notification targets, session warning
-// threshold, grace period, poll interval, and/or performance config in a single
+// threshold, grace period, poll interval, and performance config in a single
 // config load+save cycle. Any nil argument is left unchanged. This is the
 // preferred API for the dashboard PUT /api/v1/settings handler.
 func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold *int, gracePeriod *int, pollInterval *int, performance *PerformanceConfig) error {

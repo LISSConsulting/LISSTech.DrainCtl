@@ -32,9 +32,9 @@ const dashboardShutdownTimeout = 5 * time.Second
 //
 // Transitively-owned goroutines (SessionStore reaper, NegotiateMiddleware
 // SSPI reaper) are started by their constructors with the derived ctx and
-// exit on Stop's cancel. They are not joined to the subsystem's wg — the
-// http.Server drain (which Stop blocks on) is the externally observable
-// boundary, and the reapers are constructor-internal cleanup loops.
+// exit on Stop's cancel. The HTTP drain and RD Session Collection resolver are
+// joined to the subsystem's wg; the reapers remain constructor-internal
+// cleanup loops.
 type Subsystem struct {
 	cfg                       dc.DashboardConfig
 	dataDir                   string
@@ -46,6 +46,7 @@ type Subsystem struct {
 	removals                  removalWriter
 	outbox                    *telemetry.ForceUpdateOutboxStore
 	localForceUpdateSupported bool
+	rdCollections             *rdCollectionResolver
 
 	ds    *DashboardServer
 	state *ServerState
@@ -100,6 +101,14 @@ func (s *Subsystem) UpdateHeartbeatInterval(interval time.Duration) {
 	}
 }
 
+// UpdateRDConnectionBroker switches authoritative collection discovery to the
+// configured broker and triggers an immediate refresh.
+func (s *Subsystem) UpdateRDConnectionBroker(broker string) {
+	if s.ds != nil && s.ds.rdCollections != nil {
+		s.ds.rdCollections.UpdateBroker(broker)
+	}
+}
+
 // Start performs the legacy-servers.json migration, sets up the HTTP
 // server (TLS, routes, listener) synchronously, then launches the Serve
 // + shutdown-drain goroutines tied to a derived context. A synchronous
@@ -126,11 +135,18 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		return fmt.Errorf("dashboard force-update outbox: %w", err)
 	}
 
+	rdCollections := s.rdCollections
+	if rdCollections == nil {
+		rdCollections = newRDCollectionResolver(nil)
+		s.rdCollections = rdCollections
+	}
+
 	ds := &DashboardServer{
 		state:                state,
 		cfg:                  s.cfg,
 		sessionStore:         NewSessionStore(derived),
 		broker:               NewBroker(),
+		rdCollections:        rdCollections,
 		ms:                   s.ms,
 		as:                   s.as,
 		mnt:                  s.mnt,
@@ -189,13 +205,17 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	s.state = state
 	s.cancel = cancel
 
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
 		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
 		if err := ds.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			slog.Error("dashboard server error", "error", err)
 		}
+	}()
+	go func() {
+		defer s.wg.Done()
+		rdCollections.Run(derived, s.cfg.RDConnectionBroker)
 	}()
 	go func() {
 		defer s.wg.Done()
@@ -211,9 +231,9 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cancels the derived ctx (which fires the shutdown-drain goroutine)
-// and blocks until both internal goroutines have exited. Idempotent; safe
-// to call when Start was never invoked or returned an error.
+// Stop cancels the derived ctx (which fires the shutdown-drain goroutine) and
+// blocks until all owned goroutines have exited. Idempotent; safe to call when
+// Start was never invoked or returned an error.
 func (s *Subsystem) Stop() {
 	s.stopOnce.Do(func() {
 		if s.cancel != nil {

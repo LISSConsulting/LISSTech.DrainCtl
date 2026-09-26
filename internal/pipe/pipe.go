@@ -25,11 +25,21 @@ var PipeName = `\\.\pipe\drainctl`
 
 // PipeRequest is the JSON request sent by clients.
 type PipeRequest struct {
-	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server", "register", "baseline-reset"
+	Cmd         string `json:"cmd"`                    // "status", "history", "servers", "remove-server", "register", "baseline-reset", "broker-setup"
 	Limit       int    `json:"limit,omitempty"`        // for history
 	ChangesOnly bool   `json:"changes_only,omitempty"` // for history
 	Hostname    string `json:"hostname,omitempty"`     // for remove-server
 	URL         string `json:"url,omitempty"`          // for register
+	Broker      string `json:"broker,omitempty"`       // for broker-setup
+}
+
+// BrokerSetupResult proves that a broker probe completed under the running
+// service identity before its configuration was persisted.
+type BrokerSetupResult struct {
+	ConnectionBroker string `json:"connection_broker"`
+	CollectionCount  int    `json:"collection_count"`
+	SessionHostCount int    `json:"session_host_count"`
+	ServiceIdentity  string `json:"service_identity"`
 }
 
 // PipeResponse is the JSON response returned by the service.
@@ -47,12 +57,17 @@ type PipeHandler interface {
 	HandleRemoveServer(hostname string) error                    // ErrNotFound or nil
 	HandleRegister(dashboardURL string) (json.RawMessage, error) // SSPI call made under service identity
 	HandleBaselineReset() error                                  // wipes evtspike baselines; nil if evtspike not running
+	HandleBrokerSetup(connectionBroker string) (*BrokerSetupResult, error)
 }
 
 // registerDeadline is the per-connection deadline applied when handling a
 // "register" command. Registration calls out to the dashboard over HTTPS with
 // SSPI Negotiate, so the default 5s pipe deadline is too tight.
 const registerDeadline = 30 * time.Second
+
+// brokerSetupDeadline accommodates PowerShell RemoteDesktop discovery under
+// the service identity, while bounding a privileged pipe request.
+const brokerSetupDeadline = 45 * time.Second
 
 const pipeMessageCap = 1024 * 1024
 
@@ -196,6 +211,21 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 			resp = PipeResponse{OK: true, Data: raw}
 		}
 
+	case "broker-setup":
+		// RD Session Collection discovery runs PowerShell under the service
+		// identity and can exceed the default 5 s connection deadline.
+		_ = conn.SetDeadline(time.Now().Add(brokerSetupDeadline))
+		result, err := handler.HandleBrokerSetup(req.Broker)
+		if err != nil {
+			resp = PipeResponse{OK: false, Error: err.Error()}
+		} else if result == nil {
+			resp = PipeResponse{OK: false, Error: "no broker setup result"}
+		} else if raw, err := json.Marshal(result); err != nil {
+			resp = PipeResponse{OK: false, Error: "marshal broker setup result: " + err.Error()}
+		} else {
+			resp = PipeResponse{OK: true, Data: raw}
+		}
+
 	case "baseline-reset":
 		if err := handler.HandleBaselineReset(); err != nil {
 			resp = PipeResponse{OK: false, Error: err.Error()}
@@ -213,7 +243,7 @@ func handlePipeConn(conn net.Conn, handler PipeHandler) {
 
 func requiresPrivilege(cmd string) bool {
 	switch cmd {
-	case "register", "remove-server", "baseline-reset":
+	case "register", "remove-server", "baseline-reset", "broker-setup":
 		return true
 	default:
 		return false
@@ -275,6 +305,21 @@ func RegisterViaPipe(dashboardURL string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return resp.Data, nil
+}
+
+// BrokerSetupViaPipe probes RD Session Collections and persists the Connection
+// Broker through the running service. It intentionally has no caller-identity
+// fallback: the probe must execute under the service identity.
+func BrokerSetupViaPipe(connectionBroker string) (*BrokerSetupResult, error) {
+	resp, err := pipeRPCTimeout(PipeRequest{Cmd: "broker-setup", Broker: connectionBroker}, brokerSetupDeadline)
+	if err != nil {
+		return nil, err
+	}
+	var result BrokerSetupResult
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal broker setup: %w", err)
+	}
+	return &result, nil
 }
 
 // BaselineResetViaPipe asks the running service to wipe its evtspike

@@ -1,5 +1,9 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## RD Session Collection discovery — 2026-09-25
+
+- Follow-up to the hostname-derived-pool wording below: Servers grouping now comes only from authoritative RD Connection Broker discovery (`Get-RDSessionCollection` / `Get-RDSessionHost` via the `RemoteDesktop` module). Configure it with elevated `drainctl broker-setup --connection-broker HOST`; the privileged named-pipe path probes under the running service identity before persisting, so failed discovery cannot replace the configured broker. Blank targets the local machine and works only when that service host is itself the broker. Refreshes run every five minutes and after configuration reload, retain the last good map on failure, and show unavailable or unassigned hosts as **Ungrouped**. The supported installer identity remains `LocalSystem`; gMSA support still requires installer, ACL, and privilege work.
+
 ## Session metrics correctness — 2026-09-23
 
 - Per-session CPU and working-set collection now carries both P50 and P95 through sampler aggregation, retained telemetry, fleet queries, and the Overview tooltip instead of hard-coding P50 to zero.

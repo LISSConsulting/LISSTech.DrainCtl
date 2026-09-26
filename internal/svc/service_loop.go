@@ -699,6 +699,9 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			if dashSub != nil {
 				dashSub.UpdateHeartbeatInterval(newDashCfg.HeartbeatInterval)
 				dashSub.SetLocalForceUpdateSupported(!cfg.DashboardOnly)
+				if newDashCfg.RDConnectionBroker != dashCfg.RDConnectionBroker {
+					dashSub.UpdateRDConnectionBroker(newDashCfg.RDConnectionBroker)
+				}
 			}
 
 			// Reconcile the dashboard listener in both directions. A failed
