@@ -22,9 +22,10 @@ func NewFreshnessStore(db *DB) *FreshnessStore {
 	return &FreshnessStore{db: db}
 }
 
-// MarkOffline records an offline transition for reportEpoch. It returns true
-// exactly once for each current or later report epoch. Older epochs are ignored
-// so delayed status checks cannot overwrite a newer accepted report.
+// MarkOffline records an offline transition only when reportEpoch remains the
+// current persisted heartbeat for a registered host. It returns true exactly
+// once for that epoch. A deleted host or superseded report returns false, so a
+// delayed status check cannot recreate stale state or overwrite a newer report.
 func (s *FreshnessStore) MarkOffline(ctx context.Context, host string, reportEpoch, now time.Time) (bool, error) {
 	return s.transition(ctx, host, reportEpoch.UTC().UnixMilli(), now.UTC().UnixMilli(), true)
 }
@@ -58,6 +59,18 @@ func (s *FreshnessStore) transition(ctx context.Context, host string, reportEpoc
 		return false, fmt.Errorf("telemetry: freshness begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if offline {
+		var currentEpochMs int64
+		err = tx.QueryRowContext(ctx,
+			`SELECT last_seen_ms FROM servers WHERE hostname = ? COLLATE NOCASE`, host).
+			Scan(&currentEpochMs)
+		switch {
+		case errors.Is(err, sql.ErrNoRows), currentEpochMs != reportEpochMs:
+			return commitFreshnessTransition(tx, false)
+		case err != nil:
+			return false, fmt.Errorf("telemetry: freshness verify server epoch: %w", err)
+		}
+	}
 
 	var (
 		storedEpochMs int64

@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+func registerFreshnessServer(t *testing.T, db *DB, host string, lastSeen time.Time) {
+	t.Helper()
+	servers := NewServerStore(db)
+	if err := servers.Register(context.Background(), host); err != nil {
+		t.Fatalf("Register(%q): %v", host, err)
+	}
+	if err := servers.BackdateLastSeen(context.Background(), host, lastSeen); err != nil {
+		t.Fatalf("BackdateLastSeen(%q): %v", host, err)
+	}
+}
+
 func TestFreshnessMarkOfflineIsOneShotAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -18,6 +29,8 @@ func TestFreshnessMarkOfflineIsOneShotAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	registerFreshnessServer(t, db, "srv-01", epoch)
+
 	store := NewFreshnessStore(db)
 	if transitioned, err := store.MarkOffline(ctx, "srv-01", epoch, now); err != nil || !transitioned {
 		t.Fatalf("first MarkOffline = (%v, %v), want (true, nil)", transitioned, err)
@@ -41,9 +54,11 @@ func TestFreshnessMarkOfflineIsOneShotAcrossRestart(t *testing.T) {
 
 func TestFreshnessRecoveryAllowsNextEpochOffline(t *testing.T) {
 	ctx := context.Background()
-	store := NewFreshnessStore(openTestDB(t))
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
 	epoch1 := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	epoch2 := epoch1.Add(time.Minute)
+	registerFreshnessServer(t, db, "SRV-01", epoch1)
 
 	if recovered, err := store.MarkFresh(ctx, "SRV-01", epoch1); err != nil || recovered {
 		t.Fatalf("initial MarkFresh = (%v, %v), want (false, nil)", recovered, err)
@@ -57,6 +72,10 @@ func TestFreshnessRecoveryAllowsNextEpochOffline(t *testing.T) {
 	if recovered, err := store.MarkFresh(ctx, "SRV-01", epoch2); err != nil || recovered {
 		t.Fatalf("duplicate MarkFresh = (%v, %v), want (false, nil)", recovered, err)
 	}
+	if err := NewServerStore(db).BackdateLastSeen(ctx, "SRV-01", epoch2); err != nil {
+		t.Fatalf("BackdateLastSeen recovery epoch: %v", err)
+	}
+
 	if transitioned, err := store.MarkOffline(ctx, "SRV-01", epoch2, epoch2.Add(3*time.Minute)); err != nil || !transitioned {
 		t.Fatalf("next-epoch MarkOffline = (%v, %v), want (true, nil)", transitioned, err)
 	}
@@ -68,6 +87,7 @@ func TestFreshnessStaleEpochCannotOverwriteNewerState(t *testing.T) {
 	store := NewFreshnessStore(db)
 	epoch1 := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	epoch2 := epoch1.Add(time.Minute)
+	registerFreshnessServer(t, db, "SRV-01", epoch2)
 
 	if _, err := store.MarkFresh(ctx, "SRV-01", epoch2); err != nil {
 		t.Fatalf("MarkFresh current epoch: %v", err)
@@ -95,6 +115,7 @@ func TestFreshnessCanonicalizationAndRemove(t *testing.T) {
 	db := openTestDB(t)
 	store := NewFreshnessStore(db)
 	epoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	registerFreshnessServer(t, db, "srv-01", epoch)
 
 	if _, err := store.MarkFresh(ctx, "  srv-01  ", epoch); err != nil {
 		t.Fatalf("MarkFresh: %v", err)
@@ -114,5 +135,77 @@ func TestFreshnessCanonicalizationAndRemove(t *testing.T) {
 	}
 	if removed, err := store.Remove(ctx, "SRV-01"); err != nil || removed {
 		t.Fatalf("second Remove = (%v, %v), want (false, nil)", removed, err)
+	}
+}
+
+func TestFreshnessMarkOfflineRejectsHeartbeatCommittedAfterSweepSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
+	servers := NewServerStore(db)
+	observedEpoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	newerEpoch := observedEpoch.Add(time.Minute)
+
+	registerFreshnessServer(t, db, "SRV-01", observedEpoch)
+	if err := servers.BackdateLastSeen(ctx, "SRV-01", newerEpoch); err != nil {
+		t.Fatalf("commit newer heartbeat: %v", err)
+	}
+	if transitioned, err := store.MarkOffline(ctx, "SRV-01", observedEpoch, newerEpoch.Add(3*time.Minute)); err != nil || transitioned {
+		t.Fatalf("MarkOffline after newer heartbeat = (%v, %v), want (false, nil)", transitioned, err)
+	}
+
+	var freshnessRows int
+	if err := db.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM host_freshness WHERE host = ?`, "SRV-01").Scan(&freshnessRows); err != nil {
+		t.Fatalf("count freshness rows: %v", err)
+	}
+	if freshnessRows != 0 {
+		t.Fatalf("freshness rows after rejected stale transition = %d, want 0", freshnessRows)
+	}
+}
+
+func TestFreshnessMarkOfflineRejectsDeletedServer(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
+	servers := NewServerStore(db)
+	epoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+	registerFreshnessServer(t, db, "SRV-01", epoch)
+	if removed, err := servers.Remove(ctx, "SRV-01"); err != nil || !removed {
+		t.Fatalf("Remove server = (%v, %v), want (true, nil)", removed, err)
+	}
+	if transitioned, err := store.MarkOffline(ctx, "SRV-01", epoch, epoch.Add(3*time.Minute)); err != nil || transitioned {
+		t.Fatalf("MarkOffline after server removal = (%v, %v), want (false, nil)", transitioned, err)
+	}
+
+	var freshnessRows int
+	if err := db.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM host_freshness WHERE host = ?`, "SRV-01").Scan(&freshnessRows); err != nil {
+		t.Fatalf("count freshness rows: %v", err)
+	}
+	if freshnessRows != 0 {
+		t.Fatalf("freshness rows after deleted-server transition = %d, want 0", freshnessRows)
+	}
+}
+
+func TestFreshnessMarkOfflineTransitionsForMatchingPersistedHeartbeat(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
+	epoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	now := epoch.Add(3 * time.Minute)
+
+	registerFreshnessServer(t, db, "SRV-01", epoch)
+	if transitioned, err := store.MarkOffline(ctx, "SRV-01", epoch, now); err != nil || !transitioned {
+		t.Fatalf("MarkOffline matching heartbeat = (%v, %v), want (true, nil)", transitioned, err)
+	}
+
+	var storedEpoch, offlineAt int64
+	if err := db.reader.QueryRowContext(ctx,
+		`SELECT report_epoch_ms, offline_emitted_at_ms FROM host_freshness WHERE host = ?`, "SRV-01").
+		Scan(&storedEpoch, &offlineAt); err != nil {
+		t.Fatalf("query freshness state: %v", err)
+	}
+	if storedEpoch != epoch.UnixMilli() || offlineAt != now.UnixMilli() {
+		t.Fatalf("freshness state = (epoch=%d, offline=%d), want (%d, %d)", storedEpoch, offlineAt, epoch.UnixMilli(), now.UnixMilli())
 	}
 }
