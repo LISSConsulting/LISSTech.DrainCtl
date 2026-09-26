@@ -154,7 +154,9 @@
             current.push({ x: xs(i, history.length), y: ys(transform(Number(raw)), scaleMax) });
         }
         if (current.length >= 2) segments.push(current);
-        const baselineY = (invertThresholds ? yChartTop : yChartBot).toFixed(1);
+        // Threshold polarity changes zone colours and health evaluation, not
+        // geometry. Every area grows upward from the x-axis.
+        const baselineY = yChartBot.toFixed(1);
         const line = segments
             .map((points) =>
                 points.map((point, i) => `${i === 0 ? 'M' : 'L'}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' '),
@@ -440,13 +442,17 @@
                     opacity="0.7"
                 />
 
-                <!-- ── P95 area fill (lighter when secondary series present) ── -->
+                <!-- ── P95 area: outer envelope for normal metrics; sole fill for inverted metrics ── -->
                 {#if paths.area}
-                    <path d={paths.area} fill={color} fill-opacity={p50Paths.area ? 0.4 : 1} />
+                    <path
+                        d={paths.area}
+                        fill={color}
+                        fill-opacity={p50Paths.area && !invertThresholds ? 0.4 : p50Paths.line ? 0.72 : 1}
+                    />
                 {/if}
 
-                <!-- ── Secondary area fill (solid, sits inside primary envelope) ── -->
-                {#if p50Paths.area}
+                <!-- Lower-is-better P50 sits inside P95, so its nested fill remains readable. -->
+                {#if p50Paths.area && !invertThresholds}
                     <path d={p50Paths.area} fill={color} fill-opacity="1" />
                 {/if}
 

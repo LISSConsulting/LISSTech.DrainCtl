@@ -196,7 +196,9 @@
         }
         if (didDrag) {
             const dMs = (dx / Math.max(containerW, 1)) * windowMs;
-            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+            // Keep the timeline under the pointer: right reveals older
+            // history; left returns toward live.
+            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset + dMs));
         }
     }
 

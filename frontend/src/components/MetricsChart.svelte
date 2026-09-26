@@ -93,11 +93,13 @@
     // inputDelay thresholds come from the alert sensitivity config.
     // Pages/sec, TCP Retrans, Disk Queue use sensible hardcoded defaults.
 
-    /** @type {Array<{key:string,p50Key?:string,label:string,unit:string,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string,icon:import('svelte').Component}>} */
+    /** @type {Array<{key:string,p50Key?:string,label:string,unit:string,thresholds:{warn:number,crit:number},color:string,fmt:(v:number)=>string,icon:import('svelte').Component,valueLabel?:string,p50Label?:string,helpText:string}>} */
     const HIC_CHARTS = [
         {
             key: 'inputDelay',
             p50Key: 'p50InputDelay',
+            valueLabel: 'Avg host P95',
+            p50Label: 'Avg host P50',
             label: 'Input Delay',
             unit: 'ms',
             thresholds: { warn: 50, crit: 100 },
@@ -105,11 +107,13 @@
             fmt: (v) => `${Math.round(v)}ms`,
             icon: Timer,
             helpText:
-                'Longest time between a keypress or click and the screen updating, sampled each second. Reports the worst delay per session, not the average — one slow input in the interval sets the value. The fleet P95 shows the 5% of servers where users feel it most.',
+                "Delay between user input and screen response. The filled series averages each host's per-session P95; the nested series averages each host's per-session P50. Higher values are worse.",
         },
         {
             key: 'pagesPerSec',
             p50Key: 'p50PagesPerSec',
+            valueLabel: 'Fleet avg',
+            p50Label: 'Host P50',
             label: 'Pages/sec',
             unit: '/sec',
             thresholds: { warn: 80, crit: 150 },
@@ -117,11 +121,13 @@
             fmt: (v) => `${Math.round(v)}/s`,
             icon: FileText,
             helpText:
-                'Pages read from or written to disk each second. Includes pagefile activity, memory-mapped files, and prefetch. Not all page I/O is bad — correlate with available memory to tell pressure from routine file-backed reads.',
+                'Pages read from or written to disk each second, including pagefile, memory-mapped file, and prefetch activity. The outer area is the fleet average; the nested fill is the exact median host. Correlate sustained rises with available memory.',
         },
         {
             key: 'tcpRetrans',
             p50Key: 'p50TcpRetrans',
+            valueLabel: 'Fleet avg',
+            p50Label: 'Host P50',
             label: 'TCP Retrans',
             unit: '/sec',
             thresholds: { warn: 10, crit: 25 },
@@ -129,11 +135,13 @@
             fmt: (v) => `${v.toFixed(1)}/s`,
             icon: Network,
             helpText:
-                'TCP segments the OS had to send again each second. A non-zero baseline is normal on busy networks; watch for sudden spikes or sustained climbs, which signal congestion or link-layer issues.',
+                'TCP segments retransmitted each second. The outer area is the fleet average; the nested fill is the exact median host. A non-zero baseline can be normal, but sudden or sustained increases indicate congestion or link problems.',
         },
         {
             key: 'diskQueue',
             p50Key: 'p50DiskQueue',
+            valueLabel: 'Fleet avg',
+            p50Label: 'Host P50',
             label: 'Avg Disk Queue',
             unit: '',
             thresholds: { warn: 2, crit: 5 },
@@ -141,7 +149,7 @@
             fmt: (v) => v.toFixed(2),
             icon: HardDrive,
             helpText:
-                'How many I/O requests are waiting for disk at any moment. Reflects the interplay of storage speed, memory pressure, CPU scheduling, and workload mix — a spike here rarely has a single cause.',
+                'I/O requests waiting for disk. The outer area is the fleet average; the nested fill is the exact median host. Correlate spikes with storage latency, memory pressure, CPU scheduling, and workload.',
         },
     ];
 
@@ -337,9 +345,10 @@
         }
         if (didDrag) {
             const dMs = (dx / Math.max(dragStartWidth, 1)) * appState.overviewWindowMs;
-            // Dragging right = moving back in time (larger offset from now).
-            // Dragging left = moving forward in time (smaller offset, min 0 = live).
-            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset - dMs));
+            // Direct manipulation: dragging right moves the plotted timeline
+            // right and reveals older history on the left. Dragging left moves
+            // back toward live, clamped at offset 0.
+            dragPendingOffsetMs = Math.max(0, Math.round(dragStartOffset + dMs));
         }
     }
 
@@ -578,23 +587,29 @@
         const rttP50Map = tsMap(series['rfx_rtt_ms_p50']);
         const lossMap = tsMap(series['rfx_loss_pct']);
         const lossP50Map = tsMap(series['rfx_loss_pct_p50']);
-        return fps.t.map((ts) => ({
-            ts,
-            fpsOut: fpsAvg.get(ts),
-            fpsOutP50: fpsP50Map.get(ts),
-            encodeMs: encMap.get(ts),
-            encodeMsP50: encP50Map.get(ts),
-            quality: qualMap.get(ts),
-            qualityP50: qualP50Map.get(ts),
-            skipServer: skipSrvMap.get(ts),
-            skipServerP50: skipSrvP50Map.get(ts),
-            skipNet: skipNetMap.get(ts),
-            skipNetP50: skipNetP50Map.get(ts),
-            rtt: rttMap.get(ts),
-            rttP50: rttP50Map.get(ts),
-            loss: lossMap.get(ts),
-            lossP50: lossP50Map.get(ts),
-        }));
+        return fps.t.map((ts) => {
+            const fpsP50 = fpsP50Map.get(ts);
+            const qualityP50 = qualP50Map.get(ts);
+            return {
+                ts,
+                fpsOut: fpsAvg.get(ts),
+                // Historical zeroes predate P50 presence metadata and mean
+                // "not collected" for these high-is-better active-stream metrics.
+                fpsOutP50: fpsP50 != null && fpsP50 > 0 ? fpsP50 : undefined,
+                encodeMs: encMap.get(ts),
+                encodeMsP50: encP50Map.get(ts),
+                quality: qualMap.get(ts),
+                qualityP50: qualityP50 != null && qualityP50 > 0 ? qualityP50 : undefined,
+                skipServer: skipSrvMap.get(ts),
+                skipServerP50: skipSrvP50Map.get(ts),
+                skipNet: skipNetMap.get(ts),
+                skipNetP50: skipNetP50Map.get(ts),
+                rtt: rttMap.get(ts),
+                rttP50: rttP50Map.get(ts),
+                loss: lossMap.get(ts),
+                lossP50: lossP50Map.get(ts),
+            };
+        });
     }
 
     // ── RemoteFX charts ───────────────────────────────────────────────────────
@@ -658,7 +673,7 @@
             icon: Cpu,
             timeKey: 'ts',
             helpText:
-                'CPU eaten by individual sessions, aggregated across the fleet. P95 catches the power users and runaway processes; P50 is what a normal session looks like. A wide gap between the two means a few sessions are doing most of the work.',
+                'Per-session CPU across the fleet. P95 is the translucent outer envelope; P50 is the solid nested fill. A widening gap means a small number of sessions are consuming most of the CPU.',
         },
         {
             key: 'sessionMemP95',
@@ -674,7 +689,7 @@
             timeKey: 'ts',
             transform: /** @param {number} v */ (v) => v / (1024 * 1024),
             helpText:
-                'Working set memory claimed by each session. P95 spots the memory-hungry outliers (think Chrome with 40 tabs); P50 is the typical user. If P50 creeps up over hours, applications may be leaking.',
+                'Per-session working-set memory across the fleet. P95 is the translucent outer envelope; P50 is the solid nested fill. A rising median suggests broad application growth rather than isolated heavy users.',
         },
     ];
 
@@ -700,7 +715,7 @@
             timeKey: 'ts',
             invertThresholds: true,
             helpText:
-                'Frames actually delivered to clients each second. When this drops below the source frame rate, the gap is frames being skipped. P95 shows the worst-performing sessions; P50 shows what a typical session receives. Inverted threshold — lower is worse.',
+                'Frames delivered to clients each second. The filled P95 service floor is numeric P5: 95% of active sessions are at or above it. The dotted P50 line is the typical active session. Lower values are worse; inactive zeroes are gaps.',
         },
         {
             key: 'encodeMs',
@@ -713,7 +728,7 @@
             icon: Timer,
             timeKey: 'ts',
             helpText:
-                'How long the GPU spends encoding each frame before sending it. Encoding is synchronous — anything above 33ms physically caps the session below 30fps. P95 catches sessions under the heaviest load; P50 shows the median encode cost across the fleet.',
+                'Time spent encoding each frame. P95 is the translucent outer envelope; P50 is the solid nested fill. Above 33ms can cap output below 30fps. Higher values are worse.',
         },
         {
             key: 'quality',
@@ -727,7 +742,7 @@
             timeKey: 'ts',
             invertThresholds: true,
             helpText:
-                'How much fidelity survives compression — 100% means pixel-perfect. Quality drops during fast motion, low bandwidth, or heavy server load. P95 is the worst-affected sessions; P50 is what users typically see. Inverted threshold — lower is worse.',
+                'Compression fidelity; 100% is pixel-perfect. The filled P95 service floor is numeric P5: 95% of active sessions are at or above it. The dotted P50 line is the typical active session. Lower values are worse; inactive zeroes are gaps.',
         },
         {
             key: 'skipTotal',
@@ -740,7 +755,7 @@
             icon: Activity,
             timeKey: 'ts',
             helpText:
-                'Frames that never made it to the client, per second. Windows tracks three skip sources — server (GPU/CPU), network (bandwidth), and client (decoding). This chart sums server + network. P50 shows the typical skip rate; P95 shows the worst-affected sessions.',
+                'Server-resource plus network frames skipped per second; client-decoding skips are not included. P95 is the translucent outer envelope and P50 is the solid nested fill. Higher values are worse.',
         },
         {
             key: 'rtt',
@@ -753,7 +768,7 @@
             icon: Network,
             timeKey: 'ts',
             helpText:
-                'Network round-trip time between server and client. Measured on the TCP channel — may not reflect actual latency if the session is using UDP transport. P95 catches the worst-connected users; P50 shows median network conditions across the fleet.',
+                'TCP-channel round-trip time between server and client; it may not represent an active UDP transport. P95 is the translucent outer envelope and P50 is the solid nested fill. Higher values are worse.',
         },
         {
             key: 'loss',
@@ -766,7 +781,7 @@
             icon: Network,
             timeKey: 'ts',
             helpText:
-                'Percentage of packets lost in transit on the active RDP transport. RDP prefers UDP (where losses are recovered via forward error correction) and falls back to TCP (where losses trigger retransmission and congestion backoff). P50 is the typical loss rate; P95 shows the most affected sessions.',
+                'Packet loss on the active RDP transport. P95 is the translucent outer envelope and P50 is the solid nested fill. UDP can recover losses with forward error correction; TCP responds with retransmission and congestion control.',
         },
     ];
 
@@ -942,10 +957,9 @@
                         </div>
                         {#if showLoadHelp}
                             <p class="chart-desc">
-                                Fleet-average CPU and memory utilization with total connected sessions. Average CPU is
-                                the primary foreground area; CPU P95 is the translucent background envelope showing tail
-                                pressure. The Sessions area uses the right axis. A widening P95 band means short CPU
-                                bursts are rising even when sustained average load remains stable.
+                                Fleet-average CPU and memory utilization with total sessions. CPU P95 is the background
+                                envelope preserving short sampling-window spikes; Sessions is the dashed right-axis
+                                line. Drag right to reveal older history and left to return toward live.
                             </p>
                         {/if}
                     </div>
@@ -1078,9 +1092,9 @@
                     </div>
                     {#if showHicHelp}
                         <p class="chart-desc">
-                            P95 health indicators across the fleet — input responsiveness, memory pressure, network
-                            reliability, and storage I/O. P95 highlights the worst-performing 5% of servers; P50 shows
-                            the median.
+                            Input responsiveness, memory pressure, network reliability, and storage I/O. Input Delay
+                            compares the fleet average of each host's session P95 and P50. The other charts compare
+                            fleet average with exact median host: translucent outer area versus solid nested fill.
                         </p>
                     {/if}
 
@@ -1097,6 +1111,8 @@
                                     {history}
                                     valueKey={mc.key}
                                     p50Key={mc.p50Key}
+                                    valueLabel={mc.valueLabel ?? 'P95'}
+                                    p50Label={mc.p50Label ?? 'P50'}
                                     label={mc.label}
                                     unit={mc.unit}
                                     thresholds={mc.key === 'inputDelay' ? inputDelayThresh : mc.thresholds}
@@ -1150,9 +1166,9 @@
                     </div>
                     {#if showSessionHelp}
                         <p class="chart-desc">
-                            How many sessions are running, how full the farm is, and what each session costs in CPU and
-                            memory. The gap between P95 and P50 tells you how much spread there is between your heaviest
-                            users and everyone else.
+                            Session count, capacity utilization, and per-session CPU and memory. For CPU and memory,
+                            P95 is the translucent outer envelope and P50 is the solid nested fill; their gap isolates
+                            heavy users from the typical session.
                         </p>
                     {/if}
 
@@ -1224,9 +1240,11 @@
                     </div>
                     {#if showRfxHelp}
                         <p class="chart-desc">
-                            What the users actually see: frame rates, encoding speed, visual quality, and the network
-                            between them. P95 shows the worst-affected sessions; P50 shows what a typical user
-                            experiences. The gap between them reveals how much spread there is across your fleet.
+                            Frame delivery, encoding, visual quality, and network conditions. FPS and Frame Quality
+                            use a filled P95 service floor with a dotted P50 median because higher is better. The
+                            lower-is-better charts use a translucent P95 outer envelope with a solid nested P50 fill.
+                            P50 appears only where the source report supplied it; older retained buckets remain
+                            P95-only instead of being presented as zero.
                         </p>
                     {/if}
 
