@@ -247,6 +247,101 @@ func TestSanitizePerfSnapshotClearsInvalidP50Presence(t *testing.T) {
 	}
 }
 
+func TestSanitizePerfSnapshotRemoteFXSemantics(t *testing.T) {
+	allRemoteP50 := dc.PerfP50RFXFPSOut |
+		dc.PerfP50RFXSkipServer |
+		dc.PerfP50RFXSkipNet |
+		dc.PerfP50RFXEncodeMS |
+		dc.PerfP50RFXQuality |
+		dc.PerfP50RFXRTT |
+		dc.PerfP50RFXLoss
+
+	tests := []struct {
+		name  string
+		input dc.PerfSnapshot
+		check func(t *testing.T, got dc.PerfSnapshot)
+	}{
+		{
+			name: "unavailable clears remote values and presence",
+			input: dc.PerfSnapshot{
+				CPUPct: 42, RFXFPSOut: 10, RFXFPSOutP50: 5,
+				RFXSkipServer: 1, RFXSkipServerP50: 2,
+				RFXSkipNet: 3, RFXSkipNetP50: 4,
+				RFXEncodeMS: 5, RFXEncodeMSP50: 6,
+				RFXQuality: 7, RFXQualityP50: 8,
+				RFXRTT: 9, RFXRTTP50: 10,
+				RFXLoss: 11, RFXLossP50: 12,
+				P50Present: allRemoteP50,
+			},
+			check: func(t *testing.T, got dc.PerfSnapshot) {
+				if got.CPUPct != 42 {
+					t.Errorf("CPUPct = %v, want 42", got.CPUPct)
+				}
+				if got.RFXFPSOut != 0 || got.RFXFPSOutP50 != 0 ||
+					got.RFXSkipServer != 0 || got.RFXSkipServerP50 != 0 ||
+					got.RFXSkipNet != 0 || got.RFXSkipNetP50 != 0 ||
+					got.RFXEncodeMS != 0 || got.RFXEncodeMSP50 != 0 ||
+					got.RFXQuality != 0 || got.RFXQualityP50 != 0 ||
+					got.RFXRTT != 0 || got.RFXRTTP50 != 0 ||
+					got.RFXLoss != 0 || got.RFXLossP50 != 0 {
+					t.Errorf("unavailable RemoteFX retained values: %+v", got)
+				}
+				if got.P50Present&allRemoteP50 != 0 {
+					t.Errorf("unavailable RemoteFX retained P50 presence: %b", got.P50Present)
+				}
+			},
+		},
+		{
+			name: "inactive high-is-better fields clear paired P50",
+			input: dc.PerfSnapshot{
+				RFXAvailable: true, RFXFPSOutP50: 30, RFXQualityP50: 80,
+				RFXLossP50: 0,
+				P50Present: dc.PerfP50RFXFPSOut | dc.PerfP50RFXQuality | dc.PerfP50RFXLoss,
+			},
+			check: func(t *testing.T, got dc.PerfSnapshot) {
+				if got.RFXFPSOutP50 != 0 || got.HasP50(dc.PerfP50RFXFPSOut, got.RFXFPSOutP50) {
+					t.Errorf("inactive FPS P50 = (%v, present=%v), want (0, false)", got.RFXFPSOutP50, got.HasP50(dc.PerfP50RFXFPSOut, got.RFXFPSOutP50))
+				}
+				if got.RFXQualityP50 != 0 || got.HasP50(dc.PerfP50RFXQuality, got.RFXQualityP50) {
+					t.Errorf("inactive quality P50 = (%v, present=%v), want (0, false)", got.RFXQualityP50, got.HasP50(dc.PerfP50RFXQuality, got.RFXQualityP50))
+				}
+				if got.RFXLossP50 != 0 || !got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50) {
+					t.Errorf("lower-is-better zero P50 = (%v, present=%v), want (0, true)", got.RFXLossP50, got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50))
+				}
+			},
+		},
+		{
+			name: "invalid primary does not discard valid P50",
+			input: dc.PerfSnapshot{
+				RFXAvailable: true, RFXFPSOut: 241, RFXFPSOutP50: 30,
+				P50Present: dc.PerfP50RFXFPSOut,
+			},
+			check: func(t *testing.T, got dc.PerfSnapshot) {
+				if got.RFXFPSOut != 0 || got.RFXFPSOutP50 != 30 || !got.HasP50(dc.PerfP50RFXFPSOut, got.RFXFPSOutP50) {
+					t.Errorf("FPS = (%v, %v, present=%v), want (0, 30, true)", got.RFXFPSOut, got.RFXFPSOutP50, got.HasP50(dc.PerfP50RFXFPSOut, got.RFXFPSOutP50))
+				}
+			},
+		},
+		{
+			name: "invalid P50 does not discard valid primary",
+			input: dc.PerfSnapshot{
+				RFXAvailable: true, RFXQuality: 80, RFXQualityP50: 101,
+				P50Present: dc.PerfP50RFXQuality,
+			},
+			check: func(t *testing.T, got dc.PerfSnapshot) {
+				if got.RFXQuality != 80 || got.RFXQualityP50 != 0 || got.HasP50(dc.PerfP50RFXQuality, got.RFXQualityP50) {
+					t.Errorf("quality = (%v, %v, present=%v), want (80, 0, false)", got.RFXQuality, got.RFXQualityP50, got.HasP50(dc.PerfP50RFXQuality, got.RFXQualityP50))
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.check(t, dc.SanitizePerfSnapshot(test.input))
+		})
+	}
+}
+
 func TestAggregateRetainsPresentLowerIsBetterZeroP50(t *testing.T) {
 	got := aggregate([]dc.PerfSnapshot{
 		{RFXAvailable: true, RFXLossP50: 0, P50Present: dc.PerfP50RFXLoss},

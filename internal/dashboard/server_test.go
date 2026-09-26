@@ -597,6 +597,62 @@ func TestHandleReport_StoresLastResult(t *testing.T) {
 	}
 }
 
+func TestHandleReport_SanitizesRemoteFXBeforeStateAndView(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	result := dc.CheckResult{
+		Host: "SRV01",
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable: true,
+			RFXFPSOut:    0, RFXFPSOutP50: 30,
+			RFXQuality: 0, RFXQualityP50: 80,
+			RFXRTT: 60001, RFXRTTP50: 25,
+			RFXLoss: 0, RFXLossP50: 0,
+			P50Present: dc.PerfP50RFXFPSOut |
+				dc.PerfP50RFXQuality |
+				dc.PerfP50RFXRTT |
+				dc.PerfP50RFXLoss,
+		},
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	w := httptest.NewRecorder()
+	ds.handleReport(w, httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /report status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	assertRemoteFX := func(source string, perf *dc.PerfSnapshot) {
+		t.Helper()
+		if perf == nil {
+			t.Fatalf("%s performance = nil", source)
+		}
+		if perf.RFXFPSOut != 0 || perf.RFXFPSOutP50 != 0 || perf.HasP50(dc.PerfP50RFXFPSOut, perf.RFXFPSOutP50) {
+			t.Errorf("%s inactive FPS = (%v, %v, present=%v), want (0, 0, false)",
+				source, perf.RFXFPSOut, perf.RFXFPSOutP50, perf.HasP50(dc.PerfP50RFXFPSOut, perf.RFXFPSOutP50))
+		}
+		if perf.RFXQuality != 0 || perf.RFXQualityP50 != 0 || perf.HasP50(dc.PerfP50RFXQuality, perf.RFXQualityP50) {
+			t.Errorf("%s inactive quality = (%v, %v, present=%v), want (0, 0, false)",
+				source, perf.RFXQuality, perf.RFXQualityP50, perf.HasP50(dc.PerfP50RFXQuality, perf.RFXQualityP50))
+		}
+		if perf.RFXRTT != 0 || perf.RFXRTTP50 != 25 || !perf.HasP50(dc.PerfP50RFXRTT, perf.RFXRTTP50) {
+			t.Errorf("%s RTT = (%v, %v, present=%v), want (0, 25, true)",
+				source, perf.RFXRTT, perf.RFXRTTP50, perf.HasP50(dc.PerfP50RFXRTT, perf.RFXRTTP50))
+		}
+		if perf.RFXLoss != 0 || perf.RFXLossP50 != 0 || !perf.HasP50(dc.PerfP50RFXLoss, perf.RFXLossP50) {
+			t.Errorf("%s loss = (%v, %v, present=%v), want (0, 0, true)",
+				source, perf.RFXLoss, perf.RFXLossP50, perf.HasP50(dc.PerfP50RFXLoss, perf.RFXLossP50))
+		}
+	}
+
+	stored := ds.state.All()[0]
+	assertRemoteFX("LastResult", stored.LastResult.Performance)
+	assertRemoteFX("ServerView", ds.serverView(stored).Perf)
+}
+
 func TestHandleReport_NormalizesUnlimitedSessionCapacity(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
