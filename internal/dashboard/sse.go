@@ -43,7 +43,7 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 	if info == nil {
 		return
 	}
-	view := toServerView(*info, ds.staleAfter())
+	view := ds.serverView(*info)
 	payload, err := json.Marshal(SSEEvent{
 		Type:      "server_update",
 		Host:      host,
@@ -155,6 +155,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		SessionWarningThreshold int                  `json:"session_warning_threshold"`
 		GracePeriod             int                  `json:"grace_period"`
 		PollInterval            int                  `json:"poll_interval"`
+		RDConnectionBroker      string               `json:"rd_connection_broker"`
 		Performance             dc.PerformanceConfig `json:"performance"`
 		EvtSpike                evtspikeView         `json:"evtspike"`
 		Update                  dc.UpdateConfig      `json:"update"`
@@ -164,6 +165,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
+		RDConnectionBroker:      cfg.Dashboard.RDConnectionBroker,
 		Performance:             cfg.Performance,
 		EvtSpike:                buildEvtSpikeView(cfg.EvtSpike),
 		Update:                  cfg.Update,

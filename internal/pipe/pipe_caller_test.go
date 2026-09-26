@@ -97,6 +97,60 @@ func TestRegisterViaPipe_CurrentProcessPrivileged(t *testing.T) {
 	}
 }
 
+func TestBrokerSetupViaPipe_CurrentProcessPrivileged(t *testing.T) {
+	if _, err := CheckViaPipe(); err == nil {
+		t.Skip("service pipe already active; skipping isolated caller integration test")
+	}
+
+	handler := &mockHandler{brokerSetupResult: &BrokerSetupResult{
+		ConnectionBroker: "rdc.example.test",
+		CollectionCount:  2,
+		SessionHostCount: 5,
+		ServiceIdentity:  `NT AUTHORITY\SYSTEM`,
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, err := acceptPipeConn(ctx)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		handlePipeConn(conn, handler)
+		serverErr <- nil
+	}()
+
+	var result *BrokerSetupResult
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		result, err = BrokerSetupViaPipe("rdc.example.test")
+		if err == nil || !errors.Is(err, ErrPipeUnavailable) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "access is denied") || strings.Contains(low, "access denied") {
+			cancel()
+			<-serverErr
+			t.Skip("current process cannot connect as a privileged pipe caller in this environment")
+		}
+		t.Fatalf("BrokerSetupViaPipe: %v", err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("server goroutine: %v", err)
+	}
+	if result == nil || *result != *handler.brokerSetupResult {
+		t.Fatalf("BrokerSetupViaPipe result = %+v, want %+v", result, handler.brokerSetupResult)
+	}
+	if got := handler.brokerSetupCalls; len(got) != 1 || got[0] != "rdc.example.test" {
+		t.Fatalf("brokerSetupCalls = %v, want [rdc.example.test]", got)
+	}
+}
+
 func TestHandlePipeConn_PrivilegedDeny(t *testing.T) {
 	oldCheck := callerIsPrivilegedFunc
 	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) {
@@ -109,12 +163,16 @@ func TestHandlePipeConn_PrivilegedDeny(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 
-	resp := pipeCall(t, PipeRequest{Cmd: "register", URL: "https://dash.example:8443"}, &mockHandler{})
+	handler := &mockHandler{}
+	resp := pipeCall(t, PipeRequest{Cmd: "broker-setup", Broker: "rdc.example.test"}, handler)
 	if resp.OK {
 		t.Fatal("expected OK=false for denied privileged verb")
 	}
 	if resp.Error != "access denied" {
 		t.Fatalf("resp.Error = %q, want %q", resp.Error, "access denied")
+	}
+	if got := handler.brokerSetupCalls; len(got) != 0 {
+		t.Fatalf("brokerSetupCalls = %v, want no handler invocation", got)
 	}
 
 	logText := logBuf.String()

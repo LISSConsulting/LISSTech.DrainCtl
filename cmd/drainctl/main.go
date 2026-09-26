@@ -19,7 +19,7 @@ var cfg struct {
 	Grace    int
 }
 
-func main() {
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "drainctl",
 		Short:   "Remote Desktop Session Host drain mode monitor",
@@ -56,7 +56,13 @@ func main() {
 	root.AddCommand(dashboardCmd())
 	root.AddCommand(configureCmd())
 	root.AddCommand(baselineCmd())
+	root.AddCommand(brokerSetupCmd())
 
+	return root
+}
+
+func main() {
+	root := newRootCmd()
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "drainctl: %v\n", err)
 		os.Exit(2)

@@ -38,6 +38,7 @@ type DashboardServer struct {
 	fingerprint            string        // SHA-256 fingerprint of the TLS certificate
 	sessionStore           *SessionStore // in-memory dashboard session store
 	broker                 *Broker       // SSE event broker for real-time updates
+	rdCollections          *rdCollectionResolver
 	ms                     metricsReader
 	as                     auditReader
 	mnt                    maintenanceReader

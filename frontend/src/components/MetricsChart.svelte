@@ -817,58 +817,66 @@
     </button>
 </div>
 
-<!-- ── Window preset pills ── -->
-<div class="window-pills">
-    {#each OVERVIEW_WINDOW_PRESETS as preset}
-        <button
-            class="window-pill"
-            class:active={appState.overviewWindow === preset.key && panOffsetMs === 0}
-            onclick={() => {
-                panOffsetMs = 0;
-                appState.overviewWindow = preset.key;
-            }}
-            aria-pressed={appState.overviewWindow === preset.key && panOffsetMs === 0}
-        >
-            {preset.label}
-        </button>
-    {/each}
-</div>
-
-<!-- ── Overview host scope ── -->
-<details class="overview-filter">
-    <summary aria-label="Filter Overview metrics by server">
-        <span>Servers:</span>
-        {overviewFilterSummary}
-    </summary>
-    <div class="overview-filter-menu" aria-label="Overview server filter">
-        <div class="overview-filter-actions">
-            <button type="button" onclick={clearOverviewFilter} disabled={!overviewFiltering}>All servers</button>
-        </div>
-        {#if overviewHosts.length === 0}
-            <p class="overview-filter-empty">No registered servers</p>
-        {:else}
-            {#each overviewHosts as host}
-                <div class="overview-filter-option-row">
-                    <label class="overview-filter-option">
-                        <input
-                            type="checkbox"
-                            checked={!overviewFiltering || appState.overviewSelectedHosts.has(host)}
-                            onchange={() => toggleOverviewHost(host)}
-                            aria-label={`Include ${host} in Overview metrics`}
-                        />
-                        <span>{host}</span>
-                    </label>
-                    <button
-                        type="button"
-                        class="overview-filter-only"
-                        onclick={() => selectOnlyOverviewHost(host)}
-                        aria-label={`Show only ${host} in Overview metrics`}>Only</button
-                    >
-                </div>
-            {/each}
-        {/if}
+<!-- ── Overview toolbar ── -->
+<div class="overview-toolbar">
+    <!-- ── Window preset pills ── -->
+    <div class="window-pills">
+        {#each OVERVIEW_WINDOW_PRESETS as preset}
+            <button
+                class="btn-brutal gp-pill"
+                class:active={appState.overviewWindow === preset.key && panOffsetMs === 0}
+                onclick={() => {
+                    panOffsetMs = 0;
+                    appState.overviewWindow = preset.key;
+                }}
+                aria-pressed={appState.overviewWindow === preset.key && panOffsetMs === 0}
+            >
+                {preset.label}
+            </button>
+        {/each}
     </div>
-</details>
+
+    <!-- ── Overview host scope ── -->
+    <details class="overview-filter">
+        <summary class="btn-brutal gp-pill" aria-label="Filter Overview metrics by server">
+            <span>Servers:</span>
+            {overviewFilterSummary}
+        </summary>
+        <div class="overview-filter-menu" aria-label="Overview server filter">
+            <div class="overview-filter-actions">
+                <button
+                    type="button"
+                    class="btn-brutal gp-pill"
+                    onclick={clearOverviewFilter}
+                    disabled={!overviewFiltering}>All servers</button
+                >
+            </div>
+            {#if overviewHosts.length === 0}
+                <p class="overview-filter-empty">No registered servers</p>
+            {:else}
+                {#each overviewHosts as host}
+                    <div class="overview-filter-option-row">
+                        <label class="overview-filter-option">
+                            <input
+                                type="checkbox"
+                                checked={!overviewFiltering || appState.overviewSelectedHosts.has(host)}
+                                onchange={() => toggleOverviewHost(host)}
+                                aria-label={`Include ${host} in Overview metrics`}
+                            />
+                            <span>{host}</span>
+                        </label>
+                        <button
+                            type="button"
+                            class="btn-brutal gp-pill overview-filter-only"
+                            onclick={() => selectOnlyOverviewHost(host)}
+                            aria-label={`Show only ${host} in Overview metrics`}>Only</button
+                        >
+                    </div>
+                {/each}
+            {/if}
+        </div>
+    </details>
+</div>
 
 {#key activeTab}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1644,39 +1652,49 @@
         box-shadow: none;
     }
 
+    /* ── Overview toolbar ── */
+    .overview-toolbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .window-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
     /* ── Overview host scope ── */
     .overview-filter {
         position: relative;
-        display: inline-block;
-        margin: 0 0 12px 8px;
-        vertical-align: top;
     }
 
     .overview-filter summary {
+        display: flex;
+        align-items: center;
+        gap: 0.45em;
         list-style: none;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.6rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        padding: 5px 10px;
-        border: var(--spacing-bw) solid var(--color-border);
-        border-radius: var(--radius-default);
-        box-shadow: 2px 2px 0 var(--color-shadow);
-        background: var(--color-surface);
-        color: var(--color-fg);
-        cursor: pointer;
+        white-space: nowrap;
     }
 
     .overview-filter summary::-webkit-details-marker {
         display: none;
     }
 
+    .overview-filter summary:focus-visible {
+        border-color: var(--color-accent);
+        box-shadow: 3px 3px 0 var(--color-accent);
+        transform: translate(-2px, -2px);
+    }
+
     .overview-filter-menu {
         position: absolute;
         z-index: 5;
         top: calc(100% + 6px);
-        left: 0;
+        right: 0;
         min-width: 230px;
         max-height: 280px;
         overflow: auto;
@@ -1695,18 +1713,6 @@
         border-bottom: 1px solid var(--color-border);
     }
 
-    .overview-filter-actions button {
-        font: inherit;
-        font-size: 0.56rem;
-        font-weight: 700;
-        padding: 3px 5px;
-        border: 1px solid var(--color-border);
-        border-radius: 2px;
-        background: var(--color-bg);
-        color: var(--color-fg);
-        cursor: pointer;
-    }
-
     .overview-filter-option-row {
         display: flex;
         align-items: center;
@@ -1715,21 +1721,6 @@
 
     .overview-filter-only {
         margin-left: auto;
-        padding: 2px 4px;
-        border: 1px solid var(--color-border);
-        border-radius: 2px;
-        background: transparent;
-        color: var(--color-muted);
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.52rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        cursor: pointer;
-    }
-
-    .overview-filter-only:hover {
-        color: var(--color-accent);
-        border-color: var(--color-accent);
     }
 
     .overview-filter-option {
@@ -1755,48 +1746,15 @@
         color: var(--color-muted);
     }
 
-    /* ── Window preset pills ── */
-    .window-pills {
-        display: flex;
-        gap: 4px;
-        margin-bottom: 12px;
-    }
+    @media (max-width: 560px) {
+        .overview-toolbar {
+            flex-wrap: wrap;
+        }
 
-    .window-pill {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.6rem;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        padding: 4px 10px;
-        border: var(--spacing-bw) solid var(--color-border);
-        border-radius: var(--radius-default);
-        box-shadow: 2px 2px 0 var(--color-shadow);
-        background: var(--color-surface);
-        color: var(--color-muted);
-        cursor: pointer;
-        transition:
-            transform 0.08s linear,
-            box-shadow 0.08s linear,
-            color 0.08s linear,
-            background 0.08s linear;
-        white-space: nowrap;
-    }
-
-    .window-pill:hover {
-        color: var(--color-fg);
-        transform: translate(-1px, -1px);
-        box-shadow: 3px 3px 0 var(--color-shadow);
-    }
-
-    .window-pill:active {
-        transform: translate(2px, 2px);
-        box-shadow: none;
-    }
-
-    .window-pill.active {
-        background: var(--color-accent);
-        color: #fff;
-        border-color: var(--color-accent);
+        .overview-filter {
+            width: 100%;
+            display: flex;
+            justify-content: flex-end;
+        }
     }
 </style>

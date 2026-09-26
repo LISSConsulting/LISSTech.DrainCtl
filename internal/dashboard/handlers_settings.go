@@ -264,6 +264,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		SessionWarningThreshold int                  `json:"session_warning_threshold"`
 		GracePeriod             int                  `json:"grace_period"`
 		PollInterval            int                  `json:"poll_interval"`
+		RDConnectionBroker      string               `json:"rd_connection_broker"`
 		Performance             dc.PerformanceConfig `json:"performance"`
 		EvtSpike                evtspikeView         `json:"evtspike"`
 		Update                  dc.UpdateConfig      `json:"update"`
@@ -273,6 +274,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		SessionWarningThreshold: cfg.SessionWarningThreshold,
 		GracePeriod:             cfg.GracePeriod,
 		PollInterval:            cfg.PollInterval,
+		RDConnectionBroker:      cfg.Dashboard.RDConnectionBroker,
 		Performance:             cfg.Performance,
 		EvtSpike:                evtspike,
 		Update:                  cfg.Update,
@@ -380,6 +382,16 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if rawBroker, present := fields["rd_connection_broker"]; present && strings.TrimSpace(string(rawBroker)) != "null" {
+		http.Error(w, "rd_connection_broker must be configured with drainctl broker-setup", http.StatusBadRequest)
 		return
 	}
 
