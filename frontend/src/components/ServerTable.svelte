@@ -5,6 +5,7 @@
         removeServerMetrics,
         removeEvtSpikeState,
         setDetectorStatus,
+        setRecentSpikes,
         setSelection,
         toggleSelection,
         pruneSelectionFor,
@@ -13,6 +14,7 @@
     import {
         deleteServer,
         fetchEvtSpikeStatus,
+        fetchRecentSpikes,
         fetchServers,
         permanentRemoveHosts,
         forceUpdateHosts,
@@ -87,6 +89,26 @@
                 .catch(() => {})
                 .finally(() => {
                     seedingEvtSpike.delete(srv.host);
+                });
+        }
+    });
+
+    // Seed each row's EventSpike intensity sparkline from durable recent
+    // spikes. Empty arrays are cached too, preventing repeat fetches for quiet
+    // hosts; live recent_spike SSE events continue to prepend into the ring.
+    /** @type {Set<string>} */
+    const seedingRecentSpikes = new Set();
+    $effect(() => {
+        for (const srv of appState.servers) {
+            if (appState.recentSpikes.has(srv.host) || seedingRecentSpikes.has(srv.host)) continue;
+            seedingRecentSpikes.add(srv.host);
+            fetchRecentSpikes(srv.host, 20)
+                .then((spikes) => {
+                    setRecentSpikes(srv.host, spikes ?? []);
+                })
+                .catch(() => {})
+                .finally(() => {
+                    seedingRecentSpikes.delete(srv.host);
                 });
         }
     });
@@ -498,6 +520,28 @@
         return 'var(--color-muted)';
     }
 
+    /**
+     * Return recent confirmed-spike intensity in chronological order. Intensity
+     * is observed/expected, so channels with different event volumes remain
+     * comparable. A single spike gets a zero baseline so it still renders.
+     * @param {import('../lib/types.js').RecentSpike[]|undefined} spikes
+     * @returns {number[]}
+     */
+    function spikeSparkData(spikes) {
+        const values = (spikes ?? [])
+            .slice()
+            .reverse()
+            .map((spike) => {
+                const observed = Number(spike.observed);
+                const expected = Number(spike.expected);
+                return Number.isFinite(observed) && Number.isFinite(expected) && expected > 0
+                    ? observed / expected
+                    : observed;
+            })
+            .filter(Number.isFinite);
+        return values.length === 1 ? [0, values[0]] : values;
+    }
+
     // Persist search
     $effect(() => {
         localStorage.setItem('drainctl-search', search);
@@ -711,6 +755,9 @@
                             aria-sort={sortCol === 'delay' ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
                             >Input Delay {sortCol === 'delay' ? (sortDir === 1 ? '↑' : '↓') : ''}</th
                         >
+                        <th class="spark-col" title="Recent confirmed EventSpike intensity (observed ÷ expected)"
+                            >EvtSpike</th
+                        >
                         <th
                             onclick={() => sort('last_seen')}
                             class="sortable"
@@ -730,7 +777,7 @@
                 <tbody>
                     {#each pagedGroups as group (group.collection)}
                         <tr class="collection-group-header">
-                            <th colspan="12" scope="rowgroup">
+                            <th colspan="13" scope="rowgroup">
                                 <span>RD SESSION COLLECTION</span>
                                 <strong>{group.collection}</strong>
                                 <span class="collection-group-count"
@@ -758,6 +805,8 @@
                             {@const memStyle = thresholdStyle(memColor)}
                             {@const delayStyle = thresholdStyle(delayColor)}
                             {@const srvHistory = appState.serverMetrics.get(srv.host)}
+                            {@const spikeHistory = appState.recentSpikes.get(srv.host)}
+                            {@const spikeData = spikeSparkData(spikeHistory)}
                             <tr
                                 class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
                                     srv.host,
@@ -836,6 +885,16 @@
                                         ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms'
                                         : '—'}
                                 </td>
+                                <td
+                                    class="mono spark-cell"
+                                    title="{spikeHistory?.length ?? 0} recent confirmed EventSpike{spikeHistory?.length ===
+                                    1
+                                        ? ''
+                                        : 's'}; sparkline shows observed ÷ expected"
+                                >
+                                    <CellSparkline data={spikeData} color="var(--color-red)" />
+                                    {spikeHistory?.length ?? 0}
+                                </td>
                                 <td class="mono muted">{rel(srv.last_seen, now)}</td>
                                 <td onclick={(e) => e.stopPropagation()}>
                                     <div class="btn-row">
@@ -859,7 +918,7 @@
                             </tr>
                             {#if expandedHosts.has(srv.host)}
                                 <tr class="detail-row">
-                                    <td colspan="12">
+                                    <td colspan="13">
                                         <ServerDetail
                                             server={srv}
                                             {now}

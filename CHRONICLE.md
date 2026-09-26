@@ -1,5 +1,12 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Dashboard chart interaction polish — 2026-09-26
+
+- Overview and per-host timeline panning now follows direct manipulation: dragging right moves plotted data right and reveals older history; dragging left returns toward live.
+- Higher-is-better RemoteFX charts keep normal upward geometry and bottom-origin area fills. Threshold polarity remains inverted—low FPS/quality is bad—without visually turning the chart upside down. On those inverted charts, P95 is the only filled area and P50 is a dotted line, avoiding the higher median concealing the lower service floor. Conventional lower-is-better charts retain the original nested P50 fill inside the P95 envelope.
+- RemoteFX P50 is rendered only where retained source reports supplied it. Historical high-is-better zeroes are treated as missing availability metadata; older buckets cannot be backfilled and remain P95-only.
+- The Servers table adds an EventSpike sparkline per host. It plots recent confirmed-spike intensity (`observed / expected`) in chronological order and shows the retained recent-spike count.
+
 ## Runtime resilience — 2026-09-26
 
 **Evidence.** One historical agent recorded three Service Control Manager 7034 crashes and remained stopped. At the same time, 15 of 17 hosts continued to send live RemoteFX reports, but only 55 of 1,530 FPS samples were nonzero; quality was 100 where active, and a historical encoding value was near `2^32`. No dump exists for the stopped historical agent, so the crash location is unconfirmed rather than inferred from its absence.
