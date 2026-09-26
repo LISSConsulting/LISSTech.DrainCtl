@@ -7,7 +7,7 @@
 
 Make service recovery deterministic and inspectable, collect the next `drainctld.exe` crash locally without exfiltrating memory, turn stale-host derivation into durable one-shot offline/recovery events, and make RemoteFX persistence reject invalid data while preserving directional percentile meaning.
 
-Technical approach in one sentence: retain SCM as the recovery authority, provision a protected WER LocalDumps folder through installer-owned configuration, add durable host-freshness epochs to the dashboard store/SSE broker, and normalize RemoteFX values before the existing telemetry pipeline.
+Technical approach in one sentence: retain SCM as the recovery authority, provision a protected WER LocalDumps folder through installer-owned configuration, persist freshness epochs atomically in telemetry SQLite schema v3 and publish additive SSE transitions, and normalize RemoteFX values before the existing telemetry pipeline.
 
 ## Technical context
 
@@ -20,7 +20,7 @@ Technical approach in one sentence: retain SCM as the recovery authority, provis
 **Constraints**:
 
 - SCM is the sole automatic restart owner. Do not implement a second in-process restart loop.
-- WER dumps are local opt-in diagnostic artifacts. Never upload, transmit, add to SQLite, or include dump bytes in events/logs/notifications.
+- WER dumps are protected local diagnostic artifacts. Never upload, transmit, add to SQLite, or include dump bytes in events/logs/notifications; only optional newest-dump gzip/hash processing requires explicit local authorization.
 - Do not change core report compatibility: all new report and SSE data is additive.
 - Use the effective heartbeat interval already exposed by `DashboardConfig.HeartbeatInterval`; offline means exactly three intervals.
 - Preserve the existing `server_update` contract and existing directional aggregation semantics.
@@ -30,9 +30,9 @@ Technical approach in one sentence: retain SCM as the recovery authority, provis
 
 | Decision | Basis | Result |
 |---|---|---|
-| Preserve SCM recovery policy | Confirmed installer source already configures two 5-second restarts, third none, 1-day reset (`installer/LISSTech.DrainCtl.wxs`). | Assert and retain that configuration; service panics continue to surface as failed process exits. |
-| Add WER LocalDumps | Confirmed v26.9.17 session-enumeration crash plus SCM 7034/1067 evidence ended stopped; no LocalDumps setup exists in the current tree. | Configure only `drainctld.exe`, mini dumps, 3 files, protected product-local directory. |
-| Derive offline from server receive time | Existing `LastSeen` is written on dashboard report handling, and current threshold is `3 × interval` (`internal/dashboard/store.go`, `server.go`). | Use accepted report time, not agent timestamp; persist one-shot epoch state. |
+| Preserve SCM recovery policy | The installer configures two 5-second restarts, third none, 1-day reset (`installer/LISSTech.DrainCtl.wxs`). | Retain that configuration; service panics continue to surface as failed process exits. |
+| Provision WER LocalDumps | Installer configuration targets only `drainctld.exe` with mini dumps, a 3-file cap, and a protected product-local directory. | WER owns crash-dump creation and retention; no application crash-path dumper is used. |
+| Persist freshness epochs | SQLite schema v3 contains `host_freshness(host, report_epoch_ms, offline_emitted_at_ms)`. | Serialized writer transactions dedupe each canonical-host/accepted-report epoch across requests and dashboard restarts without changing `last_result` or `last_seen`. |
 | Treat zero FPS/quality as gap | Existing `checkResultSamples` already omits zero FPS/quality (`internal/dashboard/samples.go`). Evidence is sparse/nonzero FPS. | Make this an ingest invariant and do not create synthetic zero buckets. |
 | Reject sentinel/outlier RemoteFX values | v26.9.47 evidence includes an encoding value near `2^32`; current PDH output is not bounded. | Validate per field before percentiles/persistence; retain valid siblings. |
 | Preserve percentile direction | Existing `AggregateServicePercentiles` uses numeric P5 for higher-is-better FPS/quality and P95 for other fields. | Keep semantics and make labels/API explicit. |
@@ -104,23 +104,24 @@ Current source surfaces:
 - `internal/dashboard/handlers_servers.go` and `handlers_status.go`: derive `off`/offline for read responses.
 - `internal/dashboard/sse.go` and `broker.go`: publish typed SSE envelopes.
 
-Add a durable `host_freshness` record keyed by canonical hostname. It carries `last_accepted_at`, `state`, `offline_emitted_for`, and `recovered_emitted_for` (the report epoch timestamp). The update/report path and freshness evaluator serialize transitions through this record:
+Add the durable `host_freshness` SQLite schema-v3 record keyed by canonical hostname: `report_epoch_ms` is the dashboard accepted-report epoch and nullable `offline_emitted_at_ms` records the single offline transition for that epoch. The report path and freshness evaluator use serialized writer transactions:
 
 ```mermaid
 stateDiagram-v2
     [*] --> Unknown
-    Unknown --> Fresh: first accepted report
-    Fresh --> Fresh: accepted report updates epoch
-    Fresh --> Offline: now >= lastAccepted + 3 * effectiveInterval
-    Offline --> Offline: no accepted report; event already recorded
-    Offline --> Fresh: accepted report; recovery event recorded
+    Unknown --> Fresh: first accepted report creates epoch
+    Fresh --> Fresh: accepted report opens newer epoch
+    Fresh --> Offline: atomic marker at now >= epoch + 3 * effective interval
+    Offline --> Offline: marker suppresses duplicate event
+    Offline --> Fresh: newer accepted report clears marker and recovers
 ```
 
 - `Unknown` has no accepted report and is not a missed-heartbeat state.
-- A polling/status evaluator may derive Offline, but it atomically writes `offline_emitted_for` before broadcasting; repeated reads cannot repeat the event.
-- Report acceptance atomically opens a new fresh epoch. If previous state was Offline, it records one recovery transition before/with the normal state update. Event ordering is documented and tested.
-- Existing `server_update` remains emitted after state update. New `host_offline` / `host_recovered` events are additive envelopes.
-- The evaluator runs on existing dashboard lifecycle cadence or a bounded freshness sweep; it must not perform an unbounded per-request scan. The exact cadence must make boundary recognition no later than one effective heartbeat interval after crossing threshold.
+- The offline transaction requires the matching current epoch and writes `offline_emitted_at_ms` before broadcasting `host_offline`; a stale evaluator cannot overwrite a newer report.
+- The accepted-report transaction writes the newer epoch and clears the marker. If it cleared an offline marker, it emits one `host_recovered`, then retains the normal `server_update` publication.
+- Offline transitions do not rewrite server `last_seen` or `last_result`.
+- Existing `server_update` remains emitted for live result updates. `host_offline` and `host_recovered` are additive envelopes.
+- Interval reload signals the freshness worker immediately, stops its old wait, and recomputes both sweep cadence and the `3 × effective interval` threshold without restarting the listener.
 
 ### 4. RemoteFX normalization pipeline
 
@@ -147,33 +148,33 @@ NaN, ±Inf, negatives, and values above the family maximum are invalid. Reject i
 
 | Direction | Expected behavior |
 |---|---|
-| New agent → old dashboard | New diagnostics fields are optional JSON additions; old server ignores them. Core report path remains accepted. |
-| Old agent → new dashboard | Missing diagnostic fields leave optional metrics absent. The host uses existing `LastSeen` and health semantics. |
-| New dashboard restart | Durable freshness epoch data prevents duplicate offline event for an already stale report epoch. |
+| New dashboard restart | Durable schema-v3 freshness state prevents a duplicate `host_offline` event for an already stale report epoch. |
+| Heartbeat interval reload | The worker wakes immediately and evaluates using the new effective interval; it does not wait out the previous cadence. |
 | Upgrade stop/start | MSI `ServiceControl` controls stop/install/start. Do not depend on recovery action during planned upgrade. |
-| Rollback | Preserve config/database/dumps. Older binary ignores additive freshness records and has no automatic dump deletion behavior. Existing state view still derives freshness from `LastSeen`. |
+| Rollback | Preserve config/database/dumps. Older binary may ignore additive freshness state and has no automatic dump deletion behavior. Existing state view still derives freshness from `LastSeen`. |
 
 ## Delivery phases
 
 1. **Installer and WER diagnostics**
-   - Extend `installer/LISSTech.DrainCtl.wxs` and/or existing installer custom actions with idempotent protected dump directory plus LocalDumps registry setup.
-   - Add narrowly scoped Windows helpers/tests if WiX cannot safely express ACL registry work alone.
-   - Confirm `drainctld.exe` service recovery declaration remains exactly two restarts then none.
+   - Maintain the installer-owned protected dump directory and `drainctld.exe` LocalDumps registry configuration.
+   - Verify the DACL permits LocalSystem and local Administrators only; a failed hardening attempt remains visible and has no unprotected fallback.
+   - Confirm the service declaration remains exactly two restarts then none.
 
 2. **Freshness epochs and SSE transitions**
-   - Extend dashboard persistence/migration and `ServerState` APIs.
-   - Implement atomic report/recovery and fresh/offline transition emission.
-   - Add SSE envelope/API documentation and frontend handling that refreshes state without breaking unrecognized events.
+   - Maintain the additive schema-v3 `host_freshness` table and migration.
+   - Serialize report/recovery and fresh/offline transitions by canonical host and accepted-report epoch.
+   - Wake and reset freshness cadence immediately when `HeartbeatInterval` reloads.
+   - Keep `server_update` compatible while publishing the additive transition events.
 
 3. **RemoteFX validation**
-   - Add a shared pure validation/normalization helper to protect local PDH and remote report paths.
-   - Update sample extraction so absence remains absent and invalid values cannot reach durable telemetry.
-   - Update OpenAPI/chart text for directional percentiles if current wording is incomplete.
+   - Normalize locally collected and remotely reported values before any `PerfSnapshot` reaches persistence.
+   - Keep unavailable/missing values absent, omit inactive FPS/quality zeroes, and drop only invalid field siblings.
+   - Preserve numeric-P5 service-floor semantics behind FPS/quality P95 labels and conventional numeric P95 elsewhere.
 
 4. **Operational proof and release readiness**
    - Execute isolated Windows service/SCM/WER smoke tests.
-   - Exercise restart-safe freshness deduplication, mixed-version reports, and invalid-value matrix.
-   - Update operator documentation with dump handling, rollout, and rollback steps.
+   - Exercise restart-safe freshness deduplication, immediate interval reload, mixed-version reports, and invalid-value matrix.
+   - Document metadata-only dump inventory, authorized local opt-in gzip/hash behavior, and manual incident handling.
 
 ## Observability contract
 
@@ -181,8 +182,8 @@ NaN, ±Inf, negatives, and values above the family maximum are invalid. Reject i
 |---|---|---|
 | `service_recovery_policy` startup/install record | Shows configured actions and reset period | No dump contents or tenant path. |
 | `wer_localdumps_configured` / `wer_localdumps_setup_failed` | Shows availability of local diagnostics | Metadata only. |
-| Local dump inventory | Indicates filename, size, creation time, count | Admin/local only; no byte content. |
-| `host_offline` / `host_recovered` SSE | One state boundary per epoch | Canonical host, timestamps, threshold only. |
+| Metadata-only local dump inventory | Indicates filename, size, creation time, count | Admin/local only; default inventory does not hash or read bytes. |
+| `host_offline` / `host_recovered` SSE | One state boundary per canonical-host report epoch | Dashboard acceptance times and threshold only. |
 | `remotefx_value_dropped` | Detects provider/sentinel quality issues | Metric family and reason; rate-limit; no raw sensitive payload. |
 | Existing SCM 7034/1067 and service logs | Correlate failure/restart outcome | Retain existing logging policy. |
 

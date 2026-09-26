@@ -23,56 +23,55 @@ This document defines the durable and event contracts required by [spec.md](./sp
 
 RemoteFX fields remain optional. Absence means no data; it is never reinterpreted as zero.
 
-## 2. New durable entity: HostFreshness
+## 2. Durable entity: `host_freshness` (SQLite schema v3)
 
-Suggested persistence name: `host_freshness`.
+**Persistence**: the dashboard telemetry SQLite database, `PRAGMA user_version = 3`.
 
-| Field | Type | Required | Meaning |
+| Column | Type | Required | Meaning |
 |---|---|---:|---|
-| `host` | canonical hostname text | yes | Primary key; identical canonicalization to `ServerState`. |
-| `last_accepted_at` | UTC timestamp | yes after first report | Freshness epoch key. Copied from dashboard accepted-report time. |
-| `state` | `fresh` \| `offline` | yes after first report | Current derived state. Hosts without this row/report are `unknown`. |
-| `offline_emitted_for` | UTC timestamp nullable | no | Epoch for which `host_offline` was successfully committed for publication. |
-| `recovered_emitted_for` | UTC timestamp nullable | no | Epoch reached after a prior offline state for which `host_recovered` was committed for publication. |
-| `updated_at` | UTC timestamp | yes | Diagnostic/audit timestamp for transition record mutation. |
+| `host` | `TEXT PRIMARY KEY COLLATE NOCASE` | yes | Canonical hostname, using the same canonicalization as `ServerState`. |
+| `report_epoch_ms` | `INTEGER NOT NULL` | yes | Dashboard-side accepted-report time in UTC Unix milliseconds; the current freshness epoch key. |
+| `offline_emitted_at_ms` | `INTEGER NULL` | no | Dashboard-observed UTC Unix milliseconds when this epoch atomically crossed offline; `NULL` means the current epoch is fresh. |
+
+There is no process-local dedupe state in the contract. `last_result` and `last_seen_ms` remain the server record's accepted-report data and are never modified by an offline transition.
 
 ### Constraints and transitions
 
-1. `host` is unique.
-2. `last_accepted_at` is monotonically nondecreasing for a host; the report acceptance transaction assigns its value.
-3. `offline_emitted_for`, when non-null, equals `last_accepted_at` for the epoch that became stale. It is not cleared merely because the host stays stale.
-4. A new accepted report replaces `last_accepted_at`, sets `state=fresh`, and clears epoch-local offline state. If it follows `state=offline`, it records the new epoch in `recovered_emitted_for` exactly once.
-5. `Unknown` is represented by no row or no accepted report. It must not emit `host_offline`.
-6. Transition persistence precedes SSE publication. If broadcast fails after persistence, the broker's normal reconnect/reconciliation behavior may catch clients up, but a later evaluator must not publish a duplicate event for the same epoch.
+1. `host` is unique case-insensitively and is canonicalized before every read or write.
+2. `report_epoch_ms` is monotonic per host. A delayed operation for an older epoch is ignored and cannot overwrite a newer accepted report.
+3. `offline_emitted_at_ms` is set once, only for the matching `report_epoch_ms`; while it is non-`NULL`, repeated sweeps emit no further offline transition for that epoch.
+4. Accepting a newer report atomically replaces `report_epoch_ms` and clears `offline_emitted_at_ms`. If the prior epoch was offline, that same accepted-report transition is the single recovery transition.
+5. A host without an accepted report has no freshness row and is `unknown`; it never emits `host_offline`.
+6. The database transaction commits before SSE publication. A failed publication does not permit a later evaluator to duplicate the same epoch transition.
 
-### Transition transaction sketches
+### Atomic transition sketches
 
 **Accepted report**:
 
 ```text
-BEGIN
-  read host_freshness FOR UPDATE / equivalent serialized update
-  wasOffline := state == offline
-  write last_accepted_at = dashboardNow, state = fresh, updated_at = dashboardNow
-  if wasOffline: write recovered_emitted_for = dashboardNow
+BEGIN IMMEDIATE / writer transaction
+  read host_freshness for canonical host
+  reject if accepted epoch is older than stored epoch
+  recovered := stored offline_emitted_at_ms IS NOT NULL AND accepted epoch > stored epoch
+  upsert report_epoch_ms = accepted epoch, offline_emitted_at_ms = NULL
 COMMIT
-publish host_recovered once if wasOffline
+if recovered: publish host_recovered once
 publish existing server_update
 ```
 
 **Freshness evaluation**:
 
 ```text
-BEGIN
-  read host_freshness
-  if state == fresh AND now >= last_accepted_at + 3 * effectiveInterval:
-      write state = offline, offline_emitted_for = last_accepted_at, updated_at = now
+BEGIN IMMEDIATE / writer transaction
+  read host_freshness for canonical host and matching accepted-report epoch
+  if offline_emitted_at_ms IS NULL AND now >= accepted epoch + 3 * effectiveInterval:
+      set offline_emitted_at_ms = dashboard now
       transitioned = true
 COMMIT
 if transitioned: publish host_offline once
 ```
 
-The concrete database API may use an atomic conditional update rather than a literal SQL `FOR UPDATE`; the observable compare-and-set semantics are mandatory.
+The implementation uses serialized SQLite writer transactions rather than relying on a read-then-write race. Updating the configured heartbeat interval wakes the worker immediately, resets its timer cadence, and makes the next sweep use the new effective interval.
 
 ## 3. SSE event additions
 
@@ -123,10 +122,10 @@ Existing envelope remains:
 
 **Event invariants**:
 
-- `host_offline` occurs at most once per `last_accepted_at` epoch.
-- `host_recovered` occurs at most once per offline period and only after a report accepted after that offline state.
-- Event timestamps are dashboard-observed times.
-- `server_update` continues to carry the `ServerView`; clients that ignore new types remain compatible.
+- `host_offline` occurs at most once per canonical host and `report_epoch_ms`.
+- `host_recovered` occurs once only when a newer accepted report clears an offline epoch.
+- Event timestamps are dashboard-observed times. Freshness always uses dashboard acceptance time, never agent wall time.
+- `server_update` continues to carry the `ServerView`; the new event types are additive so clients that ignore them remain compatible.
 - No event includes dump paths, dump bytes, WER registry values containing environment-specific paths, tokens, or credentials.
 
 ## 4. RemoteFX validity model
@@ -178,30 +177,22 @@ WER is configured through Windows registry, not product SQLite.
 
 The implementation must use explicit ACL verification after application. Any inability to establish this DACL is a diagnostic-setup failure; it must not fall back to an unprotected location.
 
-### Optional admin-only inventory view
+### Scheduled diagnostic inventory and opt-in artifact handling
 
-The following metadata may be read by a local administrator from the protected directory:
+The disabled `\LISS Technologies\DrainCtl-Diags` task writes service/WER/event evidence and a **metadata-only** dump inventory to `diags`: name, byte count, and UTC creation time. It neither reads dump content nor computes a hash by default.
 
-```json
-{
-  "configured": true,
-  "max_dumps": 3,
-  "dumps": [
-    {"name": "drainctld.exe.1234.dmp", "bytes": 123456, "created_at": "2026-09-26T12:00:00Z"}
-  ]
-}
-```
+With `DRAINCTL_INCLUDE_CRASH_DUMPS=1` set only for an approved local investigation, the task may hash and gzip-copy the newest `.dmp`. The gzip and SHA-256 sidecar stay in the protected `dumps` directory, inherit its ACL, are never copied to `diags`, and are never uploaded. Seven-day task retention applies only to those task-created `crash-dump-*.dmp.gz` files and sidecars; it never deletes WER-managed `.dmp` files.
 
-It must not return file content, a download URL, stack-memory fragments, or a dump path to non-admin/dashboard clients.
+The inventory and opt-in artifacts must not return file contents, a download URL, stack-memory fragments, or a dump path to non-admin/dashboard clients.
 
 ## 6. Diagnostic counters and logs
 
 | Signal | Cardinality | Persistence | Meaning |
 |---|---:|---|---|
 | `remotefx_value_dropped` | bounded metric-name × reason | log/counter only | Invalid optional value was removed before persistence. |
-| `host_offline` / `host_recovered` | bounded by host × report epoch | durable freshness state + SSE | Freshness boundary occurred. |
+| `host_offline` / `host_recovered` | bounded by host × report epoch | `host_freshness` + SSE | Freshness boundary occurred. |
 | `wer_localdumps_configured` | process-wide | installer/service log | Protected local crash diagnostics setup succeeded. |
 | `wer_localdumps_setup_failed` | process-wide | installer/service log | Setup was unavailable or unsafe. |
-| dump inventory count | <= 3 | on-demand local inspection | Local artifacts exist; no content exposure. |
+| dump inventory count | <= 3 WER dumps | on-demand local inspection | Local artifacts exist; no content exposure. |
 
 No dump-content-derived field belongs in `metrics_raw`, audit history, report payloads, or SSE.

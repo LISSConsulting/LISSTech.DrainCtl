@@ -52,18 +52,19 @@ Expected results:
 
 If the registry key, directory, or safe ACL is absent, record the setup error and repair the approved installation. Do **not** point WER at a temporary, user-profile, network, or broadly writable fallback path.
 
-## 3. Optional scheduled diagnostic collection
+## 3. Scheduled diagnostic collection
 
 The disabled `\LISS Technologies\DrainCtl-Diags` task collects service, WER, event,
 and **metadata-only** dump inventory into `diags`. The inventory contains only the
-dump name, size, and UTC timestamp; it does not read dump bytes or calculate hashes.
+dump name, size, and UTC timestamp; by default it does not read dump bytes or
+calculate hashes.
 
 Set `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only for an approved local investigation. The
 task then hashes and gzip-copies only the newest `.dmp` **inside** `$dumpRoot`, writing
 the hash sidecar there as well. Both artifacts inherit the protected SYSTEM and
 Administrators-only dump ACL; no dump archive or hash is placed in `diags`, uploaded,
-or otherwise shared. Task retention deletes only its `crash-dump-*.dmp.gz` artifacts
-and hash sidecars after seven days; it never deletes WER-managed `.dmp` files.
+or otherwise shared. Seven-day task retention deletes only its `crash-dump-*.dmp.gz`
+artifacts and hash sidecars; it never deletes WER-managed `.dmp` files.
 
 Missing dump resources or an unreadable protected dump directory are reported in
 diagnostics without making the scheduled collector fail the rest of its work. Repair
@@ -117,13 +118,25 @@ Interpretation:
 
 ## 5. Crash-dump incident workflow
 
-1. **Stabilize**: determine whether SCM has exhausted its third-failure budget. If the service is stopped, restore it only under the incident/change process.
-2. **Preserve metadata**: record service state, SCM 7034/1067 events, `sc.exe qfailure` output, dump filename/size/creation time, and product/service version. Do not paste dump binary contents into the record.
-3. **Confirm authorization**: an authorized local administrator confirms the receiving restricted evidence location and incident identifier.
-4. **Copy, do not move**: copy the approved dump manually to the approved restricted evidence location. Keep the local original until the incident retention decision is made.
-5. **Restrict access**: maintain Administrators/System-only handling at source and destination. Do not relax ACLs to make the file easier to inspect.
-6. **Analyze offline**: use an approved debugger on a secured analysis workstation. Any redacted stack conclusion belongs in the incident record; memory contents do not.
-7. **Dispose deliberately**: after incident approval and required retention, an authorized administrator removes the local WER dump. The product never deletes WER-managed `.dmp` files automatically; only task-created opt-in gzip artifacts are retained for seven days.
+1. **Stabilize**: determine whether SCM has exhausted its restart limit: it restarts only the first two unexpected exits in a one-day reset period, then leaves the service stopped after the third. If stopped, restore it only under the incident/change process.
+2. **Locate and preserve metadata**: from an elevated PowerShell session, list the protected local directory without copying it:
+
+   ```powershell
+   Get-ChildItem -Force $dumpRoot | Sort-Object CreationTimeUtc -Descending |
+     Select-Object Name, Length, CreationTimeUtc
+   ```
+
+   Record service state, SCM 7034/1067 events, `sc.exe qfailure` output, selected dump filename/size/creation time, and product/service version. Do not paste dump binary contents into the incident record.
+3. **Confirm authorization**: an authorized local administrator confirms the incident identifier, retention decision, analysis workstation, and restricted evidence destination before a dump is copied.
+4. **Copy, do not move**: copy only the authorized dump manually to the approved restricted evidence location. Keep the protected local original until the incident retention decision is made; do not relax ACLs to make it easier to inspect.
+5. **Analyze offline**: use an approved debugger on the secured analysis workstation. Keep memory contents out of tickets, chat, telemetry, and dashboard data; record only approved, redacted findings in the incident record.
+6. **Delete deliberately**: after incident approval and required retention, an authorized administrator deletes the exact local WER dump from `$dumpRoot`:
+
+   ```powershell
+   Remove-Item -LiteralPath (Join-Path $dumpRoot '<approved-dump-name>.dmp') -Force
+   ```
+
+   Verify the selected filename before running the command. The product never deletes WER-managed `.dmp` files automatically; only task-created opt-in gzip artifacts and hash sidecars have seven-day retention.
 
 ## 6. Freshness and offline-transition walkthrough
 
@@ -131,10 +144,11 @@ Interpretation:
 2. Confirm a registered host has a recent accepted report and is shown as its reported health state.
 3. Prevent reports from that **test** host only, then wait at least three effective heartbeat intervals.
 4. Observe one `host_offline` event in the authenticated dashboard SSE diagnostic stream or structured server log. Existing UI/server state should show offline.
-5. Keep the host silent and repeat health queries. Expected: it remains offline without another event for the same last-report epoch.
-6. Restore reporting. Expected: one `host_recovered` event and a normal `server_update`; the reported health state is visible again.
+5. Keep the host silent and repeat health queries. Expected: it remains offline without another event for the same last-report epoch, including after a dashboard restart.
+6. Restore reporting. Expected: one `host_recovered` event followed by the compatible normal `server_update`; the reported health state is visible again.
+7. Change the configured interval during a controlled test. Expected: the freshness worker wakes immediately, replaces its prior wait, and evaluates the new `3 × effective interval` boundary without restarting the dashboard listener.
 
-Do not use agent-provided timestamps to judge this test. The dashboard acceptance time is authoritative. If the configured interval changes while testing, restart the timing window using the effective interval currently reported by the dashboard.
+Do not use agent-provided timestamps to judge this test. The dashboard acceptance time is authoritative.
 
 ## 7. RemoteFX data-quality walkthrough
 
