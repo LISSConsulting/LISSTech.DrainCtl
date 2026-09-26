@@ -5,10 +5,10 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="favicon.ico" type="image/x-icon" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-        <title>DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins</title>
+        <title>DrainCtl — Resilient RDS Farm Monitoring for MSPs &amp; RDSH Admins</title>
         <meta
             name="description"
-            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry with DrainCtl v26.9.36."
+            content="Monitor RDS session hosts, drain changes, service recovery, performance, and durable crash evidence from one secure dashboard. DrainCtl keeps restart-safe host visibility and truthful RemoteFX telemetry."
         />
         <meta
             name="keywords"
@@ -19,10 +19,10 @@
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
+        <meta property="og:title" content="DrainCtl — Resilient RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
         <meta
             property="og:description"
-            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry."
+            content="Secure RDS farm monitoring with service recovery, restart-safe offline and recovery visibility, protected local crash evidence, and truthful RemoteFX telemetry."
         />
         <meta property="og:url" content="https://lissconsulting.github.io/LISSTech.DrainCtl/" />
         <meta
@@ -33,10 +33,10 @@
 
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DrainCtl v26.9.36 — RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
+        <meta name="twitter:title" content="DrainCtl — Resilient RDS Farm Monitoring for MSPs &amp; RDSH Admins" />
         <meta
             name="twitter:description"
-            content="Monitor RDS session hosts, drain changes, sessions, performance, and EventSpike anomalies from one secure dashboard. Manage your fleet, alerts, and durable telemetry."
+            content="Secure RDS farm monitoring with service recovery, restart-safe offline and recovery visibility, protected local crash evidence, and truthful RemoteFX telemetry."
         />
         <meta
             name="twitter:image"
@@ -51,8 +51,8 @@
             "name": "DrainCtl",
             "applicationCategory": "BusinessApplication",
             "operatingSystem": "Windows Server",
-            "description": "RDS farm monitoring for MSPs and RDSH admins. Detect drain changes, track sessions and performance, investigate EventSpike anomalies, and manage the fleet from a secure dashboard.",
-            "softwareVersion": "26.9.36",
+            "description": "Resilient RDS farm monitoring for MSPs and RDSH admins. Detect drain changes, recover the service after failures, retain restart-safe host-offline and recovery history, and investigate protected local crash evidence from a secure dashboard.",
+            "downloadUrl": "https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest",
             "url": "https://lissconsulting.github.io/LISSTech.DrainCtl/",
             "screenshot": "https://lissconsulting.github.io/LISSTech.DrainCtl/dashboard-screenshot.png",
             "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -1344,8 +1344,8 @@
                 <img src="logo.png" alt="DrainCtl" width="72" height="72" style="display: block; margin: 0 auto 12px" />
                 <h1>Someone disabled new connections<br />at 2 AM. <em>You'll know who.</em></h1>
                 <p class="hero-sub">
-                    DrainCtl watches the RDS signals that matter: drain changes, sessions, performance, and unusual event
-                    volume. Investigate from one secure dashboard, act on durable history, and keep the whole farm in view.
+                    DrainCtl watches the RDS signals that matter: drain changes, sessions, performance, service health, and
+                    unusual event volume. Investigate from one secure dashboard, act on durable history, and keep the whole farm in view.
                 </p>
                 <div class="hero-buttons">
                     <a
@@ -1485,8 +1485,8 @@
                         <div class="hero-feature-body">
                             <div class="hero-feature-title">Performance That Reads Clearly</div>
                             <div class="hero-feature-desc">
-                                CPU, memory, disk I/O, input delay, and optional RemoteFX come from Windows PDH. Fleet
-                                indicators show P50 plus the right tail; FPS and frame quality show P95 as a service floor.
+                                CPU, memory, disk I/O, input delay, and optional RemoteFX come from Windows PDH. P50 and P95
+                                use valid samples; zero FPS or quality means inactive, while missing values remain gaps.
                             </div>
                         </div>
                     </div>
@@ -1548,8 +1548,8 @@
                         <div class="compact-card-icon">&#128200;</div>
                         <div class="compact-card-title">Fleet &amp; Host Charts</div>
                         <div class="compact-card-desc">
-                            Explore fleet and host history at 5M, 15M where available, 1H, 1D, 3D, 5D, or 30D. LOAD,
-                            Health Indicators, Sessions, and optional RemoteFX all read from retained SQLite telemetry.
+                            P50 and P95 use valid samples: lower-is-better zero values are retained, while zero FPS or
+                            quality is inactive and unavailable metrics chart as gaps.
                         </div>
                     </div>
                     <div class="compact-card">
@@ -1561,11 +1561,11 @@
                         </div>
                     </div>
                     <div class="compact-card">
-                        <div class="compact-card-icon">&#128274;</div>
-                        <div class="compact-card-title">Enterprise Ready</div>
+                        <div class="compact-card-icon">&#128737;&#65039;</div>
+                        <div class="compact-card-title">Resilient by Design</div>
                         <div class="compact-card-desc">
-                            DNS SRV discovery, EV code-signed installer, Kerberos SSO, daily log rotation, 12 PowerShell
-                            cmdlets, and CLI.
+                            Windows restarts the service after its first or second failure. Protected local diagnostics retain
+                            service state, failure actions, WER settings, crash events, and dump inventory for troubleshooting.
                         </div>
                     </div>
                 </div>
@@ -1684,7 +1684,7 @@
                                 <p>
                                     Interactive wizard <em>or</em> silent deploy. <code>INSTALL_MODE=dashboard</code>,
                                     <code>DASHBOARD_URL=...</code>, <code>ENABLE_PERF=1</code> &mdash; configure machine-owned settings from the command line.
-                                    Upgrades skip config dialogs and preserve existing settings.
+                                    In-place upgrades preserve settings and operational history without reopening configuration dialogs.
                                 </p>
                             </div>
                         </div>
@@ -1697,47 +1697,48 @@
         <section class="section section--shaded" id="releases">
             <div class="wrap">
                 <div class="section-label">Latest Stable Release</div>
-                <h2 class="section-title serif section-title--italic">v26.9.36 puts fleet operations in reach.</h2>
+                <h2 class="section-title serif section-title--italic">The latest stable release keeps your farm recoverable.</h2>
                 <p class="release-lede">
-                    The current stable release brings durable fleet management, clearer telemetry, and EventSpike controls
-                    together without sacrificing the in-place upgrade path.
+                    Get self-healing service recovery, restart-safe host visibility, protected local crash evidence, and
+                    telemetry that preserves uncertainty&mdash;without sacrificing the in-place upgrade path.
                 </p>
                 <div class="release-grid">
                     <article class="card release-card" data-number="01">
-                        <span class="release-tag">Fleet management</span>
-                        <h3>Manage the Servers table as a real operating surface.</h3>
+                        <span class="release-tag">Self-healing service</span>
+                        <h3>Recover from the failures Windows can recover.</h3>
                         <p>
-                            Keep a persistent multi-selection, mute or notify per server, Force Update supported agents,
-                            and permanently remove hosts. Removed hosts are durably tombstoned and restorable from Config → Servers.
+                            The Service Control Manager restarts DrainCtl five seconds after its first and second failures,
+                            then stops retrying. The failure count resets after one day so repeated faults remain visible.
                         </p>
                     </article>
                     <article class="card release-card" data-number="02">
-                        <span class="release-tag">Reliable update delivery</span>
-                        <h3>Request updates that survive a missed connection.</h3>
+                        <span class="release-tag">Restart-safe host visibility</span>
+                        <h3>Know when a host goes offline&mdash;and when it returns.</h3>
                         <p>
-                            Force Update supports agents 26.9.17 and later. Each request is durable, retries until
-                            acknowledged, and reports its terminal outcome instead of disappearing into a best-effort queue.
+                            SQLite-backed report epochs survive restarts. The dashboard emits one additive offline event after
+                            three missed heartbeats and one recovery event when reporting resumes, while keeping server-update compatibility.
                         </p>
                     </article>
                     <article class="card release-card" data-number="03">
-                        <span class="release-tag">EventSpike maturity</span>
-                        <h3>Detect during warm-up, then keep learning.</h3>
+                        <span class="release-tag">Protected crash evidence</span>
+                        <h3>Keep local evidence without copying sensitive dumps.</h3>
                         <p>
-                            EventSpike retains a seven-day warm-up while it continues to detect. Steady defaults balance
-                            sensitivity with persistence, and exact channel cooldowns can override the global setting.
+                            WER retains up to three DrainCtl mini dumps in a permanent SYSTEM/Administrators-only ProgramData
+                            folder. Hourly diagnostics record protected metadata; <code>DRAINCTL_INCLUDE_CRASH_DUMPS=1</code>
+                            hashes and gzips only the newest protected dump and never auto-uploads it.
                         </p>
                     </article>
                     <article class="card release-card" data-number="04">
                         <span class="release-tag">Safe upgrades</span>
                         <h3>Keep the operational history you built.</h3>
                         <p>
-                            In-place upgrades preserve configuration, telemetry, removed-server tombstones, the Force
-                            Update outbox, and EventSpike baselines and warm-up state.
+                            In-place upgrades preserve configuration, telemetry, host-freshness state, removed-server
+                            tombstones, the Force Update outbox, and EventSpike baselines and warm-up state.
                         </p>
                     </article>
                 </div>
                 <div class="release-footer">
-                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill">Download v26.9.36 &rarr;</a>
+                    <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest" class="btn btn-fill">Download latest stable release &rarr;</a>
                     <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases" class="btn btn-ghost">See all releases</a>
                     <span class="release-note">Stable channel &middot; signed MSI &middot; durable in-place upgrade</span>
                 </div>
@@ -1798,8 +1799,8 @@
                         <div class="icon">&#128200;</div>
                         <h3>Live Monitoring, Durable History</h3>
                         <p>
-                            Server-Sent Events deliver live changes while LOAD, Health Indicators, Sessions, and optional
-                            RemoteFX charts query retained SQLite telemetry across 5M through 30D views.
+                            Server-Sent Events deliver live changes, including one offline and recovery signal per outage.
+                            LOAD, Health Indicators, Sessions, and optional RemoteFX charts query retained SQLite telemetry.
                         </p>
                     </div>
                     <div class="feature card">

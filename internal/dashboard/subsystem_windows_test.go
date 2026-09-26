@@ -151,3 +151,28 @@ func TestSubsystem_RDCollectionResolverPreservesPreStartBrokerUpdate(t *testing.
 		t.Fatal("resolver did not refresh")
 	}
 }
+
+func TestSubsystem_StopDrainsStaleHostTransitionWorker(t *testing.T) {
+	certPath, keyPath := writeSubsystemTestTLS(t)
+	state := newTestServerState(t)
+	s := NewSubsystem(dc.DashboardConfig{
+		Port:              0,
+		TLSCert:           certPath,
+		TLSKey:            keyPath,
+		HeartbeatInterval: time.Hour,
+	}, t.TempDir(), nil, nil, nil, state.store, nil, nil, nil, false)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not drain stale-host transition worker")
+	}
+}

@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"database/sql"
+	"strconv"
 	"strings"
 )
 
@@ -116,6 +117,12 @@ CREATE TABLE IF NOT EXISTS server_exclusions (
 
 CREATE INDEX IF NOT EXISTS server_exclusions_at
     ON server_exclusions(excluded_at_ms DESC);
+CREATE TABLE IF NOT EXISTS host_freshness (
+    host                  TEXT    PRIMARY KEY COLLATE NOCASE,
+    report_epoch_ms       INTEGER NOT NULL,
+    offline_emitted_at_ms INTEGER
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS force_update_outbox (
     command_id     TEXT    NOT NULL,
     host           TEXT    NOT NULL,
@@ -129,7 +136,11 @@ CREATE INDEX IF NOT EXISTS force_update_outbox_pending
     ON force_update_outbox(host, accepted_at_ms, command_id);
 `
 
-// applySchema runs additive idempotent DDL and advances user_version to 2.
+const schemaVersion = 3
+
+// applySchema runs additive idempotent DDL and advances user_version to the
+// current schema version.
+
 // It never downgrades a schema version advanced by a future feature.
 func applySchema(db *sql.DB) error {
 	tx, err := db.Begin()
@@ -147,8 +158,8 @@ func applySchema(db *sql.DB) error {
 	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 2 {
-		if _, err = tx.Exec("PRAGMA user_version = 2"); err != nil {
+	if version < schemaVersion {
+		if _, err = tx.Exec("PRAGMA user_version = " + strconv.Itoa(schemaVersion)); err != nil {
 			return err
 		}
 	}

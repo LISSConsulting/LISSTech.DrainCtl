@@ -59,6 +59,22 @@ func AggregateServicePercentiles(values []float64, higherIsBetter bool) (p50, p9
 	return p50, Percentile(values, tail)
 }
 
+// filterRemoteFXValues removes invalid PDH instance values in place. A zero
+// FPS or quality value denotes an inactive stream; zero remains valid for
+// lower-is-better loss and skipped-frame metrics.
+func filterRemoteFXValues(values []float64, min, max float64, higherIsBetter bool) []float64 {
+	n := 0
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < min || value > max ||
+			(higherIsBetter && value == 0) {
+			continue
+		}
+		values[n] = value
+		n++
+	}
+	return values[:n]
+}
+
 // RoundTo rounds a float64 to n decimal places.
 func RoundTo(val float64, places int) float64 {
 	pow := math.Pow(10, float64(places))

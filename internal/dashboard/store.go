@@ -68,6 +68,10 @@ type ServerInfo struct {
 type ServerState struct {
 	store serverReader
 
+	// freshness durably deduplicates stale/offline transitions by host and
+	// accepted report epoch. It is optional only for legacy unit fixtures.
+	freshness *telemetry.FreshnessStore
+
 	// exclusions is the durable tombstone store used to gate re-registration
 	// against permanently-removed servers. May be nil for callers that do not
 	// want this gate (e.g. tests for the legacy behavior). SetExclusionReader
@@ -102,6 +106,9 @@ type ServerState struct {
 	// OnUpdate, if non-nil, is called after a server state update with the hostname.
 	// Used by DashboardServer to broadcast SSE events.
 	OnUpdate func(hostname string)
+	// OnRecovered, if non-nil, runs once after a newer accepted report clears
+	// a persisted offline epoch and before the compatible server_update.
+	OnRecovered func(hostname string, reportEpoch time.Time)
 	// OnMetrics, if non-nil, is called after every state update with the full
 	// CheckResult so that both the HTTP and local-report paths write metrics.
 	OnMetrics func(result dc.CheckResult)
@@ -161,6 +168,12 @@ func (s *ServerState) GetConsumeForceUpdate() func(string) *ForceUpdatePendingCo
 // lifetime of the returned ServerState.
 func NewServerState(store serverReader) *ServerState {
 	return &ServerState{store: store}
+}
+
+// SetFreshnessStore attaches the durable outage transition store. Production
+// wires this once during subsystem construction; nil preserves legacy fixtures.
+func (s *ServerState) SetFreshnessStore(store *telemetry.FreshnessStore) {
+	s.freshness = store
 }
 
 // SetExclusionReader wires the durable tombstone gate. Once set, Register
@@ -236,9 +249,9 @@ func (s *ServerState) Register(hostname string) registrationResult {
 	return registrationAccepted
 }
 
-// Remove deletes a server by hostname. Returns true if found. Invalidates the
-// per-host cache so a subsequent re-register starts from a clean slate and a
-// stale cached *ServerInfo can't outlive the row it described.
+// Remove deletes a server by hostname and its associated freshness state.
+// Returns true if the live server row was found. Cache entries are invalidated
+// so a subsequent re-register starts from a clean slate.
 func (s *ServerState) Remove(hostname string) bool {
 	hostname = telemetry.CanonicalHostname(hostname)
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
@@ -247,6 +260,11 @@ func (s *ServerState) Remove(hostname string) bool {
 	if err != nil {
 		slog.Error("dashboard: remove failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
 		return false
+	}
+	if s.freshness != nil {
+		if _, err := s.freshness.Remove(ctx, hostname); err != nil {
+			slog.Warn("dashboard: remove freshness failed", "host", hostname, "error", err)
+		}
 	}
 	s.cache.Delete(hostname)
 	s.registeredAt.Delete(hostname)
@@ -309,6 +327,9 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
 	defer cancel()
+	// Capture before ServerStore writes so this accepted epoch cannot exceed
+	// the persisted Unix-millisecond last_seen used by a later stale sweep.
+	acceptedAt := time.UnixMilli(time.Now().UTC().UnixMilli()).UTC()
 	updated, err := s.store.Update(ctx, hostname, lastJSON)
 	if err != nil {
 		// DB write failed — do NOT populate the cache. The DB is the source
@@ -320,20 +341,28 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if !updated {
 		return
 	}
+	recovered := false
+	if s.freshness != nil {
+		recovered, err = s.freshness.MarkFresh(ctx, hostname, acceptedAt)
+		if err != nil {
+			slog.Warn("dashboard: mark fresh failed", "host", hostname, "error", err)
+		}
+	}
 
 	// Populate the SSE hot-path cache with an immutable *ServerInfo. The
 	// registered_at timestamp is immutable post-Register, so we cache it
 	// per-host on first Update (one DB read per host process-lifetime) and
 	// reuse for every subsequent heartbeat — that's the actual hot-path
-	// DB-read elimination this commit was meant to deliver. LastSeen is
-	// generated locally from time.Now() to match the timestamp ServerStore
-	// just wrote (modulo sub-millisecond skew, inconsequential for stale-
-	// status display).
+	// DB-read elimination this commit was meant to deliver. acceptedAt uses
+	// ServerStore's Unix-millisecond clock precision.
 	registeredAt, ok := s.lookupRegisteredAt(ctx, hostname)
 	if !ok {
 		// Couldn't determine registered_at (DB error or row vanished
 		// between Update and Get). Skip caching this round; GetCached
 		// falls back to Get on the next broadcast.
+		if recovered && s.OnRecovered != nil {
+			s.OnRecovered(hostname, acceptedAt)
+		}
 		if s.OnUpdate != nil {
 			s.OnUpdate(hostname)
 		}
@@ -345,7 +374,7 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	info := &ServerInfo{
 		Hostname:     hostname,
 		RegisteredAt: registeredAt,
-		LastSeen:     time.Now().UTC(),
+		LastSeen:     acceptedAt,
 	}
 	if result != nil {
 		// Top-level deep-copy: take a value copy of *result and wrap
@@ -358,6 +387,9 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	}
 	s.cache.Store(hostname, info)
 
+	if recovered && s.OnRecovered != nil {
+		s.OnRecovered(hostname, acceptedAt)
+	}
 	if s.OnUpdate != nil {
 		s.OnUpdate(hostname)
 	}
@@ -466,6 +498,11 @@ func (s *ServerState) PermanentRemove(hostname, by, reason string) (time.Time, e
 	}
 	s.cache.Delete(hostname)
 	s.registeredAt.Delete(hostname)
+	if s.freshness != nil {
+		if _, err := s.freshness.Remove(ctx, hostname); err != nil {
+			slog.Warn("dashboard: remove freshness failed", "host", hostname, "error", err)
+		}
+	}
 	return time.Now().UTC(), nil
 }
 

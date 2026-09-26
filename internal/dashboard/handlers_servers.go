@@ -288,6 +288,11 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if result.Performance != nil {
+		performance := dc.SanitizePerfSnapshot(*result.Performance)
+		result.Performance = &performance
+	}
+
 	if result.Sessions != nil {
 		if limit, ok := sessionlimit.Normalize(uint64(result.Sessions.MaxSessions)); ok {
 			result.Sessions.MaxSessions = limit

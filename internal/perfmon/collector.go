@@ -347,25 +347,37 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// Per-session (V2).
 	if c.collectPerSession && sessionCollectOK {
 		if c.inputDelayAvail && c.inputDelayH != 0 {
-			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil && len(vals) > 0 {
-				snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
-				snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
-				snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
-				snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
+			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil {
+				vals = filterRemoteFXValues(vals, 0, 60000, false)
+				if len(vals) > 0 {
+					snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
+					snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
+					snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
+					snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
+					snap.P50Present |= dc.PerfP50InputDelay
+				}
 			}
 		}
 		if c.sessCPUH != 0 {
-			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil && len(vals) > 0 {
-				p50, p95, _ := AggregateValues(vals)
-				snap.SessionCPUP50 = RoundTo(p50, 1)
-				snap.SessionCPUP95 = RoundTo(p95, 1)
+			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil {
+				vals = filterRemoteFXValues(vals, 0, 100, false)
+				if len(vals) > 0 {
+					p50, p95, _ := AggregateValues(vals)
+					snap.SessionCPUP50 = RoundTo(p50, 1)
+					snap.SessionCPUP95 = RoundTo(p95, 1)
+					snap.P50Present |= dc.PerfP50SessionCPU
+				}
 			}
 		}
 		if c.sessMemH != 0 {
-			if vals, err := pdhGetDoubleArray(c.sessMemH); err == nil && len(vals) > 0 {
-				p50, p95, _ := AggregateValues(vals)
-				snap.SessionMemP50 = RoundTo(p50, 0)
-				snap.SessionMemP95 = RoundTo(p95, 0)
+			if vals, err := pdhGetDoubleArray(c.sessMemH); err == nil {
+				vals = filterRemoteFXValues(vals, 0, 1<<60, false)
+				if len(vals) > 0 {
+					p50, p95, _ := AggregateValues(vals)
+					snap.SessionMemP50 = RoundTo(p50, 0)
+					snap.SessionMemP95 = RoundTo(p95, 0)
+					snap.P50Present |= dc.PerfP50SessionMem
+				}
 			}
 		}
 	}
@@ -373,15 +385,30 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
 		snap.RFXAvailable = true
-		c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, true)
-		c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, false)
-		c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, false)
-		c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, false)
-		c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, true)
-		c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, false)
-		c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, false)
+		if c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, 0, 240, true) {
+			snap.P50Present |= dc.PerfP50RFXFPSOut
+		}
+		if c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, 0, 1000000, false) {
+			snap.P50Present |= dc.PerfP50RFXSkipServer
+		}
+		if c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, 0, 1000000, false) {
+			snap.P50Present |= dc.PerfP50RFXSkipNet
+		}
+		if c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, 0, 60000, false) {
+			snap.P50Present |= dc.PerfP50RFXEncodeMS
+		}
+		if c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, 0, 100, true) {
+			snap.P50Present |= dc.PerfP50RFXQuality
+		}
+		if c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, 0, 60000, false) {
+			snap.P50Present |= dc.PerfP50RFXRTT
+		}
+		if c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, 0, 100, false) {
+			snap.P50Present |= dc.PerfP50RFXLoss
+		}
 	}
 
+	*snap = dc.SanitizePerfSnapshot(*snap)
 	slog.Debug(fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
 		snap.CPUPct, snap.MemAvailMB, snap.MemTotalMB, snap.PagesSec, snap.DiskQueue, snap.TCPRetrans, snap.InputDelayMax))
 
@@ -400,6 +427,7 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 		agg.PagesSec += s.PagesSec
 		agg.DiskQueue += s.DiskQueue
 		agg.TCPRetrans += s.TCPRetrans
+		agg.P50Present |= s.P50Present
 
 		// Worst-case metrics: keep the max across samples.
 		if s.InputDelayP50 > agg.InputDelayP50 {
@@ -443,10 +471,20 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 			} else {
 				// Higher-is-better metrics retain the worst (lowest) service
 				// floor across samples; lower-is-better metrics retain max.
-				agg.RFXFPSOut = min(agg.RFXFPSOut, s.RFXFPSOut)
-				agg.RFXFPSOutP50 = min(agg.RFXFPSOutP50, s.RFXFPSOutP50)
-				agg.RFXQuality = min(agg.RFXQuality, s.RFXQuality)
-				agg.RFXQualityP50 = min(agg.RFXQualityP50, s.RFXQualityP50)
+				if s.RFXFPSOut > 0 && (agg.RFXFPSOut == 0 || s.RFXFPSOut < agg.RFXFPSOut) {
+					agg.RFXFPSOut = s.RFXFPSOut
+				}
+				if s.HasP50(dc.PerfP50RFXFPSOut, s.RFXFPSOutP50) && s.RFXFPSOutP50 > 0 &&
+					(!agg.HasP50(dc.PerfP50RFXFPSOut, agg.RFXFPSOutP50) || agg.RFXFPSOutP50 == 0 || s.RFXFPSOutP50 < agg.RFXFPSOutP50) {
+					agg.RFXFPSOutP50 = s.RFXFPSOutP50
+				}
+				if s.RFXQuality > 0 && (agg.RFXQuality == 0 || s.RFXQuality < agg.RFXQuality) {
+					agg.RFXQuality = s.RFXQuality
+				}
+				if s.HasP50(dc.PerfP50RFXQuality, s.RFXQualityP50) && s.RFXQualityP50 > 0 &&
+					(!agg.HasP50(dc.PerfP50RFXQuality, agg.RFXQualityP50) || agg.RFXQualityP50 == 0 || s.RFXQualityP50 < agg.RFXQualityP50) {
+					agg.RFXQualityP50 = s.RFXQualityP50
+				}
 				agg.RFXEncodeMS = max(agg.RFXEncodeMS, s.RFXEncodeMS)
 				agg.RFXEncodeMSP50 = max(agg.RFXEncodeMSP50, s.RFXEncodeMSP50)
 				agg.RFXRTT = max(agg.RFXRTT, s.RFXRTT)
@@ -500,15 +538,22 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	return 0, false
 }
 
-func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, higherIsBetter bool) {
+func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, min, max float64, higherIsBetter bool) bool {
 	if h == 0 {
-		return
+		return false
 	}
-	if values, err := pdhGetDoubleArray(h); err == nil && len(values) > 0 {
-		median, serviceP95 := AggregateServicePercentiles(values, higherIsBetter)
-		*p50 = RoundTo(median, places)
-		*p95 = RoundTo(serviceP95, places)
+	values, err := pdhGetDoubleArray(h)
+	if err != nil {
+		return false
 	}
+	values = filterRemoteFXValues(values, min, max, higherIsBetter)
+	if len(values) == 0 {
+		return false
+	}
+	median, serviceP95 := AggregateServicePercentiles(values, higherIsBetter)
+	*p50 = RoundTo(median, places)
+	*p95 = RoundTo(serviceP95, places)
+	return true
 }
 
 // Close releases PDH queries and stops the worker goroutine.

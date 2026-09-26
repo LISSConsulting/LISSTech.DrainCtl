@@ -24,16 +24,26 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// newTestServer creates a DashboardServer backed by a temp directory.
+// newTestServer creates a DashboardServer backed by a temp telemetry DB.
 // No TLS, no auth middleware — tests call handler methods directly.
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	state := NewServerState(telemetry.NewServerStore(db))
+	freshness := telemetry.NewFreshnessStore(db)
+	state.SetFreshnessStore(freshness)
 	return &DashboardServer{
-		state:                newTestServerState(t),
-		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
-		broker:               NewBroker(),
-		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
-		forceUpdates:         newForceUpdateState(),
+		state:                    state,
+		cfg:                      dc.DashboardConfig{Group: "Domain Admins"},
+		broker:                   NewBroker(),
+		freshness:                freshness,
+		heartbeatIntervalChanged: make(chan struct{}, 1),
+		remoteEvtSpikeStatus:     make(map[string]evtspike.DetectorStatus),
+		forceUpdates:             newForceUpdateState(),
 	}
 }
 
@@ -587,6 +597,62 @@ func TestHandleReport_StoresLastResult(t *testing.T) {
 	}
 }
 
+func TestHandleReport_SanitizesRemoteFXBeforeStateAndView(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+
+	result := dc.CheckResult{
+		Host: "SRV01",
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable: true,
+			RFXFPSOut:    0, RFXFPSOutP50: 30,
+			RFXQuality: 0, RFXQualityP50: 80,
+			RFXRTT: 60001, RFXRTTP50: 25,
+			RFXLoss: 0, RFXLossP50: 0,
+			P50Present: dc.PerfP50RFXFPSOut |
+				dc.PerfP50RFXQuality |
+				dc.PerfP50RFXRTT |
+				dc.PerfP50RFXLoss,
+		},
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	w := httptest.NewRecorder()
+	ds.handleReport(w, httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /report status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	assertRemoteFX := func(source string, perf *dc.PerfSnapshot) {
+		t.Helper()
+		if perf == nil {
+			t.Fatalf("%s performance = nil", source)
+		}
+		if perf.RFXFPSOut != 0 || perf.RFXFPSOutP50 != 0 || perf.HasP50(dc.PerfP50RFXFPSOut, perf.RFXFPSOutP50) {
+			t.Errorf("%s inactive FPS = (%v, %v, present=%v), want (0, 0, false)",
+				source, perf.RFXFPSOut, perf.RFXFPSOutP50, perf.HasP50(dc.PerfP50RFXFPSOut, perf.RFXFPSOutP50))
+		}
+		if perf.RFXQuality != 0 || perf.RFXQualityP50 != 0 || perf.HasP50(dc.PerfP50RFXQuality, perf.RFXQualityP50) {
+			t.Errorf("%s inactive quality = (%v, %v, present=%v), want (0, 0, false)",
+				source, perf.RFXQuality, perf.RFXQualityP50, perf.HasP50(dc.PerfP50RFXQuality, perf.RFXQualityP50))
+		}
+		if perf.RFXRTT != 0 || perf.RFXRTTP50 != 25 || !perf.HasP50(dc.PerfP50RFXRTT, perf.RFXRTTP50) {
+			t.Errorf("%s RTT = (%v, %v, present=%v), want (0, 25, true)",
+				source, perf.RFXRTT, perf.RFXRTTP50, perf.HasP50(dc.PerfP50RFXRTT, perf.RFXRTTP50))
+		}
+		if perf.RFXLoss != 0 || perf.RFXLossP50 != 0 || !perf.HasP50(dc.PerfP50RFXLoss, perf.RFXLossP50) {
+			t.Errorf("%s loss = (%v, %v, present=%v), want (0, 0, true)",
+				source, perf.RFXLoss, perf.RFXLossP50, perf.HasP50(dc.PerfP50RFXLoss, perf.RFXLossP50))
+		}
+	}
+
+	stored := ds.state.All()[0]
+	assertRemoteFX("LastResult", stored.LastResult.Performance)
+	assertRemoteFX("ServerView", ds.serverView(stored).Perf)
+}
+
 func TestHandleReport_NormalizesUnlimitedSessionCapacity(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
@@ -629,6 +695,59 @@ func TestCheckResultSamples_OmitsUnlimitedSessionCapacity(t *testing.T) {
 	for _, sample := range samples {
 		if sample.Counter == "sessions_max" {
 			t.Fatalf("unexpected sessions_max sample for unlimited capacity: %+v", sample)
+		}
+	}
+}
+
+func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable:     true,
+			RFXFPSOut:        0,
+			RFXFPSOutP50:     0,
+			RFXEncodeMS:      10,
+			RFXEncodeMSP50:   5,
+			RFXQuality:       100,
+			RFXQualityP50:    100,
+			RFXRTT:           20,
+			RFXRTTP50:        10,
+			RFXLoss:          0,
+			RFXLossP50:       0.25,
+			RFXSkipServer:    0,
+			RFXSkipServerP50: 1.5,
+			RFXSkipNet:       0,
+			RFXSkipNetP50:    2.5,
+		},
+	})
+
+	got := make(map[string]float64, len(samples))
+	for _, sample := range samples {
+		got[sample.Counter] = sample.Value
+	}
+	if _, ok := got["rfx_fps_out"]; ok {
+		t.Error("inactive zero FPS must be omitted, not persisted as degraded performance")
+	}
+	if _, ok := got["rfx_fps_out_p50"]; ok {
+		t.Error("missing zero FPS P50 must be omitted")
+	}
+	for counter, want := range map[string]float64{
+		"rfx_encode_ms":           10,
+		"rfx_encode_ms_p50":       5,
+		"rfx_quality_pct":         100,
+		"rfx_quality_pct_p50":     100,
+		"rfx_rtt_ms":              20,
+		"rfx_rtt_ms_p50":          10,
+		"rfx_loss_pct":            0,
+		"rfx_loss_pct_p50":        0.25,
+		"rfx_skip_server_sec":     0,
+		"rfx_skip_server_sec_p50": 1.5,
+		"rfx_skip_net_sec":        0,
+		"rfx_skip_net_sec_p50":    2.5,
+	} {
+		if got[counter] != want {
+			t.Errorf("%s = %v, want %v", counter, got[counter], want)
 		}
 	}
 }
@@ -6155,5 +6274,172 @@ func TestGetSettings_RemoteConfigCarriesEvtSpikeAndExclusions(t *testing.T) {
 	}
 	if got := (*settings.EvtSpike.ChannelCooldownMinutes)["Application"]; got != 30 {
 		t.Errorf("channel cooldown = %d, want 30", got)
+	}
+}
+
+func staleTransitionFixture(t *testing.T, status string) (*DashboardServer, time.Time) {
+	t.Helper()
+	ds := newTestServer(t)
+	ds.wireServerStateCallbacks()
+	ds.setHeartbeatInterval(time.Minute)
+	ds.state.Register("SRV01")
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: status})
+	return ds, time.Now().UTC().Add(3 * time.Minute)
+}
+
+func readSSEEvent(t *testing.T, ch <-chan []byte) SSEEvent {
+	t.Helper()
+	select {
+	case payload := <-ch:
+		var event SSEEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode SSE event: %v", err)
+		}
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for SSE event")
+		return SSEEvent{}
+	}
+}
+
+func TestStaleHostSweep_PersistsOfflineAndKeepsServerUpdate(t *testing.T) {
+	ds, now := staleTransitionFixture(t, "Healthy")
+	id, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer ds.broker.Unsubscribe(id)
+
+	before := ds.state.Get("SRV01")
+	ds.sweepStaleServers(now)
+	offline := readSSEEvent(t, ch)
+	if offline.Type != "host_offline" || offline.Host != "SRV01" {
+		t.Fatalf("offline event = %#v", offline)
+	}
+	var payload HostFreshnessEvent
+	if err := json.Unmarshal(offline.Data, &payload); err != nil {
+		t.Fatalf("decode offline payload: %v", err)
+	}
+	if payload.ReportEpoch != before.LastSeen || payload.LastSeen != before.LastSeen || payload.TransitionTime != now || payload.StaleAfter != 3*time.Minute {
+		t.Fatalf("offline payload = %#v", payload)
+	}
+	if update := readSSEEvent(t, ch); update.Type != "server_update" || update.Host != "SRV01" {
+		t.Fatalf("compatibility update = %#v", update)
+	}
+	after := ds.state.Get("SRV01")
+	if after.LastSeen != before.LastSeen || after.LastResult.Status != before.LastResult.Status {
+		t.Fatal("offline transition mutated the servers row")
+	}
+
+	ds.sweepStaleServers(now.Add(time.Minute))
+	select {
+	case event := <-ch:
+		t.Fatalf("duplicate outage event: %s", event)
+	default:
+	}
+}
+
+func TestStaleHostSweep_RestartDedupesSameEpoch(t *testing.T) {
+	dir := t.TempDir()
+	db, err := telemetry.Open(dir)
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	newDashboard := func() *DashboardServer {
+		state := NewServerState(telemetry.NewServerStore(db))
+		freshness := telemetry.NewFreshnessStore(db)
+		state.SetFreshnessStore(freshness)
+		return &DashboardServer{
+			state:                    state,
+			broker:                   NewBroker(),
+			freshness:                freshness,
+			heartbeatIntervalChanged: make(chan struct{}, 1),
+			forceUpdates:             newForceUpdateState(),
+		}
+	}
+	first := newDashboard()
+	first.setHeartbeatInterval(time.Minute)
+	first.state.Register("SRV01")
+	first.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	now := time.Now().UTC().Add(3 * time.Minute)
+	id, ch, _, err := first.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer first.broker.Unsubscribe(id)
+	first.sweepStaleServers(now)
+	_ = readSSEEvent(t, ch)
+	_ = readSSEEvent(t, ch)
+
+	second := newDashboard()
+	second.setHeartbeatInterval(time.Minute)
+	id, ch, _, err = second.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe restart: %v", err)
+	}
+	defer second.broker.Unsubscribe(id)
+	second.sweepStaleServers(now.Add(time.Minute))
+	select {
+	case event := <-ch:
+		t.Fatalf("restart duplicated outage event: %s", event)
+	default:
+	}
+}
+
+func TestStaleHostSweep_RecoveryAndReoutage(t *testing.T) {
+	ds, now := staleTransitionFixture(t, "Healthy")
+	id, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer ds.broker.Unsubscribe(id)
+
+	ds.sweepStaleServers(now)
+	_ = readSSEEvent(t, ch)
+	_ = readSSEEvent(t, ch)
+	time.Sleep(time.Millisecond)
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	if event := readSSEEvent(t, ch); event.Type != "host_recovered" {
+		t.Fatalf("recovery event = %#v", event)
+	}
+	if event := readSSEEvent(t, ch); event.Type != "server_update" {
+		t.Fatalf("recovery compatibility event = %#v", event)
+	}
+
+	ds.sweepStaleServers(now.Add(time.Minute))
+	if event := readSSEEvent(t, ch); event.Type != "host_offline" {
+		t.Fatalf("re-outage event = %#v", event)
+	}
+	if event := readSSEEvent(t, ch); event.Type != "server_update" {
+		t.Fatalf("re-outage compatibility event = %#v", event)
+	}
+}
+
+func TestRunStaleHostTransitions_IntervalChangeWakesTimer(t *testing.T) {
+	ds, _ := staleTransitionFixture(t, "Healthy")
+	ds.now = func() time.Time { return time.Now().UTC().Add(time.Hour) }
+	ds.setHeartbeatInterval(time.Hour)
+	id, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer ds.broker.Unsubscribe(id)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		ds.runStaleHostTransitions(ctx)
+		close(done)
+	}()
+
+	ds.setHeartbeatInterval(time.Millisecond)
+	if event := readSSEEvent(t, ch); event.Type != "host_offline" {
+		t.Fatalf("interval wake event = %#v", event)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stale-host worker did not stop")
 	}
 }

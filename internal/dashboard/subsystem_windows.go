@@ -32,9 +32,9 @@ const dashboardShutdownTimeout = 5 * time.Second
 //
 // Transitively-owned goroutines (SessionStore reaper, NegotiateMiddleware
 // SSPI reaper) are started by their constructors with the derived ctx and
-// exit on Stop's cancel. The HTTP drain and RD Session Collection resolver are
-// joined to the subsystem's wg; the reapers remain constructor-internal
-// cleanup loops.
+// exit on Stop's cancel. The HTTP drain, RD Session Collection resolver, and
+// stale-host transition worker are joined to the subsystem's wg; the reapers
+// remain constructor-internal cleanup loops.
 type Subsystem struct {
 	cfg                       dc.DashboardConfig
 	dataDir                   string
@@ -45,6 +45,7 @@ type Subsystem struct {
 	sps                       eventSpikeReader
 	removals                  removalWriter
 	outbox                    *telemetry.ForceUpdateOutboxStore
+	freshness                 *telemetry.FreshnessStore
 	localForceUpdateSupported bool
 	rdCollections             *rdCollectionResolver
 
@@ -59,8 +60,13 @@ type Subsystem struct {
 // NewSubsystem constructs the dashboard subsystem. ms/as/mnt may be nil
 // (degraded mode); srv and sps are required since feature 009. removals
 // enforces durable server removal; outbox retains force-update commands across
-// dashboard restarts. localForceUpdateSupported is false in dashboard-only mode.
-func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader, removals removalWriter, outbox *telemetry.ForceUpdateOutboxStore, localForceUpdateSupported bool) *Subsystem {
+// dashboard restarts. freshness persists outage transition dedupe; callers
+// should supply the store backed by the same telemetry DB as srv.
+func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader, removals removalWriter, outbox *telemetry.ForceUpdateOutboxStore, localForceUpdateSupported bool, freshness ...*telemetry.FreshnessStore) *Subsystem {
+	var freshnessStore *telemetry.FreshnessStore
+	if len(freshness) > 0 {
+		freshnessStore = freshness[0]
+	}
 	return &Subsystem{
 		cfg:                       cfg,
 		dataDir:                   dataDir,
@@ -71,6 +77,7 @@ func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as a
 		sps:                       sps,
 		removals:                  removals,
 		outbox:                    outbox,
+		freshness:                 freshnessStore,
 		localForceUpdateSupported: localForceUpdateSupported,
 	}
 }
@@ -125,6 +132,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	derived, cancel := context.WithCancel(ctx)
 
 	state := NewServerState(s.srv)
+	state.SetFreshnessStore(s.freshness)
 	if s.removals != nil {
 		state.SetExclusionReader(s.removals)
 		state.SetRemovalWriter(s.removals)
@@ -142,17 +150,19 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	}
 
 	ds := &DashboardServer{
-		state:                state,
-		cfg:                  s.cfg,
-		sessionStore:         NewSessionStore(derived),
-		broker:               NewBroker(),
-		rdCollections:        rdCollections,
-		ms:                   s.ms,
-		as:                   s.as,
-		mnt:                  s.mnt,
-		spikes:               s.sps,
-		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
-		forceUpdates:         forceUpdates,
+		state:                    state,
+		cfg:                      s.cfg,
+		sessionStore:             NewSessionStore(derived),
+		broker:                   NewBroker(),
+		rdCollections:            rdCollections,
+		ms:                       s.ms,
+		as:                       s.as,
+		mnt:                      s.mnt,
+		spikes:                   s.sps,
+		freshness:                s.freshness,
+		heartbeatIntervalChanged: make(chan struct{}, 1),
+		remoteEvtSpikeStatus:     make(map[string]evtspike.DetectorStatus),
+		forceUpdates:             forceUpdates,
 	}
 	ds.setLocalForceUpdateSupported(s.localForceUpdateSupported)
 	ds.setHeartbeatInterval(s.cfg.HeartbeatInterval)
@@ -205,7 +215,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	s.state = state
 	s.cancel = cancel
 
-	s.wg.Add(3)
+	s.wg.Add(4)
 	go func() {
 		defer s.wg.Done()
 		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
@@ -216,6 +226,10 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		rdCollections.Run(derived, s.cfg.RDConnectionBroker)
+	}()
+	go func() {
+		defer s.wg.Done()
+		ds.runStaleHostTransitions(derived)
 	}()
 	go func() {
 		defer s.wg.Done()
