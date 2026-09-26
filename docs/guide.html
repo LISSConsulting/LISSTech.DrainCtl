@@ -1704,10 +1704,11 @@ https://dashboard-server:49470</code></pre>
                 membership cannot currently be discovered, remains under <strong>Ungrouped</strong>. Color-coded:
                 green for healthy, amber for grace, red for alert, gray for offline. Offline is derived from the
                 dashboard's accepted-report time after exactly three effective heartbeat intervals; it does not change
-                the host's stored last result or last-seen value. Each server card includes a
-                <strong>session gauge</strong> showing current utilization, plus an <strong>Overview LOAD
-                chart</strong> that overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis
-                canvas.
+                the host's stored last result or last-seen value. The table includes per-host Sessions, CPU, memory,
+                input-delay, and EventSpike sparklines. EventSpike plots recent confirmed-spike intensity as
+                <code>observed &divide; expected</code> and displays the recent retained count. Each expanded server
+                includes a <strong>session gauge</strong>, while Overview provides a <strong>LOAD chart</strong> that
+                overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis canvas.
             </p>
 
             <p>
@@ -1718,10 +1719,13 @@ https://dashboard-server:49470</code></pre>
 
             <p>
                 Charts use retained SQLite data, not browser history. Select 5M, 15M where applicable, 1H, 1D, 3D,
-                5D, or 30D; the dashboard selects the appropriate retention tier for the requested range. For latency,
-                load, queues, and other lower-is-better measures, P95 is the upper-tail value. FPS and frame quality
-                are higher-is-better: their displayed P95 is the service floor (numeric P5), while P50 is the median.
-                Fleet Health Indicators show the actual P50 median, not a proxy.
+                5D, or 30D; the dashboard selects the appropriate retention tier for the requested range. Drag the
+                plotted timeline directly: right moves the data right and reveals older history; left returns toward
+                live. For latency, load, queues, and other lower-is-better measures, P95 is the upper-tail value and
+                P50 retains its nested fill inside the P95 envelope. FPS and frame quality are higher-is-better: their
+                displayed P95 is the service floor (numeric P5), while P50 is the median. On those inverted charts,
+                P95 is the sole filled area and P50 is a dotted line because the higher median would otherwise conceal
+                the lower service floor. Fleet Health Indicators show the actual P50 median, not a proxy.
             </p>
 
             <p>
@@ -2120,8 +2124,9 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <p>
                 Percentile series preserve field presence. A valid lower-is-better zero P50 is plotted as zero, not
-                converted to a gap; a missing value remains a gap. This distinction prevents idle sessions from
-                looking like a measured zero-latency or zero-loss result.
+                converted to a gap; a missing value remains a gap. P50 is drawn only for retained buckets whose
+                source report supplied it, so older P95-only RemoteFX history remains a gap instead of appearing as a
+                false zero.
             </p>
 
             <h3>Dashboard Display</h3>
