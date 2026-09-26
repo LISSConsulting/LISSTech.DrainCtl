@@ -31,8 +31,8 @@ func (s *FreshnessStore) MarkOffline(ctx context.Context, host string, reportEpo
 }
 
 // MarkFresh records reportEpoch as the latest accepted report and clears its
-// offline transition marker. It returns true when that report recovered a
-// previously offline epoch. Older reports are ignored.
+// offline transition marker only for a registered host. It returns true when
+// that report recovered a previously offline epoch. Older reports are ignored.
 func (s *FreshnessStore) MarkFresh(ctx context.Context, host string, reportEpoch time.Time) (bool, error) {
 	return s.transition(ctx, host, reportEpoch.UTC().UnixMilli(), 0, false)
 }
@@ -69,6 +69,18 @@ func (s *FreshnessStore) transition(ctx context.Context, host string, reportEpoc
 			return commitFreshnessTransition(tx, false)
 		case err != nil:
 			return false, fmt.Errorf("telemetry: freshness verify server epoch: %w", err)
+		}
+	}
+	if !offline {
+		var registered int
+		err = tx.QueryRowContext(ctx,
+			`SELECT 1 FROM servers WHERE hostname = ? COLLATE NOCASE`, host).
+			Scan(&registered)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return commitFreshnessTransition(tx, false)
+		case err != nil:
+			return false, fmt.Errorf("telemetry: freshness verify server: %w", err)
 		}
 	}
 

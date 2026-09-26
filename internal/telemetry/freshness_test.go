@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 )
@@ -207,5 +208,60 @@ func TestFreshnessMarkOfflineTransitionsForMatchingPersistedHeartbeat(t *testing
 	}
 	if storedEpoch != epoch.UnixMilli() || offlineAt != now.UnixMilli() {
 		t.Fatalf("freshness state = (epoch=%d, offline=%d), want (%d, %d)", storedEpoch, offlineAt, epoch.UnixMilli(), now.UnixMilli())
+	}
+}
+
+func TestFreshnessMarkFreshRejectsDeletedServerWithoutRecreatingState(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
+	servers := NewServerStore(db)
+	epoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+	registerFreshnessServer(t, db, "SRV-01", epoch)
+	if _, err := store.MarkFresh(ctx, "SRV-01", epoch); err != nil {
+		t.Fatalf("MarkFresh initial state: %v", err)
+	}
+	if removed, err := servers.Remove(ctx, "SRV-01"); err != nil || !removed {
+		t.Fatalf("Remove server = (%v, %v), want (true, nil)", removed, err)
+	}
+	if removed, err := store.Remove(ctx, "SRV-01"); err != nil || !removed {
+		t.Fatalf("Remove freshness = (%v, %v), want (true, nil)", removed, err)
+	}
+	if recovered, err := store.MarkFresh(ctx, "SRV-01", epoch.Add(time.Minute)); err != nil || recovered {
+		t.Fatalf("MarkFresh after server removal = (%v, %v), want (false, nil)", recovered, err)
+	}
+
+	var freshnessRows int
+	if err := db.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM host_freshness WHERE host = ?`, "SRV-01").Scan(&freshnessRows); err != nil {
+		t.Fatalf("count freshness rows: %v", err)
+	}
+	if freshnessRows != 0 {
+		t.Fatalf("freshness rows after deleted-server report = %d, want 0", freshnessRows)
+	}
+}
+
+func TestFreshnessMarkFreshRecoversMatchingExistingServer(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	store := NewFreshnessStore(db)
+	epoch := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+	registerFreshnessServer(t, db, "SRV-01", epoch)
+	if transitioned, err := store.MarkOffline(ctx, "SRV-01", epoch, epoch.Add(3*time.Minute)); err != nil || !transitioned {
+		t.Fatalf("MarkOffline = (%v, %v), want (true, nil)", transitioned, err)
+	}
+	if recovered, err := store.MarkFresh(ctx, "SRV-01", epoch); err != nil || !recovered {
+		t.Fatalf("MarkFresh matching server = (%v, %v), want (true, nil)", recovered, err)
+	}
+
+	var offlineAt sql.NullInt64
+	if err := db.reader.QueryRowContext(ctx,
+		`SELECT offline_emitted_at_ms FROM host_freshness WHERE host = ?`, "SRV-01").
+		Scan(&offlineAt); err != nil {
+		t.Fatalf("query freshness state: %v", err)
+	}
+	if offlineAt.Valid {
+		t.Fatalf("offline marker after recovery = %d, want NULL", offlineAt.Int64)
 	}
 }
