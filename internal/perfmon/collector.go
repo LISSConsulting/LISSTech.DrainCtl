@@ -373,13 +373,13 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
 		snap.RFXAvailable = true
-		c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, true)
-		c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, false)
-		c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, false)
-		c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, false)
-		c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, true)
-		c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, false)
-		c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, false)
+		c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, 0, 240, true)
+		c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, 0, 1000000, false)
+		c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, 0, 1000000, false)
+		c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, 0, 60000, false)
+		c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, 0, 100, true)
+		c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, 0, 60000, false)
+		c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, 0, 100, false)
 	}
 
 	slog.Debug(fmt.Sprintf("perfmon: cpu=%.1f%% mem=%0.fMB/%0.fMB pages=%.1f disk=%.2f tcp=%.1f input_delay_max=%.1f",
@@ -500,11 +500,15 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	return 0, false
 }
 
-func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, higherIsBetter bool) {
+func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, min, max float64, higherIsBetter bool) {
 	if h == 0 {
 		return
 	}
-	if values, err := pdhGetDoubleArray(h); err == nil && len(values) > 0 {
+	if values, err := pdhGetDoubleArray(h); err == nil {
+		values = filterRemoteFXValues(values, min, max, higherIsBetter)
+		if len(values) == 0 {
+			return
+		}
 		median, serviceP95 := AggregateServicePercentiles(values, higherIsBetter)
 		*p50 = RoundTo(median, places)
 		*p95 = RoundTo(serviceP95, places)

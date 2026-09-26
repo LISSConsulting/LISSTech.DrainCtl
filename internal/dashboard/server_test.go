@@ -648,9 +648,11 @@ func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t 
 			RFXRTT:           20,
 			RFXRTTP50:        10,
 			RFXLoss:          0,
-			RFXLossP50:       0,
+			RFXLossP50:       0.25,
 			RFXSkipServer:    0,
-			RFXSkipServerP50: 0,
+			RFXSkipServerP50: 1.5,
+			RFXSkipNet:       0,
+			RFXSkipNetP50:    2.5,
 		},
 	})
 
@@ -665,10 +667,18 @@ func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t 
 		t.Error("missing zero FPS P50 must be omitted")
 	}
 	for counter, want := range map[string]float64{
-		"rfx_encode_ms_p50":   5,
-		"rfx_quality_pct":     100,
-		"rfx_quality_pct_p50": 100,
-		"rfx_rtt_ms_p50":      10,
+		"rfx_encode_ms":           10,
+		"rfx_encode_ms_p50":       5,
+		"rfx_quality_pct":         100,
+		"rfx_quality_pct_p50":     100,
+		"rfx_rtt_ms":              20,
+		"rfx_rtt_ms_p50":          10,
+		"rfx_loss_pct":            0,
+		"rfx_loss_pct_p50":        0.25,
+		"rfx_skip_server_sec":     0,
+		"rfx_skip_server_sec_p50": 1.5,
+		"rfx_skip_net_sec":        0,
+		"rfx_skip_net_sec_p50":    2.5,
 	} {
 		if got[counter] != want {
 			t.Errorf("%s = %v, want %v", counter, got[counter], want)
