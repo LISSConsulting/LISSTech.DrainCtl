@@ -2,6 +2,26 @@
 
 package drainctl
 
+import "math"
+
+// PerfP50Presence identifies a P50 field that was read and validated. A zero
+// mask is the wire-compatible representation emitted by older agents, whose
+// zero-valued P50 fields must remain indistinguishable from absent values.
+type PerfP50Presence uint16
+
+const (
+	PerfP50InputDelay PerfP50Presence = 1 << iota
+	PerfP50SessionCPU
+	PerfP50SessionMem
+	PerfP50RFXFPSOut
+	PerfP50RFXSkipServer
+	PerfP50RFXSkipNet
+	PerfP50RFXEncodeMS
+	PerfP50RFXQuality
+	PerfP50RFXRTT
+	PerfP50RFXLoss
+)
+
 // PerfSnapshot holds one point-in-time performance sample.
 type PerfSnapshot struct {
 	// Host-level
@@ -24,6 +44,10 @@ type PerfSnapshot struct {
 	SessionMemP95 float64 `json:"session_mem_p95_bytes,omitempty"`
 	SessionMemP50 float64 `json:"session_mem_p50_bytes,omitempty"`
 
+	// P50Present marks P50 fields that were actually collected. It is omitted
+	// for old-compatible reports that have no availability metadata.
+	P50Present PerfP50Presence `json:"p50_present,omitempty"`
+
 	// RemoteFX (zero-valued when unavailable). For lower-is-better metrics,
 	// the primary field is the numeric P95. For higher-is-better FPS and frame
 	// quality, it is the service P95 floor (numeric P5): 95% of sessions are at
@@ -43,4 +67,121 @@ type PerfSnapshot struct {
 	RFXRTTP50        float64 `json:"rfx_rtt_ms_p50,omitempty"`
 	RFXLoss          float64 `json:"rfx_loss_pct,omitempty"`
 	RFXLossP50       float64 `json:"rfx_loss_pct_p50,omitempty"`
+}
+
+// HasP50 reports whether a P50 was collected. Non-zero legacy values remain
+// available while an unmarked zero from an older report remains absent.
+func (p PerfSnapshot) HasP50(field PerfP50Presence, value float64) bool {
+	return p.P50Present&field != 0 || value != 0
+}
+
+// SanitizePerfField validates one persisted performance field. It is shared by
+// local collection and report ingestion so they enforce identical bounds.
+func SanitizePerfField(field string, value float64) (float64, bool) {
+	var max float64
+	switch field {
+	case "cpu_pct", "cpu_p95_pct", "session_cpu_p50_pct", "session_cpu_p95_pct", "rfx_quality_pct", "rfx_quality_pct_p50", "rfx_loss_pct", "rfx_loss_pct_p50":
+		max = 100
+	case "mem_avail_mb", "mem_total_mb":
+		max = 1 << 50
+	case "pages_sec", "disk_queue", "tcp_retrans_sec", "rfx_skip_server_sec", "rfx_skip_server_sec_p50", "rfx_skip_net_sec", "rfx_skip_net_sec_p50":
+		max = 1e6
+	case "input_delay_p50_ms", "input_delay_p95_ms", "input_delay_max_ms", "rfx_encode_ms", "rfx_encode_ms_p50", "rfx_rtt_ms", "rfx_rtt_ms_p50":
+		max = 60000
+	case "session_mem_p50_bytes", "session_mem_p95_bytes":
+		max = 1 << 60
+	case "rfx_fps_out", "rfx_fps_out_p50":
+		max = 240
+	default:
+		return 0, false
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > max {
+		return 0, false
+	}
+	return value, true
+}
+
+// SanitizePerfSnapshot removes invalid numeric values from a report before it
+// is used or persisted. Valid zeroes are retained; P50Present distinguishes a
+// collected zero from a missing legacy P50.
+func SanitizePerfSnapshot(p PerfSnapshot) PerfSnapshot {
+	sanitize := func(field string, value *float64) bool {
+		if sanitized, ok := SanitizePerfField(field, *value); ok {
+			*value = sanitized
+			return true
+		}
+		*value = 0
+		return false
+	}
+	sanitizeP50 := func(field string, presence PerfP50Presence, value *float64) {
+		if !sanitize(field, value) {
+			p.P50Present &^= presence
+		}
+	}
+	sanitize("cpu_pct", &p.CPUPct)
+	sanitize("cpu_p95_pct", &p.CPUP95)
+	sanitize("mem_avail_mb", &p.MemAvailMB)
+	sanitize("mem_total_mb", &p.MemTotalMB)
+	sanitize("pages_sec", &p.PagesSec)
+	sanitize("disk_queue", &p.DiskQueue)
+	sanitize("tcp_retrans_sec", &p.TCPRetrans)
+	sanitizeP50("input_delay_p50_ms", PerfP50InputDelay, &p.InputDelayP50)
+	sanitize("input_delay_p95_ms", &p.InputDelayP95)
+	sanitize("input_delay_max_ms", &p.InputDelayMax)
+	sanitizeP50("session_cpu_p50_pct", PerfP50SessionCPU, &p.SessionCPUP50)
+	sanitize("session_cpu_p95_pct", &p.SessionCPUP95)
+	sanitizeP50("session_mem_p50_bytes", PerfP50SessionMem, &p.SessionMemP50)
+	sanitize("session_mem_p95_bytes", &p.SessionMemP95)
+
+	if !p.RFXAvailable {
+		p.RFXFPSOut = 0
+		p.RFXFPSOutP50 = 0
+		p.RFXSkipServer = 0
+		p.RFXSkipServerP50 = 0
+		p.RFXSkipNet = 0
+		p.RFXSkipNetP50 = 0
+		p.RFXEncodeMS = 0
+		p.RFXEncodeMSP50 = 0
+		p.RFXQuality = 0
+		p.RFXQualityP50 = 0
+		p.RFXRTT = 0
+		p.RFXRTTP50 = 0
+		p.RFXLoss = 0
+		p.RFXLossP50 = 0
+		p.P50Present &^= PerfP50RFXFPSOut |
+			PerfP50RFXSkipServer |
+			PerfP50RFXSkipNet |
+			PerfP50RFXEncodeMS |
+			PerfP50RFXQuality |
+			PerfP50RFXRTT |
+			PerfP50RFXLoss
+		return p
+	}
+
+	fpsValid := sanitize("rfx_fps_out", &p.RFXFPSOut)
+	sanitizeP50("rfx_fps_out_p50", PerfP50RFXFPSOut, &p.RFXFPSOutP50)
+	sanitize("rfx_skip_server_sec", &p.RFXSkipServer)
+	sanitizeP50("rfx_skip_server_sec_p50", PerfP50RFXSkipServer, &p.RFXSkipServerP50)
+	sanitize("rfx_skip_net_sec", &p.RFXSkipNet)
+	sanitizeP50("rfx_skip_net_sec_p50", PerfP50RFXSkipNet, &p.RFXSkipNetP50)
+	sanitize("rfx_encode_ms", &p.RFXEncodeMS)
+	sanitizeP50("rfx_encode_ms_p50", PerfP50RFXEncodeMS, &p.RFXEncodeMSP50)
+	qualityValid := sanitize("rfx_quality_pct", &p.RFXQuality)
+	sanitizeP50("rfx_quality_pct_p50", PerfP50RFXQuality, &p.RFXQualityP50)
+	sanitize("rfx_rtt_ms", &p.RFXRTT)
+	sanitizeP50("rfx_rtt_ms_p50", PerfP50RFXRTT, &p.RFXRTTP50)
+	sanitize("rfx_loss_pct", &p.RFXLoss)
+	sanitizeP50("rfx_loss_pct_p50", PerfP50RFXLoss, &p.RFXLossP50)
+
+	// Zero FPS or frame quality represents no active RemoteFX stream rather
+	// than a collected high-is-better percentile.
+	if fpsValid && p.RFXFPSOut == 0 {
+		p.RFXFPSOutP50 = 0
+		p.P50Present &^= PerfP50RFXFPSOut
+	}
+	if qualityValid && p.RFXQuality == 0 {
+		p.RFXQualityP50 = 0
+		p.P50Present &^= PerfP50RFXQuality
+	}
+	return p
 }

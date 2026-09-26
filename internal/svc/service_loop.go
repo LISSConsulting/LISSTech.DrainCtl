@@ -155,6 +155,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	removalStore := telemetry.NewRemovalStore(telDB)
 	eventSpikeStore := telemetry.NewEventSpikeStore(telDB)
 	forceUpdateOutboxStore := telemetry.NewForceUpdateOutboxStore(telDB)
+	freshnessStore := telemetry.NewFreshnessStore(telDB)
 	auditStore, err := telemetry.NewAuditStore(ctx, telDB)
 	if err != nil {
 		slog.Error("service=failed", "error", err)
@@ -313,7 +314,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	var dashState *dashboard.ServerState
 	var dashSub *dashboard.Subsystem
 	if dashCfg.Enabled {
-		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly)
+		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
 		if err := sub.Start(ctx); err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
@@ -714,7 +715,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				dashRegistered = false
 				slog.Info("dashboard=stopped", "reason", "config reload")
 			} else if newDashCfg.Enabled && dashState == nil {
-				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly)
+				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
 				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
