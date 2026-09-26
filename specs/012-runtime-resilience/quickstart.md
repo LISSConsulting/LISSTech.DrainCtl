@@ -52,9 +52,27 @@ Expected results:
 
 If the registry key, directory, or safe ACL is absent, record the setup error and repair the approved installation. Do **not** point WER at a temporary, user-profile, network, or broadly writable fallback path.
 
-## 3. Controlled recovery smoke test (isolated host only)
+## 3. Optional scheduled diagnostic collection
+
+The disabled `\LISS Technologies\DrainCtl-Diags` task collects service, WER, event,
+and **metadata-only** dump inventory into `diags`. The inventory contains only the
+dump name, size, and UTC timestamp; it does not read dump bytes or calculate hashes.
+
+Set `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only for an approved local investigation. The
+task then hashes and gzip-copies only the newest `.dmp` **inside** `$dumpRoot`, writing
+the hash sidecar there as well. Both artifacts inherit the protected SYSTEM and
+Administrators-only dump ACL; no dump archive or hash is placed in `diags`, uploaded,
+or otherwise shared. Task retention deletes only its `crash-dump-*.dmp.gz` artifacts
+and hash sidecars after seven days; it never deletes WER-managed `.dmp` files.
+
+Missing dump resources or an unreadable protected dump directory are reported in
+diagnostics without making the scheduled collector fail the rest of its work. Repair
+the approved MSI if the protected directory ACL is absent rather than relaxing it.
+
+## 4. Controlled recovery smoke test (isolated host only)
 
 > This exercise intentionally interrupts the monitoring service. Do not run it on a production host without explicit change approval.
+
 
 1. Start with a healthy service and note its process ID:
 
@@ -97,7 +115,7 @@ Interpretation:
 - Up to three dumps validates bounded WER retention. More than three requires investigation; do not add an application-side delete job.
 - No dump can result from WER service/policy, disk, or access constraints. Preserve SCM evidence and investigate protected setup; do not improvise exfiltration.
 
-## 4. Crash-dump incident workflow
+## 5. Crash-dump incident workflow
 
 1. **Stabilize**: determine whether SCM has exhausted its third-failure budget. If the service is stopped, restore it only under the incident/change process.
 2. **Preserve metadata**: record service state, SCM 7034/1067 events, `sc.exe qfailure` output, dump filename/size/creation time, and product/service version. Do not paste dump binary contents into the record.
@@ -105,9 +123,9 @@ Interpretation:
 4. **Copy, do not move**: copy the approved dump manually to the approved restricted evidence location. Keep the local original until the incident retention decision is made.
 5. **Restrict access**: maintain Administrators/System-only handling at source and destination. Do not relax ACLs to make the file easier to inspect.
 6. **Analyze offline**: use an approved debugger on a secured analysis workstation. Any redacted stack conclusion belongs in the incident record; memory contents do not.
-7. **Dispose deliberately**: after incident approval and required retention, an authorized administrator removes the local artifact. The product never performs this deletion automatically.
+7. **Dispose deliberately**: after incident approval and required retention, an authorized administrator removes the local WER dump. The product never deletes WER-managed `.dmp` files automatically; only task-created opt-in gzip artifacts are retained for seven days.
 
-## 5. Freshness and offline-transition walkthrough
+## 6. Freshness and offline-transition walkthrough
 
 1. Configure a short safe test poll interval (for example 60 seconds) through the normal supported configuration path and allow it to take effect.
 2. Confirm a registered host has a recent accepted report and is shown as its reported health state.
@@ -118,7 +136,7 @@ Interpretation:
 
 Do not use agent-provided timestamps to judge this test. The dashboard acceptance time is authoritative. If the configured interval changes while testing, restart the timing window using the effective interval currently reported by the dashboard.
 
-## 6. RemoteFX data-quality walkthrough
+## 7. RemoteFX data-quality walkthrough
 
 1. Enable optional RemoteFX collection only on a test host that has the relevant role/provider available.
 2. In the dashboard, distinguish these states:
@@ -128,7 +146,7 @@ Do not use agent-provided timestamps to judge this test. The dashboard acceptanc
 3. Inspect structured diagnostic signals for invalid RemoteFX values. A sentinel-like encoding value, NaN, infinity, negative value, or out-of-range value must be dropped, not capped or graphed.
 4. Confirm other valid RemoteFX fields and core metrics in the same report remain visible. A malformed optional field must not make the host offline or discard the entire performance record.
 
-## 7. Rolling upgrade and rollback
+## 8. Rolling upgrade and rollback
 
 ### Upgrade
 

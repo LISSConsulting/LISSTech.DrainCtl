@@ -275,23 +275,23 @@
             </Directory>
         </StandardDirectory>
 
+        <!-- Keep non-dump product data accessible to the service and local users.
+             PermissionEx authors MsiLockPermissionsEx directly; do not mix it
+             with legacy Permission/LockPermissions authoring. -->
         <Component Id="DataDirectory" Directory="DATADIRECTORY"
             Guid="0c2afad8-e85a-4a79-b484-d3e51ebd6fea">
             <CreateFolder>
-                <Permission User="SYSTEM" GenericAll="yes" />
-                <Permission User="Administrators" GenericAll="yes" />
-                <Permission User="SERVICE" GenericAll="yes" />
-                <Permission User="Users" GenericRead="yes" GenericExecute="yes" />
+                <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GA;;;SU)(A;OICI;GRGX;;;BU)" />
             </CreateFolder>
         </Component>
-        <!-- Crash dumps can contain process memory. Restrict this directory to
-             SYSTEM and Administrators, and retain collected dumps across uninstall. -->
+        <!-- Crash dumps can contain process memory. This protected DACL has no
+             inherited or ordinary-user ACEs: only SYSTEM and built-in Administrators
+             can access the directory and artifacts retained beneath it. -->
         <Component Id="DumpsDirectory" Directory="DUMPSDIRECTORY"
             Guid="5c0a4d57-d8e1-4b6e-9f0a-2c7d8e1b6e8f"
             Permanent="yes">
             <CreateFolder>
-                <Permission User="SYSTEM" GenericAll="yes" />
-                <Permission User="Administrators" GenericAll="yes" />
+                <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)" />
             </CreateFolder>
         </Component>
 

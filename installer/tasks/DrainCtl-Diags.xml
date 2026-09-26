@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>LISSTech DrainCtl diagnostics — hourly service, WER LocalDumps, crash-event, and dump-inventory collection. Crash dumps remain local and are not copied by default; set DRAINCTL_INCLUDE_CRASH_DUMPS=1 to gzip-copy only the newest dump. Pprof and selfmetrics remain opt-in through DRAINCTL_PPROF_PORT. Disabled by default; enable via Task Scheduler when investigating.</Description>
+    <Description>LISSTech DrainCtl diagnostics — hourly service, WER LocalDumps, crash-event, and metadata-only dump inventory collection. Crash bytes and hashes remain unread by default. Set DRAINCTL_INCLUDE_CRASH_DUMPS=1 only for authorized local review: it hashes and gzip-copies the newest .dmp inside the protected dumps directory; nothing is copied to diags or uploaded. Pprof and selfmetrics remain opt-in through DRAINCTL_PPROF_PORT. Disabled by default; enable via Task Scheduler when investigating.</Description>
     <URI>\LISS Technologies\DrainCtl-Diags</URI>
   </RegistrationInfo>
   <Triggers>

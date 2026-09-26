@@ -3,8 +3,9 @@
 # pprof and selfmetrics snapshots remain opt-in through DRAINCTL_PPROF_PORT.
 # Output: %ProgramData%\LISS Technologies\LISSTech DrainCtl\diags
 #
-# Crash dumps are sensitive local diagnostic data. They are inventoried only unless
-# DRAINCTL_INCLUDE_CRASH_DUMPS=1, which gzip-copies the newest dump for operator review.
+# Crash dumps are sensitive local diagnostic data. They are inventoried as metadata
+# only unless DRAINCTL_INCLUDE_CRASH_DUMPS=1, which hashes and gzip-copies only the
+# newest dump inside the protected dumps directory for authorized local review.
 
 $ErrorActionPreference = 'Stop'
 
@@ -143,9 +144,9 @@ function Collect-DumpInventory([string]$stamp) {
     $path = Join-Path $diagsDir ('dump-inventory-{0}.txt' -f $stamp)
     $dumpDir = Join-Path $dataDir 'dumps'
     $lines = @(
-        '# WER dump inventory. Dump content is not copied by default.',
+        '# WER dump inventory. Dump bytes and hashes are not read by default.',
         '# Captured UTC: ' + ([DateTime]::UtcNow.ToString('o')),
-        '# Columns: name | size_bytes | last_write_utc | sha256'
+        '# Columns: name | size_bytes | last_write_utc'
     )
     if (-not (Test-Path -LiteralPath $dumpDir)) {
         $lines += 'dump folder not found: ' + $dumpDir
@@ -154,18 +155,13 @@ function Collect-DumpInventory([string]$stamp) {
         return $null
     }
     try {
-        $dumps = @(Get-ChildItem -LiteralPath $dumpDir -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending)
+        $dumps = @(Get-ChildItem -LiteralPath $dumpDir -File -Filter '*.dmp' -ErrorAction Stop |
+            Sort-Object LastWriteTimeUtc -Descending)
         if ($dumps.Count -eq 0) {
             $lines += '(no dumps found)'
         }
         foreach ($dump in $dumps) {
-            try {
-                $hash = Get-Sha256Hex $dump.FullName
-                $lines += ('{0} | {1} | {2:o} | {3}' -f $dump.Name, $dump.Length, $dump.LastWriteTimeUtc, $hash)
-            } catch {
-                $lines += ('{0} | {1} | {2:o} | hash failed: {3}' -f $dump.Name, $dump.Length, $dump.LastWriteTimeUtc, $_.Exception.Message)
-                Log ('dump hash failed for {0}: {1}' -f $dump.Name, $_.Exception.Message)
-            }
+            $lines += ('{0} | {1} | {2:o}' -f $dump.Name, $dump.Length, $dump.LastWriteTimeUtc)
         }
         Write-TextFile $path $lines
         return $dumps | Select-Object -First 1
@@ -188,12 +184,17 @@ try {
         if ($null -eq $newestDump) {
             Log 'crash dump inclusion requested, but no dump is available.'
         } else {
-            $dumpArchive = Join-Path $diagsDir ('crash-dump-{0}-{1}.gz' -f $stamp, $newestDump.Name)
+            $dumpDir = Join-Path $dataDir 'dumps'
+            $dumpArchive = Join-Path $dumpDir ('crash-dump-{0}-{1}.gz' -f $stamp, $newestDump.Name)
+            $dumpHash = "$dumpArchive.sha256"
             try {
+                $sha256 = Get-Sha256Hex $newestDump.FullName
                 GzipFile $newestDump.FullName $dumpArchive
-                Log ('SENSITIVITY WARNING: copied newest crash dump into diagnostics: {0}. It may contain process memory; handle as sensitive local diagnostic data.' -f $dumpArchive)
+                @('{0} *{1}' -f $sha256, $newestDump.Name) |
+                    Set-Content -LiteralPath $dumpHash -Encoding ASCII
+                Log ('SENSITIVITY WARNING: hashed and gzip-copied newest crash dump only into protected dump directory: {0}. The archive and hash remain local; do not copy them to diagnostics or upload them.' -f $dumpDir)
             } catch {
-                Log ('crash dump gzip failed for {0}: {1}' -f $newestDump.Name, $_.Exception.Message)
+                Log ('crash dump hash or gzip failed for {0}: {1}' -f $newestDump.Name, $_.Exception.Message)
             }
         }
     }
@@ -260,8 +261,17 @@ try {
             $_.Name -like 'service-*.txt' -or
             $_.Name -like 'wer-localdumps-*.txt' -or
             $_.Name -like 'crash-events-*.log' -or
-            $_.Name -like 'dump-inventory-*.txt' -or
-            $_.Name -like 'crash-dump-*.gz'
+            $_.Name -like 'dump-inventory-*.txt'
+        } |
+        Where-Object { $_.LastWriteTime -lt $cutoff } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Only task-created opt-in archives are eligible for cleanup. WER-owned .dmp
+    # files are never selected or deleted here.
+    Get-ChildItem -Path (Join-Path $dataDir 'dumps') -File -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -like 'crash-dump-*.dmp.gz' -or
+            $_.Name -like 'crash-dump-*.dmp.gz.sha256'
         } |
         Where-Object { $_.LastWriteTime -lt $cutoff } |
         Remove-Item -Force -ErrorAction SilentlyContinue
