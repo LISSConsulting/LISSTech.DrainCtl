@@ -271,6 +271,7 @@
             <Directory Id="ProgramDataLISSTech" Name="LISS Technologies">
                 <Directory Id="DATADIRECTORY" Name="LISSTech DrainCtl">
                     <Directory Id="DUMPSDIRECTORY" Name="dumps" />
+                    <Directory Id="DIAGSDIRECTORY" Name="diags" />
                 </Directory>
             </Directory>
         </StandardDirectory>
@@ -295,10 +296,21 @@
             </CreateFolder>
         </Component>
 
+        <!-- Collector output contains service configuration, WER policy, and event
+             diagnostics. Like dumps, it is sensitive local evidence and must not
+             inherit ordinary-user access from the product data directory. -->
+        <Component Id="DiagsDirectory" Directory="DIAGSDIRECTORY"
+            Guid="a1e3d5c7-9b2f-4a68-8c1d-6e0f2b4d7a9c"
+            Permanent="yes">
+            <CreateFolder>
+                <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)" />
+            </CreateFolder>
+        </Component>
+
         <!-- WER owns dump retention: three local mini dumps support native
              stack/module analysis without automatically uploading sensitive memory.
-             These registry values are removed on uninstall; the permanent dumps
-             directory and its collected files are intentionally left in place. -->
+             These registry values are removed on uninstall; the permanent protected
+             dumps and diags directories and their collected files remain in place. -->
         <Component Id="WerLocalDumps" Directory="DATADIRECTORY"
             Guid="d8e1b6e8-2c7d-4f0a-9b5c-0d1e2f3a4b5c">
             <RegistryValue Root="HKLM"
@@ -425,6 +437,7 @@
             <ComponentRef Id="DefaultConfig" />
             <ComponentRef Id="DataDirectory" />
             <ComponentRef Id="DumpsDirectory" />
+            <ComponentRef Id="DiagsDirectory" />
             <ComponentRef Id="WerLocalDumps" />
             <ComponentRef Id="PSModule" />
             <ComponentRef Id="FirewallRule" />

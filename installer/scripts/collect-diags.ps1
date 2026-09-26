@@ -13,7 +13,11 @@ $dataDir  = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
 $diagsDir = Join-Path $dataDir 'diags'
 $ownLog   = Join-Path $diagsDir 'collector.log'
 
-New-Item -ItemType Directory -Force -Path $diagsDir | Out-Null
+# The MSI pre-creates this path with a protected SYSTEM/Administrators-only DACL.
+# Do not recreate a missing directory and inherit the broader product-data ACL.
+if (-not (Test-Path -LiteralPath $diagsDir -PathType Container)) {
+    throw "Protected diagnostics directory is missing: $diagsDir. Repair the approved MSI."
+}
 
 function Log([string]$msg) {
     $line = '{0} {1}' -f ([DateTime]::UtcNow.ToString('o')), $msg
