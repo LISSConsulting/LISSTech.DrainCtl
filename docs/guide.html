@@ -388,14 +388,13 @@
                 GPO, or just double-click it.
             </p>
             <p>
-                Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">current stable MSI (v26.9.36)</a>.
+                Download the <a href="https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest">latest stable MSI</a>.
                 Every release is signed, upgrades in place, and preserves service configuration, retained telemetry,
                 removed-server tombstones, the Force Update outbox, and EventSpike baseline and warm-up state.
             </p>
             <div class="callout">
-                <strong>Current stable: v26.9.36.</strong> It includes dashboard-only deployment, durable fleet
-                controls, retained 30-day charts, and the current EventSpike detector defaults. No configuration
-                migration is required.
+                <strong>Use the latest stable release for production.</strong> The release page identifies the current
+                signed MSI and its release notes; no prospective CalVer is embedded in this guide.
             </div>
 
             <h3>Choose an installation mode</h3>
@@ -579,8 +578,10 @@
                 <strong>preserved</strong>.
             </p>
             <p>
-                To remove those protected artifacts after the required incident retention period, run the following
-                from an elevated PowerShell session:
+                After the required incident-retention period, an authorized administrator may remove the retained
+                protected artifacts from an elevated PowerShell session. This is permanent: verify the exact host,
+                incident, and retention decision first. The product never automatically deletes WER-managed
+                <code>.dmp</code> files.
             </p>
             <pre><code>$dataRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
 Remove-Item -LiteralPath (Join-Path $dataRoot 'dumps') -Recurse -Force
@@ -600,7 +601,17 @@ Remove-Item -LiteralPath (Join-Path $dataRoot 'diags') -Recurse -Force</code></p
                 <li>Audit trail and TLS certificates in ProgramData are preserved</li>
                 <li>The Windows Firewall rule is always maintained across upgrades</li>
             </ul>
-            <p>Silent upgrades work the same way &mdash; just run the new MSI with <code>/qn</code>.</p>
+            <p>Silent upgrades work the same way &mdash; just run the latest stable MSI with <code>/qn</code>.</p>
+            <h3>Rollback</h3>
+            <p>
+                If an upgrade must be reversed, stop the service through the approved change process and install the
+                previously approved signed MSI over the current installation. Do not delete or replace
+                <code>config.json</code>, <code>drainctl.db</code>, <code>baseline.json</code>, certificates, dumps, or
+                diagnostics as part of the rollback. Confirm <code>Get-Service DrainCtl</code>,
+                <code>drainctl check</code>, and dashboard reporting after the prior package starts. A rollback cannot
+                make a newer database schema readable by an older binary; restore only a tested, compatible
+                ProgramData backup when the release notes explicitly require it.
+            </p>
 
             <!-- ── First Run ─────────────────────────────────────────────────────── -->
             <h2 id="first-run">2. First Run</h2>
@@ -1388,7 +1399,7 @@ Remove-RDSHDrainNotificationTarget -URL 'https://hooks.example.com/drain'</code>
   "state_duration_seconds": 900,
   "grace_period_seconds": 3600,
   "connections_allowed": false,
-  "version": "26.9.36",
+  "version": "latest stable release",
   "timestamp": "2026-04-03T14:30:00-04:00",
   "sessions": {
     "active_sessions": 12,
@@ -2100,9 +2111,17 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 gaps rather than errors.
             </p>
             <p>
-                Zero FPS or frame quality means no active stream and is also omitted as a gap. Zero remains valid for
-                encoding time, RTT, loss, and skip rates. NaN, infinity, negative, and out-of-range RemoteFX values
-                are dropped individually before persistence; valid siblings and core host telemetry remain available.
+                Each reported field is validated independently before it reaches retained telemetry: FPS must be
+                <code>(0, 240]</code>; frame quality <code>(0, 100]</code>; encoding time and RTT
+                <code>[0, 60000]</code> ms; packet loss <code>[0, 100]</code> percent; and each skip rate
+                <code>[0, 1000000]</code>. NaN, infinity, negative values, and outliers are dropped without discarding
+                valid sibling counters or core host telemetry. Zero FPS or frame quality means no active stream and is
+                a gap; zero is valid and retained for encoding time, RTT, loss, and skip rates.
+            </p>
+            <p>
+                Percentile series preserve field presence. A valid lower-is-better zero P50 is plotted as zero, not
+                converted to a gap; a missing value remains a gap. This distinction prevents idle sessions from
+                looking like a measured zero-latency or zero-loss result.
             </p>
 
             <h3>Dashboard Display</h3>
@@ -2226,10 +2245,11 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     normal delivery.
                 </li>
                 <li>
-                    <strong>Force Update</strong> requires an online compatible agent (v26.9.17 or later). Once the
-                    dashboard accepts the command, it persists and retries delivery until the agent acknowledges it.
-                    Offline hosts are reported as offline and are not queued. The dashboard reports terminal outcomes
-                    per host, including completion, no update available, unsupported version, and update failure.
+                    <strong>Force Update</strong> requires an online agent meeting the <strong>historical compatibility
+                    baseline</strong> of <code>v26.9.17</code> or later. Once the dashboard accepts the command, it
+                    persists and retries delivery until the agent acknowledges it. Offline hosts are reported as offline
+                    and are not queued. The dashboard reports terminal outcomes per host, including completion, no
+                    update available, unsupported version, and update failure.
                 </li>
             </ul>
             <p>
@@ -2735,7 +2755,8 @@ if ($result.exit_code -ne 0) {
                 Open <strong>Configuration &rarr; System</strong> to enable or disable updates, choose the stable or
                 prerelease channel, and select the polling cadence. The dashboard policy applies to every connected
                 agent on its next settings synchronization without a service restart. For an immediate one-time check,
-                use the Servers table's Force Update action; it is supported by agents v26.9.17 and later and remains
+                use the Servers table's Force Update action; it is supported by agents meeting the
+                <strong>historical compatibility baseline</strong> of <code>v26.9.17</code> or later and remains
                 queued until acknowledged.
             </p>
 
@@ -2893,27 +2914,56 @@ drainctl service uninstall</code></pre>
             <p>
                 Windows Error Reporting (WER) writes only protected local mini dumps for
                 <code>drainctld.exe</code>, up to three files, in
-                <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dumps</code>. The protected
-                <code>diags</code> directory beside it stores scheduled collector output. Both directories are
-                restricted to LocalSystem and local Administrators; neither inherits Users, Everyone, or
-                Authenticated Users access. Dumps and diagnostic artifacts are sensitive evidence: DrainCtl never
-                uploads, sends, indexes, or exposes their bytes through the dashboard, SSE, logs, or notifications.
+                <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dumps</code>. The installer creates this
+                permanent ProgramData directory with a DACL granting full control only to LocalSystem and local
+                Administrators; broad inherited access is removed. WER owns dump creation and its three-file
+                retention limit. The adjacent protected <code>diags</code> directory stores diagnostics task output.
+                Neither directory grants Users, Everyone, or Authenticated Users access.
             </p>
             <pre><code># Run from an elevated PowerShell session
 $dumpRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl\dumps'
 $diagsRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl\diags'
 sc.exe qfailure DrainCtl
+Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\drainctld.exe' |
+  Select-Object DumpFolder, DumpType, DumpCount
 Get-ChildItem -Force $dumpRoot | Sort-Object CreationTimeUtc -Descending |
   Select-Object Name, Length, CreationTimeUtc
 Get-Acl -Path $dumpRoot, $diagsRoot | Format-List Path, Owner, AccessToString</code></pre>
             <p>
-                The disabled <code>\LISS Technologies\DrainCtl-Diags</code> task records only dump name, size, and UTC
-                creation time by default into protected <code>diags</code>. For an approved local investigation, setting
-                <code>DRAINCTL_INCLUDE_CRASH_DUMPS=1</code> lets it hash and gzip-copy only the newest dump inside the
-                protected <code>dumps</code> directory; the archive and hash sidecar are never put in
-                <code>diags</code> or uploaded. Analyze a manually authorized copy only on a secured workstation.
-                After incident approval and retention, an authorized administrator may delete the exact local
-                <code>.dmp</code>; the product never deletes WER-managed dumps automatically.
+                The installed <code>\LISS Technologies\DrainCtl-Diags</code> task has an hourly schedule. Enable it in
+                Task Scheduler when policy permits scheduled local collection; it writes protected service state and
+                failure actions, WER LocalDumps configuration, relevant crash events, and a metadata-only dump
+                inventory to <code>diags</code>. The inventory records only name, byte count, and UTC creation time: it
+                does not read dump bytes, calculate hashes, or copy dump content by default. Dumps and diagnostic
+                artifacts are sensitive evidence; DrainCtl never uploads, sends, indexes, or exposes their bytes
+                through the dashboard, SSE, logs, or notifications.
+            </p>
+            <p>
+                For an approved local investigation only, set <code>DRAINCTL_INCLUDE_CRASH_DUMPS=1</code> in the task
+                environment. The next collection hashes and gzip-copies only the newest dump <em>inside</em> the
+                protected <code>dumps</code> directory; the archive and SHA-256 sidecar never enter
+                <code>diags</code> and are never uploaded. Analyze only a manually authorized copy on a secured
+                workstation. After incident approval and retention, an authorized administrator may delete the exact
+                local <code>.dmp</code>; the product never deletes WER-managed dumps automatically.
+            </p>
+            <h3>Crash triage</h3>
+            <ol>
+                <li>Record the incident time in UTC, host, installed package version, service state, and
+                    <code>sc.exe qfailure DrainCtl</code> output.</li>
+                <li>Collect the matching System service-control events (including 7034 or 1067 when present), the
+                    DrainCtl event log, the hourly diagnostics files, and the metadata-only dump inventory.</li>
+                <li>Check that the WER key has <code>DumpType=1</code> and <code>DumpCount=3</code>, that the protected
+                    directory is available, and whether a dump timestamp matches the unexpected exit.</li>
+                <li>If analysis is authorized, copy&mdash;do not move&mdash;the selected dump to the approved restricted
+                    evidence location, preserving the protected original until the retention decision is complete.</li>
+            </ol>
+            <p>
+                A service-control event confirms that the process ended; it does not identify the faulting function,
+                module, or instruction. Three 7034 events followed by a stopped service confirm that the recovery
+                budget was exhausted, not where the process crashed. When no matching dump exists for an historical
+                incident, record the crash location as unknown rather than inferring it from service events, a restart,
+                or nearby log lines. Preserve the evidence and investigate WER policy, ACLs, storage, and Windows
+                Error Reporting operational events before changing recovery settings.
             </p>
 
             <h3>Event Log</h3>
@@ -3012,25 +3062,33 @@ Get-Acl -Path $dumpRoot, $diagsRoot | Format-List Path, Owner, AccessToString</c
             </ol>
 
             <h3>Dashboard shows "Offline" for a registered server</h3>
-            <p>The server's DrainCtl service isn't reporting. Check:</p>
+            <p>
+                Offline means the dashboard has not accepted a report for three effective heartbeat intervals. It is a
+                freshness state, not a rewrite of the host's last successful result or last-seen value. Start with the
+                reporting host:
+            </p>
             <ul>
-                <li>Is the service running on that server? <code>Get-Service DrainCtl</code></li>
-                <li>
-                    Is <code>dashboard.url</code> set in
-                    <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code>?
-                </li>
-                <li>
-                    Can the server reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code>
-                </li>
-                <li>Check the DrainCtl event log on the reporting server for DrainCtl errors</li>
+                <li>Is the service running? <code>Get-Service DrainCtl</code></li>
+                <li>Is <code>dashboard.url</code> set in
+                    <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json</code>?</li>
+                <li>Can it reach the dashboard? <code>Test-NetConnection dashboard-server -Port 49470</code></li>
+                <li>Check the DrainCtl event log and file log on the reporting server for report, TLS, or registration errors.</li>
             </ul>
-
+            <p>
+                The dashboard emits one additive <code>host_offline</code> SSE event for the affected
+                canonical-host/report epoch, while continuing compatible <code>server_update</code> events. The next
+                accepted report emits one <code>host_recovered</code> event. These boundaries are persisted in telemetry
+                SQLite schema v3, so page refreshes and dashboard restarts do not re-alert the same outage. If you
+                change the heartbeat interval, the running freshness timer wakes immediately and evaluates the new
+                three-interval threshold; it does not wait for the old timer.
+            </p>
             <h3>Force Update remains queued</h3>
             <p>
                 A queued Force Update means the dashboard has not yet received an agent acknowledgement. Confirm the
                 server is online and reporting, then inspect the command's per-server delivery status in
-                <strong>Configuration &rarr; Servers</strong>. Agents older than v26.9.17 are terminally unsupported;
-                delivery and update failures are terminal outcomes, not successful updates.
+                <strong>Configuration &rarr; Servers</strong>. Agents older than the <strong>historical compatibility
+                baseline</strong> of <code>v26.9.17</code> are terminally unsupported; delivery and update failures are
+                terminal outcomes, not successful updates.
             </p>
 
             <h3>Event Spikes stays TRAINING</h3>

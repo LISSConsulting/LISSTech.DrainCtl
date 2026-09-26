@@ -58,6 +58,39 @@ The dashboard and selfmetrics paths use a type-assertion to detect Statusable su
 - Runtime errors discovered by background goroutines are reported via the subsystem's own callbacks (e.g., `OnStatusChange`, `OnLoss`) or its logs. The service does not poll subsystems for errors.
 - A subsystem whose primary worker has irrecoverably failed at runtime (e.g., evtspike all subscriptions in StateFailed) MUST keep running its other workers so Stop can still drain cleanly. The status surface signals the failure to operators; the lifecycle does not flap.
 
+## Runtime-resilience ownership and persistence boundaries
+
+The LCI owns in-process lifetime only. `Execute` constructs the subsystem graph, passes a service-owned context to
+each `Start`, cancels that context during service shutdown, and calls each `Stop` to drain work. A subsystem owns its
+own goroutines and any transient in-memory state needed to stop them; it does not own the Windows service, SCM policy,
+or another subsystem's worker group.
+
+The following boundaries are intentionally outside the LCI:
+
+- **SCM owns process recovery.** An unexpected service process exit is allowed to reach SCM. The installer configures
+  a five-second restart after the first and second failures, no action after the third, and a one-day failure-count
+  reset. Planned stop, upgrade, and uninstall are not recovery events. Subsystems do not implement competing restart
+  loops.
+- **MSI and WER own crash-dump provisioning and retention.** The installer provisions a permanent protected
+  ProgramData `dumps` directory and the per-executable `drainctld.exe` WER LocalDumps policy
+  (`DumpType=1`, `DumpCount=3`). WER creates mini dumps and owns the count limit. The service never uploads, indexes,
+  or deletes dump bytes.
+- **The scheduled diagnostics task owns diagnostic collection.** Its hourly schedule writes to protected `diags` when
+  the task is enabled. It records service state/failure actions, WER configuration, relevant crash events, and dump
+  metadata only. Explicit `DRAINCTL_INCLUDE_CRASH_DUMPS=1` permits handling only the newest dump, and its gzip/hash
+  artifacts stay under protected `dumps`; this does not add a telemetry or upload path.
+- **Telemetry SQLite owns durable fleet state.** Schema v3 persists host freshness by canonical host and accepted
+  report epoch, including whether the offline boundary was emitted. The freshness worker may publish one
+  `host_offline` event per epoch and one `host_recovered` event on the next accepted report. Status reads and timer
+  evaluation never rewrite the host's last successful result or `LastSeen`.
+- **RemoteFX normalization precedes persistence.** Each optional counter is validated independently before telemetry
+  aggregation. Missing or inactive FPS/quality fields retain absence semantics, while valid lower-is-better zero P50
+  values remain present and persist as zero.
+
+These ownership boundaries make restart behavior, crash evidence, fleet freshness, and telemetry retention durable
+without giving an individual subsystem authority over product installation, Windows policy, or another subsystem's
+lifetime.
+
 ## What the LCI explicitly does NOT do
 
 - **No DI container.** The service constructs subsystems directly with their dependencies as constructor arguments. No registry-of-registries.
