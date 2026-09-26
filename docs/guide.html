@@ -1660,10 +1660,18 @@ https://dashboard-server:49470</code></pre>
 
             <p>
                 The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who
-                last changed it, and when it was last seen. Color-coded: green for healthy, amber for grace, red for
-                alert, gray for offline. Each server card includes a <strong>session gauge</strong> showing current
-                utilization, plus an <strong>Overview LOAD chart</strong> that overlays CPU, CPU P95, Memory, and
-                Sessions for the entire fleet on one dual-axis canvas.
+                last changed it, and when it was last seen. Recognized hostnames are presented under a conservatively
+                derived RD Session Pool; hosts that cannot be recognized remain under <strong>Ungrouped</strong>.
+                Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card
+                includes a <strong>session gauge</strong> showing current utilization, plus an <strong>Overview LOAD
+                chart</strong> that overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis
+                canvas.
+            </p>
+
+            <p>
+                The Overview's optional multi-server filter applies to every chart family (LOAD, Health Indicators,
+                Sessions, and RemoteFX). With no host selected, all registered servers are included; selected hosts are
+                sent as repeated <code>host</code> query parameters to <code>/api/v1/metrics/_fleet</code>.
             </p>
 
             <p>
@@ -1676,10 +1684,12 @@ https://dashboard-server:49470</code></pre>
 
             <p>
                 Clicking a server opens the <strong>Server Detail</strong> panel. The Host Load tile on that panel is a
-                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host. An
-                <strong>Event Spikes</strong> swimlane below it plots confirmed event-log spikes per channel and reports
-                <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> / <code>ERROR</code>. See
-                <a href="#evtspike">Event-Log Anomaly Detection</a> for the detector states.
+                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host. At
+                coarse retained resolutions, a Host Load CPU P95 point is the maximum retained agent sampling-window
+                P95 in its bucket, preserving spikes; it is not a percentile recomputed from all raw samples in that
+                bucket. An <strong>Event Spikes</strong> swimlane below it plots confirmed event-log spikes per channel
+                and reports <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> /
+                <code>ERROR</code>. See <a href="#evtspike">Event-Log Anomaly Detection</a> for the detector states.
             </p>
 
             <h3>Configuration modal</h3>
@@ -2027,13 +2037,18 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Each server card in the Overview grid shows live CPU/Memory/Sessions values color-coded by severity
                 (green/amber/red). The fleet-wide <strong>LOAD chart</strong> overlays CPU, CPU P95, Memory, and
-                Sessions on one dual-axis canvas; a P95 toggle surfaces spikes the average smooths over.
+                Sessions on one dual-axis canvas; a P95 toggle surfaces spikes the average smooths over. The optional
+                multi-server Overview filter applies consistently to LOAD, Health Indicators, Sessions, and RemoteFX;
+                its all-server default sends no <code>host</code> filters, and selected servers use repeated
+                <code>host</code> parameters on <code>/api/v1/metrics/_fleet</code>.
             </p>
             <p>
                 Opening a server reveals the Server Detail panel &mdash; a single dual-axis
                 <strong>Host Load chart</strong> scoped to that host plots CPU, CPU P95, Memory, and Sessions together,
-                with retained 5M, 15M where applicable, 1H, 1D, 3D, 5D, and 30D ranges. Input delay, disk queue, and
-                RemoteFX counters (when the role is installed) are surfaced in the metrics tiles alongside.
+                with retained 5M, 15M where applicable, 1H, 1D, 3D, 5D, and 30D ranges. At a coarse tier, CPU P95 is
+                the maximum retained agent sampling-window P95 in each bucket, not an exact percentile recomputed for
+                that bucket. Input delay, disk queue, and RemoteFX counters (when the role is installed) are surfaced
+                in the metrics tiles alongside.
             </p>
 
             <h3>Server Status Levels</h3>
@@ -2107,11 +2122,13 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                 <li><strong>Capacity</strong>: up to 100 concurrent browser sessions with &lt;1 MB memory per subscriber</li>
             </ul>
 
-            <h3>Servers: selection, lifecycle, and updates</h3>
+            <h3>Servers: grouping, selection, lifecycle, and updates</h3>
             <p>
-                The Servers table supports persistent multi-select with per-row checkboxes and a tri-state select-all
-                control. Selection survives filtering and pagination until you clear it or complete an action, so an
-                operator can assemble a batch deliberately before acting.
+                The Servers table groups recognized hostnames by a conservative hostname-derived RD Session Pool.
+                Hosts that do not match a recognized pool stay in <strong>Ungrouped</strong>; the presentation does not
+                infer a pool from uncertain names. It supports persistent multi-select with per-row checkboxes and a
+                tri-state select-all control. Selection survives filtering and pagination until you clear it or complete
+                an action, so an operator can assemble a batch deliberately before acting.
             </p>
             <ul>
                 <li>
@@ -2185,7 +2202,10 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Each Server Detail panel carries an <strong>Event Spikes</strong> swimlane tile: one row per active
                 channel, with confirmed spikes plotted on the retained 5M, 15M where applicable, 1H, 1D, 3D, 5D, and
-                30D time ranges. The tile header carries a state chip:
+                30D time ranges. The header's count is the exact total whose <code>window_start</code> is in the
+                visible <code>[from, to)</code> range; the chart renders at most 500 newest-first dots, and
+                <code>truncated</code> signals omitted older dots. Live <code>recent_spike</code> SSE entries are
+                deduplicated by ID before rendering. The tile header carries a state chip:
             </p>
             <table>
                 <thead>

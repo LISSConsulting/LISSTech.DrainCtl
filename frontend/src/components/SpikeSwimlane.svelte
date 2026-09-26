@@ -26,9 +26,10 @@
     import { formatTs, formatTime12 } from '../lib/utils.js';
 
     /** @typedef {import('../lib/types.js').RecentSpike} RecentSpike */
+    /** @typedef {import('../lib/api.js').SpikeRangeResponse} SpikeRangeResponse */
 
-    /** @type {{ host: string }} */
-    let { host } = $props();
+    /** @type {{ host: string, onSummaryChange?: (summary: {total: number|null, truncated: boolean, loading: boolean, error: string}) => void }} */
+    let { host, onSummaryChange = undefined } = $props();
 
     // ── Window presets (matches 008 Overview shared-window semantics) ────
     const PRESETS = [
@@ -60,8 +61,8 @@
     let presetMs = $derived(PRESETS.find((p) => p.key === presetKey)?.ms ?? PRESETS[2].ms);
 
     // ── Data fetch ─────────────────────────────────────────────────────────
-    /** @type {RecentSpike[]} */
-    let fetched = $state([]);
+    /** @type {SpikeRangeResponse | null} */
+    let snapshot = $state(null);
     let loading = $state(false);
     let error = $state('');
     /** @type {AbortController | null} */
@@ -71,23 +72,32 @@
     let windowFrom = $derived(new Date(windowTo.getTime() - presetMs));
 
     async function load() {
-        if (!host) return;
         if (inflight) inflight.abort();
-        inflight = new AbortController();
-        loading = true;
+        snapshot = null;
         error = '';
+        if (!host) {
+            loading = false;
+            return;
+        }
+
+        const controller = new AbortController();
+        inflight = controller;
+        loading = true;
         const to = new Date();
         windowTo = to;
         const from = new Date(to.getTime() - presetMs);
         try {
-            const data = await fetchSpikeRange(host, from, to, inflight.signal);
-            fetched = data;
+            const data = await fetchSpikeRange(host, from, to, controller.signal);
+            if (inflight !== controller) return;
+            snapshot = data;
         } catch (e) {
-            if (e instanceof DOMException && e.name === 'AbortError') return;
+            if (inflight !== controller || (e instanceof DOMException && e.name === 'AbortError')) return;
             error = /** @type {Error} */ (e)?.message ?? String(e);
-            fetched = [];
         } finally {
-            loading = false;
+            if (inflight === controller) {
+                loading = false;
+                inflight = null;
+            }
         }
     }
 
@@ -108,29 +118,70 @@
     });
 
     function selectPreset(key) {
+        if (key === presetKey) return;
+        // Clear the old window's authoritative count before the reload effect
+        // runs, so the parent header never briefly labels it as this preset.
+        snapshot = null;
+        error = '';
+        loading = true;
         presetKey = key;
         writeStoredPreset(key);
     }
 
-    // ── Data shaping ───────────────────────────────────────────────────────
-    // Merge REST fetch with SSE live appends. De-dupe on id so a spike arriving
-    // via SSE after our range fetch doesn't appear twice.
-    let mergedSpikes = $derived.by(() => {
-        const live = appState.recentSpikes.get(host) ?? [];
-        const byId = new Map();
-        for (const s of fetched) byId.set(s.id, s);
-        for (const s of live) byId.set(s.id, s); // SSE wins on tie — it's fresher
+    // Merge every in-window live arrival for plotting, de-duped by ID. The
+    // REST total remains authoritative: an absent live ID can increase it only
+    // when it was written after the range snapshot's ID watermark. An older
+    // absent ID may be one of the rows omitted by the 500-row plotting cap.
+    let liveSpikes = $derived.by(() => {
         const fromMs = windowFrom.getTime();
         const toMs = windowTo.getTime();
-        const out = [];
-        for (const s of byId.values()) {
-            const t = Date.parse(s.window_end);
-            if (!Number.isFinite(t)) continue;
-            if (t < fromMs || t > toMs) continue;
-            out.push({ ...s, _t: t });
+        const byId = new Map();
+        for (const s of appState.recentSpikes.get(host) ?? []) {
+            const t = Date.parse(s.window_start);
+            if (Number.isFinite(t) && t >= fromMs && t < toMs) byId.set(s.id, s);
         }
-        out.sort((a, b) => a._t - b._t);
-        return out;
+        return Array.from(byId.values());
+    });
+
+    let newLiveSpikes = $derived.by(() => {
+        const snapshotIds = new Set((snapshot?.spikes ?? []).map((s) => s.id));
+        const asOfId = snapshot?.as_of_id ?? 0;
+        return liveSpikes.filter((s) => !snapshotIds.has(s.id) && Number.isInteger(s.id) && s.id > asOfId);
+    });
+
+    let displayedTotal = $derived(snapshot ? snapshot.total + newLiveSpikes.length : null);
+    let plotTruncated = $derived.by(() => {
+        if (snapshot?.truncated) return true;
+        const ids = new Set(snapshot?.spikes.map((s) => s.id) ?? []);
+        for (const s of liveSpikes) ids.add(s.id);
+        return ids.size > 500;
+    });
+    let summary = $derived({
+        total: loading || error || !snapshot ? null : displayedTotal,
+        truncated: plotTruncated,
+        loading,
+        error,
+    });
+    $effect(() => {
+        onSummaryChange?.(summary);
+    });
+
+    // Merge the retained REST rows with every in-window live arrival. The
+    // chart itself is independently capped to 500 newest rows.
+    let mergedSpikes = $derived.by(() => {
+        const fromMs = windowFrom.getTime();
+        const toMs = windowTo.getTime();
+        const byId = new Map();
+        for (const s of snapshot?.spikes ?? []) byId.set(s.id, s);
+        for (const s of liveSpikes) byId.set(s.id, s); // SSE has fresher fields on ID ties.
+        const newestFirst = [];
+        for (const s of byId.values()) {
+            const t = Date.parse(s.window_start);
+            if (!Number.isFinite(t) || t < fromMs || t >= toMs) continue;
+            newestFirst.push({ ...s, _t: t });
+        }
+        newestFirst.sort((a, b) => b._t - a._t);
+        return newestFirst.slice(0, 500).reverse();
     });
 
     // Derive channel lanes from the visible data. Newest spike's channel gets

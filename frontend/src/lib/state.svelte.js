@@ -291,6 +291,14 @@ let recentSpikes = $state(new Map());
  */
 let selectedHosts = $state(/** @type {Set<string>} */ (new Set()));
 
+/**
+ * Hosts scoped into the Overview metrics query. An empty set deliberately means
+ * "all registered hosts", unlike `selectedHosts`, which means no batch action.
+ * Every mutation assigns a fresh Set so rune reactivity observes the change.
+ * @type {Set<string>}
+ */
+let overviewSelectedHosts = $state(/** @type {Set<string>} */ (new Set()));
+
 /** Incremented after a durable removal or restore SSE event. */
 let removedServersRevision = $state(0);
 
@@ -592,6 +600,14 @@ export const appState = {
         return selectedHosts;
     },
 
+    /**
+     * Hosts scoped into Overview charts. Empty means all registered hosts.
+     * Mutate with the overview-selection helpers below.
+     * @type {Set<string>}
+     */
+    get overviewSelectedHosts() {
+        return overviewSelectedHosts;
+    },
     // UI state
     get connected() {
         return connected;
@@ -875,6 +891,56 @@ export function dropSelection(host) {
 export function clearSelection() {
     if (selectedHosts.size === 0) return;
     selectedHosts = new Set();
+}
+
+// ---------------------------------------------------------------------------
+// Overview metrics selection helpers
+//
+// This selection is intentionally separate from `selectedHosts`: chart
+// filtering must never alter a destructive Servers-table batch selection.
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace the Overview host filter. An empty iterable restores the all-hosts
+ * default. Assigning a fresh Set keeps Svelte 5 reactivity reliable.
+ * @param {Iterable<string>} hosts
+ */
+export function setOverviewSelection(hosts) {
+    overviewSelectedHosts = new Set(hosts);
+}
+
+/** Toggle one host in the Overview filter. @param {string} host */
+export function toggleOverviewSelection(host) {
+    const next = new Set(overviewSelectedHosts);
+    if (next.has(host)) next.delete(host);
+    else next.add(host);
+    overviewSelectedHosts = next;
+}
+
+/**
+ * Remove Overview-filter hosts that no longer exist in the live roster.
+ * @param {Iterable<string>} liveHosts
+ * @returns {boolean} true if entries were pruned
+ */
+export function pruneOverviewSelectionFor(liveHosts) {
+    if (overviewSelectedHosts.size === 0) return false;
+    const live = liveHosts instanceof Set ? liveHosts : new Set(liveHosts);
+    const next = new Set();
+    let changed = false;
+    for (const host of overviewSelectedHosts) {
+        if (live.has(host)) next.add(host);
+        else changed = true;
+    }
+    if (changed) overviewSelectedHosts = next;
+    return changed;
+}
+
+/** Drop one removed host from the Overview filter. @param {string} host */
+export function dropOverviewSelection(host) {
+    if (!overviewSelectedHosts.has(host)) return;
+    const next = new Set(overviewSelectedHosts);
+    next.delete(host);
+    overviewSelectedHosts = next;
 }
 
 /**

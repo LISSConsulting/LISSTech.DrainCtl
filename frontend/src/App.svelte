@@ -13,6 +13,8 @@
         appendRecentSpike,
         removeEvtSpikeState,
         dropSelection,
+        dropOverviewSelection,
+        pruneOverviewSelectionFor,
         recordForceUpdateCompletion,
     } from './lib/state.svelte.js';
     import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, settingsFromWire } from './lib/api.js';
@@ -198,6 +200,7 @@
                     return polled;
                 });
             }
+            pruneOverviewSelectionFor(appState.servers.map((server) => server.host));
             appState.health = health;
             if (needsConfig) appState.config = results[2] ?? null;
             appState.connected = true;
@@ -429,6 +432,7 @@
                     // host is gone — drop any in-flight batch selection so the
                     // toolbar never operates on a stale row.
                     dropSelection(event.host);
+                    dropOverviewSelection(event.host);
                     prevStates.delete(event.host);
                     addEvent(
                         serverEvent(
@@ -449,6 +453,7 @@
                     appState.notifyRemovedServersChanged();
                     removeEvtSpikeState(event.host);
                     dropSelection(event.host);
+                    dropOverviewSelection(event.host);
                     prevStates.delete(event.host);
                     addEvent(
                         serverEvent(
