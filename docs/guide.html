@@ -524,6 +524,11 @@
                 </li>
                 <li>Creates the data directory at <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\</code></li>
                 <li>
+                    Creates the protected local crash-dump directory at
+                    <code>C:\ProgramData\LISS Technologies\LISSTech DrainCtl\dumps\</code> and configures WER
+                    LocalDumps for <code>drainctld.exe</code> only (mini dumps, maximum three)
+                </li>
+                <li>
                     Installs and <strong>auto-starts</strong> the <strong>DrainCtl</strong> Windows Service (runs as
                     LocalSystem)
                 </li>
@@ -1674,7 +1679,9 @@ https://dashboard-server:49470</code></pre>
                 last changed it, and when it was last seen. The Servers table groups hosts by authoritative RD
                 Connection Broker session-collection membership. A host with no assigned collection, or a host whose
                 membership cannot currently be discovered, remains under <strong>Ungrouped</strong>. Color-coded:
-                green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a
+                green for healthy, amber for grace, red for alert, gray for offline. Offline is derived from the
+                dashboard's accepted-report time after exactly three effective heartbeat intervals; it does not change
+                the host's stored last result or last-seen value. Each server card includes a
                 <strong>session gauge</strong> showing current utilization, plus an <strong>Overview LOAD
                 chart</strong> that overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis
                 canvas.
@@ -2077,7 +2084,13 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Set <code>"collect_remotefx": true</code> to collect RemoteFX Graphics and Network counters: output FPS,
                 encoding time, frame quality, RTT, packet loss, and skip rates. These counters are only available when
-                the RemoteFX role is installed; absence is not an error.
+                the RemoteFX role is installed; provider absence, missing counters, and missing values are displayed as
+                gaps rather than errors.
+            </p>
+            <p>
+                Zero FPS or frame quality means no active stream and is also omitted as a gap. Zero remains valid for
+                encoding time, RTT, loss, and skip rates. NaN, infinity, negative, and out-of-range RemoteFX values
+                are dropped individually before persistence; valid siblings and core host telemetry remain available.
             </p>
 
             <h3>Dashboard Display</h3>
@@ -2135,7 +2148,7 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     <tr>
                         <td>Offline</td>
                         <td>Grey</td>
-                        <td>Three consecutive expected reports were missed (for example, 3 minutes at a 60-second poll interval)</td>
+                        <td>Three effective heartbeat intervals have elapsed since the dashboard accepted the last report; one durable offline transition is recorded for that report epoch.</td>
                     </tr>
                 </tbody>
             </table>
@@ -2161,9 +2174,15 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <ul>
                 <li><strong>Endpoint</strong>: <code>GET /api/v1/events</code> (requires session cookie)</li>
-                <li><strong>Event types</strong>: <code>server_update</code> (agent reports, local checks),
+                <li><strong>Event types</strong>: <code>server_update</code> (agent reports and compatible live views),
+                    <code>host_offline</code> (one fresh-to-offline transition per canonical host/report epoch),
+                    <code>host_recovered</code> (the next accepted report after that outage),
                     <code>server_deleted</code> (server removed via dashboard), and
                     <code>settings_update</code> (config changes)</li>
+                <li><strong>Freshness durability</strong>: the dashboard stores epoch deduplication in telemetry SQLite
+                    schema v3, so repeated status reads or a dashboard restart do not repeat an offline transition.
+                    Changing the heartbeat interval wakes and resets the freshness worker immediately; the next
+                    evaluation uses the new three-interval threshold.</li>
                 <li><strong>Reconnection</strong>: automatic (~3 seconds, handled by the browser&rsquo;s EventSource API)</li>
                 <li><strong>Fallback</strong>: the existing periodic poll continues as a full-sync safety net</li>
                 <li><strong>Capacity</strong>: up to 100 concurrent browser sessions with &lt;1 MB memory per subscriber</li>
@@ -2852,6 +2871,35 @@ drainctl service uninstall</code></pre>
                 </li>
                 <li><strong>Hot-reloads</strong> configuration when <code>config.json</code> changes</li>
             </ul>
+
+            <h3>Unexpected-failure recovery and local crash dumps</h3>
+            <p>
+                SCM restarts the first and second unexpected service exits after five seconds. A third unexpected exit
+                in the same one-day reset window leaves the service stopped; a normal stop, upgrade, or uninstall is
+                not a recovery event. Confirm the installed policy with <code>sc.exe qfailure DrainCtl</code>.
+            </p>
+            <p>
+                Windows Error Reporting (WER) writes only protected local mini dumps for
+                <code>drainctld.exe</code>, up to three files, in
+                <code>%ProgramData%\LISS Technologies\LISSTech DrainCtl\dumps</code>. The directory is restricted to
+                LocalSystem and local Administrators. Dumps are sensitive memory evidence: DrainCtl never uploads,
+                sends, indexes, or exposes their bytes through the dashboard, SSE, logs, or notifications.
+            </p>
+            <pre><code># Run from an elevated PowerShell session
+$dumpRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl\dumps'
+sc.exe qfailure DrainCtl
+Get-ChildItem -Force $dumpRoot | Sort-Object CreationTimeUtc -Descending |
+  Select-Object Name, Length, CreationTimeUtc
+Get-Acl -Path $dumpRoot | Format-List Owner, AccessToString</code></pre>
+            <p>
+                The disabled <code>\LISS Technologies\DrainCtl-Diags</code> task records only dump name, size, and UTC
+                creation time by default. For an approved local investigation, setting
+                <code>DRAINCTL_INCLUDE_CRASH_DUMPS=1</code> lets it hash and gzip-copy only the newest dump inside this
+                same protected directory; the archive and hash sidecar are never put in <code>diags</code> or uploaded.
+                Analyze a manually authorized copy only on a secured workstation. After incident approval and retention,
+                an authorized administrator may delete the exact local <code>.dmp</code>; the product never deletes
+                WER-managed dumps automatically.
+            </p>
 
             <h3>Event Log</h3>
             <p>Open Event Viewer &rarr; Applications and Services Logs &rarr; <code>DrainCtl</code>:</p>

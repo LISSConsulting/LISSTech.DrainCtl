@@ -58,7 +58,7 @@ An operator monitoring the dashboard needs a host to turn offline exactly after 
 2. **Given** that host, **when** `now >= t0 + 3 × effectiveHeartbeatInterval`, **then** its derived state becomes offline and the dashboard emits exactly one `host_offline` SSE transition for that freshness epoch.
 3. **Given** an already-offline host with no report, **when** status is polled repeatedly, **then** it remains offline and no duplicate offline SSE transition is emitted.
 4. **Given** an offline host, **when** the dashboard accepts a new report, **then** it becomes fresh, its reported health is visible, and the dashboard emits exactly one `host_recovered` SSE transition for that recovery.
-5. **Given** a hot-reloaded configured poll interval, **when** the new effective interval takes effect, **then** staleness is recalculated from that interval without restarting the dashboard listener.
+5. **Given** a hot-reloaded configured poll interval, **when** the new effective interval takes effect, **then** the freshness worker is woken immediately, its prior wait is reset, and staleness is recalculated from that interval without restarting the dashboard listener.
 
 ### User Story 3 — Trust RemoteFX charts in sparse or invalid telemetry (P1)
 
@@ -91,16 +91,16 @@ An operator can deploy this release while older agents continue to report and ne
 - **FR-002**: The service runtime MUST allow an unexpected process failure to reach SCM. Panic logging MAY record metadata and a stack, but MUST re-panic or otherwise return a failing process exit; it MUST NOT convert a corrupted runtime condition into an apparently clean service stop.
 - **FR-003**: Installation or repair MUST configure WER LocalDumps specifically for `drainctld.exe`, with `DumpType=1` (mini dump), `DumpCount=3`, and a product-local ProgramData `dumps` directory.
 - **FR-004**: The dump directory ACL MUST grant full control only to LocalSystem and local Administrators; inherited broad read/write access MUST be removed. The installer/service MUST create the directory before configuring WER and MUST fail the diagnostic setup visibly if either directory creation or ACL hardening fails.
-- **FR-005**: Local dumps are sensitive memory artifacts. The product MUST NOT automatically upload, attach, transmit, index into SQLite, serialize into dashboard APIs/SSE, or include dump bytes in logs or notifications. A dump inventory MAY expose only filename, size, and local creation time to an authorized local administrator.
-- **FR-006**: Retention MUST be bounded by WER `DumpCount=3`. The product MUST NOT add a competing deletion routine that can race WER; manual deletion by an authorized administrator remains permitted.
+- **FR-005**: Local dumps are sensitive memory artifacts. The product MUST NOT automatically upload, attach, transmit, index into SQLite, serialize into dashboard APIs/SSE, or include dump bytes in logs or notifications. The default scheduled inventory MUST contain only filename, size, and local creation time for an authorized local administrator; it MUST NOT read bytes or calculate hashes. With explicit, approved `DRAINCTL_INCLUDE_CRASH_DUMPS=1`, only the newest dump MAY be hashed and gzip-copied inside the protected `dumps` directory with its hash sidecar; neither artifact may be copied to `diags` or uploaded.
+- **FR-006**: Retention MUST be bounded by WER `DumpCount=3`. The product MUST NOT add a competing deletion routine that can race WER; manual deletion by an authorized administrator remains permitted. Seven-day task cleanup MAY delete only task-created opt-in gzip artifacts and hash sidecars, never WER-managed `.dmp` files.
 - **FR-007**: A structured service-start log MUST record the effective recovery/dump diagnostic configuration without dump contents or customer-specific paths. Failure to configure crash diagnostics MUST log an actionable error and be independently observable.
 
 ### Freshness and SSE
 
-- **FR-008**: The effective heartbeat interval is the currently configured dashboard heartbeat interval; if unset or invalid, it MUST fall back to the product default poll interval. The offline threshold MUST equal exactly `3 × effectiveHeartbeatInterval`.
+- **FR-008**: The effective heartbeat interval is the currently configured dashboard heartbeat interval; if unset or invalid, it MUST fall back to the product default poll interval. The offline threshold MUST equal exactly `3 × effectiveHeartbeatInterval`. Reloading that interval MUST immediately wake and reset the freshness worker so its next evaluation uses the new interval rather than waiting for the old cadence.
 - **FR-009**: Freshness is derived from the server-side accepted-report timestamp, not agent-provided wall time. A host with no accepted report remains `unknown`, not `offline`.
-- **FR-010**: The dashboard MUST persist enough freshness-transition state to deduplicate a fresh→offline event across status requests and dashboard process restarts. The state MUST be keyed by canonical host identity and freshness epoch (the last accepted report time).
-- **FR-011**: On the first observation of a fresh→offline transition for an epoch, the dashboard MUST emit one `host_offline` SSE event. On the first accepted report after an offline epoch, it MUST emit one `host_recovered` SSE event. Both events MUST contain canonical host identity, observed timestamp, last accepted-report timestamp, and effective threshold; neither includes report secrets or dump data.
+- **FR-010**: The dashboard MUST persist enough freshness-transition state in telemetry SQLite schema v3 to deduplicate a fresh→offline event across status requests and dashboard process restarts. `host_freshness` MUST be keyed by canonical host identity and contain the accepted-report epoch plus a nullable offline-emitted marker. Its transactions MUST prevent an older evaluator from overwriting a newer accepted epoch; offline transitions MUST NOT rewrite `last_seen` or `last_result`.
+- **FR-011**: On the first atomic fresh→offline transition for an epoch, the dashboard MUST emit one `host_offline` SSE event. On the first newer accepted report after an offline epoch, it MUST emit one `host_recovered` SSE event. Both events MUST contain canonical host identity, observed timestamp, last accepted-report timestamp, and effective threshold; neither includes report secrets or dump data.
 - **FR-012**: Existing `server_update` behavior MUST remain available for live result updates. Transition events supplement it; clients that do not recognize them MUST remain functional.
 
 ### RemoteFX validity and directionality
@@ -124,9 +124,9 @@ An operator can deploy this release while older agents continue to report and ne
 |---|---|
 | WER registry write or dump-directory ACL fails during install/repair | Fail the diagnostic-setup action visibly; do not claim crash diagnostics are enabled; leave core service install behavior explicit in MSI logs. |
 | WER cannot create a dump because of OS policy, storage, or access | Service recovery remains governed by SCM; log/diagnostic inventory reports the absence without retry-uploading or exposing memory. |
-| Process dies three times in reset period | SCM leaves service stopped; operator sees SCM event history and local dump inventory. No third automatic restart. |
-| Dashboard restarts while host is stale | Persistent transition state prevents duplicate `host_offline` for the same last-report epoch. |
-| Report arrives at offline boundary | Accepted report establishes a new fresh epoch; transition processing is serialized so the outcome is one coherent recovery/update sequence, not both an offline and recovery event for the same observation. |
+| Dashboard restarts while host is stale | Persistent schema-v3 epoch state prevents duplicate `host_offline` for the same last-report epoch. |
+| Report arrives at offline boundary | Accepted report establishes a newer fresh epoch; atomic serialization produces one coherent recovery/update sequence, not both an offline and recovery event for the same epoch. |
+| Heartbeat interval is hot-reloaded | The freshness worker is signaled immediately, discards its former wait, and evaluates the new `3 × interval` boundary without listener restart. |
 | Counter provider absent or PDH returns no instances | Set RemoteFX unavailable/missing; do not emit zeros. |
 | NaN, infinity, negative, or out-of-range RemoteFX field | Drop only the field, increment an invalid-field diagnostic counter/log rate, and preserve remaining valid fields. |
 | New dashboard receives old agent report | Preserve current report behavior; optional diagnostics remain absent. |
@@ -146,6 +146,6 @@ An operator can deploy this release while older agents continue to report and ne
 ## Assumptions and explicit non-goals
 
 - The Windows Error Reporting service and LocalDumps policy are available on supported Windows Server installations. If organizational policy disables them, this feature reports the resulting absence; it does not bypass policy.
-- Dumps are opt-in local diagnostics, not a telemetry feature. Their contents require incident-approved local administrator handling.
+- Dumps are protected local diagnostics, not a telemetry feature. WER may create them for an unexpected crash; only optional newest-dump gzip/hash handling requires incident-approved local administrator action.
 - This sprint does not add automatic crash reporting, remote dump retrieval, a new cloud endpoint, customer-specific host routing, or a customer identifier to any artifact.
 - This sprint does not change force-update eligibility rules. Existing compatibility rules, including the v26.9.17 minimum for force update, remain independent of crash diagnostics.
