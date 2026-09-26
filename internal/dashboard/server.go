@@ -19,6 +19,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 //go:embed all:dist
@@ -32,23 +33,19 @@ var openapiSpec []byte
 
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state                  *ServerState
-	cfg                    dc.DashboardConfig
-	server                 *http.Server
-	fingerprint            string        // SHA-256 fingerprint of the TLS certificate
-	sessionStore           *SessionStore // in-memory dashboard session store
-	broker                 *Broker       // SSE event broker for real-time updates
-	rdCollections          *rdCollectionResolver
-	ms                     metricsReader
-	as                     auditReader
-	mnt                    maintenanceReader
-	heartbeatIntervalNanos atomic.Int64
-
-	// staleTransitions contains hosts for which the stale-host worker has
-	// already emitted the fresh-to-offline server_update. It is intentionally
-	// process-local: the durable server row and last result stay untouched.
-	staleTransitionsMu sync.Mutex
-	staleTransitions   map[string]struct{}
+	state                    *ServerState
+	cfg                      dc.DashboardConfig
+	server                   *http.Server
+	fingerprint              string        // SHA-256 fingerprint of the TLS certificate
+	sessionStore             *SessionStore // in-memory dashboard session store
+	broker                   *Broker       // SSE event broker for real-time updates
+	rdCollections            *rdCollectionResolver
+	ms                       metricsReader
+	as                       auditReader
+	mnt                      maintenanceReader
+	heartbeatIntervalNanos   atomic.Int64
+	heartbeatIntervalChanged chan struct{}
+	freshness                *telemetry.FreshnessStore
 
 	// now and staleSweepTicks are deterministic test seams. Production uses
 	// time.Now and a timer derived from the current heartbeat interval.
@@ -119,6 +116,13 @@ const missedHeartbeatLimit = 3
 
 func (ds *DashboardServer) setHeartbeatInterval(interval time.Duration) {
 	ds.heartbeatIntervalNanos.Store(int64(interval))
+	if ds.heartbeatIntervalChanged == nil {
+		return
+	}
+	select {
+	case ds.heartbeatIntervalChanged <- struct{}{}:
+	default:
+	}
 }
 
 func (ds *DashboardServer) staleAfter() time.Duration {
@@ -149,63 +153,42 @@ func (ds *DashboardServer) clock() time.Time {
 	return time.Now()
 }
 
-// clearStaleTransition permits the next fresh-to-offline transition after a
-// heartbeat has made a previously stale host fresh again.
-func (ds *DashboardServer) clearStaleTransition(host string) {
-	ds.staleTransitionsMu.Lock()
-	delete(ds.staleTransitions, host)
-	ds.staleTransitionsMu.Unlock()
-}
-
-// sweepStaleServers emits one server_update for each host which has crossed
-// from fresh to offline. It only observes durable state; neither last_seen nor
-// last_result is rewritten.
+// sweepStaleServers records and publishes each fresh-to-offline transition
+// exactly once per persisted last_seen epoch. It only observes durable server
+// state; neither last_seen nor last_result is rewritten.
 func (ds *DashboardServer) sweepStaleServers(now time.Time) {
-	infos := ds.state.All()
-	present := make(map[string]struct{}, len(infos))
+	if ds.freshness == nil {
+		return
+	}
 	staleAfter := ds.staleAfter()
-
-	for _, info := range infos {
-		present[info.Hostname] = struct{}{}
+	for _, info := range ds.state.All() {
 		if info.LastSeen.IsZero() || now.Sub(info.LastSeen) < staleAfter {
-			ds.clearStaleTransition(info.Hostname)
 			continue
 		}
 
-		ds.staleTransitionsMu.Lock()
-		_, emitted := ds.staleTransitions[info.Hostname]
-		if !emitted {
-			if ds.staleTransitions == nil {
-				ds.staleTransitions = make(map[string]struct{})
-			}
-			ds.staleTransitions[info.Hostname] = struct{}{}
-		}
-		ds.staleTransitionsMu.Unlock()
-		if emitted {
+		ctx, cancel := context.WithTimeout(context.Background(), serverStoreOpTimeout)
+		transitioned, err := ds.freshness.MarkOffline(ctx, info.Hostname, info.LastSeen, now)
+		cancel()
+		if err != nil {
+			slog.Warn("dashboard: stale transition persistence failed", "host", info.Hostname, "error", err)
 			continue
 		}
-
+		if !transitioned {
+			continue
+		}
 		slog.Warn("dashboard: server heartbeat stale",
 			"host", info.Hostname,
 			"last_seen", info.LastSeen,
 			"stale_after", staleAfter)
+		ds.broadcastHostOffline(info.Hostname, info.LastSeen, now, staleAfter)
 		ds.broadcastServerUpdateAt(info.Hostname, now)
 	}
-
-	ds.staleTransitionsMu.Lock()
-	for host := range ds.staleTransitions {
-		if _, ok := present[host]; !ok {
-			delete(ds.staleTransitions, host)
-		}
-	}
-	ds.staleTransitionsMu.Unlock()
 }
 
 // runStaleHostTransitions owns the stale-host transition loop for a dashboard
-// lifecycle. A fresh timer is created after each sweep so interval reloads
-// govern the next production sweep.
+// lifecycle. A heartbeat interval reload resets the active timer immediately.
 func (ds *DashboardServer) runStaleHostTransitions(ctx context.Context) {
-	if ds.state == nil || ds.state.store == nil {
+	if ds.state == nil || ds.state.store == nil || ds.freshness == nil {
 		return
 	}
 	if ds.staleSweepTicks != nil {
@@ -219,19 +202,23 @@ func (ds *DashboardServer) runStaleHostTransitions(ctx context.Context) {
 		}
 	}
 
+	timer := time.NewTimer(ds.staleSweepInterval())
+	defer timer.Stop()
 	for {
-		timer := time.NewTimer(ds.staleSweepInterval())
 		select {
 		case <-ctx.Done():
+			return
+		case <-ds.heartbeatIntervalChanged:
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
 				default:
 				}
 			}
-			return
+			timer.Reset(ds.staleSweepInterval())
 		case now := <-timer.C:
 			ds.sweepStaleServers(now)
+			timer.Reset(ds.staleSweepInterval())
 		}
 	}
 }
@@ -249,10 +236,10 @@ func (ds *DashboardServer) wireServerStateCallbacks() {
 
 	// Wire SSE broadcast: any state update (from handleReport or local ReportLocal)
 	// triggers a server_update event to all connected browsers.
-	// A heartbeat also marks any earlier stale transition as recovered so the
-	// next genuine outage produces exactly one new server_update.
+	state.OnRecovered = func(host string, reportEpoch time.Time) {
+		ds.broadcastHostRecovered(host, reportEpoch, ds.clock(), ds.staleAfter())
+	}
 	state.OnUpdate = func(host string) {
-		ds.clearStaleTransition(host)
 		ds.broadcastServerUpdate(host)
 	}
 
