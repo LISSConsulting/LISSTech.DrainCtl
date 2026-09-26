@@ -27,6 +27,15 @@ type EventSpike struct {
 	FirstSeenAt       time.Time
 }
 
+// EventSpikeRange is a bounded newest-first range query result. Total and
+// AsOfID cover every matching row even when Spikes is capped.
+type EventSpikeRange struct {
+	Spikes    []EventSpike
+	Total     int64
+	Truncated bool
+	AsOfID    int64
+}
+
 // EventSpikeStore persists confirmed event-log spike payloads to drainctl.db.
 // Retention is driven by the retention worker using AuditDays — same TTL as
 // the drain-mode audit table — so an operator who raises audit retention to
@@ -111,15 +120,31 @@ func (s *EventSpikeStore) Recent(ctx context.Context, host string, limit int) ([
 }
 
 // Range returns newest-first entries for host whose window_start falls in
-// [from, to). Clamped to maxLimit rows so a pathological window can't evict
-// the query budget.
-func (s *EventSpikeStore) Range(ctx context.Context, host string, from, to time.Time, maxLimit int) ([]EventSpike, error) {
-	if maxLimit <= 0 {
-		return []EventSpike{}, nil
+// [from, to). The rows, exact count, and ID watermark are read from the same
+// SQLite snapshot.
+func (s *EventSpikeStore) Range(ctx context.Context, host string, from, to time.Time, maxLimit int) (EventSpikeRange, error) {
+	if maxLimit < 0 {
+		maxLimit = 0
 	}
 	fromMs := from.UTC().UnixMilli()
 	toMs := to.UTC().UnixMilli()
-	rows, err := s.db.reader.QueryContext(ctx,
+	tx, err := s.db.reader.BeginTx(ctx, nil)
+	if err != nil {
+		return EventSpikeRange{}, fmt.Errorf("telemetry: event_spikes range begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var total, asOfID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(MAX(id), 0)
+		 FROM event_spikes
+		 WHERE host = ? AND window_start_ms >= ? AND window_start_ms < ?`,
+		host, fromMs, toMs,
+	).Scan(&total, &asOfID); err != nil {
+		return EventSpikeRange{}, fmt.Errorf("telemetry: event_spikes range metadata: %w", err)
+	}
+
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, channel, window_start_ms, window_end_ms, observed, expected,
 		        tail_probability, confirmation_count, first_seen_at_ms
 		 FROM event_spikes
@@ -127,10 +152,23 @@ func (s *EventSpikeStore) Range(ctx context.Context, host string, from, to time.
 		 ORDER BY window_start_ms DESC, id DESC
 		 LIMIT ?`, host, fromMs, toMs, maxLimit)
 	if err != nil {
-		return nil, fmt.Errorf("telemetry: event_spikes range: %w", err)
+		return EventSpikeRange{}, fmt.Errorf("telemetry: event_spikes range rows: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	return scanSpikes(rows, host)
+	spikes, err := scanSpikes(rows, host)
+	closeErr := rows.Close()
+	if err != nil {
+		return EventSpikeRange{}, err
+	}
+	if closeErr != nil {
+		return EventSpikeRange{}, fmt.Errorf("telemetry: event_spikes range rows close: %w", closeErr)
+	}
+
+	return EventSpikeRange{
+		Spikes:    spikes,
+		Total:     total,
+		Truncated: total > int64(len(spikes)),
+		AsOfID:    asOfID,
+	}, nil
 }
 
 func (s *EventSpikeStore) lookup(ctx context.Context, host, channel string, windowStartMs int64) (EventSpike, error) {

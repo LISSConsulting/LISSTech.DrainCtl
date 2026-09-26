@@ -1,7 +1,12 @@
 <script>
     import { fly } from 'svelte/transition';
     import { LayerCake, Svg } from 'layercake';
-    import { appState, OVERVIEW_WINDOW_PRESETS } from '../lib/state.svelte.js';
+    import {
+        appState,
+        OVERVIEW_WINDOW_PRESETS,
+        setOverviewSelection,
+        toggleOverviewSelection,
+    } from '../lib/state.svelte.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { fetchFleetMetrics } from '../lib/api.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
@@ -151,6 +156,47 @@
     let fleetLoading = $state(false);
     let fleetError = $state(false);
 
+    /** Sorted live roster used by the Overview-only host filter. */
+    let overviewHosts = $derived(appState.servers.map((server) => server.host).sort());
+    let overviewFiltering = $derived(appState.overviewSelectedHosts.size > 0);
+    let overviewFilterSummary = $derived(
+        overviewFiltering
+            ? `${appState.overviewSelectedHosts.size} server${appState.overviewSelectedHosts.size === 1 ? '' : 's'}`
+            : 'All servers',
+    );
+    let fleetEmptyMessage = $derived(
+        overviewHosts.length === 0
+            ? 'No registered servers'
+            : overviewFiltering
+              ? 'No retained history for selected servers'
+              : 'No retained history for this window',
+    );
+    let fleetErrorMessage = $derived(
+        overviewFiltering ? 'Unable to load metrics for selected servers' : 'Unable to reach the metrics endpoint',
+    );
+
+    /** @param {string} host */
+    function toggleOverviewHost(host) {
+        // Empty means all. Materialize that all-hosts state before removing one.
+        if (!overviewFiltering) {
+            const next = new Set(overviewHosts);
+            next.delete(host);
+            setOverviewSelection(next);
+            return;
+        }
+        toggleOverviewSelection(host);
+    }
+
+    /** Restore the all-hosts default, which deliberately omits host parameters. */
+    function clearOverviewFilter() {
+        setOverviewSelection([]);
+    }
+
+    /** Scope Overview to one host; more hosts can then be added with checkboxes. @param {string} host */
+    function selectOnlyOverviewHost(host) {
+        setOverviewSelection([host]);
+    }
+
     // Pan offset: milliseconds before "now" that the TO boundary is anchored.
     // 0 = live (to = now); positive = panned into the past.
     // Reactive — changing it triggers the fleet fetch.
@@ -184,13 +230,21 @@
     $effect(() => {
         const windowMs = appState.overviewWindowMs;
         const offset = panOffsetMs;
+        const rosterSize = appState.servers.length;
+        const selectedHosts = appState.overviewSelectedHosts;
+        if (rosterSize === 0) {
+            fleetResponse = null;
+            fleetLoading = false;
+            fleetError = false;
+            return;
+        }
         const ac = new AbortController();
         fleetLoading = true;
         fleetError = false;
         const now = new Date();
         const to = new Date(now.getTime() - offset);
         const from = new Date(to.getTime() - windowMs);
-        fetchFleetMetrics(from, to, 'auto', undefined, ac.signal)
+        fetchFleetMetrics(from, to, 'auto', undefined, ac.signal, selectedHosts)
             .then((data) => {
                 if (!ac.signal.aborted) {
                     fleetResponse = data;
@@ -780,6 +834,42 @@
     {/each}
 </div>
 
+<!-- ── Overview host scope ── -->
+<details class="overview-filter">
+    <summary aria-label="Filter Overview metrics by server">
+        <span>Servers:</span>
+        {overviewFilterSummary}
+    </summary>
+    <div class="overview-filter-menu" aria-label="Overview server filter">
+        <div class="overview-filter-actions">
+            <button type="button" onclick={clearOverviewFilter} disabled={!overviewFiltering}>All servers</button>
+        </div>
+        {#if overviewHosts.length === 0}
+            <p class="overview-filter-empty">No registered servers</p>
+        {:else}
+            {#each overviewHosts as host}
+                <div class="overview-filter-option-row">
+                    <label class="overview-filter-option">
+                        <input
+                            type="checkbox"
+                            checked={!overviewFiltering || appState.overviewSelectedHosts.has(host)}
+                            onchange={() => toggleOverviewHost(host)}
+                            aria-label={`Include ${host} in Overview metrics`}
+                        />
+                        <span>{host}</span>
+                    </label>
+                    <button
+                        type="button"
+                        class="overview-filter-only"
+                        onclick={() => selectOnlyOverviewHost(host)}
+                        aria-label={`Show only ${host} in Overview metrics`}>Only</button
+                    >
+                </div>
+            {/each}
+        {/if}
+    </div>
+</details>
+
 {#key activeTab}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -912,10 +1002,10 @@
                             {#if fleetLoading}
                                 <div class="chart-overlay">Loading retained history…</div>
                             {:else if fleetError}
-                                <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
+                                <div class="chart-overlay chart-error">{fleetErrorMessage}</div>
                             {:else if history.length < 2}
                                 <div class="chart-overlay">
-                                    {#if panOffsetMs > 0}
+                                    {#if panOffsetMs > 0 && overviewHosts.length > 0}
                                         <button
                                             class="back-to-live overlay-live"
                                             onclick={() => {
@@ -923,7 +1013,7 @@
                                             }}>↺ LIVE</button
                                         >
                                     {/if}
-                                    <span>No retained history for this window</span>
+                                    <span>{fleetEmptyMessage}</span>
                                 </div>
                             {/if}
                         </div>
@@ -983,16 +1073,18 @@
                         {#if fleetLoading}
                             <div class="chart-overlay">Loading retained history…</div>
                         {:else if fleetError}
-                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
-                        {:else if history.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay chart-error">{fleetErrorMessage}</div>
+                        {:else if history.length === 0 && (panOffsetMs > 0 || overviewHosts.length === 0 || overviewFiltering)}
                             <div class="chart-overlay">
-                                <button
-                                    class="back-to-live overlay-live"
-                                    onclick={() => {
-                                        panOffsetMs = 0;
-                                    }}>↺ LIVE</button
-                                >
-                                <span>No retained history for this window</span>
+                                {#if panOffsetMs > 0 && overviewHosts.length > 0}
+                                    <button
+                                        class="back-to-live overlay-live"
+                                        onclick={() => {
+                                            panOffsetMs = 0;
+                                        }}>↺ LIVE</button
+                                    >
+                                {/if}
+                                <span>{fleetEmptyMessage}</span>
                             </div>
                         {/if}
                     </div>
@@ -1055,16 +1147,18 @@
                         {#if fleetLoading}
                             <div class="chart-overlay">Loading retained history…</div>
                         {:else if fleetError}
-                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
-                        {:else if sessionHistory.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay chart-error">{fleetErrorMessage}</div>
+                        {:else if sessionHistory.length === 0 && (panOffsetMs > 0 || overviewHosts.length === 0 || overviewFiltering)}
                             <div class="chart-overlay">
-                                <button
-                                    class="back-to-live overlay-live"
-                                    onclick={() => {
-                                        panOffsetMs = 0;
-                                    }}>↺ LIVE</button
-                                >
-                                <span>No retained history for this window</span>
+                                {#if panOffsetMs > 0 && overviewHosts.length > 0}
+                                    <button
+                                        class="back-to-live overlay-live"
+                                        onclick={() => {
+                                            panOffsetMs = 0;
+                                        }}>↺ LIVE</button
+                                    >
+                                {/if}
+                                <span>{fleetEmptyMessage}</span>
                             </div>
                         {/if}
                     </div>
@@ -1121,16 +1215,18 @@
                         {#if fleetLoading}
                             <div class="chart-overlay">Loading retained history…</div>
                         {:else if fleetError}
-                            <div class="chart-overlay chart-error">Unable to reach the metrics endpoint</div>
-                        {:else if rfxHistoryProcessed.length === 0 && panOffsetMs > 0}
+                            <div class="chart-overlay chart-error">{fleetErrorMessage}</div>
+                        {:else if rfxHistoryProcessed.length === 0 && (panOffsetMs > 0 || overviewHosts.length === 0 || overviewFiltering)}
                             <div class="chart-overlay">
-                                <button
-                                    class="back-to-live overlay-live"
-                                    onclick={() => {
-                                        panOffsetMs = 0;
-                                    }}>↺ LIVE</button
-                                >
-                                <span>No retained history for this window</span>
+                                {#if panOffsetMs > 0 && overviewHosts.length > 0}
+                                    <button
+                                        class="back-to-live overlay-live"
+                                        onclick={() => {
+                                            panOffsetMs = 0;
+                                        }}>↺ LIVE</button
+                                    >
+                                {/if}
+                                <span>{fleetEmptyMessage}</span>
                             </div>
                         {/if}
                     </div>
@@ -1546,6 +1642,117 @@
     .back-to-live:active {
         transform: translate(1px, 1px);
         box-shadow: none;
+    }
+
+    /* ── Overview host scope ── */
+    .overview-filter {
+        position: relative;
+        display: inline-block;
+        margin: 0 0 12px 8px;
+        vertical-align: top;
+    }
+
+    .overview-filter summary {
+        list-style: none;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 5px 10px;
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        box-shadow: 2px 2px 0 var(--color-shadow);
+        background: var(--color-surface);
+        color: var(--color-fg);
+        cursor: pointer;
+    }
+
+    .overview-filter summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .overview-filter-menu {
+        position: absolute;
+        z-index: 5;
+        top: calc(100% + 6px);
+        left: 0;
+        min-width: 230px;
+        max-height: 280px;
+        overflow: auto;
+        padding: 8px;
+        border: var(--spacing-bw) solid var(--color-border);
+        border-radius: var(--radius-default);
+        background: var(--color-surface);
+        box-shadow: 3px 3px 0 var(--color-shadow);
+    }
+
+    .overview-filter-actions {
+        display: flex;
+        gap: 6px;
+        padding-bottom: 8px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .overview-filter-actions button {
+        font: inherit;
+        font-size: 0.56rem;
+        font-weight: 700;
+        padding: 3px 5px;
+        border: 1px solid var(--color-border);
+        border-radius: 2px;
+        background: var(--color-bg);
+        color: var(--color-fg);
+        cursor: pointer;
+    }
+
+    .overview-filter-option-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .overview-filter-only {
+        margin-left: auto;
+        padding: 2px 4px;
+        border: 1px solid var(--color-border);
+        border-radius: 2px;
+        background: transparent;
+        color: var(--color-muted);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.52rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+
+    .overview-filter-only:hover {
+        color: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+
+    .overview-filter-option {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 4px 2px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.66rem;
+        color: var(--color-fg);
+        cursor: pointer;
+        flex: 1;
+    }
+
+    .overview-filter-option input {
+        accent-color: var(--color-accent);
+    }
+
+    .overview-filter-empty {
+        margin: 4px 0;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.66rem;
+        color: var(--color-muted);
     }
 
     /* ── Window preset pills ── */

@@ -986,6 +986,23 @@ function handleRequest(method, pathname, body, query = {}) {
         if (!isFleet && !state.has(host)) {
             return { status: 404, body: { error: 'unknown_host' } };
         }
+        let requestedHosts = [];
+        if (isFleet && Object.hasOwn(query, 'host')) {
+            const roster = new Map(
+                [...state.keys()].map((registeredHost) => [registeredHost.toUpperCase(), registeredHost]),
+            );
+            const seen = new Set();
+            const requested = Array.isArray(query.host) ? query.host : [query.host];
+            for (const value of requested) {
+                const canonical = String(value).trim().toUpperCase();
+                const registeredHost = roster.get(canonical);
+                if (!canonical || seen.has(canonical) || !registeredHost) {
+                    return { status: 400, body: { error: 'invalid_host_filter' } };
+                }
+                seen.add(canonical);
+                requestedHosts.push(registeredHost);
+            }
+        }
         const from = query.from ? Date.parse(query.from) : NaN;
         const to = query.to ? Date.parse(query.to) : NaN;
         if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
@@ -1053,15 +1070,17 @@ function handleRequest(method, pathname, body, query = {}) {
         ]);
 
         // Build the sample set we'll read from. For a single host it's that host's
-        // ring buffer; for _fleet it's groups of per-host samples keyed by timestamp
-        // (all hosts share the same tick cadence in the mock).
+        // ring buffer; for _fleet it's groups of requested per-host samples keyed
+        // by timestamp (all hosts share the same tick cadence in the mock).
         let windowed; // Array<{ time: number, samples: Sample[] }>
         let oldestTime = null;
         let newestTime = null;
         if (isFleet) {
             /** @type {Map<number, any[]>} */
             const byTime = new Map();
-            for (const hist of perfHistory.values()) {
+            const metricHosts = requestedHosts.length > 0 ? requestedHosts : [...state.keys()];
+            const histories = metricHosts.map((requestedHost) => perfHistory.get(requestedHost) ?? []);
+            for (const hist of histories) {
                 for (const s of hist) {
                     if (s.time < from || s.time >= to) continue;
                     const bucket = byTime.get(s.time);
@@ -1230,7 +1249,7 @@ function handleRequest(method, pathname, body, query = {}) {
         }
         const nowMs = Date.now();
 
-        // Range mode: synthesize spikes across [from, to) at pseudo-random intervals.
+        // Range mode: synthesize spikes whose window_start is in [from, to).
         if (query.from && query.to) {
             const fromMs = Date.parse(query.from);
             const toMs = Date.parse(query.to);
@@ -1238,18 +1257,18 @@ function handleRequest(method, pathname, body, query = {}) {
                 return { status: 400, body: { error: 'invalid_range' } };
             }
             const emptyHost = Math.abs(h) % 8 === 0;
-            if (emptyHost) return { status: 200, body: [] };
+            if (emptyHost) return { status: 200, body: { spikes: [], total: 0, truncated: false, as_of_id: 0 } };
 
             const windowMs = toMs - fromMs;
-            // Scale spike count to window size: ~1 spike per hour, capped at 80.
-            const targetCount = Math.min(80, Math.max(3, Math.round(windowMs / (60 * 60_000))));
+            // A busy 30-day range exceeds the server's 500-row retention cap,
+            // exercising the same envelope semantics as production.
+            const total = Math.min(800, Math.max(3, Math.round(windowMs / (60 * 60_000))));
             const spikes = [];
-            for (let i = 0; i < targetCount; i++) {
-                // Deterministic "random" position within window using host hash.
+            for (let i = 0; i < total; i++) {
+                // Deterministic "random" position within the half-open range.
                 const r = Math.abs((h * (i + 1)) ^ (i * 0x9e3779b1)) % 1000;
-                const frac = r / 1000;
-                const endMs = fromMs + Math.floor(frac * windowMs);
-                const startMs = endMs - 10_000;
+                const startMs = fromMs + Math.floor((r / 1000) * windowMs);
+                const endMs = startMs + 10_000;
                 const channel = channels[(Math.abs(h) + i) % channels.length];
                 const observed = 30 + (Math.abs(h * (i + 3)) % 500);
                 const expected = 1.5 + ((Math.abs(h) >> i) & 0x7) * 0.8;
@@ -1266,9 +1285,15 @@ function handleRequest(method, pathname, body, query = {}) {
                     first_seen_at: new Date(startMs - 20_000).toISOString(),
                 });
             }
-            // Newest first.
-            spikes.sort((a, b) => Date.parse(b.window_end) - Date.parse(a.window_end));
-            return { status: 200, body: spikes };
+            // Newest first, mirroring the production range response. The ID
+            // watermark covers the complete in-window snapshot, including rows
+            // omitted by the plotting cap.
+            const asOfId = spikes.reduce((maxId, spike) => Math.max(maxId, spike.id), 0);
+            spikes.sort((a, b) => Date.parse(b.window_start) - Date.parse(a.window_start));
+            return {
+                status: 200,
+                body: { spikes: spikes.slice(0, 500), total, truncated: total > 500, as_of_id: asOfId },
+            };
         }
 
         // Recent-list mode (pre-009 contract).
@@ -1501,8 +1526,11 @@ export default function mockApi() {
                 if (!req.url?.startsWith('/api/')) return next();
 
                 const [pathname, qs] = req.url.split('?');
-                const query = Object.fromEntries(new URLSearchParams(qs || ''));
-                const method = req.method?.toUpperCase() ?? 'GET';
+                const method = req.method || 'GET';
+                const searchParams = new URLSearchParams(qs || '');
+                const query = Object.fromEntries(searchParams);
+                const hosts = searchParams.getAll('host');
+                if (hosts.length > 1) query.host = hosts;
 
                 // SSE endpoint — long-lived streaming response.
                 if (method === 'GET' && pathname === '/api/v1/events') {

@@ -15,6 +15,10 @@ callers treat the contract above as the canonical route.
 - `to` (required): ISO-8601 UTC timestamp, exclusive upper bound
 - `resolution` (optional): `auto` | `raw` | `5min` | `hourly`; default `auto`
 - `counters` (optional): comma-separated counter names; omit to return all available counters
+- `host` (optional, repeatable): restrict aggregation to the named registered hosts.
+  Omit it to aggregate all registered hosts. Each value is trimmed and resolved
+  case-insensitively to the canonical registered hostname; empty, duplicate,
+  or unregistered values are rejected.
 
 ## Success Response
 
@@ -91,6 +95,8 @@ must not substitute browser-local history.
 
 - `400 invalid_range` — `from`/`to` absent, unparseable, equal, or span > 90 days
 - `400 invalid_resolution` — unrecognised resolution value
+- `400 invalid_host_filter` — `host` used outside `_fleet`, or an empty,
+  case-insensitive duplicate, or unregistered `host` value
 - `500 storage_error` — metric store unavailable or query failure
 
 When the request fails, each chart family shows an explicit "Unable to reach the metrics

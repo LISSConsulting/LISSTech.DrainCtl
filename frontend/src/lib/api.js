@@ -662,18 +662,30 @@ export async function fetchMetrics(host, from, to, resolution = 'auto', counters
 /**
  * GET /api/v1/metrics/_fleet
  *
- * Fleet-wide sentinel form of the per-host metrics query. The response shape
- * is identical to MetricsResponse with host always equal to "_fleet".
+ * An omitted `hosts` list requests every registered host. When supplied, each
+ * host is serialized as a separate `host=` parameter so the backend can
+ * distinguish it from a comma-containing hostname and validate each member.
  *
  * @param {Date|string} from                         - inclusive lower bound
  * @param {Date|string} to                           - exclusive upper bound (must be > from)
  * @param {'raw'|'1min'|'5min'|'hourly'|'auto'} [resolution='auto']
  * @param {string[]} [counters]                      - omitted → all known counters
- * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer zoom/pan supersedes it
+ * @param {AbortSignal} [signal]                     - abort in-flight fetch when a newer query supersedes it
+ * @param {Iterable<string>} [hosts]                 - omitted or empty → all registered hosts
  * @returns {Promise<MetricsResponse>}
  */
-export async function fetchFleetMetrics(from, to, resolution = 'auto', counters, signal) {
-    return fetchMetrics('_fleet', from, to, resolution, counters, signal);
+export async function fetchFleetMetrics(from, to, resolution = 'auto', counters, signal, hosts) {
+    const params = new URLSearchParams({
+        from: from instanceof Date ? from.toISOString() : from,
+        to: to instanceof Date ? to.toISOString() : to,
+        resolution,
+    });
+    if (counters && counters.length > 0) params.set('counters', counters.join(','));
+    if (hosts) {
+        for (const host of hosts) params.append('host', host);
+    }
+    const res = await apiFetch(`/metrics/_fleet?${params}`, { signal });
+    return /** @type {MetricsResponse} */ (await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -982,17 +994,29 @@ export async function fetchRecentSpikes(host, limit = 20, signal) {
 }
 
 /**
+ * SpikeRangeResponse is the bounded range-query envelope. `total` is the exact
+ * count before the 500-row plotting cap; `truncated` reports whether rows were
+ * omitted from `spikes`; `as_of_id` is the maximum in-window ID included in
+ * the read snapshot (or 0 when no rows matched).
+ *
+ * @typedef {Object} SpikeRangeResponse
+ * @property {RecentSpike[]} spikes
+ * @property {number} total
+ * @property {boolean} truncated
+ * @property {number} as_of_id
+ */
+
+/**
  * GET /api/evtspike/spikes?host=<host>&from=<iso>&to=<iso>
  *
- * Returns confirmed spikes for one host whose window_start falls in [from, to),
- * newest first. Used by the SpikeSwimlane chart — server clamps at 500 rows,
- * more than enough for a 5-day window on a busy fleet member.
+ * Returns confirmed spikes whose window_start falls in [from, to), newest
+ * first. `spikes` contains at most 500 rows while `total` remains exact.
  *
  * @param {string} host
  * @param {Date} from
  * @param {Date} to
  * @param {AbortSignal} [signal]
- * @returns {Promise<RecentSpike[]>}
+ * @returns {Promise<SpikeRangeResponse>}
  */
 export async function fetchSpikeRange(host, from, to, signal) {
     const params = new URLSearchParams({
@@ -1001,5 +1025,5 @@ export async function fetchSpikeRange(host, from, to, signal) {
         to: to.toISOString(),
     });
     const res = await apiFetch(`/api/evtspike/spikes?${params}`, { signal });
-    return /** @type {RecentSpike[]} */ (await res.json());
+    return /** @type {SpikeRangeResponse} */ (await res.json());
 }

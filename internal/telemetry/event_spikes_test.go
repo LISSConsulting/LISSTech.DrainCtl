@@ -162,19 +162,28 @@ func TestEventSpikes_RangeFiltersByWindow(t *testing.T) {
 		}
 	}
 
-	// Range [base+3min, base+7min) should return spikes at 3, 4, 5, 6.
-	entries, err := s.Range(context.Background(), "SRV01",
+	// Range [base+3min, base+7min) includes 3..6 and excludes 7.
+	result, err := s.Range(context.Background(), "SRV01",
 		base.Add(3*time.Minute), base.Add(7*time.Minute), 100)
 	if err != nil {
 		t.Fatalf("Range: %v", err)
 	}
-	if len(entries) != 4 {
-		t.Fatalf("Range len = %d, want 4", len(entries))
+	if result.Total != 4 {
+		t.Fatalf("Range total = %d, want 4", result.Total)
+	}
+	if result.AsOfID != 7 {
+		t.Errorf("Range AsOfID = %d, want 7", result.AsOfID)
+	}
+	if result.Truncated {
+		t.Fatal("Range truncated = true, want false")
+	}
+	if len(result.Spikes) != 4 {
+		t.Fatalf("Range len = %d, want 4", len(result.Spikes))
 	}
 	// Newest first: 6, 5, 4, 3.
 	for i, want := range []int{6, 5, 4, 3} {
-		if entries[i].Observed != want {
-			t.Errorf("entries[%d].Observed = %d, want %d", i, entries[i].Observed, want)
+		if result.Spikes[i].Observed != want {
+			t.Errorf("entries[%d].Observed = %d, want %d", i, result.Spikes[i].Observed, want)
 		}
 	}
 }
@@ -198,11 +207,43 @@ func TestEventSpikes_EmptyHostReturnsEmptySlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Range: %v", err)
 	}
-	if rng == nil {
+	if rng.Spikes == nil {
 		t.Error("Range returned nil slice")
 	}
-	if len(rng) != 0 {
-		t.Errorf("Range len = %d, want 0", len(rng))
+	if len(rng.Spikes) != 0 || rng.Total != 0 || rng.Truncated || rng.AsOfID != 0 {
+		t.Errorf("Range = %#v, want empty, untruncated result with zero watermark", rng)
+	}
+}
+
+func TestEventSpikes_RangeReportsExactTotalBeyondCap(t *testing.T) {
+	s, _ := newEventSpikeStore(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for i := range 501 {
+		if _, _, err := s.Insert(context.Background(),
+			sampleSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second), i)); err != nil {
+			t.Fatalf("Insert[%d]: %v", i, err)
+		}
+	}
+
+	result, err := s.Range(context.Background(), "SRV01", base, base.Add(501*time.Second), 500)
+	if err != nil {
+		t.Fatalf("Range: %v", err)
+	}
+	if len(result.Spikes) != 500 {
+		t.Fatalf("Range len = %d, want 500", len(result.Spikes))
+	}
+	if result.Total != 501 {
+		t.Errorf("Range total = %d, want 501", result.Total)
+	}
+	if result.AsOfID != 501 {
+		t.Errorf("Range AsOfID = %d, want 501", result.AsOfID)
+	}
+	if !result.Truncated {
+		t.Error("Range truncated = false, want true")
+	}
+	if result.Spikes[0].Observed != 500 || result.Spikes[len(result.Spikes)-1].Observed != 1 {
+		t.Errorf("Range rows = [%d ... %d], want [500 ... 1]", result.Spikes[0].Observed, result.Spikes[len(result.Spikes)-1].Observed)
 	}
 }
 
