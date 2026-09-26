@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,8 +58,8 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 	if got := queryPragmaInt(t, db, "foreign_keys"); got != 1 {
 		t.Errorf("foreign_keys = %d, want 1 (ON)", got)
 	}
-	if got := queryPragmaInt(t, db, "user_version"); got != 2 {
-		t.Errorf("user_version = %d, want 2", got)
+	if got := queryPragmaInt(t, db, "user_version"); got != schemaVersion {
+		t.Errorf("user_version = %d, want %d", got, schemaVersion)
 	}
 }
 
@@ -79,8 +80,40 @@ func TestOpen_IsIdempotent(t *testing.T) {
 	}
 	defer func() { _ = db2.Close() }()
 
-	if got := queryPragmaInt(t, db2, "user_version"); got != 2 {
-		t.Errorf("second open: user_version = %d, want 2", got)
+	if got := queryPragmaInt(t, db2, "user_version"); got != schemaVersion {
+		t.Errorf("second open: user_version = %d, want %d", got, schemaVersion)
+	}
+}
+
+func TestOpen_UpgradesV2WithFreshnessSchema(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := db.writer.Exec(`DROP TABLE host_freshness`); err != nil {
+		t.Fatalf("drop v3 table: %v", err)
+	}
+	if _, err := db.writer.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set v2 user_version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close v2 DB: %v", err)
+	}
+
+	upgraded, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open v2 DB: %v", err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	if got := queryPragmaInt(t, upgraded, "user_version"); got != schemaVersion {
+		t.Errorf("upgraded user_version = %d, want %d", got, schemaVersion)
+	}
+	var table string
+	if err := upgraded.reader.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'host_freshness'`,
+	).Scan(&table); err != nil {
+		t.Fatalf("freshness table after v2 upgrade: %v", err)
 	}
 }
 
@@ -90,8 +123,8 @@ func TestOpen_DoesNotDowngradeUserVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
-	if _, err := db.writer.Exec("PRAGMA user_version = 2"); err != nil {
-		t.Fatalf("set user_version: %v", err)
+	if _, err := db.writer.Exec("PRAGMA user_version = " + strconv.Itoa(schemaVersion+1)); err != nil {
+		t.Fatalf("set future user_version: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close first DB: %v", err)
@@ -101,8 +134,8 @@ func TestOpen_DoesNotDowngradeUserVersion(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	if got := queryPragmaInt(t, reopened, "user_version"); got != 2 {
-		t.Errorf("user_version = %d, want 2 (must not downgrade another additive migration)", got)
+	if got := queryPragmaInt(t, reopened, "user_version"); got != schemaVersion+1 {
+		t.Errorf("user_version = %d, want %d (must not downgrade another additive migration)", got, schemaVersion+1)
 	}
 }
 
