@@ -217,6 +217,75 @@ func TestAggregate_PreservesDirectionalRemoteFXPercentiles(t *testing.T) {
 	}
 }
 
+func TestSanitizePerfFieldRejectsInvalidValues(t *testing.T) {
+	for _, test := range []struct {
+		field string
+		value float64
+	}{
+		{"cpu_pct", math.NaN()},
+		{"rfx_rtt_ms", math.Inf(1)},
+		{"rfx_quality_pct", 101},
+		{"session_mem_p50_bytes", -1},
+	} {
+		if _, ok := dc.SanitizePerfField(test.field, test.value); ok {
+			t.Errorf("SanitizePerfField(%q, %v) accepted invalid value", test.field, test.value)
+		}
+	}
+	if got, ok := dc.SanitizePerfField("rfx_loss_pct_p50", 0); !ok || got != 0 {
+		t.Errorf("SanitizePerfField valid zero = (%v, %v), want (0, true)", got, ok)
+	}
+}
+
+func TestSanitizePerfSnapshotClearsInvalidP50Presence(t *testing.T) {
+	got := dc.SanitizePerfSnapshot(dc.PerfSnapshot{
+		RFXLossP50: 101,
+		P50Present: dc.PerfP50RFXLoss,
+	})
+	if got.RFXLossP50 != 0 || got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50) {
+		t.Errorf("invalid P50 = (%v, present=%v), want (0, false)",
+			got.RFXLossP50, got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50))
+	}
+}
+
+func TestAggregateRetainsPresentLowerIsBetterZeroP50(t *testing.T) {
+	got := aggregate([]dc.PerfSnapshot{
+		{RFXAvailable: true, RFXLossP50: 0, P50Present: dc.PerfP50RFXLoss},
+		{RFXAvailable: true, RFXLossP50: 5, P50Present: dc.PerfP50RFXLoss},
+	})
+	if got.RFXLossP50 != 5 || !got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50) {
+		t.Errorf("loss P50 = (%v, present=%v), want (5, true)",
+			got.RFXLossP50, got.HasP50(dc.PerfP50RFXLoss, got.RFXLossP50))
+	}
+}
+
+func TestAggregateIgnoresInactiveHighIsBetterZeros(t *testing.T) {
+	got := aggregate([]dc.PerfSnapshot{
+		{RFXAvailable: true},
+		{
+			RFXAvailable:  true,
+			RFXFPSOut:     15,
+			RFXFPSOutP50:  20,
+			RFXQuality:    70,
+			RFXQualityP50: 80,
+			P50Present: dc.PerfP50RFXFPSOut |
+				dc.PerfP50RFXQuality,
+		},
+		{
+			RFXAvailable:  true,
+			RFXFPSOut:     18,
+			RFXFPSOutP50:  24,
+			RFXQuality:    75,
+			RFXQualityP50: 85,
+			P50Present: dc.PerfP50RFXFPSOut |
+				dc.PerfP50RFXQuality,
+		},
+	})
+	if got.RFXFPSOut != 15 || got.RFXFPSOutP50 != 20 || got.RFXQuality != 70 || got.RFXQualityP50 != 80 {
+		t.Errorf("high-is-better temporal values = FPS (%v,%v), quality (%v,%v), want (15,20) (70,80)",
+			got.RFXFPSOut, got.RFXFPSOutP50, got.RFXQuality, got.RFXQualityP50)
+	}
+}
+
 func TestRoundTo(t *testing.T) {
 	tests := []struct {
 		val    float64
