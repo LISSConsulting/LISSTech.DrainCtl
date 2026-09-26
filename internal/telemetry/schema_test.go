@@ -19,6 +19,8 @@ func TestApplySchema_FreshDB(t *testing.T) {
 		"event_spikes",
 		"servers",
 		"server_exclusions",
+		"host_freshness",
+		"force_update_outbox",
 	}
 	for _, tbl := range wantTables {
 		var name string
@@ -30,31 +32,31 @@ func TestApplySchema_FreshDB(t *testing.T) {
 		}
 	}
 
-	if got := queryPragmaInt(t, db, "user_version"); got != 2 {
-		t.Errorf("user_version = %d, want 2", got)
+	if got := queryPragmaInt(t, db, "user_version"); got != schemaVersion {
+		t.Errorf("user_version = %d, want %d", got, schemaVersion)
 	}
 }
 
-func TestApplySchema_IdempotentOnExistingV2(t *testing.T) {
+func TestApplySchema_IdempotentOnExistingV3(t *testing.T) {
 	dir := t.TempDir()
 
 	db1, err := Open(dir)
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
-	if got := queryPragmaInt(t, db1, "user_version"); got != 2 {
-		t.Errorf("after first open: user_version = %d, want 2", got)
+	if got := queryPragmaInt(t, db1, "user_version"); got != schemaVersion {
+		t.Errorf("after first open: user_version = %d, want %d", got, schemaVersion)
 	}
 	_ = db1.Close()
 
-	// Second open — applySchema must not return an error on a v2 DB.
+	// Second open — applySchema must not return an error on a current DB.
 	db2, err := Open(dir)
 	if err != nil {
 		t.Fatalf("second Open (idempotent): %v", err)
 	}
 	defer func() { _ = db2.Close() }()
 
-	if got := queryPragmaInt(t, db2, "user_version"); got != 2 {
-		t.Errorf("after second open: user_version = %d, want 2", got)
+	if got := queryPragmaInt(t, db2, "user_version"); got != schemaVersion {
+		t.Errorf("after second open: user_version = %d, want %d", got, schemaVersion)
 	}
 }
