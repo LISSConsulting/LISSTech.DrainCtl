@@ -633,6 +633,49 @@ func TestCheckResultSamples_OmitsUnlimitedSessionCapacity(t *testing.T) {
 	}
 }
 
+func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable:     true,
+			RFXFPSOut:        0,
+			RFXFPSOutP50:     0,
+			RFXEncodeMS:      10,
+			RFXEncodeMSP50:   5,
+			RFXQuality:       100,
+			RFXQualityP50:    100,
+			RFXRTT:           20,
+			RFXRTTP50:        10,
+			RFXLoss:          0,
+			RFXLossP50:       0,
+			RFXSkipServer:    0,
+			RFXSkipServerP50: 0,
+		},
+	})
+
+	got := make(map[string]float64, len(samples))
+	for _, sample := range samples {
+		got[sample.Counter] = sample.Value
+	}
+	if _, ok := got["rfx_fps_out"]; ok {
+		t.Error("inactive zero FPS must be omitted, not persisted as degraded performance")
+	}
+	if _, ok := got["rfx_fps_out_p50"]; ok {
+		t.Error("missing zero FPS P50 must be omitted")
+	}
+	for counter, want := range map[string]float64{
+		"rfx_encode_ms_p50":   5,
+		"rfx_quality_pct":     100,
+		"rfx_quality_pct_p50": 100,
+		"rfx_rtt_ms_p50":      10,
+	} {
+		if got[counter] != want {
+			t.Errorf("%s = %v, want %v", counter, got[counter], want)
+		}
+	}
+}
+
 func TestHandleReport_UpdatesLastSeen(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
