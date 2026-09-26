@@ -37,38 +37,41 @@ From the same elevated prompt:
 
 ```powershell
 $dumpRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl\dumps'
+$diagsRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl\diags'
 $werKey = 'HKLM:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\drainctld.exe'
 Get-ItemProperty -Path $werKey | Select-Object DumpFolder, DumpType, DumpCount
-Get-Acl -Path $dumpRoot | Format-List Owner, AccessToString
+Get-Acl -Path $dumpRoot, $diagsRoot | Format-List Path, Owner, AccessToString
 Get-ChildItem -Force $dumpRoot | Select-Object Name, Length, CreationTimeUtc
+Get-ChildItem -Force $diagsRoot | Select-Object Name, Length, CreationTimeUtc
 ```
 
 Expected results:
 
 - `DumpType` is `1` (mini dump) and `DumpCount` is `3`.
 - `DumpFolder` points to the product's ProgramData `dumps` directory.
-- Only LocalSystem and local Administrators have broad/full access. Investigate inherited Users, Everyone, Authenticated Users, or service-group access before allowing any dump collection.
-- An empty directory before the first fault is normal.
+- Both `dumps` and `diags` are permanent protected directories. Only LocalSystem and local Administrators have broad/full access; neither inherits Users, Everyone, Authenticated Users, or service-group access.
+- Empty directories before the first fault or scheduled collection are normal.
 
-If the registry key, directory, or safe ACL is absent, record the setup error and repair the approved installation. Do **not** point WER at a temporary, user-profile, network, or broadly writable fallback path.
+If the registry key, either directory, or either safe ACL is absent, record the setup error and repair the approved installation. Do **not** point WER at a temporary, user-profile, network, or broadly writable fallback path, and do not recreate a missing `diags` directory outside the MSI.
 
 ## 3. Scheduled diagnostic collection
 
 The disabled `\LISS Technologies\DrainCtl-Diags` task collects service, WER, event,
-and **metadata-only** dump inventory into `diags`. The inventory contains only the
-dump name, size, and UTC timestamp; by default it does not read dump bytes or
-calculate hashes.
+and **metadata-only** dump inventory into the protected `$diagsRoot` directory. The
+inventory contains only the dump name, size, and UTC timestamp; by default it does
+not read dump bytes or calculate hashes.
 
 Set `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only for an approved local investigation. The
 task then hashes and gzip-copies only the newest `.dmp` **inside** `$dumpRoot`, writing
-the hash sidecar there as well. Both artifacts inherit the protected SYSTEM and
-Administrators-only dump ACL; no dump archive or hash is placed in `diags`, uploaded,
-or otherwise shared. Seven-day task retention deletes only its `crash-dump-*.dmp.gz`
-artifacts and hash sidecars; it never deletes WER-managed `.dmp` files.
+the hash sidecar there as well. Both dump artifacts remain under the protected SYSTEM
+and Administrators-only dump ACL; no dump archive or hash is placed in `$diagsRoot`,
+uploaded, or otherwise shared. Seven-day task retention deletes only its
+`crash-dump-*.dmp.gz` artifacts and hash sidecars; it never deletes WER-managed
+`.dmp` files.
 
-Missing dump resources or an unreadable protected dump directory are reported in
-diagnostics without making the scheduled collector fail the rest of its work. Repair
-the approved MSI if the protected directory ACL is absent rather than relaxing it.
+Missing dump resources or either protected directory are reported without the
+scheduled collector creating an unprotected replacement. Repair the approved MSI if
+the protected directory or ACL is absent rather than relaxing it.
 
 ## 4. Controlled recovery smoke test (isolated host only)
 
@@ -138,6 +141,21 @@ Interpretation:
 
    Verify the selected filename before running the command. The product never deletes WER-managed `.dmp` files automatically; only task-created opt-in gzip artifacts and hash sidecars have seven-day retention.
 
+### Uninstall and protected artifact cleanup
+
+Full MSI uninstall removes the `drainctld.exe` WER LocalDumps policy and unregisters
+the `\LISS Technologies\DrainCtl-Diags` scheduled task. It intentionally preserves
+the protected `$dumpRoot` and `$diagsRoot` artifacts for incident retention.
+
+After the required incident retention period, an authorized administrator can remove
+both protected artifact directories from an elevated PowerShell session:
+
+```powershell
+$dataRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
+Remove-Item -LiteralPath (Join-Path $dataRoot 'dumps') -Recurse -Force
+Remove-Item -LiteralPath (Join-Path $dataRoot 'diags') -Recurse -Force
+```
+
 ## 6. Freshness and offline-transition walkthrough
 
 1. Configure a short safe test poll interval (for example 60 seconds) through the normal supported configuration path and allow it to take effect.
@@ -172,9 +190,9 @@ Do not use agent-provided timestamps to judge this test. The dashboard acceptanc
 ### Rollback
 
 1. Stop only through the approved installer/change process; do not induce crashes to roll back.
-2. Install the approved prior package. Preserve `config.json`, the telemetry database, and the protected dumps directory unless an incident owner directs otherwise.
+2. Install the approved prior package. Preserve `config.json`, the telemetry database, and the protected `dumps` and `diags` directories unless an incident owner directs otherwise.
 3. Confirm core host reporting after rollback. Earlier software may ignore additive freshness records or newer optional fields; it must not interpret their absence as a zero or a deletion.
-4. Keep existing dumps under the incident retention decision. Rollback does not authorize deletion or remote collection.
+4. Keep existing dumps and diagnostics under the incident retention decision. Rollback does not authorize deletion or remote collection.
 
 ## Troubleshooting table
 
