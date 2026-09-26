@@ -3,9 +3,11 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -18,9 +20,10 @@ import (
 )
 
 const (
-	rdCollectionRefreshInterval = 5 * time.Minute
-	rdCollectionCommandTimeout  = 30 * time.Second
-	rdConnectionBrokerEnv       = "DRAINCTL_RD_CONNECTION_BROKER"
+	rdCollectionRefreshInterval      = 5 * time.Minute
+	rdCollectionCommandTimeout       = 30 * time.Second
+	rdCollectionCommandStderrMaxSize = 2 * 1024
+	rdConnectionBrokerEnv            = "DRAINCTL_RD_CONNECTION_BROKER"
 )
 
 // rdCollectionPowerShell emits a JSON array even if no session collections
@@ -281,8 +284,31 @@ func loadRDCollections(ctx context.Context, broker string) ([]byte, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, rdCollectionCommandTimeout)
 	defer cancel()
 
-	cmd := newRDCollectionCommand(commandCtx, broker)
-	return cmd.Output()
+	return runRDCollectionCommand(newRDCollectionCommand(commandCtx, broker))
+}
+
+// runRDCollectionCommand captures stdout and stderr independently so only the
+// PowerShell JSON stream is passed to the strict decoder.
+func runRDCollectionCommand(cmd *exec.Cmd) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, wrapRDCollectionCommandError(err, stderr.String())
+	}
+	return stdout.Bytes(), nil
+}
+
+func wrapRDCollectionCommandError(err error, stderr string) error {
+	diagnostic := strings.TrimSpace(stderr)
+	if diagnostic == "" {
+		return fmt.Errorf("discover RD Session Collections: %w", err)
+	}
+	if len(diagnostic) > rdCollectionCommandStderrMaxSize {
+		diagnostic = strings.TrimSpace(diagnostic[:rdCollectionCommandStderrMaxSize])
+	}
+	return fmt.Errorf("discover RD Session Collections: %w: %s", err, diagnostic)
 }
 
 func rdCollectionEnvironment(broker string) []string {

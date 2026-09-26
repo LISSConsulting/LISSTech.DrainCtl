@@ -15,7 +15,11 @@ type callerTokenResult struct {
 	isAdmin   bool
 }
 
-var readCallerToken = readCallerTokenWindows
+var (
+	readCallerToken  = readCallerTokenWindows
+	duplicateTokenEx = windows.DuplicateTokenEx
+	tokenIsMember    = windows.Token.IsMember
+)
 
 func callerIsPrivileged(conn net.Conn) (bool, string, error) {
 	info, err := readCallerToken(conn)
@@ -43,7 +47,7 @@ func readCallerTokenWindows(conn net.Conn) (callerTokenResult, error) {
 	defer func() { _ = windows.CloseHandle(procHandle) }()
 
 	var token windows.Token
-	if err := windows.OpenProcessToken(procHandle, windows.TOKEN_QUERY, &token); err != nil {
+	if err := windows.OpenProcessToken(procHandle, windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &token); err != nil {
 		return callerTokenResult{}, fmt.Errorf("pipe auth: OpenProcessToken(%d): %w", pid, err)
 	}
 	defer func() { _ = token.Close() }()
@@ -65,9 +69,9 @@ func readCallerTokenWindows(conn net.Conn) (callerTokenResult, error) {
 	if err != nil {
 		return callerTokenResult{sidString: sidStr}, fmt.Errorf("pipe auth: CreateWellKnownSid(Administrators): %w", err)
 	}
-	isAdmin, err := token.IsMember(adminSID)
+	isAdmin, err := tokenIsAdministrator(token, adminSID)
 	if err != nil {
-		return callerTokenResult{sidString: sidStr}, fmt.Errorf("pipe auth: Token.IsMember(%d): %w", pid, err)
+		return callerTokenResult{sidString: sidStr}, fmt.Errorf("pipe auth: administrator membership (%d): %w", pid, err)
 	}
 
 	return callerTokenResult{
@@ -75,4 +79,25 @@ func readCallerTokenWindows(conn net.Conn) (callerTokenResult, error) {
 		isSystem:  isSystem,
 		isAdmin:   isAdmin,
 	}, nil
+}
+
+func tokenIsAdministrator(token windows.Token, adminSID *windows.SID) (bool, error) {
+	var impersonationToken windows.Token
+	if err := duplicateTokenEx(
+		token,
+		windows.TOKEN_QUERY,
+		nil,
+		windows.SecurityImpersonation,
+		windows.TokenImpersonation,
+		&impersonationToken,
+	); err != nil {
+		return false, fmt.Errorf("DuplicateTokenEx: %w", err)
+	}
+	defer func() { _ = impersonationToken.Close() }()
+
+	isAdmin, err := tokenIsMember(impersonationToken, adminSID)
+	if err != nil {
+		return false, fmt.Errorf("Token.IsMember: %w", err)
+	}
+	return isAdmin, nil
 }
