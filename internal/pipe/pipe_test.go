@@ -19,11 +19,14 @@ import (
 
 // mockHandler implements PipeHandler for tests.
 type mockHandler struct {
-	statusResult   *dc.CheckResult
-	historyResult  []dc.AuditRecord
-	registerResult json.RawMessage
-	registerErr    error
-	registerCalls  []string
+	statusResult      *dc.CheckResult
+	historyResult     []dc.AuditRecord
+	registerResult    json.RawMessage
+	registerErr       error
+	registerCalls     []string
+	brokerSetupResult *BrokerSetupResult
+	brokerSetupErr    error
+	brokerSetupCalls  []string
 }
 
 func (m *mockHandler) HandleStatus() *dc.CheckResult {
@@ -52,6 +55,14 @@ func (m *mockHandler) HandleRegister(url string) (json.RawMessage, error) {
 
 func (m *mockHandler) HandleBaselineReset() error {
 	return fmt.Errorf("not implemented")
+}
+
+func (m *mockHandler) HandleBrokerSetup(connectionBroker string) (*BrokerSetupResult, error) {
+	m.brokerSetupCalls = append(m.brokerSetupCalls, connectionBroker)
+	if m.brokerSetupErr != nil {
+		return nil, m.brokerSetupErr
+	}
+	return m.brokerSetupResult, nil
 }
 
 // pipeCall writes req to handlePipeConn via an in-memory net.Pipe and returns
@@ -339,6 +350,50 @@ func TestHandlePipeConn_RegisterHandlerError(t *testing.T) {
 	}
 }
 
+func TestHandlePipeConn_BrokerSetupOK(t *testing.T) {
+	oldCheck := callerIsPrivilegedFunc
+	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) { return true, "S-1-5-18", nil }
+	t.Cleanup(func() { callerIsPrivilegedFunc = oldCheck })
+
+	handler := &mockHandler{brokerSetupResult: &BrokerSetupResult{
+		ConnectionBroker: "rdc.example.test",
+		CollectionCount:  2,
+		SessionHostCount: 5,
+		ServiceIdentity:  `NT AUTHORITY\SYSTEM`,
+	}}
+	resp := pipeCall(t, PipeRequest{Cmd: "broker-setup", Broker: "rdc.example.test"}, handler)
+
+	if !resp.OK {
+		t.Fatalf("expected OK=true, got error=%q", resp.Error)
+	}
+	var result BrokerSetupResult
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if result != *handler.brokerSetupResult {
+		t.Fatalf("result = %+v, want %+v", result, *handler.brokerSetupResult)
+	}
+	if got := handler.brokerSetupCalls; len(got) != 1 || got[0] != "rdc.example.test" {
+		t.Fatalf("brokerSetupCalls = %v, want [rdc.example.test]", got)
+	}
+}
+
+func TestHandlePipeConn_BrokerSetupHandlerError(t *testing.T) {
+	oldCheck := callerIsPrivilegedFunc
+	callerIsPrivilegedFunc = func(net.Conn) (bool, string, error) { return true, "S-1-5-18", nil }
+	t.Cleanup(func() { callerIsPrivilegedFunc = oldCheck })
+
+	resp := pipeCall(t, PipeRequest{Cmd: "broker-setup"}, &mockHandler{
+		brokerSetupErr: errors.New("RD Session Collection discovery failed"),
+	})
+	if resp.OK {
+		t.Fatal("expected handler error response")
+	}
+	if !strings.Contains(resp.Error, "discovery failed") {
+		t.Fatalf("error = %q, want discovery failure", resp.Error)
+	}
+}
+
 func TestReadPipeResponse_ContinuesOnMoreData(t *testing.T) {
 	r := &scriptedReader{steps: []readStep{
 		{data: []byte(`{"ok":true,"data":"`), err: windows.ERROR_MORE_DATA},
@@ -472,6 +527,10 @@ func (c *captureHandler) HandleRegister(_ string) (json.RawMessage, error) {
 
 func (c *captureHandler) HandleBaselineReset() error {
 	return fmt.Errorf("not implemented")
+}
+
+func (c *captureHandler) HandleBrokerSetup(_ string) (*BrokerSetupResult, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 // TestRegisterViaPipe_WrapsDialFailureWithErrPipeUnavailable guards the

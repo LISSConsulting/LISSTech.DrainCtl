@@ -871,6 +871,78 @@ func TestHandleServers_IncludesStatus(t *testing.T) {
 	}
 }
 
+func TestHandleServers_RDSessionCollectionUsesEffectiveResultHost(t *testing.T) {
+	ds := newTestServer(t)
+	ds.rdCollections = newRDCollectionResolver(func(context.Context, string) ([]byte, error) {
+		return []byte(`[{"host":"effective-rd.example.test","collection":"Published Apps"}]`), nil
+	})
+	ds.rdCollections.refresh(context.Background())
+	ds.state.Register("registered-rd.example.test")
+	ds.state.Update("registered-rd.example.test", &dc.CheckResult{
+		Host:   "effective-rd.example.test",
+		Status: "Healthy",
+	})
+
+	w := httptest.NewRecorder()
+	ds.handleServers(w, httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil))
+
+	var views []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&views); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("list response length = %d, want 1", len(views))
+	}
+	if got := views[0]["rd_session_collection"]; got != "Published Apps" {
+		t.Errorf("list rd_session_collection = %v, want %q", got, "Published Apps")
+	}
+
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/registered-rd.example.test", nil)
+	r.SetPathValue("host", "registered-rd.example.test")
+	ds.handleGetServer(w, r)
+
+	var view map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&view); err != nil {
+		t.Fatalf("decode single response: %v", err)
+	}
+	if got := view["rd_session_collection"]; got != "Published Apps" {
+		t.Errorf("single rd_session_collection = %v, want %q", got, "Published Apps")
+	}
+}
+
+func TestHandleGetServer_RDSessionCollectionUnknownOrResolverAbsentIsOmitted(t *testing.T) {
+	for _, resolver := range []*rdCollectionResolver{
+		nil,
+		newRDCollectionResolver(func(context.Context, string) ([]byte, error) {
+			return []byte(`[{"host":"other-rd.example.test","collection":"Other"}]`), nil
+		}),
+	} {
+		t.Run("resolver", func(t *testing.T) {
+			ds := newTestServer(t)
+			ds.rdCollections = resolver
+			if resolver != nil {
+				resolver.refresh(context.Background())
+			}
+			ds.state.Register("rd.example.test")
+			ds.state.Update("rd.example.test", &dc.CheckResult{Host: "rd.example.test", Status: "Healthy"})
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/rd.example.test", nil)
+			r.SetPathValue("host", "rd.example.test")
+			ds.handleGetServer(w, r)
+
+			var view map[string]any
+			if err := json.NewDecoder(w.Body).Decode(&view); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if _, present := view["rd_session_collection"]; present {
+				t.Errorf("rd_session_collection = %v, want omitted", view["rd_session_collection"])
+			}
+		})
+	}
+}
+
 // ── handleDeleteServer ────────────────────────────────────────────────────────
 
 func TestHandleDeleteServer_UnknownHostReturns404(t *testing.T) {
@@ -1157,6 +1229,7 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 		}}
 		cfg.SessionWarningThreshold = 75
 		cfg.GracePeriod = 45
+		cfg.Dashboard.RDConnectionBroker = "rdc-broker.example.test"
 		cfg.Update = dc.UpdateConfig{
 			Enabled:      true,
 			Channel:      dc.ChannelPrerelease,
@@ -1180,6 +1253,7 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 		Notifications           []dc.NotificationTarget `json:"notifications"`
 		SessionWarningThreshold int                     `json:"session_warning_threshold"`
 		GracePeriod             int                     `json:"grace_period"`
+		RDConnectionBroker      string                  `json:"rd_connection_broker"`
 		Update                  dc.UpdateConfig         `json:"update"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1201,6 +1275,9 @@ func TestHandleGetSettings_Returns200WithNotifications(t *testing.T) {
 	}
 	if resp.GracePeriod != 45 {
 		t.Errorf("grace_period = %d, want 45", resp.GracePeriod)
+	}
+	if resp.RDConnectionBroker != "rdc-broker.example.test" {
+		t.Errorf("rd_connection_broker = %q, want rdc-broker.example.test", resp.RDConnectionBroker)
 	}
 	if !resp.Update.Enabled || resp.Update.Channel != dc.ChannelPrerelease ||
 		time.Duration(resp.Update.PollInterval) != 6*time.Hour {
@@ -1940,6 +2017,70 @@ func TestHandlePutSettings_AuthenticatedUser_Returns200(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestHandlePutSettings_RejectsRDConnectionBrokerWithoutMutation(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	seed := dc.DefaultConfig()
+	seed.Dashboard.RDConnectionBroker = "existing-broker.example.test"
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	for _, body := range []string{
+		`{"rd_connection_broker":"rdc-broker.example.test"}`,
+		`{"rd_connection_broker":""}`,
+		`{"rd_connection_broker":42}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ds.handlePutSettings(w, httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body)))
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "drainctl broker-setup") {
+				t.Errorf("response = %q, want drainctl broker-setup guidance", w.Body.String())
+			}
+
+			cfg, err := dc.LoadConfig()
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if got := cfg.Dashboard.RDConnectionBroker; got != "existing-broker.example.test" {
+				t.Errorf("RDConnectionBroker = %q, want existing value preserved", got)
+			}
+		})
+	}
+}
+
+func TestHandlePutSettings_AbsentOrNullRDConnectionBrokerLeavesValueUnchanged(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	seed := dc.DefaultConfig()
+	seed.Dashboard.RDConnectionBroker = "existing-broker.example.test"
+	if err := dc.SaveConfig(seed); err != nil {
+		t.Fatalf("seed SaveConfig: %v", err)
+	}
+
+	ds := newTestServer(t)
+	for _, body := range []string{"{}", `{"rd_connection_broker":null}`} {
+		t.Run(body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ds.handlePutSettings(w, httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+
+			cfg, err := dc.LoadConfig()
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if got := cfg.Dashboard.RDConnectionBroker; got != "existing-broker.example.test" {
+				t.Errorf("RDConnectionBroker = %q, want existing value preserved", got)
+			}
+		})
 	}
 }
 
@@ -2731,6 +2872,48 @@ func TestHandleReport_BroadcastsSSEUpdate(t *testing.T) {
 	}
 }
 
+func TestBroadcastServerUpdate_IncludesRDSessionCollection(t *testing.T) {
+	ds := newTestServer(t)
+	ds.rdCollections = newRDCollectionResolver(func(context.Context, string) ([]byte, error) {
+		return []byte(`[{"host":"effective-rd.example.test","collection":"Published Apps"}]`), nil
+	})
+	ds.rdCollections.refresh(context.Background())
+	ds.state.Register("registered-rd.example.test")
+	ds.state.Update("registered-rd.example.test", &dc.CheckResult{
+		Host:   "effective-rd.example.test",
+		Status: "Healthy",
+	})
+
+	id, ch, done, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ds.broker.Unsubscribe(id) })
+	ds.broadcastServerUpdate("registered-rd.example.test")
+
+	select {
+	case payload := <-ch:
+		var event SSEEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode SSE event: %v", err)
+		}
+		if event.Type != "server_update" {
+			t.Fatalf("event type = %q, want server_update", event.Type)
+		}
+		var view map[string]any
+		if err := json.Unmarshal(event.Data, &view); err != nil {
+			t.Fatalf("decode server_update data: %v", err)
+		}
+		if got := view["rd_session_collection"]; got != "Published Apps" {
+			t.Errorf("SSE rd_session_collection = %v, want %q", got, "Published Apps")
+		}
+	case <-done:
+		t.Fatal("subscriber evicted unexpectedly")
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for server_update")
+	}
+}
+
 // TestHandlePutSettings_BroadcastsSSESettingsUpdate verifies that a successful
 // PUT /api/v1/settings broadcasts a settings_update event to connected browsers.
 func TestHandlePutSettings_BroadcastsSSESettingsUpdate(t *testing.T) {
@@ -2832,6 +3015,7 @@ func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
 	cfg.GracePeriod = 17
 	cfg.PollInterval = 45
 	cfg.SessionWarningThreshold = 73
+	cfg.Dashboard.RDConnectionBroker = "rdc-broker.example.test"
 	cfg.NotificationExclusions = []string{"rds-a.example.test", "rds-b.example.test"}
 	cfg.Notifications = []dc.NotificationTarget{{
 		Type:     "webhook",
@@ -2898,6 +3082,9 @@ func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
 	}
 	if got := sseSnapshot["notification_exclusions"]; !reflect.DeepEqual(got, []any{"rds-a.example.test", "rds-b.example.test"}) {
 		t.Errorf("notification_exclusions = %#v, want both exclusions", got)
+	}
+	if got := sseSnapshot["rd_connection_broker"]; got != "rdc-broker.example.test" {
+		t.Errorf("rd_connection_broker = %#v, want rdc-broker.example.test", got)
 	}
 	evtspike := sseSnapshot["evtspike"].(map[string]any)
 	if _, found := evtspike["baseline_path"]; found {
