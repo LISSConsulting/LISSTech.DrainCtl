@@ -776,6 +776,17 @@ Get-RDSHDrainMode | Format-List</code></pre>
                         </td>
                     </tr>
                     <tr>
+                        <td><code>dashboard.rd_connection_broker</code></td>
+                        <td><em>empty</em></td>
+                        <td>
+                            Config/runtime field <code>RDConnectionBroker</code>. It is the RD Connection Broker
+                            hostname for authoritative session-collection discovery; blank means the local machine
+                            running the DrainCtl service and works only when that host is the broker. The dashboard
+                            displays it read-only; use elevated <code>drainctl broker-setup --connection-broker HOST</code>
+                            to change it. Manual <code>config.json</code> editing is an advanced administrator-controlled path.
+                    </tr>
+
+                    <tr>
                         <td><code>dashboard_only</code></td>
                         <td>false</td>
                         <td>Run the dashboard listener, authentication, SQLite, and retention only. It disables local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, and the updater.</td>
@@ -1660,10 +1671,11 @@ https://dashboard-server:49470</code></pre>
 
             <p>
                 The dashboard shows a live grid with each server's hostname, drain mode, status, state duration, who
-                last changed it, and when it was last seen. Recognized hostnames are presented under a conservatively
-                derived RD Session Pool; hosts that cannot be recognized remain under <strong>Ungrouped</strong>.
-                Color-coded: green for healthy, amber for grace, red for alert, gray for offline. Each server card
-                includes a <strong>session gauge</strong> showing current utilization, plus an <strong>Overview LOAD
+                last changed it, and when it was last seen. The Servers table groups hosts by authoritative RD
+                Connection Broker session-collection membership. A host with no assigned collection, or a host whose
+                membership cannot currently be discovered, remains under <strong>Ungrouped</strong>. Color-coded:
+                green for healthy, amber for grace, red for alert, gray for offline. Each server card includes a
+                <strong>session gauge</strong> showing current utilization, plus an <strong>Overview LOAD
                 chart</strong> that overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis
                 canvas.
             </p>
@@ -1700,6 +1712,41 @@ https://dashboard-server:49470</code></pre>
                 <strong>Servers</strong> (fleet lifecycle controls), and <strong>System</strong> (dashboard and update
                 policy). The dashboard propagates its settings to connected agents, including <em>all</em>
                 operator-safe EventSpike fields; <code>baseline_path</code> is deliberately local-only.
+            </p>
+            <p>
+                The <strong>Config &rarr; Servers</strong> tab displays the current <strong>RD Connection Broker</strong>
+                (<code>rd_connection_broker</code>) but cannot change it. The resolver refreshes every five minutes.
+                It imports the <code>RemoteDesktop</code> PowerShell module and reads
+                <code>Get-RDSessionCollection</code> and <code>Get-RDSessionHost</code>, so the DrainCtl service
+                identity needs the module and appropriate administrative/RDS-management rights on the selected
+                Connection Broker. A failed discovery retains the last good membership map rather than removing
+                existing groups.
+            </p>
+
+            <h3>Validate and save a Connection Broker</h3>
+            <p>
+                To change the broker, run the elevated command against the running DrainCtl service:
+            </p>
+            <pre><code>drainctl broker-setup --connection-broker rdc-broker.example.test
+
+# Blank means the local machine running the DrainCtl service:
+drainctl broker-setup</code></pre>
+            <p>
+                Blank succeeds only when that local DrainCtl service host is the Connection Broker.
+                <code>broker-setup</code> uses the privileged named-pipe service path, so
+                <code>Get-RDSessionCollection</code> and <code>Get-RDSessionHost</code> run under the actual
+                service identity rather than the interactive administrator. It imports <code>RemoteDesktop</code>
+                and needs appropriate administrative/RDS-management rights on the selected broker. The command
+                probes before it saves: a failed probe never changes the configured broker. It never creates
+                accounts, changes group membership or permissions, installs Windows features, or changes the
+                service identity. Manual <code>config.json</code> editing remains an advanced administrator-controlled path.
+            </p>
+            <p>
+                The supported installer service identity is currently <code>LocalSystem</code>; it accesses a remote
+                broker as <code>DOMAIN\DASHBOARDHOST$</code>. RDSH agents also remain <code>LocalSystem</code>.
+                gMSA support is future work and requires installer, ACL, and privilege support. Microsoft's
+                <a href="https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/manage-group-managed-service-accounts">Manage Group Managed Service Accounts guidance</a>
+                is a future-planning reference only.
             </p>
 
             <h3>Manage servers</h3>
@@ -2124,11 +2171,16 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
 
             <h3>Servers: grouping, selection, lifecycle, and updates</h3>
             <p>
-                The Servers table groups recognized hostnames by a conservative hostname-derived RD Session Pool.
-                Hosts that do not match a recognized pool stay in <strong>Ungrouped</strong>; the presentation does not
-                infer a pool from uncertain names. It supports persistent multi-select with per-row checkboxes and a
-                tri-state select-all control. Selection survives filtering and pagination until you clear it or complete
-                an action, so an operator can assemble a batch deliberately before acting.
+                The Servers table uses authoritative RD Connection Broker membership, not hostname-derived pools.
+                <strong>Config &rarr; Servers</strong> displays the configured broker read-only; use elevated
+                <code>drainctl broker-setup --connection-broker HOST</code> to change it. Blank means the local
+                machine running the DrainCtl service and works only when that host is the broker. The
+                <code>RemoteDesktop</code> module's <code>Get-RDSessionCollection</code> and
+                <code>Get-RDSessionHost</code> commands supply the mapping. Only assigned, successfully discovered
+                hosts appear in a collection; missing or unknown membership is <strong>Ungrouped</strong>, and failed
+                refreshes keep the last good mapping. It supports persistent multi-select with per-row checkboxes and
+                a tri-state select-all control. Selection survives filtering and pagination until you clear it or
+                complete an action, so an operator can assemble a batch deliberately before acting.
             </p>
             <ul>
                 <li>

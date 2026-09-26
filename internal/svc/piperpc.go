@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os/user"
 	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -51,6 +53,26 @@ type serviceHandler struct {
 	lastSessions atomic.Pointer[dc.SessionSummary]
 	evtSpikeSub  atomic.Pointer[evtspike.Subsystem] // nil while evtspike subsystem has not been constructed
 	registration *registrationSubsystem
+}
+
+const brokerSetupDeadline = 45 * time.Second
+
+var (
+	normalizeRDConnectionBrokerFunc = dc.NormalizeRDConnectionBroker
+	probeRDSessionCollectionsFunc   = dashboard.ProbeRDSessionCollections
+	persistRDConnectionBrokerFunc   = dc.PersistRDConnectionBroker
+	serviceIdentityFunc             = runningServiceIdentity
+)
+
+func runningServiceIdentity() (string, error) {
+	current, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("get service identity: %w", err)
+	}
+	if current.Username == "" {
+		return "", fmt.Errorf("get service identity: username unavailable")
+	}
+	return current.Username, nil
 }
 
 func (h *serviceHandler) publish(cfg dc.ServiceConfig, dashState *dashboard.ServerState) {
@@ -293,6 +315,40 @@ func (h *serviceHandler) HandleRegister(dashboardURL string) (json.RawMessage, e
 		return nil, fmt.Errorf("marshal register result: %w", err)
 	}
 	return raw, nil
+}
+
+// HandleBrokerSetup verifies RD Session Collection discovery under the service
+// account before persisting the normalized Connection Broker. It must remain a
+// pipe-only operation so a CLI caller cannot accidentally probe under its own
+// identity.
+func (h *serviceHandler) HandleBrokerSetup(connectionBroker string) (*pipe.BrokerSetupResult, error) {
+	normalized, err := normalizeRDConnectionBrokerFunc(connectionBroker)
+	if err != nil {
+		return nil, fmt.Errorf("rd connection broker: %w", err)
+	}
+
+	identity, err := serviceIdentityFunc()
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), brokerSetupDeadline)
+	defer cancel()
+	probe, err := probeRDSessionCollectionsFunc(ctx, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("probe RD Session Collections: %w", err)
+	}
+
+	if err := persistRDConnectionBrokerFunc(normalized); err != nil {
+		return nil, fmt.Errorf("persist RD connection broker: %w", err)
+	}
+
+	return &pipe.BrokerSetupResult{
+		ConnectionBroker: normalized,
+		CollectionCount:  probe.CollectionCount,
+		SessionHostCount: probe.SessionHostCount,
+		ServiceIdentity:  identity,
+	}, nil
 }
 
 func (h *serviceHandler) HandleBaselineReset() error {

@@ -42,6 +42,7 @@ type ServerView struct {
 	ChangedBy            string           `json:"changed_by,omitempty"`
 	GraceDeadline        *time.Time       `json:"grace_deadline"`
 	Perf                 *dc.PerfSnapshot `json:"perf"`
+	RDSessionCollection  string           `json:"rd_session_collection,omitempty"`
 }
 
 // statusToken converts a CheckResult.Status value ("Healthy"/"Warning"/"Grace"/"Alert")
@@ -102,6 +103,16 @@ func toServerView(info ServerInfo, staleAfter time.Duration) ServerView {
 		v.GraceDeadline = &deadline
 	}
 	return v
+}
+
+// serverView enriches a stored server record with dashboard-owned data before
+// it crosses the HTTP or SSE boundary.
+func (ds *DashboardServer) serverView(info ServerInfo) ServerView {
+	view := toServerView(info, ds.staleAfter())
+	if ds.rdCollections != nil {
+		view.RDSessionCollection = ds.rdCollections.CollectionFor(view.Host)
+	}
+	return view
 }
 
 // isAuthorizedForHost checks whether the authenticated identity is allowed to
@@ -397,7 +408,7 @@ func (ds *DashboardServer) handleServers(w http.ResponseWriter, r *http.Request)
 	infos := ds.state.All()
 	views := make([]ServerView, len(infos))
 	for i, info := range infos {
-		views[i] = toServerView(info, ds.staleAfter())
+		views[i] = ds.serverView(info)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
@@ -423,7 +434,7 @@ func (ds *DashboardServer) handleGetServer(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(toServerView(*info, ds.staleAfter()))
+	_ = enc.Encode(ds.serverView(*info))
 }
 
 // handleDeleteServer processes DELETE /api/v1/servers/{host}.

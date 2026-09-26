@@ -54,6 +54,7 @@ const BASE = '/api/v1';
  *
  * @typedef {Object} Server
  * @property {string} host
+ * @property {string} [rd_session_collection]  - authoritative RD Session Collection membership; absent when unassigned
  * @property {'ok'|'warning'|'grace'|'alert'|'off'} status
  * @property {string} drain_mode
  * @property {number} sessions                 - TotalSessions (integer)
@@ -173,7 +174,9 @@ const BASE = '/api/v1';
 /**
  * @typedef {Object} Settings
  * @property {number} grace_period              - grace period in minutes
+ * @property {number} poll_interval             - safety-net poll interval in seconds (10–86400)
  * @property {number} session_warning_threshold
+ * @property {string} rd_connection_broker      - blank uses the local DrainCtl service host only when it is the Connection Broker
  * @property {PerfMonitoringConfig} performance
  * @property {NotifyTarget[]} notifications
  * @property {string[]} notification_exclusions - canonical hosts suppressed across every target and trigger
@@ -790,6 +793,10 @@ export async function saveSettings(config) {
     // Backend treats absent `notifications` as "no change", so omitting it
     // keeps targets entirely in the per-target endpoints' lane.
     delete payload.notifications;
+    // Connection Broker configuration is persisted only through the elevated
+    // drainctl broker-setup service path, after it validates discovery under
+    // the service identity.
+    delete payload.rd_connection_broker;
     await apiFetch('/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

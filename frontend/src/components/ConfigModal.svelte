@@ -1504,6 +1504,24 @@
                     </div>
                 {:else if activeTab === 'servers'}
                     <div id="config-panel-servers" role="tabpanel" aria-labelledby="config-tab-servers">
+                        <div class="settings-group">
+                            <div class="section-header">
+                                <Monitor size={14} strokeWidth={2.5} /> RD Connection Broker
+                            </div>
+                            <label class="settings-label" for="rd-connection-broker">Configured broker</label>
+                            <input
+                                id="rd-connection-broker"
+                                class="settings-input"
+                                type="text"
+                                value={config.rd_connection_broker || 'Local DrainCtl service host'}
+                                readonly
+                            />
+                            <div class="settings-hint">
+                                This value is read-only in the dashboard. To change it, run the elevated command
+                                <code>drainctl broker-setup --connection-broker HOST</code>. Leave the command's broker
+                                value blank only when the local machine running the DrainCtl service is the broker.
+                            </div>
+                        </div>
                         <RemovedServersSettings />
                     </div>
                 {:else if activeTab === 'system'}
@@ -2258,7 +2276,6 @@
         border-style: dashed;
         font-size: 0.7rem;
     }
-    .gp-pill,
     .pctl-pill {
         font-size: 0.72rem;
         font-weight: 600;
@@ -2267,34 +2284,17 @@
         background: var(--color-card);
         box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 20%, transparent);
     }
-    .gp-pill:hover,
     .pctl-pill:hover {
         box-shadow: 3px 3px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
     }
-    .gp-pill:active,
     .pctl-pill:active {
         box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-accent) 15%, transparent);
     }
-    .gp-pill.active,
     .pctl-pill.active {
         background: var(--color-accent);
         color: #fff;
         border-color: var(--color-accent);
         box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
-    }
-    .gp-pill--dashed {
-        border-style: dashed;
-        font-size: 0.7rem;
-    }
-    .gp-pill--off {
-        font-size: 0.68rem;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-    }
-    .gp-pill--off.active {
-        background: var(--color-subtle);
-        color: var(--color-bg);
-        border-color: var(--color-subtle);
     }
     .evtspike-full-width {
         grid-column: 1 / -1;

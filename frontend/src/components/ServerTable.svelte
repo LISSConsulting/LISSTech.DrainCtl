@@ -24,7 +24,7 @@
     import ConfirmDialog from './ConfirmDialog.svelte';
     import NotificationExclusionAction from './NotificationExclusionAction.svelte';
     import { toast } from '../lib/toast.svelte.js';
-    import { groupServersByRdSessionPool } from '../lib/server-groups.js';
+    import { groupServersByRdSessionCollection } from '../lib/server-groups.js';
 
     let { onhistoryclick } = $props();
 
@@ -521,15 +521,15 @@
         localStorage.setItem('drainctl-page-size', String(pageSize));
     });
 
-    let grouped = $derived.by(() => groupServersByRdSessionPool(sorted));
+    let grouped = $derived.by(() => groupServersByRdSessionCollection(sorted));
     let groupedServers = $derived(grouped.flatMap((group) => group.servers));
     let totalPages = $derived(Math.max(1, Math.ceil(groupedServers.length / pageSize)));
     let paged = $derived(groupedServers.slice(page * pageSize, (page + 1) * pageSize));
     let pagedGroups = $derived.by(() => {
-        const filteredCounts = new Map(grouped.map((group) => [group.pool, group.servers.length]));
-        return groupServersByRdSessionPool(paged).map((group) => ({
+        const filteredCounts = new Map(grouped.map((group) => [group.collection, group.servers.length]));
+        return groupServersByRdSessionCollection(paged).map((group) => ({
             ...group,
-            count: filteredCounts.get(group.pool) ?? group.servers.length,
+            count: filteredCounts.get(group.collection) ?? group.servers.length,
         }));
     });
 </script>
@@ -728,12 +728,14 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {#each pagedGroups as group (group.pool)}
-                        <tr class="pool-group-header">
+                    {#each pagedGroups as group (group.collection)}
+                        <tr class="collection-group-header">
                             <th colspan="12" scope="rowgroup">
-                                <span>RD SESSION POOL</span>
-                                <strong>{group.pool}</strong>
-                                <span class="pool-group-count">{group.count} server{group.count === 1 ? '' : 's'}</span>
+                                <span>RD SESSION COLLECTION</span>
+                                <strong>{group.collection}</strong>
+                                <span class="collection-group-count"
+                                    >{group.count} server{group.count === 1 ? '' : 's'}</span
+                                >
                             </th>
                         </tr>
                         {#each group.servers as srv (srv.host)}
@@ -1062,18 +1064,18 @@
         white-space: nowrap;
         background: var(--color-card);
     }
-    tr.pool-group-header th {
+    tr.collection-group-header th {
         padding: 7px 8px;
         background: var(--color-surface);
         border-bottom: 1px solid var(--color-border);
         color: var(--color-muted);
     }
-    .pool-group-header strong {
+    .collection-group-header strong {
         margin-left: 10px;
         color: var(--color-fg);
         font-weight: 700;
     }
-    .pool-group-count {
+    .collection-group-count {
         margin-left: 8px;
         font-weight: 400;
         opacity: 0.75;
