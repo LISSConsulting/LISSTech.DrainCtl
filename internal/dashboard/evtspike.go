@@ -34,6 +34,15 @@ const (
 	spikeRangeMaxLimit = 500
 )
 
+// eventSpikeRangeResponse is the range-mode wire contract. Recent mode keeps
+// returning a bare array for compatibility.
+type eventSpikeRangeResponse struct {
+	Spikes    []evtspike.RecentSpikeEntry `json:"spikes"`
+	Total     int64                       `json:"total"`
+	Truncated bool                        `json:"truncated"`
+	AsOfID    int64                       `json:"as_of_id"`
+}
+
 // EvtSpikeStatusFunc returns the detector status for a registered host. The
 // subsystem installs this hook at Start; when the feature is off (or the
 // subsystem has not wired itself yet) the field on DashboardServer is nil and
@@ -73,13 +82,15 @@ func (ds *DashboardServer) handleEvtSpikeStatus(w http.ResponseWriter, r *http.R
 // Mode A (recent list, pre-009 contract): no from/to → returns newest-first
 // entries capped by limit (default 20, clamped [1,50]).
 //
-// Mode B (range query, 009+): both from and to supplied → returns newest-first
-// entries whose window_start falls in [from, to), capped at spikeRangeMaxLimit.
-// Backs the SpikeSwimlane chart.
+// Mode B (range query, 009+): both from and to supplied → returns an object
+// containing newest-first entries whose window_start falls in [from, to), their
+// exact total, the ID watermark for that total, and whether the rows were capped
+// at spikeRangeMaxLimit. Backs the SpikeSwimlane chart.
 //
-// Returns 200 with a (possibly empty) JSON array of RecentSpikeEntry. 404 for
-// unknown hosts. 400 if from/to are malformed or one is supplied without the
-// other. Empty result for a registered host with no spikes is 200 [], not 404.
+// Recent mode returns a (possibly empty) JSON array of RecentSpikeEntry.
+// Range mode returns {spikes,total,truncated,as_of_id}. Both return 404 for
+// unknown hosts and 400 if from/to are malformed or one is supplied without the
+// other.
 func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	if host == "" || !ds.state.IsRegistered(host) {
@@ -87,11 +98,13 @@ func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	host = telemetry.CanonicalHostname(host)
+
 	fromRaw := r.URL.Query().Get("from")
 	toRaw := r.URL.Query().Get("to")
 
 	entries := []evtspike.RecentSpikeEntry{}
-
+	rangeResponse := eventSpikeRangeResponse{Spikes: entries}
 	if fromRaw != "" || toRaw != "" {
 		// Mode B: range query.
 		if fromRaw == "" || toRaw == "" {
@@ -116,13 +129,18 @@ func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.R
 		if ds.spikes != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), spikeQueryTimeout)
 			defer cancel()
-			rows, err := ds.spikes.Range(ctx, host, from, to, spikeRangeMaxLimit)
+			result, err := ds.spikes.Range(ctx, host, from, to, spikeRangeMaxLimit)
 			if err != nil {
 				slog.Warn("dashboard: event_spikes range failed", "host", host, "error", err) //nolint:gosec // host is validated against registered server list
 				writeJSONError(w, "storage_error", http.StatusInternalServerError)
 				return
 			}
-			entries = toRecentSpikeEntries(rows)
+			rangeResponse = eventSpikeRangeResponse{
+				Spikes:    toRecentSpikeEntries(result.Spikes),
+				Total:     result.Total,
+				Truncated: result.Truncated,
+				AsOfID:    result.AsOfID,
+			}
 		}
 	} else {
 		// Mode A: recent list.
@@ -154,6 +172,10 @@ func (ds *DashboardServer) handleEvtSpikeSpikes(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	if fromRaw != "" || toRaw != "" {
+		_ = enc.Encode(rangeResponse)
+		return
+	}
 	_ = enc.Encode(entries)
 }
 

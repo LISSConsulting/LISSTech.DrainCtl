@@ -65,6 +65,10 @@
 
 - Overview and per-host LOAD charts now render opaque series in a fixed back-to-front order: memory, CPU, CPU P95, sessions. Each area's stroke is painted with its fill, so a covered series no longer leaves a disconnected line through the metric above it. Sessions use a dedicated blue token in both light and dark themes, distinct from the CPU accent and CPU P95 amber.
 
+## Fleet chart filtering and spike fidelity — 2026-09-25
+
+- The Servers table presents only conservatively recognized hostname-derived RD Session Pools and leaves uncertain hosts in **Ungrouped**. Overview's repeated `host` filter is shared by every chart family (no filter means all servers). Event Spikes reports an exact `[from,to)` total even when its newest-first dot payload is capped at 500 and SSE IDs are deduplicated. For coarse Host Load CPU P95, retain the maximum agent-window P95 in the bucket; recomputing a bucket percentile would hide the spikes the overlay exists to expose.
+
 ## Runtime correctness hardening — 2026-08-06
 
 - Named-pipe accepts now treat `ERROR_PIPE_CONNECTED` as success, closing the client-before-accept race reproduced by the race suite.

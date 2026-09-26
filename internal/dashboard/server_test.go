@@ -4671,6 +4671,106 @@ func TestFleetMetrics_AggregatesAcrossHosts(t *testing.T) {
 	}
 }
 
+func TestFleetMetrics_HostFilterAggregatesRequestedSubset(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"S01"}, base, map[string]float64{"cpu_pct": 10}, 3)
+	insertFleetSamples(t, ds, ms, []string{"S02"}, base, map[string]float64{"cpu_pct": 90}, 3)
+	from := base.Add(-time.Minute)
+	to := base.Add(5 * time.Minute)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, metricsURL("_fleet", from, to, "raw", []string{"cpu_pct"})+"&host=%20s01%20", nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	cpu := decodeMetricsResp(t, w).Series["cpu_pct"]
+	if cpu == nil || len(cpu.Avg) == 0 {
+		t.Fatal("response missing cpu_pct series")
+	}
+	for i, avg := range cpu.Avg {
+		if avg != 10 {
+			t.Errorf("cpu_pct avg[%d] = %v, want 10 (S01 only)", i, avg)
+		}
+	}
+}
+
+func TestFleetMetrics_HostFilterAbsentUsesEntireFleet(t *testing.T) {
+	ds, ms, closeDB := newTestServerWithStore(t)
+	defer closeDB()
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	insertFleetSamples(t, ds, ms, []string{"S01"}, base, map[string]float64{"cpu_pct": 10}, 3)
+	insertFleetSamples(t, ds, ms, []string{"S02"}, base, map[string]float64{"cpu_pct": 90}, 3)
+	from := base.Add(-time.Minute)
+	to := base.Add(5 * time.Minute)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, metricsURL("_fleet", from, to, "raw", []string{"cpu_pct"}), nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	cpu := decodeMetricsResp(t, w).Series["cpu_pct"]
+	if cpu == nil || len(cpu.Avg) == 0 {
+		t.Fatal("response missing cpu_pct series")
+	}
+	for i, avg := range cpu.Avg {
+		if avg != 50 {
+			t.Errorf("cpu_pct avg[%d] = %v, want 50 (both hosts)", i, avg)
+		}
+	}
+}
+
+func TestFleetMetrics_HostFilterValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"unknown", "UNKNOWN"},
+		{"case-insensitive duplicate", "S01&host=s01"},
+		{"empty", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds, _, closeDB := newTestServerWithStore(t)
+			defer closeDB()
+			ds.state.Register("S01")
+			now := time.Now().UTC()
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, metricsURL("_fleet", now.Add(-time.Hour), now, "raw", nil)+"&host="+tc.host, nil)
+			r.SetPathValue("host", "_fleet")
+			ds.handleMetrics(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestMetricsHandler_HostFilterRejectedForSingleHost(t *testing.T) {
+	ds := newTestServer(t)
+	now := time.Now().UTC()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, metricsURL("S01", now.Add(-time.Hour), now, "raw", nil)+"&host=S01", nil)
+	r.SetPathValue("host", "S01")
+	ds.handleMetrics(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
 // TestFleetMetrics_SumsSessionCountersAcrossHosts pins the fix for the Overview
 // Sessions metric reading half the counter tile's value: session counters must
 // SUM across hosts at fleet aggregation, not AVG. Exercises all three tier

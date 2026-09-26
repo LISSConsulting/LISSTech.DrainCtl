@@ -24,6 +24,7 @@
     import ConfirmDialog from './ConfirmDialog.svelte';
     import NotificationExclusionAction from './NotificationExclusionAction.svelte';
     import { toast } from '../lib/toast.svelte.js';
+    import { groupServersByRdSessionPool } from '../lib/server-groups.js';
 
     let { onhistoryclick } = $props();
 
@@ -520,8 +521,17 @@
         localStorage.setItem('drainctl-page-size', String(pageSize));
     });
 
-    let totalPages = $derived(Math.max(1, Math.ceil(sorted.length / pageSize)));
-    let paged = $derived(sorted.slice(page * pageSize, (page + 1) * pageSize));
+    let grouped = $derived.by(() => groupServersByRdSessionPool(sorted));
+    let groupedServers = $derived(grouped.flatMap((group) => group.servers));
+    let totalPages = $derived(Math.max(1, Math.ceil(groupedServers.length / pageSize)));
+    let paged = $derived(groupedServers.slice(page * pageSize, (page + 1) * pageSize));
+    let pagedGroups = $derived.by(() => {
+        const filteredCounts = new Map(grouped.map((group) => [group.pool, group.servers.length]));
+        return groupServersByRdSessionPool(paged).map((group) => ({
+            ...group,
+            count: filteredCounts.get(group.pool) ?? group.servers.length,
+        }));
+    });
 </script>
 
 <div class="grid">
@@ -718,129 +728,146 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {#each paged as srv (srv.host)}
-                        {@const memPct =
-                            srv.perf?.mem_total_mb > 0
-                                ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100
-                                : null}
-                        {@const cpuColor = srv.perf
-                            ? getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)
-                            : 'neutral'}
-                        {@const memColor =
-                            memPct != null ? getThresholdColor(memPct, memThresh.warn, memThresh.crit) : 'neutral'}
-                        {@const delayColor = srv.perf
-                            ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit)
-                            : 'neutral'}
-                        {@const sessPct = srv.max_sessions > 0 ? ((srv.sessions ?? 0) / srv.max_sessions) * 100 : null}
-                        {@const sessColor = getThresholdColor(sessPct, sessionWarnThresh, 100)}
-                        {@const cpuStyle = thresholdStyle(cpuColor)}
-                        {@const memStyle = thresholdStyle(memColor)}
-                        {@const delayStyle = thresholdStyle(delayColor)}
-                        {@const srvHistory = appState.serverMetrics.get(srv.host)}
-                        <tr
-                            class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
-                                srv.host,
-                            )
-                                ? 'row-sel'
-                                : ''}"
-                            data-host={srv.host}
-                            data-status={srv.status}
-                            tabindex="0"
-                            aria-expanded={expandedHosts.has(srv.host)}
-                            aria-selected={appState.selectedHosts.has(srv.host)}
-                            onclick={() => toggleRow(srv.host)}
-                            onkeydown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    toggleRow(srv.host);
-                                }
-                            }}
-                        >
-                            <td
-                                class="sel-col"
-                                onclick={(e) => e.stopPropagation()}
-                                onkeydown={(e) => e.stopPropagation()}
-                            >
-                                <input
-                                    type="checkbox"
-                                    class="srv-check"
-                                    aria-label="Select {srv.host}"
-                                    checked={appState.selectedHosts.has(srv.host)}
-                                    onclick={(e) => onRowCheckboxClick(srv.host, e)}
-                                    onkeydown={(e) => onRowCheckboxKeydown(srv.host, e)}
-                                />
-                            </td>
-                            <td><span class="dot {srv.status}"></span></td>
-                            <td class="mono fw7">{srv.host.split('.')[0]}</td>
-                            <td>
-                                <span class="pill {srv.status}">{statusLabel(srv.status)}</span>
-                                {#if srv.status === 'grace'}
-                                    {@const cd = graceCountdown(srv.grace_deadline, now)}
-                                    {#if cd}
-                                        <span class="grace-cd {cd === 'expired' ? 'grace-cd--expired' : ''}">{cd}</span>
-                                    {/if}
-                                {/if}
-                            </td>
-                            <td class="mono">{modeLabel(srv.drain_mode)}</td>
-                            <td class="mono muted">{rel(srv.state_changed_at ?? srv.registered_at, now)}</td>
-                            <td class="mono spark-cell">
-                                <CellSparkline
-                                    data={srvHistory?.map((s) => s.sessions) ?? []}
-                                    color={sparkColor(sessColor)}
-                                />
-                                {srv.sessions ?? '—'}
-                            </td>
-                            <td class="mono spark-cell" style={cpuStyle}>
-                                <CellSparkline
-                                    data={srvHistory?.map((s) => s.cpu) ?? []}
-                                    color={sparkColor(cpuColor)}
-                                />
-                                {srv.perf?.cpu_pct != null ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}
-                            </td>
-                            <td class="mono spark-cell" style={memStyle}>
-                                <CellSparkline
-                                    data={srvHistory?.map((s) => s.mem) ?? []}
-                                    color={sparkColor(memColor)}
-                                />
-                                {memPct != null ? memPct.toFixed(0) + '%' : '—'}
-                            </td>
-                            <td class="mono spark-cell" style={delayStyle}>
-                                <CellSparkline
-                                    data={srvHistory?.map((s) => s.inputDelay) ?? []}
-                                    color={sparkColor(delayColor)}
-                                />
-                                {srv.perf?.input_delay_p95_ms != null
-                                    ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms'
-                                    : '—'}
-                            </td>
-                            <td class="mono muted">{rel(srv.last_seen, now)}</td>
-                            <td onclick={(e) => e.stopPropagation()}>
-                                <div class="btn-row">
-                                    <button
-                                        class="btn-hist"
-                                        onclick={() => {
-                                            appState.eventHostFilter = srv.host.split('.')[0];
-                                            appState.currentView = 'events';
-                                        }}>History</button
-                                    >
-                                    <NotificationExclusionAction host={srv.host} compact />
-                                    <button
-                                        class="btn-rm"
-                                        onclick={() => requestRemoveServer(srv.host)}
-                                        aria-label="Remove {srv.host}"
-                                        disabled={removingHosts.has(srv.host)}
-                                        >{removingHosts.has(srv.host) ? '…' : '✕'}</button
-                                    >
-                                </div>
-                            </td>
+                    {#each pagedGroups as group (group.pool)}
+                        <tr class="pool-group-header">
+                            <th colspan="12" scope="rowgroup">
+                                <span>RD SESSION POOL</span>
+                                <strong>{group.pool}</strong>
+                                <span class="pool-group-count">{group.count} server{group.count === 1 ? '' : 's'}</span>
+                            </th>
                         </tr>
-                        {#if expandedHosts.has(srv.host)}
-                            <tr class="detail-row">
-                                <td colspan="12">
-                                    <ServerDetail server={srv} {now} {onhistoryclick} onremove={requestRemoveServer} />
+                        {#each group.servers as srv (srv.host)}
+                            {@const memPct =
+                                srv.perf?.mem_total_mb > 0
+                                    ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100
+                                    : null}
+                            {@const cpuColor = srv.perf
+                                ? getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)
+                                : 'neutral'}
+                            {@const memColor =
+                                memPct != null ? getThresholdColor(memPct, memThresh.warn, memThresh.crit) : 'neutral'}
+                            {@const delayColor = srv.perf
+                                ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit)
+                                : 'neutral'}
+                            {@const sessPct =
+                                srv.max_sessions > 0 ? ((srv.sessions ?? 0) / srv.max_sessions) * 100 : null}
+                            {@const sessColor = getThresholdColor(sessPct, sessionWarnThresh, 100)}
+                            {@const cpuStyle = thresholdStyle(cpuColor)}
+                            {@const memStyle = thresholdStyle(memColor)}
+                            {@const delayStyle = thresholdStyle(delayColor)}
+                            {@const srvHistory = appState.serverMetrics.get(srv.host)}
+                            <tr
+                                class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
+                                    srv.host,
+                                )
+                                    ? 'row-sel'
+                                    : ''}"
+                                data-host={srv.host}
+                                data-status={srv.status}
+                                tabindex="0"
+                                aria-expanded={expandedHosts.has(srv.host)}
+                                aria-selected={appState.selectedHosts.has(srv.host)}
+                                onclick={() => toggleRow(srv.host)}
+                                onkeydown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        toggleRow(srv.host);
+                                    }
+                                }}
+                            >
+                                <td
+                                    class="sel-col"
+                                    onclick={(e) => e.stopPropagation()}
+                                    onkeydown={(e) => e.stopPropagation()}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="srv-check"
+                                        aria-label="Select {srv.host}"
+                                        checked={appState.selectedHosts.has(srv.host)}
+                                        onclick={(e) => onRowCheckboxClick(srv.host, e)}
+                                        onkeydown={(e) => onRowCheckboxKeydown(srv.host, e)}
+                                    />
+                                </td>
+                                <td><span class="dot {srv.status}"></span></td>
+                                <td class="mono fw7">{srv.host.split('.')[0]}</td>
+                                <td>
+                                    <span class="pill {srv.status}">{statusLabel(srv.status)}</span>
+                                    {#if srv.status === 'grace'}
+                                        {@const cd = graceCountdown(srv.grace_deadline, now)}
+                                        {#if cd}
+                                            <span class="grace-cd {cd === 'expired' ? 'grace-cd--expired' : ''}"
+                                                >{cd}</span
+                                            >
+                                        {/if}
+                                    {/if}
+                                </td>
+                                <td class="mono">{modeLabel(srv.drain_mode)}</td>
+                                <td class="mono muted">{rel(srv.state_changed_at ?? srv.registered_at, now)}</td>
+                                <td class="mono spark-cell">
+                                    <CellSparkline
+                                        data={srvHistory?.map((s) => s.sessions) ?? []}
+                                        color={sparkColor(sessColor)}
+                                    />
+                                    {srv.sessions ?? '—'}
+                                </td>
+                                <td class="mono spark-cell" style={cpuStyle}>
+                                    <CellSparkline
+                                        data={srvHistory?.map((s) => s.cpu) ?? []}
+                                        color={sparkColor(cpuColor)}
+                                    />
+                                    {srv.perf?.cpu_pct != null ? srv.perf.cpu_pct.toFixed(1) + '%' : '—'}
+                                </td>
+                                <td class="mono spark-cell" style={memStyle}>
+                                    <CellSparkline
+                                        data={srvHistory?.map((s) => s.mem) ?? []}
+                                        color={sparkColor(memColor)}
+                                    />
+                                    {memPct != null ? memPct.toFixed(0) + '%' : '—'}
+                                </td>
+                                <td class="mono spark-cell" style={delayStyle}>
+                                    <CellSparkline
+                                        data={srvHistory?.map((s) => s.inputDelay) ?? []}
+                                        color={sparkColor(delayColor)}
+                                    />
+                                    {srv.perf?.input_delay_p95_ms != null
+                                        ? srv.perf.input_delay_p95_ms.toFixed(1) + 'ms'
+                                        : '—'}
+                                </td>
+                                <td class="mono muted">{rel(srv.last_seen, now)}</td>
+                                <td onclick={(e) => e.stopPropagation()}>
+                                    <div class="btn-row">
+                                        <button
+                                            class="btn-hist"
+                                            onclick={() => {
+                                                appState.eventHostFilter = srv.host.split('.')[0];
+                                                appState.currentView = 'events';
+                                            }}>History</button
+                                        >
+                                        <NotificationExclusionAction host={srv.host} compact />
+                                        <button
+                                            class="btn-rm"
+                                            onclick={() => requestRemoveServer(srv.host)}
+                                            aria-label="Remove {srv.host}"
+                                            disabled={removingHosts.has(srv.host)}
+                                            >{removingHosts.has(srv.host) ? '…' : '✕'}</button
+                                        >
+                                    </div>
                                 </td>
                             </tr>
-                        {/if}
+                            {#if expandedHosts.has(srv.host)}
+                                <tr class="detail-row">
+                                    <td colspan="12">
+                                        <ServerDetail
+                                            server={srv}
+                                            {now}
+                                            {onhistoryclick}
+                                            onremove={requestRemoveServer}
+                                        />
+                                    </td>
+                                </tr>
+                            {/if}
+                        {/each}
                     {/each}
                 </tbody>
             </table>
@@ -1034,6 +1061,22 @@
         border-bottom: var(--spacing-bw) solid var(--color-border);
         white-space: nowrap;
         background: var(--color-card);
+    }
+    tr.pool-group-header th {
+        padding: 7px 8px;
+        background: var(--color-surface);
+        border-bottom: 1px solid var(--color-border);
+        color: var(--color-muted);
+    }
+    .pool-group-header strong {
+        margin-left: 10px;
+        color: var(--color-fg);
+        font-weight: 700;
+    }
+    .pool-group-count {
+        margin-left: 8px;
+        font-weight: 400;
+        opacity: 0.75;
     }
     table.srv-tbl td {
         padding: 9px 8px;

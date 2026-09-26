@@ -413,6 +413,53 @@ func TestAPI_EvtSpikeSpikes_PerHostIsolation(t *testing.T) {
 	}
 }
 
+// TestAPI_EvtSpikeSpikes_CaseVariantHostUsesCanonicalRosterHost verifies that
+// lookup canonicalizes a case-insensitive registered hostname before querying
+// the case-sensitive telemetry store in both response modes.
+func TestAPI_EvtSpikeSpikes_CaseVariantHostUsesCanonicalRosterHost(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	const canonicalHost = "SRV01"
+	ds.state.Register(canonicalHost)
+	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
+	seedSpike(t, ds, makeSpike(canonicalHost, "Application", base))
+
+	t.Run("recent", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/evtspike/spikes?host=srv01", nil)
+		ds.handleEvtSpikeSpikes(w, r)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var got []evtspike.RecentSpikeEntry
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got) != 1 || got[0].Host != canonicalHost {
+			t.Errorf("spikes = %#v, want one spike for %q", got, canonicalHost)
+		}
+	})
+
+	t.Run("range", func(t *testing.T) {
+		url := "/api/evtspike/spikes?host=srv01&from=" + base.Add(-11*time.Second).Format(time.RFC3339Nano) +
+			"&to=" + base.Add(time.Second).Format(time.RFC3339Nano)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, url, nil)
+		ds.handleEvtSpikeSpikes(w, r)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var got eventSpikeRangeResponse
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Total != 1 || len(got.Spikes) != 1 || got.Spikes[0].Host != canonicalHost {
+			t.Errorf("range response = %#v, want one spike for %q", got, canonicalHost)
+		}
+	})
+}
+
 // TestAPI_EvtSpikeSpikes_UnknownHost_404 asserts 404 for unregistered hosts.
 func TestAPI_EvtSpikeSpikes_UnknownHost_404(t *testing.T) {
 	ds := newTestServerWithSpikes(t)
@@ -488,15 +535,15 @@ func TestAPI_EvtSpikeSpikes_NilStore_EmptyArray(t *testing.T) {
 	}
 }
 
-// TestAPI_EvtSpikeSpikes_Range returns only rows whose window_start falls in
-// the supplied [from, to) window.
+// TestAPI_EvtSpikeSpikes_Range returns an exact count and only rows whose
+// window_start falls in the supplied [from, to) window.
 func TestAPI_EvtSpikeSpikes_Range(t *testing.T) {
 	ds := newTestServerWithSpikes(t)
 	ds.state.Register("SRV01")
 
 	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
 	// Seed 10 spikes at 1-minute intervals — WindowStart = end - 10s.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Minute)))
 	}
 
@@ -512,13 +559,87 @@ func TestAPI_EvtSpikeSpikes_Range(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
-	var got []evtspike.RecentSpikeEntry
+	var got eventSpikeRangeResponse
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	// window_start values 3min-10s, 4min-10s, 5min-10s, 6min-10s fall in [3min-10s, 7min-10s).
-	if len(got) != 4 {
-		t.Fatalf("len = %d, want 4", len(got))
+	if got.Total != 4 || got.Truncated {
+		t.Errorf("range metadata = total %d, truncated %t; want 4, false", got.Total, got.Truncated)
+	}
+	if got.AsOfID != 7 {
+		t.Errorf("as_of_id = %d, want 7", got.AsOfID)
+	}
+	if len(got.Spikes) != 4 {
+		t.Fatalf("len = %d, want 4", len(got.Spikes))
+	}
+	for i, want := range []int64{7, 6, 5, 4} {
+		if got.Spikes[i].ID != want {
+			t.Errorf("spikes[%d].ID = %d, want %d", i, got.Spikes[i].ID, want)
+		}
+	}
+}
+
+func TestAPI_EvtSpikeSpikes_RangeEmptyRegisteredHost(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/evtspike/spikes?host=SRV01&from=2026-01-01T00:00:00Z&to=2026-01-01T01:00:00Z", nil)
+	ds.handleEvtSpikeSpikes(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response fields: %v", err)
+	}
+	if got := string(body["as_of_id"]); got != "0" {
+		t.Errorf("as_of_id JSON = %q, want 0", got)
+	}
+	var got eventSpikeRangeResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Spikes == nil || len(got.Spikes) != 0 || got.Total != 0 || got.Truncated || got.AsOfID != 0 {
+		t.Errorf("range response = %#v, want empty, untruncated result with zero watermark", got)
+	}
+}
+
+func TestAPI_EvtSpikeSpikes_RangeReportsExactTotalBeyondCap(t *testing.T) {
+	ds := newTestServerWithSpikes(t)
+	ds.state.Register("SRV01")
+	base := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
+
+	for i := range spikeRangeMaxLimit + 1 {
+		seedSpike(t, ds, makeSpike("SRV01", "Application", base.Add(time.Duration(i)*time.Second)))
+	}
+
+	url := "/api/evtspike/spikes?host=SRV01&from=" + base.Add(-10*time.Second).Format(time.RFC3339Nano) +
+		"&to=" + base.Add(time.Duration(spikeRangeMaxLimit+1)*time.Second-10*time.Second).Format(time.RFC3339Nano)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	ds.handleEvtSpikeSpikes(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var got eventSpikeRangeResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Spikes) != spikeRangeMaxLimit {
+		t.Errorf("len = %d, want %d", len(got.Spikes), spikeRangeMaxLimit)
+	}
+	if got.Total != int64(spikeRangeMaxLimit+1) {
+		t.Errorf("total = %d, want %d", got.Total, spikeRangeMaxLimit+1)
+	}
+	if got.AsOfID != int64(spikeRangeMaxLimit+1) {
+		t.Errorf("as_of_id = %d, want %d", got.AsOfID, spikeRangeMaxLimit+1)
+	}
+	if !got.Truncated {
+		t.Error("truncated = false, want true")
 	}
 }
 
