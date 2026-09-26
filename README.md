@@ -18,9 +18,9 @@
   <a href="https://www.powershellgallery.com/packages/LISSTech.DrainCtl"><img src="https://img.shields.io/powershellgallery/v/LISSTech.DrainCtl?style=for-the-badge&label=PSGALLERY&color=b87843&labelColor=2d1a1a" alt="Stable PSGallery release" /></a>
 </p>
 
-DrainCtl is stable for production deployment. Install a lightweight Windows service on each RDSH host and, when needed, a dashboard-only coordinator for fleet visibility. Signed upgrades preserve configuration, telemetry, removed-server tombstones, the force-update outbox, and EventSpike baseline and warm-up state.
+DrainCtl is stable for production deployment. Install a lightweight Windows service on each RDSH host and, when needed, a dashboard-only coordinator for fleet visibility. Signed upgrades preserve configuration, telemetry, removed-server tombstones, the force-update outbox, EventSpike baseline and warm-up state, and protected crash-investigation artifacts.
 
-**Operator docs:** [landing page](https://lissconsulting.github.io/LISSTech.DrainCtl/) · [setup guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html)
+**Operator docs:** [landing page](https://lissconsulting.github.io/LISSTech.DrainCtl/) · [setup guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html) · [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest)
 
 ```powershell
 Install-Module LISSTech.DrainCtl
@@ -42,22 +42,22 @@ Query from CLI, PowerShell, or your RMM. Local answers come from a named pipe in
 
 ---
 
-<h2 id="latest-release">▎ Latest release — v26.9.36</h2>
+<h2 id="latest-release">▎ Latest stable release</h2>
 
-v26.9.36 is the current stable release. It completes the fleet operator workflow and preserves state across in-place upgrades:
+The [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) completes the runtime-resilience work while preserving existing fleet workflows:
 
-- **Dashboard-only coordinator** — listener, authentication, SQLite, and retention without local drain monitoring, collection, registration/reporting, notifications, or updater activity.
-- **Fleet server controls** — persistent multi-select; batch permanent removal with durable tombstones and restore from **Config → Servers**; per-server global **Mute/Notify**; and terminal Force Update outcomes.
-- **EventSpike controls** — seven-day durable warm-up that continues detecting, editable operator-safe detector fields, channel-specific cooldowns, and Chill / Steady / Vigilant presets that enable the detector.
-- **Retained telemetry** — fleet and host charts support short and long horizons without browser-local history.
-- **Safe upgrades** — configuration, telemetry, tombstones, the Force Update outbox, and EventSpike baseline/warm-up survive upgrades.
+- **Bounded service recovery** — Windows SCM restarts the first and second unexpected service exits after five seconds, then leaves a third failure stopped; the failure count resets after one day.
+- **Protected local crash evidence** — WER LocalDumps creates up to three `drainctld.exe` mini dumps in a SYSTEM/Administrators-only ProgramData directory. DrainCtl never uploads or adds dump contents to telemetry.
+- **Durable host freshness** — SQLite-backed report epochs survive dashboard restarts and produce one additive offline and one recovery SSE event per outage without changing the compatible `server_update` event.
+- **Trustworthy RemoteFX history** — local and remote reports reject invalid values before persistence; inactive zero FPS/quality becomes a chart gap while valid lower-is-better zeroes remain meaningful.
+- **Incident-ready diagnostics** — the installed hourly collector records service recovery policy, WER settings, crash events, and metadata-only dump inventory in protected local storage.
 
-[Download v26.9.36 or the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest), install the [PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl), or use the [operator guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html).
+[Download the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest), install the [PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl), or use the [operator guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html).
 ---
 
 <h2 id="toc">▎ Table of contents</h2>
 
-[Latest release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Notifications](#notifications) · [EventSpike](#evtspike) · [Configuration](#configuration) · [Telemetry & charts](#telemetry-charts) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
+[Latest stable release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Crash diagnostics](#crash-diagnostics) · [Notifications](#notifications) · [EventSpike](#evtspike) · [Configuration](#configuration) · [Telemetry & charts](#telemetry-charts) · [Troubleshooting](#troubleshooting) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
 
 ---
 
@@ -69,22 +69,19 @@ v26.9.36 is the current stable release. It completes the fleet operator workflow
 graph TB
     subgraph AGENT["RDSH agent"]
         RNK["Registry watcher"] --> CHECK["Drain / session check"]
-        EVT["Security 4657"] --> CHECK
         CHECK --> STORE["SQLite telemetry"]
         CHECK --> PERF["PDH + EventSpike"]
         CHECK --> NOTIFY["Webhook / ntfy / SMTP"]
-        STORE --> PIPE["Named pipe"]
         CHECK --> REPORT["Dashboard report"]
+        STORE --> PIPE["Named pipe"]
     end
-
     subgraph DASH["Dashboard-only or dashboard host"]
         AUTH["HTTPS + auth"] --> FLEET["Fleet API / SSE"]
-        FLEET --> DSTORE["SQLite: roster, telemetry,<br/>tombstones, update outbox"]
+        FLEET --> DSTORE["SQLite: roster, telemetry,<br/>tombstones, freshness epochs, update outbox"]
         FLEET --> SETTINGS["Authoritative settings"]
     end
 
     REPORT -->|"register, heartbeat, metrics"| FLEET
-    SETTINGS -->|"next poll / reload"| AGENT
     FLEET -->|"Force Update command"| AGENT
     CLI["drainctl.exe"] --> PIPE
     PS["PowerShell module"] --> PIPE
@@ -142,9 +139,12 @@ C:\ProgramData\LISS Technologies\LISSTech DrainCtl\
   ├── update-state.json    updater replay-defense state
   ├── dashboard-tls.*      auto-generated or installed dashboard certificate
   ├── updates\             downloaded update packages
-  └── diags\               optional scheduled diagnostics output
+  ├── dumps\               permanent WER mini dumps; SYSTEM/Administrators only
+  └── diags\               permanent diagnostic output; SYSTEM/Administrators only
 
 Service                    DrainCtl, auto-start, LocalSystem
+                             SCM recovery: restart after failures 1 and 2 in 5 s;
+                             no third restart; reset failure count after 1 day
 ETW provider               LISS Technologies-DrainCtl (Operational + Debug)
 Event log source           DrainCtl
 ```
@@ -170,6 +170,8 @@ Restart-Service DrainCtl
 ```
 
 Dashboard-only mode runs the listener, authentication, SQLite, and retention only. It does **not** monitor the coordinator's drain state, collect performance or EventSpike data, register or report as an agent, send notifications, or run the updater.
+
+The installer also creates protected, permanent `dumps` and `diags` directories and configures WER LocalDumps for `drainctld.exe` only: mini dumps, maximum three files. The installed `\LISS Technologies\DrainCtl-Diags` task is disabled until an operator enables it; once enabled, it runs hourly. Full uninstall removes the WER policy and diagnostic task but retains those protected directories and their contents for incident retention.
 
 > Upgrading from v26-pre-007? First service start auto-migrates `audit.jsonl` into the SQLite store and renames the source file. No manual steps.
 
@@ -299,6 +301,14 @@ pipe IPC, auto-update, self-metrics, pprof, spike forwarding, registration, and
 performance collection each own their workers and shutdown path. The remaining
 Windows service loop is wiring and dispatch only.
 
+### Unexpected-failure recovery
+
+SCM is the only automatic restart authority. It restarts the first and second unexpected `drainctld.exe` exits after five seconds, takes no action on a third failure in the same one-day reset window, and resets the count after one day. Planned stops, upgrades, and uninstalls are not recovery failures. Confirm the installed policy with:
+
+```powershell
+sc.exe qfailure DrainCtl
+```
+
 ### Diagnostic profiling (opt-in, loopback-only)
 
 ```powershell
@@ -335,6 +345,26 @@ Source `DrainCtl` on the Application channel:
 - **ETW** — manifest provider `LISS Technologies-DrainCtl` with Operational (INF+) and Debug (DBG) channels. Disabled by default; `wevtutil sl /e:true` to enable. Level: `log_event_level`.
 
 Both accept `debug`, `info`, `warn`, `error`. CLI verbosity is separate (`--log-level`).
+
+---
+
+<h2 id="crash-diagnostics">▎ Crash diagnostics</h2>
+
+The MSI provisions WER LocalDumps only for `drainctld.exe`: mini dumps (`DumpType=1`), up to three files, in `%ProgramData%\LISS Technologies\LISSTech DrainCtl\dumps`. Both `dumps` and `%ProgramData%\LISS Technologies\LISSTech DrainCtl\diags` have a protected DACL for `SYSTEM` and local `Administrators` only. WER owns dump retention; DrainCtl never adds a competing dump-deletion job.
+
+The installed, disabled-by-default `\LISS Technologies\DrainCtl-Diags` task writes an hourly local diagnostic set to `diags` when enabled: service state and failure actions, WER LocalDumps configuration, relevant crash events, and a metadata-only dump inventory (name, size, creation time). It does not copy, hash, upload, or expose dump bytes by default.
+
+For an approved local investigation only, set the machine environment variable `DRAINCTL_INCLUDE_CRASH_DUMPS=1` and run the collector. It hashes and gzip-copies only the newest `.dmp` **within the protected `dumps` directory**; the archive and SHA-256 sidecar are never placed in `diags` and are never uploaded. Remove the variable after the investigation. A missing dump does not prove a crash location: the historical stopped-agent incident had no dump, so its crash location remains unconfirmed.
+
+```powershell
+$dataRoot = Join-Path $env:ProgramData 'LISS Technologies\LISSTech DrainCtl'
+Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\drainctld.exe' |
+  Select-Object DumpFolder, DumpType, DumpCount
+Get-ChildItem -Force (Join-Path $dataRoot 'dumps') |
+  Sort-Object CreationTimeUtc -Descending
+```
+
+Full uninstall removes the `drainctld.exe` WER policy and unregisters the diagnostics task, but intentionally retains the protected `dumps` and `diags` directories and their artifacts. Delete them only under the applicable incident-retention decision.
 
 ### Dashboard-authoritative configuration
 
@@ -653,12 +683,26 @@ LayerCake + Svelte 5 frontend embedded into the service binary:
 - **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / Sessions), **Health Indicators** (input delay, pages/sec, TCP retransmits, disk queue), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host). Its optional multi-server filter applies to every chart family; with no selected hosts, every registered host participates.
 - **Windows** — use `5M`, `15M` where the chart has sufficient source resolution, `1H`, `1D`, `3D`, `5D`, or `30D`. SQLite retained telemetry, not browser-local history, supplies the series.
 - **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values. Fleet Health Indicator P50 is the exact median across participating hosts for each bucket. At coarse resolution, Host Load CPU P95 is the maximum retained agent sampling-window P95 in its bucket, preserving spikes; it is not a percentile recomputed from the bucket's raw samples.
+- **RemoteFX data quality** — local collection and remote reports validate each optional field before state, fleet aggregation, or SQLite persistence: FPS `(0,240]`, quality `(0,100]`, encode/RTT `[0,60000]`, loss `[0,100]`, and server/network skip rates `[0,1000000]`. `NaN`, infinity, negatives, and outliers are dropped individually without discarding valid sibling counters. Zero FPS or quality denotes an inactive stream and charts as a gap; zero encode time, RTT, loss, or skip rate is valid, including its P50.
 - **Server Detail** — Host Load combines the host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes. Its header shows the exact number of spikes whose `window_start` is in the visible `[from, to)` range, while the swimlane renders at most 500 newest-first dots; incoming SSE spikes are deduplicated by ID.
-- **Offline detection** — a registered host becomes offline after three consecutive expected heartbeats are missed. The timeout follows `poll_interval` (for example, 3 minutes at a 60-second interval).
+- **Offline detection** — freshness is durable in SQLite schema v3 and keyed by canonical host plus accepted report epoch. A host becomes offline at exactly `3 × poll_interval`; an interval reload wakes the timer immediately. Each outage emits one additive `host_offline`, and the next accepted report emits one `host_recovered`; dashboard restart and repeated checks cannot duplicate them. Existing `server_update` remains available, and freshness transitions never rewrite `last_seen`.
 
 ### Force Update
 
 From the Servers table, **Force Update** queues a durable command for each selected agent. It retries delivery until the agent acknowledges it, supports agents at v26.9.17 or later, and reports terminal `completed`, `failed`, `duplicate`, or `refused` outcomes in the dashboard. It is separate from the opt-in scheduled updater policy.
+
+---
+
+<h2 id="troubleshooting">▎ Troubleshooting</h2>
+
+| Symptom | Check | Operator action |
+|---|---|---|
+| Service stays stopped after failures | `sc.exe qfailure DrainCtl` and SCM/Application events | The first two unexpected exits restart after five seconds; a third in one day is intentionally left stopped. Preserve the failure evidence and investigate the process fault—do not add an in-process restart loop. |
+| No dump after an unexpected exit | WER LocalDumps registry key, protected `dumps` ACL, WER Operational events, free space | WER policy, service, storage, or ACL may have prevented collection. A missing historical dump does not establish where the process crashed. Repair the approved installation; do not create an unprotected or remote fallback. |
+| Dump inventory shows more than three `.dmp` files | `DumpCount` under the `drainctld.exe` LocalDumps key | Preserve evidence and investigate the WER policy. DrainCtl does not delete WER-managed dumps because concurrent cleanup could race WER retention. |
+| Repeated offline/recovery notices | Dashboard SSE timestamps and active `poll_interval` | Offline is exactly three effective heartbeat intervals. One event pair per report epoch is expected; duplicates without a new accepted report are actionable diagnostics. |
+| RemoteFX looks empty or discontinuous | `collect_remotefx`, role/counter availability, diagnostic logs | Missing counters and inactive zero FPS/quality chart as gaps. Zero lower-is-better values are retained; invalid/outlier values are rejected before storage rather than rendered as a bad session. |
+| Need a local incident bundle | Protected `diags` directory and `\LISS Technologies\DrainCtl-Diags` task | Enable the installed task for hourly metadata diagnostics. Use `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only with approved local authorization; dump archives remain in protected `dumps` and are never uploaded. |
 
 ---
 
