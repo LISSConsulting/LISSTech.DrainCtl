@@ -24,16 +24,26 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// newTestServer creates a DashboardServer backed by a temp directory.
+// newTestServer creates a DashboardServer backed by a temp telemetry DB.
 // No TLS, no auth middleware — tests call handler methods directly.
 func newTestServer(t *testing.T) *DashboardServer {
 	t.Helper()
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	state := NewServerState(telemetry.NewServerStore(db))
+	freshness := telemetry.NewFreshnessStore(db)
+	state.SetFreshnessStore(freshness)
 	return &DashboardServer{
-		state:                newTestServerState(t),
-		cfg:                  dc.DashboardConfig{Group: "Domain Admins"},
-		broker:               NewBroker(),
-		remoteEvtSpikeStatus: make(map[string]evtspike.DetectorStatus),
-		forceUpdates:         newForceUpdateState(),
+		state:                    state,
+		cfg:                      dc.DashboardConfig{Group: "Domain Admins"},
+		broker:                   NewBroker(),
+		freshness:                freshness,
+		heartbeatIntervalChanged: make(chan struct{}, 1),
+		remoteEvtSpikeStatus:     make(map[string]evtspike.DetectorStatus),
+		forceUpdates:             newForceUpdateState(),
 	}
 }
 
@@ -6211,28 +6221,17 @@ func TestGetSettings_RemoteConfigCarriesEvtSpikeAndExclusions(t *testing.T) {
 	}
 }
 
-// staleTransitionFixture creates one reported host whose persisted and cached
-// last_seen can be advanced deterministically by the stale-host worker tests.
 func staleTransitionFixture(t *testing.T, status string) (*DashboardServer, time.Time) {
 	t.Helper()
 	ds := newTestServer(t)
-	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
-	ds.now = func() time.Time { return now }
+	ds.wireServerStateCallbacks()
 	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
 	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: status})
-	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", now.Add(-3*time.Minute)); err != nil {
-		t.Fatalf("BackdateLastSeen: %v", err)
-	}
-	info := ds.state.Get("SRV01")
-	if info == nil {
-		t.Fatal("missing fixture server")
-	}
-	ds.state.cache.Store("SRV01", info)
-	return ds, now
+	return ds, time.Now().UTC().Add(3 * time.Minute)
 }
 
-func readStaleTransitionEvent(t *testing.T, ch <-chan []byte) (SSEEvent, ServerView) {
+func readSSEEvent(t *testing.T, ch <-chan []byte) SSEEvent {
 	t.Helper()
 	select {
 	case payload := <-ch:
@@ -6240,131 +6239,136 @@ func readStaleTransitionEvent(t *testing.T, ch <-chan []byte) (SSEEvent, ServerV
 		if err := json.Unmarshal(payload, &event); err != nil {
 			t.Fatalf("decode SSE event: %v", err)
 		}
-		var view ServerView
-		if err := json.Unmarshal(event.Data, &view); err != nil {
-			t.Fatalf("decode server view: %v", err)
-		}
-		return event, view
-	default:
-		t.Fatal("expected stale-host SSE event")
-		return SSEEvent{}, ServerView{}
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for SSE event")
+		return SSEEvent{}
 	}
 }
 
-func TestStaleHostSweep_EmitsOneOfflineTransition(t *testing.T) {
+func TestStaleHostSweep_PersistsOfflineAndKeepsServerUpdate(t *testing.T) {
 	ds, now := staleTransitionFixture(t, "Healthy")
 	id, ch, _, err := ds.broker.Subscribe()
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 	defer ds.broker.Unsubscribe(id)
+
 	before := ds.state.Get("SRV01")
-	if before == nil || before.LastResult == nil {
-		t.Fatal("missing persisted fixture state")
-	}
 	ds.sweepStaleServers(now)
-	event, view := readStaleTransitionEvent(t, ch)
-	if event.Type != "server_update" || event.Host != "SRV01" {
-		t.Fatalf("event = %#v, want server_update for SRV01", event)
+	offline := readSSEEvent(t, ch)
+	if offline.Type != "host_offline" || offline.Host != "SRV01" {
+		t.Fatalf("offline event = %#v", offline)
 	}
-	if view.Status != "off" {
-		t.Errorf("status = %q, want off", view.Status)
+	var payload HostFreshnessEvent
+	if err := json.Unmarshal(offline.Data, &payload); err != nil {
+		t.Fatalf("decode offline payload: %v", err)
+	}
+	if payload.ReportEpoch != before.LastSeen || payload.LastSeen != before.LastSeen || payload.TransitionTime != now || payload.StaleAfter != 3*time.Minute {
+		t.Fatalf("offline payload = %#v", payload)
+	}
+	if update := readSSEEvent(t, ch); update.Type != "server_update" || update.Host != "SRV01" {
+		t.Fatalf("compatibility update = %#v", update)
 	}
 	after := ds.state.Get("SRV01")
-	if after == nil || after.LastSeen != before.LastSeen || after.LastResult == nil || after.LastResult.Status != before.LastResult.Status {
-		t.Fatal("stale transition mutated persisted server state")
+	if after.LastSeen != before.LastSeen || after.LastResult.Status != before.LastResult.Status {
+		t.Fatal("offline transition mutated the servers row")
 	}
 
 	ds.sweepStaleServers(now.Add(time.Minute))
 	select {
-	case payload := <-ch:
-		t.Fatalf("duplicate stale-host SSE event: %s", payload)
+	case event := <-ch:
+		t.Fatalf("duplicate outage event: %s", event)
 	default:
 	}
 }
 
-func TestStaleHostSweep_RecoveryPermitsAnotherOfflineTransition(t *testing.T) {
-	ds, now := staleTransitionFixture(t, "Healthy")
-	id, ch, _, err := ds.broker.Subscribe()
+func TestStaleHostSweep_RestartDedupesSameEpoch(t *testing.T) {
+	dir := t.TempDir()
+	db, err := telemetry.Open(dir)
+	if err != nil {
+		t.Fatalf("telemetry.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	newDashboard := func() *DashboardServer {
+		state := NewServerState(telemetry.NewServerStore(db))
+		freshness := telemetry.NewFreshnessStore(db)
+		state.SetFreshnessStore(freshness)
+		return &DashboardServer{
+			state:                    state,
+			broker:                   NewBroker(),
+			freshness:                freshness,
+			heartbeatIntervalChanged: make(chan struct{}, 1),
+			forceUpdates:             newForceUpdateState(),
+		}
+	}
+	first := newDashboard()
+	first.setHeartbeatInterval(time.Minute)
+	first.state.Register("SRV01")
+	first.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	now := time.Now().UTC().Add(3 * time.Minute)
+	id, ch, _, err := first.broker.Subscribe()
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer ds.broker.Unsubscribe(id)
+	defer first.broker.Unsubscribe(id)
+	first.sweepStaleServers(now)
+	_ = readSSEEvent(t, ch)
+	_ = readSSEEvent(t, ch)
 
-	ds.sweepStaleServers(now)
-	_, _ = readStaleTransitionEvent(t, ch)
-
-	// A real heartbeat clears the process-local transition state through the
-	// same callback used by both remote reports and ReportLocal.
-	ds.wireServerStateCallbacks()
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
-	_, _ = readStaleTransitionEvent(t, ch)
-
-	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", now.Add(-4*time.Minute)); err != nil {
-		t.Fatalf("BackdateLastSeen stale: %v", err)
-	}
-	info := ds.state.Get("SRV01")
-	ds.state.cache.Store("SRV01", info)
-	ds.sweepStaleServers(now)
-	_, view := readStaleTransitionEvent(t, ch)
-	if view.Status != "off" {
-		t.Errorf("status = %q, want off after recovery and re-offline", view.Status)
-	}
-}
-
-func TestStaleHostSweep_PromotesGraceAndAlertToOffline(t *testing.T) {
-	for _, status := range []string{"Grace", "Alert"} {
-		t.Run(status, func(t *testing.T) {
-			ds, now := staleTransitionFixture(t, status)
-			id, ch, _, err := ds.broker.Subscribe()
-			if err != nil {
-				t.Fatalf("Subscribe: %v", err)
-			}
-			defer ds.broker.Unsubscribe(id)
-
-			ds.sweepStaleServers(now)
-			_, view := readStaleTransitionEvent(t, ch)
-			if view.Status != "off" {
-				t.Errorf("%s stale status = %q, want off", status, view.Status)
-			}
-		})
-	}
-}
-
-func TestStaleHostSweep_DoesNotTransitionHostWithoutLastSeen(t *testing.T) {
-	ds := newTestServer(t)
-	ds.setHeartbeatInterval(time.Minute)
-	ds.state.Register("SRV01")
-	id, ch, _, err := ds.broker.Subscribe()
+	second := newDashboard()
+	second.setHeartbeatInterval(time.Minute)
+	id, ch, _, err = second.broker.Subscribe()
 	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
+		t.Fatalf("Subscribe restart: %v", err)
 	}
-	defer ds.broker.Unsubscribe(id)
-
-	ds.sweepStaleServers(time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC))
+	defer second.broker.Unsubscribe(id)
+	second.sweepStaleServers(now.Add(time.Minute))
 	select {
-	case payload := <-ch:
-		t.Fatalf("unexpected SSE event for host without last_seen: %s", payload)
+	case event := <-ch:
+		t.Fatalf("restart duplicated outage event: %s", event)
 	default:
 	}
 }
 
-func TestStaleHostSweepIntervalFollowsHeartbeatReload(t *testing.T) {
-	ds := newTestServer(t)
-	ds.setHeartbeatInterval(45 * time.Second)
-	if got := ds.staleSweepInterval(); got != 30*time.Second {
-		t.Fatalf("initial stale sweep interval = %v, want 30s", got)
+func TestStaleHostSweep_RecoveryAndReoutage(t *testing.T) {
+	ds, now := staleTransitionFixture(t, "Healthy")
+	id, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
 	}
-	ds.setHeartbeatInterval(10 * time.Second)
-	if got := ds.staleSweepInterval(); got != 10*time.Second {
-		t.Errorf("reloaded stale sweep interval = %v, want 10s", got)
+	defer ds.broker.Unsubscribe(id)
+
+	ds.sweepStaleServers(now)
+	_ = readSSEEvent(t, ch)
+	_ = readSSEEvent(t, ch)
+	time.Sleep(time.Millisecond)
+	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	if event := readSSEEvent(t, ch); event.Type != "host_recovered" {
+		t.Fatalf("recovery event = %#v", event)
+	}
+	if event := readSSEEvent(t, ch); event.Type != "server_update" {
+		t.Fatalf("recovery compatibility event = %#v", event)
+	}
+
+	ds.sweepStaleServers(now.Add(time.Minute))
+	if event := readSSEEvent(t, ch); event.Type != "host_offline" {
+		t.Fatalf("re-outage event = %#v", event)
+	}
+	if event := readSSEEvent(t, ch); event.Type != "server_update" {
+		t.Fatalf("re-outage compatibility event = %#v", event)
 	}
 }
 
-func TestRunStaleHostTransitions_UsesTickSeamAndStops(t *testing.T) {
-	ds, now := staleTransitionFixture(t, "Healthy")
-	ticks := make(chan time.Time, 1)
-	ds.staleSweepTicks = ticks
+func TestRunStaleHostTransitions_IntervalChangeWakesTimer(t *testing.T) {
+	ds, _ := staleTransitionFixture(t, "Healthy")
+	ds.now = func() time.Time { return time.Now().UTC().Add(time.Hour) }
+	ds.setHeartbeatInterval(time.Hour)
+	id, ch, _, err := ds.broker.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer ds.broker.Unsubscribe(id)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -6372,26 +6376,14 @@ func TestRunStaleHostTransitions_UsesTickSeamAndStops(t *testing.T) {
 		close(done)
 	}()
 
-	ticks <- now
-	deadline := time.After(time.Second)
-	for {
-		ds.staleTransitionsMu.Lock()
-		_, transitioned := ds.staleTransitions["SRV01"]
-		ds.staleTransitionsMu.Unlock()
-		if transitioned {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("tick did not trigger stale-host sweep")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	ds.setHeartbeatInterval(time.Millisecond)
+	if event := readSSEEvent(t, ch); event.Type != "host_offline" {
+		t.Fatalf("interval wake event = %#v", event)
 	}
 	cancel()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("stale-host transition worker did not stop")
+		t.Fatal("stale-host worker did not stop")
 	}
 }
