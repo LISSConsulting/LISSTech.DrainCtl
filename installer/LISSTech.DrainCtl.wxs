@@ -1,6 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
   xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
-  xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+  xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
+  xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
     <Package Name="LISSTech DrainCtl v$(var.AppVersion)"
         Manufacturer="LISS Consulting, Corp."
         Version="$(var.ProductVersion)"
@@ -215,7 +216,14 @@
                 Type="ownProcess"
                 Start="auto"
                 ErrorControl="normal"
-                Account="LocalSystem" />
+                Account="LocalSystem">
+                <util:ServiceConfig
+                    FirstFailureActionType="restart"
+                    SecondFailureActionType="restart"
+                    ThirdFailureActionType="none"
+                    RestartServiceDelayInSeconds="5"
+                    ResetPeriodInDays="1" />
+            </ServiceInstall>
             <ServiceControl Id="DrainCtlServiceControl"
                 Name="DrainCtl"
                 Stop="both"
