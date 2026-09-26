@@ -231,20 +231,25 @@
     // ── Adapt response.series → MetricsSample[] ───────────────────────────
     /** @typedef {{ time: number, cpu: number, cpuP95: number, mem: number, sessions: number }} Sample */
     //
-    // Each counter is a parallel-arrays Series (t[], avg[]). Counters are
-    // collected from the same PerfSnapshot but the storage path can drop
-    // individual values (warmup, transient unavailability), so different
-    // counters may return different lengths or skip timestamps. Indexing by
-    // position would mis-pair (cpu_pct[5], cpu_p95_pct[5]) when cpu_p95_pct
-    // dropped a sample earlier — that's how we hit "CPU=27.7% / P95=0%" on
-    // the same point. Build a per-counter ts→value map and join on the
-    // canonical cpu_pct timeline.
-    function asTsMap(/** @type {{t:number[], avg:number[]}|undefined} */ s) {
+    // Each counter is a parallel-arrays Series. Counters are collected from
+    // the same PerfSnapshot but the storage path can drop individual values
+    // (warmup, transient unavailability), so different counters may return
+    // different lengths or skip timestamps. Indexing by position would
+    // mis-pair values when one counter dropped a sample. Build a per-counter
+    // timestamp map and join on the canonical cpu_pct timeline.
+    //
+    // At rolled-up resolutions, cpu_p95_pct.avg is only the average of the
+    // agent's sampling-window P95 values. Use max so short CPU spikes remain
+    // visible; the retained schema cannot reconstruct an exact bucket P95.
+    function asTsMap(
+        /** @type {{t:number[], avg:number[], max?:number[]}|undefined} */ s,
+        /** @type {'avg'|'max'} */ field = 'avg',
+    ) {
         const m = new Map();
         if (!s) return m;
         const t = s.t || [];
-        const a = s.avg || [];
-        for (let i = 0; i < t.length; i++) m.set(t[i], a[i]);
+        const values = s[field] || s.avg || [];
+        for (let i = 0; i < t.length; i++) m.set(t[i], values[i]);
         return m;
     }
     let history = $derived.by(() => {
@@ -252,7 +257,7 @@
         const cpu = series['cpu_pct'];
         if (!cpu || cpu.t.length === 0) return /** @type {Sample[]} */ ([]);
         const cpuMap = asTsMap(cpu);
-        const p95Map = asTsMap(series['cpu_p95_pct']);
+        const p95Map = asTsMap(series['cpu_p95_pct'], 'max');
         const availMap = asTsMap(series['mem_avail_mb']);
         const totalMap = asTsMap(series['mem_total_mb']);
         const sessMap = asTsMap(series['sessions_total']);

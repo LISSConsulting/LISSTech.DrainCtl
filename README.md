@@ -339,7 +339,7 @@ Both accept `debug`, `info`, `warn`, `error`. CLI verbosity is separate (`--log-
 
 For registered agents, dashboard settings are authoritative. The **Alerts & Performance**, **Event Spikes**, **Notifications**, **Servers**, and **System** tabs manage grace/session/performance settings, all operator-safe EventSpike fields, notification targets, removed-server recovery, and automatic-update policy. Changes propagate to connected agents on their next poll and during local `config.json` reload; `evtspike.baseline_path` intentionally remains local-only.
 
-The live **Servers** view keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and issue Force Update. Durable tombstones are listed and restored under **Config → Servers**. A removed agent cannot re-register until restored.
+The live **Servers** view groups recognized hostnames under their conservatively derived RD Session Pool; a hostname that cannot be recognized is shown under **Ungrouped**. It keeps multi-selection while the table refreshes. Operators can set a server's global **Mute/Notify** policy, permanently remove a selected batch, and issue Force Update. Durable tombstones are listed and restored under **Config → Servers**. A removed agent cannot re-register until restored.
 
 ---
 
@@ -625,9 +625,9 @@ Authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener.
 | Endpoint | Returns |
 |---|---|
 | `GET /api/v1/metrics/{host}` | Per-host time-series. `resolution=raw\|1min\|5min\|hourly\|auto`. Auto picks a tier from the requested window. |
-| `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio). |
+| `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host by default. Add repeated `host` filters only on this path (for example, `/api/v1/metrics/_fleet?host=RDSH-01&host=RDSH-02`) to aggregate a registered subset. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio). |
+| `GET /api/evtspike/spikes` | With `host` and no range, returns the compatibility recent-list array. With `host`, `from`, and `to`, returns `{spikes, total, truncated, as_of_id}` for `window_start ∈ [from,to)`: `total` is exact, `spikes` contains at most 500 newest-first rows, and `as_of_id` lets live SSE updates avoid double-counting rows already included in the snapshot. |
 | `GET /api/v1/audit` | Time-range query over drain-mode audit events. `host`, `actor`, `changes_only` filters. Cursor pagination. |
-| `GET /api/v1/maintenance/status` | Last-run timestamp, duration, outcome, `overdue` flag for every background job. |
 
 The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`.
 
@@ -635,10 +635,10 @@ The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now retu
 
 LayerCake + Svelte 5 frontend embedded into the service binary:
 
-- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / Sessions), **Health Indicators** (input delay, pages/sec, TCP retransmits, disk queue), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host).
+- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / Sessions), **Health Indicators** (input delay, pages/sec, TCP retransmits, disk queue), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host). Its optional multi-server filter applies to every chart family; with no selected hosts, every registered host participates.
 - **Windows** — use `5M`, `15M` where the chart has sufficient source resolution, `1H`, `1D`, `3D`, `5D`, or `30D`. SQLite retained telemetry, not browser-local history, supplies the series.
-- **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values. Fleet Health Indicator P50 is the exact median across participating hosts for each bucket.
-- **Server Detail** — Host Load combines the host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes.
+- **Percentiles** — frame quality and FPS are higher-is-better: the displayed `P95` is the service-floor numeric `P5`, while `P50` is the median. Other `P95` metrics are conventional upper-tail values. Fleet Health Indicator P50 is the exact median across participating hosts for each bucket. At coarse resolution, Host Load CPU P95 is the maximum retained agent sampling-window P95 in its bucket, preserving spikes; it is not a percentile recomputed from the bucket's raw samples.
+- **Server Detail** — Host Load combines the host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes. Its header shows the exact number of spikes whose `window_start` is in the visible `[from, to)` range, while the swimlane renders at most 500 newest-first dots; incoming SSE spikes are deduplicated by ID.
 - **Offline detection** — a registered host becomes offline after three consecutive expected heartbeats are missed. The timeout follows `poll_interval` (for example, 3 minutes at a 60-second interval).
 
 ### Force Update

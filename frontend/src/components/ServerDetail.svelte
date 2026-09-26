@@ -84,6 +84,15 @@
 
     let isOff = $derived(server.status === 'off');
 
+    let spikeSummary = $state({ total: null, truncated: false, loading: true, error: '' });
+    $effect.pre(() => {
+        server.host;
+        spikeSummary = { total: null, truncated: false, loading: true, error: '' };
+    });
+    function updateSpikeSummary(summary) {
+        spikeSummary = summary;
+    }
+
     // Event Spikes tile always renders on the expanded row — the detector-
     // status chip in the tile header communicates whether the detector is
     // disabled, training, healthy, or errored, so operators don't lose the
@@ -364,7 +373,9 @@
             </div>
             {#if server.drain_mode && server.drain_mode !== 'ALLOW_ALL_CONNECTIONS'}
                 <div class="d-kv-row">
-                    <span class="d-kv-k">Draining For</span><span class="d-kv-v">{dur(server.state_duration_seconds)}</span>
+                    <span class="d-kv-k">Draining For</span><span class="d-kv-v"
+                        >{dur(server.state_duration_seconds)}</span
+                    >
                 </div>
             {/if}
             {#if server.drain_mode && server.drain_mode !== 'ALLOW_ALL_CONNECTIONS' && gracePeriodSec != null}
@@ -433,8 +444,20 @@
          chip in the tile header stays visible even when the detector is
          disabled. One lane per active channel; own 5M/1H/1D/3D/5D pill. -->
     <div class="d-tile d-tile-spikes">
-        <div class="d-tile-label">Event Spikes</div>
-        <SpikeSwimlane host={server.host} />
+        <div class="d-tile-label d-spikes-label">
+            <span>Event Spikes</span>
+            <span class="d-spikes-summary">
+                <span class="d-spikes-total" aria-label="Event spikes in active window"
+                    >{spikeSummary.loading || spikeSummary.error || spikeSummary.total == null
+                        ? '—'
+                        : spikeSummary.total.toLocaleString()}</span
+                >
+                {#if !spikeSummary.loading && !spikeSummary.error && spikeSummary.truncated}
+                    <span class="d-spikes-truncated">500 shown</span>
+                {/if}
+            </span>
+        </div>
+        <SpikeSwimlane host={server.host} onSummaryChange={updateSpikeSummary} />
     </div>
 </div>
 
@@ -468,6 +491,29 @@
         letter-spacing: 0.6px;
         color: var(--color-accent);
         margin-bottom: 8px;
+    }
+    .d-spikes-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .d-spikes-summary {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        white-space: nowrap;
+    }
+    .d-spikes-total {
+        color: var(--color-fg);
+        font-size: 0.7rem;
+    }
+    .d-spikes-truncated {
+        color: var(--color-subtle);
+        font-size: 0.55rem;
+        font-weight: 400;
+        letter-spacing: 0.03em;
+        text-transform: none;
     }
 
     .d-tile-util {

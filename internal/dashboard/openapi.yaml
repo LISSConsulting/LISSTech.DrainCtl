@@ -476,6 +476,68 @@ components:
           nullable: true
 
 
+    EventSpike:
+      type: object
+      description: A confirmed event-log anomaly.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Monotonically assigned event ID.
+        host:
+          type: string
+        channel:
+          type: string
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        observed:
+          type: integer
+        expected:
+          type: number
+          format: double
+        tail_probability:
+          type: number
+          format: double
+        confirmation_count:
+          type: integer
+        first_seen_at:
+          type: string
+          format: date-time
+      required:
+        [id, host, channel, window_start, window_end, observed, expected,
+        tail_probability, confirmation_count, first_seen_at]
+
+    EventSpikeRangeResponse:
+      type: object
+      description: |
+        Snapshot of confirmed spikes whose `window_start` is in the requested
+        half-open range. Metadata and rows come from the same snapshot.
+      properties:
+        spikes:
+          type: array
+          description: At most 500 matching spikes, ordered newest-first by window start, then ID.
+          items:
+            $ref: "#/components/schemas/EventSpike"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Exact number of matching spikes before the 500-row cap.
+        truncated:
+          type: boolean
+          description: True when the 500-row cap omitted matching spikes.
+        as_of_id:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Maximum ID among every matching spike in this snapshot; 0 when none matched. Use it to ignore later live events already represented by the snapshot.
+      required: [spikes, total, truncated, as_of_id]
+
+
     DetectorStatus:
       type: object
       description: |
@@ -543,8 +605,8 @@ components:
           type: string
         tier:
           type: string
-          enum: [raw, 5min, hourly]
-          description: "Tier the server actually served. May differ from the requested resolution when `auto` was used or the finer tier has been purged (FR-019)."
+          enum: [raw, 1min, 5min, hourly]
+          description: "Tier the server actually served. May differ from the requested resolution when `auto` selected or degraded to a coarser tier."
         from:
           type: string
           format: date-time
@@ -1197,6 +1259,84 @@ paths:
                 $ref: "#/components/schemas/DetectorStatus"
         "404":
           description: Host is not registered.
+
+  /evtspike/spikes:
+    get:
+      tags: [evtspike]
+      summary: List confirmed event spikes
+      description: |
+        Returns confirmed event-log anomalies for one registered host. `host` is
+        required.
+
+        Compatibility mode applies when neither `from` nor `to` is supplied.
+        It returns a bare JSON array of newest-first spikes. `limit` defaults to
+        20; parsed integer values are clamped to 1–50.
+
+        Range mode applies only when both `from` and `to` are supplied. It
+        returns an envelope for spikes with `window_start ∈ [from, to)`, ordered
+        newest-first by window start then ID. `spikes` is capped at 500 rows,
+        while `total` remains exact and `truncated` reports whether rows were
+        omitted. `as_of_id` is the maximum ID across every matching row in the
+        same read snapshot (or 0 when none match), allowing live event updates
+        at or below that watermark to be de-duplicated.
+      operationId: getEvtSpikeSpikes
+      security:
+        - session: []
+      parameters:
+        - name: host
+          in: query
+          required: true
+          description: Registered hostname.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: "Compatibility-mode maximum. Ignored in range mode; defaults to 20 and parsed integer values are clamped to 1–50."
+          schema:
+            type: integer
+        - name: from
+          in: query
+          description: "Inclusive RFC 3339 / RFC 3339Nano lower bound. Requires `to`."
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: "Exclusive RFC 3339 / RFC 3339Nano upper bound. Requires `from` and must be later than it."
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Compatibility-mode array or range-mode envelope, selected by the presence of paired `from` and `to`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/EventSpike"
+                  - $ref: "#/components/schemas/EventSpikeRangeResponse"
+        "400":
+          description: "`from_and_to_both_required`, `invalid_from`, `invalid_to`, or `to_must_be_after_from`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated.
+        "404":
+          description: "`unknown_host` — host is absent or not registered."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "`storage_error` — spike storage query failed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /auth/negotiate:
     post:
@@ -2098,18 +2238,20 @@ paths:
   /metrics/{host}:
     get:
       tags: [metrics]
-      summary: Get per-host time-series metrics
+      summary: Get per-host or fleet time-series metrics
       description: |
         Returns per-counter time-series for a single host at a chosen resolution tier.
+        Use `_fleet` as the path host to aggregate all registered hosts, or a
+        repeatable `host` query parameter to aggregate a registered subset.
 
-        `resolution=auto` picks the coarsest tier yielding ≥ 240 points in the
-        window. During the US1 phase the `5min` tier is not yet materialized,
-        so `auto` and an explicit `5min` request both degrade to `hourly`; the
-        `tier` field in the response always reflects what was actually served
-        (FR-019). When the tier holds zero rows for the host+window, the
-        response is 200 OK with an empty `series` map and `oldest_available`
-        / `newest_available` set to `null` (FR-019a — drives the dashboard's
-        "Collecting data…" state).
+        `resolution=auto` selects `1min` for windows up to one hour, `5min`
+        for windows up to 36 hours, and `hourly` for longer windows. It
+        degrades to the next coarser tier if the selected tier does not cover
+        `from`; the `tier` field always reflects the tier actually served.
+        The `1min` tier is a one-minute aggregation over raw samples. When the
+        tier holds zero rows for the host+window, the response is 200 OK with
+        an empty `series` map and `oldest_available` / `newest_available` set
+        to `null` (FR-019a — drives the dashboard's "Collecting data…" state).
       operationId: getMetrics
       security:
         - session: []
@@ -2120,6 +2262,19 @@ paths:
           description: "URL-encoded hostname. Must exist in `ServerState` or a 404 is returned."
           schema:
             type: string
+        - name: host
+          in: query
+          required: false
+          description: |
+            Repeatable fleet member filter, valid only when the path `host` is
+            `_fleet`. Omit to aggregate all registered hosts. Values are
+            trimmed, matched case-insensitively, and canonicalized to the
+            registered hostname; empty, duplicate, or unregistered values
+            return `400 invalid_host_filter`.
+          schema:
+            type: string
+          style: form
+          explode: true
         - name: from
           in: query
           required: true
@@ -2136,10 +2291,10 @@ paths:
             format: date-time
         - name: resolution
           in: query
-          description: "Tier selection."
+          description: "Tier selection. `auto` is the default; explicit values are `raw`, `1min`, `5min`, and `hourly`."
           schema:
             type: string
-            enum: [raw, 5min, hourly, auto]
+            enum: [raw, 1min, 5min, hourly, auto]
             default: auto
         - name: counters
           in: query
@@ -2154,7 +2309,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MetricsResponse"
         "400":
-          description: "`invalid_range` (unparseable timestamps, `to` ≤ `from`, or window > 90 days) or `invalid_resolution`."
+          description: "`invalid_range` (unparseable timestamps, `to` ≤ `from`, or window > 90 days), `invalid_resolution`, or `invalid_host_filter` (a fleet filter used outside `_fleet`, or an empty, duplicate, or unregistered filter value)."
           content:
             application/json:
               schema:

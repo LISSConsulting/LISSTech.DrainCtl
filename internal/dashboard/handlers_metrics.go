@@ -87,6 +87,10 @@ func (ds *DashboardServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 		ds.handleFleetMetrics(w, r)
 		return
 	}
+	if _, present := r.URL.Query()["host"]; present {
+		writeJSONError(w, "invalid_host_filter", http.StatusBadRequest)
+		return
+	}
 	if !ds.state.IsRegistered(host) {
 		writeJSONError(w, "unknown_host", http.StatusNotFound)
 		return
@@ -264,7 +268,7 @@ func (ds *DashboardServer) resolveFleetMetricsTier(
 
 // handleFleetMetrics serves GET /api/v1/metrics/_fleet per
 // contracts/http-fleet-metrics.md, returning retained history aggregated
-// across all registered hosts.
+// across all registered hosts or an explicitly requested registered subset.
 func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	fromStr := q.Get("from")
@@ -304,15 +308,45 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
+
+	infos := ds.state.All()
+	roster := make(map[string]string, len(infos))
+	for _, info := range infos {
+		canonical := telemetry.CanonicalHostname(info.Hostname)
+		roster[canonical] = canonical
+	}
+
+	requestedHosts, hasHostFilter := q["host"]
+	hosts := make([]string, 0, len(roster))
+	if hasHostFilter {
+		seen := make(map[string]struct{}, len(requestedHosts))
+		for _, requested := range requestedHosts {
+			canonical := telemetry.CanonicalHostname(requested)
+			if canonical == "" {
+				writeJSONError(w, "invalid_host_filter", http.StatusBadRequest)
+				return
+			}
+			if _, duplicate := seen[canonical]; duplicate {
+				writeJSONError(w, "invalid_host_filter", http.StatusBadRequest)
+				return
+			}
+			registered, ok := roster[canonical]
+			if !ok {
+				writeJSONError(w, "invalid_host_filter", http.StatusBadRequest)
+				return
+			}
+			seen[canonical] = struct{}{}
+			hosts = append(hosts, registered)
+		}
+	} else {
+		for _, registered := range roster {
+			hosts = append(hosts, registered)
+		}
+	}
+	slices.Sort(hosts)
 	if ds.ms == nil {
 		writeJSONError(w, "storage_error", http.StatusInternalServerError)
 		return
-	}
-
-	infos := ds.state.All()
-	hosts := make([]string, len(infos))
-	for i, info := range infos {
-		hosts[i] = info.Hostname
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)

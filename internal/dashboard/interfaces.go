@@ -49,5 +49,5 @@ type serverReader interface {
 type eventSpikeReader interface {
 	Insert(ctx context.Context, spike telemetry.EventSpike) (telemetry.EventSpike, bool, error)
 	Recent(ctx context.Context, host string, limit int) ([]telemetry.EventSpike, error)
-	Range(ctx context.Context, host string, from, to time.Time, maxLimit int) ([]telemetry.EventSpike, error)
+	Range(ctx context.Context, host string, from, to time.Time, maxLimit int) (telemetry.EventSpikeRange, error)
 }
