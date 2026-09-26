@@ -36,6 +36,13 @@ func mustMarshal(v any) json.RawMessage {
 // or process restart). The cache hit path skips the per-heartbeat DB read +
 // JSON unmarshal that previously fired for every registered host.
 func (ds *DashboardServer) broadcastServerUpdate(host string) {
+	ds.broadcastServerUpdateAt(host, ds.clock())
+}
+
+// broadcastServerUpdateAt emits a view evaluated at now. The stale-host worker
+// supplies its backend sweep time so the transition event is Offline even when
+// a test clock is in use.
+func (ds *DashboardServer) broadcastServerUpdateAt(host string, now time.Time) {
 	info := ds.state.GetCached(host)
 	if info == nil {
 		info = ds.state.Get(host)
@@ -44,11 +51,14 @@ func (ds *DashboardServer) broadcastServerUpdate(host string) {
 		return
 	}
 	view := ds.serverView(*info)
+	if !info.LastSeen.IsZero() && now.Sub(info.LastSeen) >= ds.staleAfter() {
+		view.Status = "off"
+	}
 	payload, err := json.Marshal(SSEEvent{
 		Type:      "server_update",
 		Host:      host,
 		Data:      mustMarshal(view),
-		Timestamp: time.Now(),
+		Timestamp: now,
 	})
 	if err != nil {
 		slog.Warn("sse: broadcastServerUpdate: marshal failed", "host", host, "error", err)
