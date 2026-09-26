@@ -1,10 +1,10 @@
 # Hourly diagnostics collector for LISSTech DrainCtl. Invoked by Task Scheduler
-# (\LISS Technologies\DrainCtl-Diags). Snapshots heap/goroutine/allocs/threadcreate
-# profiles from the loopback pprof endpoint and tails recent selfmetrics lines
-# from the rotating file log. Output: %ProgramData%\LISS Technologies\LISSTech DrainCtl\diags
+# (\LISS Technologies\DrainCtl-Diags). Always captures service and crash diagnostics;
+# pprof and selfmetrics snapshots remain opt-in through DRAINCTL_PPROF_PORT.
+# Output: %ProgramData%\LISS Technologies\LISSTech DrainCtl\diags
 #
-# Operator gate: pprof endpoint is opt-in via DRAINCTL_PPROF_PORT (machine env
-# var). If the var is unset or the port is unreachable, this script no-ops.
+# Crash dumps are sensitive local diagnostic data. They are inventoried only unless
+# DRAINCTL_INCLUDE_CRASH_DUMPS=1, which gzip-copies the newest dump for operator review.
 
 $ErrorActionPreference = 'Stop'
 
@@ -30,78 +30,242 @@ function GzipFile([string]$src, [string]$dst) {
     } finally { $in.Dispose() }
 }
 
-try {
-    $portRaw = $env:DRAINCTL_PPROF_PORT
-    if ([string]::IsNullOrEmpty($portRaw)) {
-        Log 'DRAINCTL_PPROF_PORT not set; nothing to collect. Set machine env var to enable pprof on drainctld and restart the service.'
-        return
+function Write-TextFile([string]$path, [object[]]$lines) {
+    $lines | Set-Content -Path $path -Encoding UTF8
+}
+
+function Get-ServiceCommandOutput([string[]]$arguments) {
+    try {
+        return (& sc.exe @arguments 2>&1 | Out-String).TrimEnd()
+    } catch {
+        return ('command failed: {0}' -f $_.Exception.Message)
     }
+}
 
-    $port = 0
-    if (-not [int]::TryParse($portRaw, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
-        Log ('DRAINCTL_PPROF_PORT={0} invalid; expected 1-65535.' -f $portRaw)
-        return
-    }
-
-    $stamp     = (Get-Date).ToString('yyyyMMdd-HHmm')
-    $endpoints = 'heap','goroutine','allocs','threadcreate'
-
-    foreach ($p in $endpoints) {
-        $raw = Join-Path $diagsDir ('{0}-{1}.pprof' -f $p, $stamp)
-        $gz  = "$raw.gz"
+function Get-Sha256Hex([string]$path) {
+    $stream = [System.IO.File]::OpenRead($path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:{0}/debug/pprof/{1}' -f $port, $p) `
-                -OutFile $raw -TimeoutSec 10
-        } catch {
-            Log ('fetch {0} failed: {1}' -f $p, $_.Exception.Message)
-            if (Test-Path $raw) { Remove-Item $raw -Force -ErrorAction SilentlyContinue }
+            return [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+        } finally { $sha256.Dispose() }
+    } finally { $stream.Dispose() }
+}
+
+function Collect-ServiceDiagnostics([string]$stamp) {
+    $path = Join-Path $diagsDir ('service-{0}.txt' -f $stamp)
+    $lines = @(
+        '# DrainCtl service state, configuration, and failure actions',
+        '# Captured UTC: ' + ([DateTime]::UtcNow.ToString('o'))
+    )
+    try {
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='DrainCtl'" -ErrorAction Stop
+        $lines += $service | Format-List Name, DisplayName, State, StartMode, StartName, PathName, ExitCode, ServiceSpecificExitCode | Out-String
+    } catch {
+        $lines += 'service query unavailable: ' + $_.Exception.Message
+        Log ('service diagnostics unavailable: {0}' -f $_.Exception.Message)
+    }
+    $lines += '--- sc.exe qc DrainCtl ---'
+    $lines += Get-ServiceCommandOutput @('qc', 'DrainCtl')
+    $lines += '--- sc.exe qfailure DrainCtl ---'
+    $lines += Get-ServiceCommandOutput @('qfailure', 'DrainCtl')
+    Write-TextFile $path $lines
+}
+
+function Collect-WerConfiguration([string]$stamp) {
+    $path = Join-Path $diagsDir ('wer-localdumps-{0}.txt' -f $stamp)
+    $keys = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps',
+        'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\drainctld.exe'
+    )
+    $lines = @(
+        '# Windows Error Reporting LocalDumps configuration for drainctld.exe',
+        '# Captured UTC: ' + ([DateTime]::UtcNow.ToString('o'))
+    )
+    foreach ($key in $keys) {
+        $lines += '--- ' + $key + ' ---'
+        if (-not (Test-Path -LiteralPath $key)) {
+            $lines += 'not configured'
+            Log ('WER registry key not found: {0}' -f $key)
             continue
         }
         try {
-            GzipFile $raw $gz
-            Remove-Item $raw -Force
+            $properties = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+            $values = $properties.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' }
+            if ($values.Count -eq 0) {
+                $lines += '(no values)'
+            } else {
+                foreach ($value in $values) {
+                    $lines += '{0}={1}' -f $value.Name, $value.Value
+                }
+            }
         } catch {
-            Log ('gzip {0} failed: {1}' -f $p, $_.Exception.Message)
+            $lines += 'read failed: ' + $_.Exception.Message
+            Log ('WER registry read failed for {0}: {1}' -f $key, $_.Exception.Message)
         }
     }
+    Write-TextFile $path $lines
+}
 
-    # Selfmetrics excerpt — read the rotating file log(s) and grep for the
-    # selfmetrics emission tag. Only present when log_file_level=debug.
-    $selfPath = Join-Path $diagsDir ('selfmetrics-{0}.log' -f $stamp)
-    $logs = Get-ChildItem -Path $dataDir -Filter 'drainctl*.log' -File -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 2
-
-    $hits = @()
-    foreach ($f in $logs) {
+function Collect-CrashEvents([string]$stamp) {
+    $path = Join-Path $diagsDir ('crash-events-{0}.log' -f $stamp)
+    $start = (Get-Date).AddDays(-7)
+    $lines = @(
+        '# DrainCtl-related SCM and application crash events from the last 7 days',
+        '# Captured UTC: ' + ([DateTime]::UtcNow.ToString('o'))
+    )
+    $queries = @(
+        @{ Name = 'System'; Filter = @{ LogName = 'System'; Id = @(7031, 7034); StartTime = $start }; Match = 'DrainCtl|drainctld' },
+        @{ Name = 'Application'; Filter = @{ LogName = 'Application'; ProviderName = @('Application Error', 'Windows Error Reporting', '.NET Runtime'); StartTime = $start }; Match = 'DrainCtl|drainctld' }
+    )
+    foreach ($query in $queries) {
         try {
-            $hits += Get-Content -Path $f.FullName -ErrorAction Stop |
-                     Where-Object { $_ -match 'msg=selfmetrics' }
+            $events = Get-WinEvent -FilterHashtable $query.Filter -ErrorAction Stop |
+                Where-Object { $_.Message -match $query.Match }
+            if (@($events).Count -eq 0) {
+                $lines += ('[{0}] no matching events' -f $query.Name)
+                continue
+            }
+            foreach ($event in $events) {
+                $lines += ('[{0}] UTC={1:o} ID={2} Provider={3} Level={4}' -f $query.Name, $event.TimeCreated.ToUniversalTime(), $event.Id, $event.ProviderName, $event.LevelDisplayName)
+                $lines += $event.Message.Trim()
+                $lines += ''
+            }
         } catch {
-            Log ('read {0} failed: {1}' -f $f.Name, $_.Exception.Message)
+            $lines += ('[{0}] unavailable: {1}' -f $query.Name, $_.Exception.Message)
+            Log ('event channel {0} unavailable: {1}' -f $query.Name, $_.Exception.Message)
+        }
+    }
+    Write-TextFile $path $lines
+}
+
+function Collect-DumpInventory([string]$stamp) {
+    $path = Join-Path $diagsDir ('dump-inventory-{0}.txt' -f $stamp)
+    $dumpDir = Join-Path $dataDir 'dumps'
+    $lines = @(
+        '# WER dump inventory. Dump content is not copied by default.',
+        '# Captured UTC: ' + ([DateTime]::UtcNow.ToString('o')),
+        '# Columns: name | size_bytes | last_write_utc | sha256'
+    )
+    if (-not (Test-Path -LiteralPath $dumpDir)) {
+        $lines += 'dump folder not found: ' + $dumpDir
+        Log ('dump folder not found: {0}' -f $dumpDir)
+        Write-TextFile $path $lines
+        return $null
+    }
+    try {
+        $dumps = @(Get-ChildItem -LiteralPath $dumpDir -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending)
+        if ($dumps.Count -eq 0) {
+            $lines += '(no dumps found)'
+        }
+        foreach ($dump in $dumps) {
+            try {
+                $hash = Get-Sha256Hex $dump.FullName
+                $lines += ('{0} | {1} | {2:o} | {3}' -f $dump.Name, $dump.Length, $dump.LastWriteTimeUtc, $hash)
+            } catch {
+                $lines += ('{0} | {1} | {2:o} | hash failed: {3}' -f $dump.Name, $dump.Length, $dump.LastWriteTimeUtc, $_.Exception.Message)
+                Log ('dump hash failed for {0}: {1}' -f $dump.Name, $_.Exception.Message)
+            }
+        }
+        Write-TextFile $path $lines
+        return $dumps | Select-Object -First 1
+    } catch {
+        $lines += 'inventory failed: ' + $_.Exception.Message
+        Log ('dump inventory failed: {0}' -f $_.Exception.Message)
+        Write-TextFile $path $lines
+        return $null
+    }
+}
+
+try {
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmm')
+    Collect-ServiceDiagnostics $stamp
+    Collect-WerConfiguration $stamp
+    Collect-CrashEvents $stamp
+    $newestDump = Collect-DumpInventory $stamp
+
+    if ($env:DRAINCTL_INCLUDE_CRASH_DUMPS -eq '1') {
+        if ($null -eq $newestDump) {
+            Log 'crash dump inclusion requested, but no dump is available.'
+        } else {
+            $dumpArchive = Join-Path $diagsDir ('crash-dump-{0}-{1}.gz' -f $stamp, $newestDump.Name)
+            try {
+                GzipFile $newestDump.FullName $dumpArchive
+                Log ('SENSITIVITY WARNING: copied newest crash dump into diagnostics: {0}. It may contain process memory; handle as sensitive local diagnostic data.' -f $dumpArchive)
+            } catch {
+                Log ('crash dump gzip failed for {0}: {1}' -f $newestDump.Name, $_.Exception.Message)
+            }
         }
     }
 
-    if ($hits.Count -eq 0) {
-        @(
-            '# no selfmetrics emissions found in recent drainctl*.log',
-            '# selfmetrics emits at slog.Debug — set log_file_level=debug in config.json to enable.',
-            '# config: %ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json'
-        ) | Set-Content -Path $selfPath -Encoding UTF8
+    $portRaw = $env:DRAINCTL_PPROF_PORT
+    $port = 0
+    if ([string]::IsNullOrEmpty($portRaw)) {
+        Log 'DRAINCTL_PPROF_PORT not set; pprof and selfmetrics collection skipped.'
+    } elseif (-not [int]::TryParse($portRaw, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        Log 'DRAINCTL_PPROF_PORT is invalid; pprof and selfmetrics collection skipped.'
     } else {
-        $hits | Select-Object -Last 120 | Set-Content -Path $selfPath -Encoding UTF8
+        $endpoints = 'heap','goroutine','allocs','threadcreate'
+        foreach ($p in $endpoints) {
+            $raw = Join-Path $diagsDir ('{0}-{1}.pprof' -f $p, $stamp)
+            $gz  = "$raw.gz"
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:{0}/debug/pprof/{1}' -f $port, $p) `
+                    -OutFile $raw -TimeoutSec 10
+            } catch {
+                Log ('fetch {0} failed: {1}' -f $p, $_.Exception.Message)
+                if (Test-Path $raw) { Remove-Item $raw -Force -ErrorAction SilentlyContinue }
+                continue
+            }
+            try {
+                GzipFile $raw $gz
+                Remove-Item $raw -Force
+            } catch {
+                Log ('gzip {0} failed: {1}' -f $p, $_.Exception.Message)
+            }
+        }
+
+        # Selfmetrics excerpt — read the rotating file log(s) and grep for the
+        # selfmetrics emission tag. Only present when log_file_level=debug.
+        $selfPath = Join-Path $diagsDir ('selfmetrics-{0}.log' -f $stamp)
+        $logs = Get-ChildItem -Path $dataDir -Filter 'drainctl*.log' -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 2
+        $hits = @()
+        foreach ($f in $logs) {
+            try {
+                $hits += Get-Content -Path $f.FullName -ErrorAction Stop |
+                         Where-Object { $_ -match 'msg=selfmetrics' }
+            } catch {
+                Log ('read {0} failed: {1}' -f $f.Name, $_.Exception.Message)
+            }
+        }
+        if ($hits.Count -eq 0) {
+            @(
+                '# no selfmetrics emissions found in recent drainctl*.log',
+                '# selfmetrics emits at slog.Debug — set log_file_level=debug in config.json to enable.',
+                '# config: %ProgramData%\LISS Technologies\LISSTech DrainCtl\config.json'
+            ) | Set-Content -Path $selfPath -Encoding UTF8
+        } else {
+            $hits | Select-Object -Last 120 | Set-Content -Path $selfPath -Encoding UTF8
+        }
     }
 
-    # Retention: drop pprof + selfmetrics excerpts older than 7 days.
+    # Retention: drop diagnostics collected by this task after 7 days.
     $cutoff = (Get-Date).AddDays(-7)
     Get-ChildItem -Path $diagsDir -File -ErrorAction SilentlyContinue |
         Where-Object {
-            ($_.Name -like '*.pprof.gz' -or $_.Name -like 'selfmetrics-*.log') -and
-            $_.LastWriteTime -lt $cutoff
+            $_.Name -like '*.pprof.gz' -or
+            $_.Name -like 'selfmetrics-*.log' -or
+            $_.Name -like 'service-*.txt' -or
+            $_.Name -like 'wer-localdumps-*.txt' -or
+            $_.Name -like 'crash-events-*.log' -or
+            $_.Name -like 'dump-inventory-*.txt' -or
+            $_.Name -like 'crash-dump-*.gz'
         } |
+        Where-Object { $_.LastWriteTime -lt $cutoff } |
         Remove-Item -Force -ErrorAction SilentlyContinue
-}
-catch {
+} catch {
     Log ('fatal: {0}' -f $_.Exception.Message)
     throw
 }
