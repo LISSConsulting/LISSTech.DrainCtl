@@ -43,14 +43,40 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 			add("session_mem_p50_bytes", p.SessionMemP50)
 		}
 		if p.RFXAvailable {
-			add("rfx_fps_out", p.RFXFPSOut)
-			add("rfx_fps_out_p50", p.RFXFPSOutP50)
+			// Zero FPS/quality means no active RemoteFX stream, not a poor
+			// percentile. Omit it so higher-is-better charts render a gap.
+			if p.RFXFPSOut > 0 {
+				add("rfx_fps_out", p.RFXFPSOut)
+			}
+			if p.RFXFPSOutP50 > 0 {
+				add("rfx_fps_out_p50", p.RFXFPSOutP50)
+			}
 			add("rfx_skip_server_sec", p.RFXSkipServer)
 			add("rfx_skip_net_sec", p.RFXSkipNet)
 			add("rfx_encode_ms", p.RFXEncodeMS)
-			add("rfx_quality_pct", p.RFXQuality)
+			if p.RFXEncodeMSP50 != 0 {
+				add("rfx_encode_ms_p50", p.RFXEncodeMSP50)
+			}
+			if p.RFXQuality > 0 {
+				add("rfx_quality_pct", p.RFXQuality)
+			}
+			if p.RFXQualityP50 > 0 {
+				add("rfx_quality_pct_p50", p.RFXQualityP50)
+			}
 			add("rfx_rtt_ms", p.RFXRTT)
+			if p.RFXRTTP50 != 0 {
+				add("rfx_rtt_ms_p50", p.RFXRTTP50)
+			}
 			add("rfx_loss_pct", p.RFXLoss)
+			if p.RFXLossP50 != 0 {
+				add("rfx_loss_pct_p50", p.RFXLossP50)
+			}
+			if p.RFXSkipServerP50 != 0 {
+				add("rfx_skip_server_sec_p50", p.RFXSkipServerP50)
+			}
+			if p.RFXSkipNetP50 != 0 {
+				add("rfx_skip_net_sec_p50", p.RFXSkipNetP50)
+			}
 		}
 	}
 
