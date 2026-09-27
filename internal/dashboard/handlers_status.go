@@ -48,10 +48,9 @@ func (ds *DashboardServer) handleUI(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(html))
 }
 
-// handleHealth serves GET /api/v1/health without authentication.
-// Returns version, registered server count, and per-status counts.
-// Useful for load-balancer health checks and external monitoring.
-//
+// handleHealth serves authenticated GET /api/v1/health.
+// Returns version, registered server count, and per-status counts for the
+// dashboard and authorized monitoring clients.
 // A server is counted as offline after three expected reports have been
 // missed, regardless of its last-reported status.
 func (ds *DashboardServer) handleHealth(w http.ResponseWriter, _ *http.Request) {

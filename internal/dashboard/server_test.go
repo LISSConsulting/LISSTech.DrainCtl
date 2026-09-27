@@ -88,6 +88,71 @@ func TestHandleHealth_EmptyState(t *testing.T) {
 	}
 }
 
+func TestHealthRouteRequiresSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ds := newTestServer(t)
+	ds.sessionStore = NewSessionStore(ctx)
+	ds.state.Register("SRV01")
+
+	mux := http.NewServeMux()
+	registerRoutes(ctx, ds, mux)
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		if strings.Contains(w.Body.String(), `"servers"`) || strings.Contains(w.Body.String(), `"healthy"`) {
+			t.Fatalf("unauthenticated response disclosed fleet counts: %s", w.Body.String())
+		}
+		if got := strings.TrimSpace(w.Body.String()); got != `{"error":"unauthorized"}` {
+			t.Fatalf("body = %q, want generic unauthorized error", got)
+		}
+	})
+
+	t.Run("invalid session", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		r.AddCookie(&http.Cookie{Name: "drainctl_session", Value: strings.Repeat("a", 64)})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		if got := strings.TrimSpace(w.Body.String()); got != `{"error":"unauthorized"}` {
+			t.Fatalf("body = %q, want generic unauthorized error", got)
+		}
+	})
+
+	t.Run("authenticated", func(t *testing.T) {
+		token, err := ds.sessionStore.Create(&AuthInfo{Username: `DOMAIN\operator`})
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		r.AddCookie(&http.Cookie{Name: "drainctl_session", Value: token})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp struct {
+			Servers int `json:"servers"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Servers != 1 {
+			t.Fatalf("servers = %d, want 1", resp.Servers)
+		}
+	})
+}
+
 func TestHandleHealth_UnreportedServersAreUnknown(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")

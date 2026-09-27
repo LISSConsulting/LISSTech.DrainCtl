@@ -1229,9 +1229,11 @@ paths:
   /health:
     get:
       tags: [health]
-      summary: Health check
-      description: Public endpoint for load balancer probes. Returns aggregate server counts.
+      summary: Authenticated dashboard health
+      description: Returns dashboard version and aggregate fleet status counts to authenticated dashboard sessions.
       operationId: getHealth
+      security:
+        - session: []
       responses:
         "200":
           description: Dashboard is healthy.
@@ -1257,6 +1259,12 @@ paths:
                     description: "Three consecutive expected reports missed, based on the configured poll interval."
                   unknown:
                     type: integer
+        "401":
+          description: Missing, invalid, or expired dashboard session; response is `{"error":"unauthorized"}`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /evtspike/status:
     get:
