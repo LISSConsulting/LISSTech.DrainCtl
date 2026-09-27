@@ -196,6 +196,16 @@ func TestAggregate_PreservesSessionPercentiles(t *testing.T) {
 	}
 }
 
+func TestAggregatePreservesLogicalProcessorCount(t *testing.T) {
+	got := aggregate([]dc.PerfSnapshot{
+		{LogicalProcessors: 16},
+		{LogicalProcessors: 16},
+	})
+	if got.LogicalProcessors != 16 {
+		t.Fatalf("LogicalProcessors = %d, want 16", got.LogicalProcessors)
+	}
+}
+
 func TestAggregate_PreservesDirectionalRemoteFXPercentiles(t *testing.T) {
 	got := aggregate([]dc.PerfSnapshot{
 		{

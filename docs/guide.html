@@ -1732,11 +1732,13 @@ https://dashboard-server:49470</code></pre>
             </p>
 
             <p>
-                Clicking a server opens the <strong>Server Detail</strong> panel. The Host Load tile on that panel is a
-                <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions for that host. At
-                coarse retained resolutions, a Host Load CPU P95 point is the maximum retained agent sampling-window
-                P95 in its bucket, preserving spikes; it is not a percentile recomputed from all raw samples in that
-                bucket. An <strong>Event Spikes</strong> swimlane below it plots confirmed event-log spikes per channel
+                Clicking a server opens the <strong>Server Detail</strong> panel. Resource Utilization reports the
+                logical processor count available to the DrainCtl service alongside host CPU and per-session P95. The
+                Host Load tile is a <strong>single dual-axis chart</strong> showing CPU, CPU P95, Memory, and Sessions
+                for that host. At coarse retained resolutions, a Host Load CPU P95 point is the maximum retained agent
+                sampling-window P95 in its bucket, preserving spikes; it is not a percentile recomputed from all raw
+                samples in that bucket. An <strong>Event Spikes</strong> swimlane below it plots confirmed event-log
+                spikes per channel
                 and reports <code>HEALTHY</code> / <code>TRAINING</code> / <code>DISABLED</code> /
                 <code>ERROR</code>. See <a href="#evtspike">Event-Log Anomaly Detection</a> for the detector states.
             </p>
@@ -2052,9 +2054,9 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             </p>
             <pre><code>"performance": { "enabled": true }</code></pre>
             <p>
-                With defaults, DrainCtl collects CPU, available memory, pages/sec, disk queue length, TCP retransmits,
-                and per-session input delay on the configured sample interval. Metrics appear in the dashboard, audit trail, webhook
-                payloads, and CLI JSON output.
+                With defaults, DrainCtl reports logical processor capacity and collects CPU, available memory,
+                pages/sec, disk queue length, TCP retransmits, and per-session input delay on the configured sample
+                interval. Metrics appear in the dashboard, audit trail, webhook payloads, and CLI JSON output.
             </p>
 
             <h3>Thresholds &amp; Triggers</h3>

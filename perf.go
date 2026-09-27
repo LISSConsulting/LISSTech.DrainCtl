@@ -25,13 +25,14 @@ const (
 // PerfSnapshot holds one point-in-time performance sample.
 type PerfSnapshot struct {
 	// Host-level
-	CPUPct     float64 `json:"cpu_pct"`     // average across samples
-	CPUP95     float64 `json:"cpu_p95_pct"` // 95th percentile across samples
-	MemAvailMB float64 `json:"mem_avail_mb"`
-	MemTotalMB float64 `json:"mem_total_mb"`
-	PagesSec   float64 `json:"pages_sec"`
-	DiskQueue  float64 `json:"disk_queue"`
-	TCPRetrans float64 `json:"tcp_retrans_sec"`
+	CPUPct            float64 `json:"cpu_pct"`     // average across samples
+	CPUP95            float64 `json:"cpu_p95_pct"` // 95th percentile across samples
+	LogicalProcessors int     `json:"logical_processors,omitempty"`
+	MemAvailMB        float64 `json:"mem_avail_mb"`
+	MemTotalMB        float64 `json:"mem_total_mb"`
+	PagesSec          float64 `json:"pages_sec"`
+	DiskQueue         float64 `json:"disk_queue"`
+	TCPRetrans        float64 `json:"tcp_retrans_sec"`
 
 	// Per-session aggregates (User Input Delay)
 	InputDelayP50 float64 `json:"input_delay_p50_ms"`
@@ -117,6 +118,9 @@ func SanitizePerfSnapshot(p PerfSnapshot) PerfSnapshot {
 		if !sanitize(field, value) {
 			p.P50Present &^= presence
 		}
+	}
+	if p.LogicalProcessors < 0 || p.LogicalProcessors > 4096 {
+		p.LogicalProcessors = 0
 	}
 	sanitize("cpu_pct", &p.CPUPct)
 	sanitize("cpu_p95_pct", &p.CPUP95)

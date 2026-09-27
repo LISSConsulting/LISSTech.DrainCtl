@@ -79,9 +79,10 @@ type Collector struct {
 	rfxRTTH         syscall.Handle
 	rfxLossH        syscall.Handle
 
-	memTotalMB      float64
-	primed          bool
-	skipNextCollect bool
+	memTotalMB        float64
+	logicalProcessors int
+	primed            bool
+	skipNextCollect   bool
 
 	sampleInterval time.Duration     // how often the sampler collects (default 60s)
 	accum          []dc.PerfSnapshot // samples accumulated between Collect() calls
@@ -127,6 +128,7 @@ func Open(cfg dc.PerformanceConfig) (*Collector, error) {
 		collectPerSession: cfg.CollectPerSession,
 		collectRemoteFX:   cfg.CollectRemoteFX,
 		memTotalMB:        totalPhysicalMemoryMB(),
+		logicalProcessors: runtime.NumCPU(),
 		sampleInterval:    sampleInterval,
 		loggedErrors:      make(map[string]bool),
 		reqCh:             startWorker(),
@@ -321,7 +323,7 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 		}
 	}
 
-	snap := &dc.PerfSnapshot{MemTotalMB: c.memTotalMB}
+	snap := &dc.PerfSnapshot{MemTotalMB: c.memTotalMB, LogicalProcessors: c.logicalProcessors}
 
 	// Host-level (V1).
 	if v, ok := c.scalar(c.cpuH, "cpu"); ok {
@@ -514,8 +516,10 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 	agg.DiskQueue = RoundTo(agg.DiskQueue/n, 2)
 	agg.TCPRetrans = RoundTo(agg.TCPRetrans/n, 1)
 
-	// MemTotalMB is constant — take from last sample.
-	agg.MemTotalMB = samples[len(samples)-1].MemTotalMB
+	// Host capacity is constant — take it from the last sample.
+	last := samples[len(samples)-1]
+	agg.MemTotalMB = last.MemTotalMB
+	agg.LogicalProcessors = last.LogicalProcessors
 
 	return agg
 }

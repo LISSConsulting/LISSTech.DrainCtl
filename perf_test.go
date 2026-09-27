@@ -9,18 +9,19 @@ import (
 
 func TestPerfSnapshot_JSON_RoundTrip(t *testing.T) {
 	snap := &PerfSnapshot{
-		CPUPct:        45.2,
-		MemAvailMB:    8192,
-		MemTotalMB:    16384,
-		PagesSec:      12.5,
-		DiskQueue:     0.3,
-		TCPRetrans:    1.0,
-		InputDelayP50: 10,
-		InputDelayP95: 22,
-		InputDelayMax: 48,
-		RFXAvailable:  true,
-		RFXFPSOut:     30,
-		RFXRTT:        85.5,
+		CPUPct:            45.2,
+		LogicalProcessors: 16,
+		MemAvailMB:        8192,
+		MemTotalMB:        16384,
+		PagesSec:          12.5,
+		DiskQueue:         0.3,
+		TCPRetrans:        1.0,
+		InputDelayP50:     10,
+		InputDelayP95:     22,
+		InputDelayMax:     48,
+		RFXAvailable:      true,
+		RFXFPSOut:         30,
+		RFXRTT:            85.5,
 	}
 
 	data, err := json.Marshal(snap)
@@ -35,6 +36,9 @@ func TestPerfSnapshot_JSON_RoundTrip(t *testing.T) {
 
 	if got.CPUPct != snap.CPUPct {
 		t.Errorf("CPUPct = %v, want %v", got.CPUPct, snap.CPUPct)
+	}
+	if got.LogicalProcessors != snap.LogicalProcessors {
+		t.Errorf("LogicalProcessors = %v, want %v", got.LogicalProcessors, snap.LogicalProcessors)
 	}
 	if got.InputDelayP95 != snap.InputDelayP95 {
 		t.Errorf("InputDelayP95 = %v, want %v", got.InputDelayP95, snap.InputDelayP95)
@@ -61,7 +65,7 @@ func TestPerfSnapshot_JSON_OmitsEmpty(t *testing.T) {
 	}
 
 	// omitempty fields should not be present when zero
-	for _, key := range []string{"rfx_fps_out", "rfx_rtt_ms", "session_cpu_p95_pct"} {
+	for _, key := range []string{"logical_processors", "rfx_fps_out", "rfx_rtt_ms", "session_cpu_p95_pct"} {
 		if _, ok := m[key]; ok {
 			t.Errorf("expected %q to be omitted when zero, but it was present", key)
 		}
@@ -72,6 +76,26 @@ func TestPerfSnapshot_JSON_OmitsEmpty(t *testing.T) {
 		if _, ok := m[key]; !ok {
 			t.Errorf("expected %q to be present, but it was missing", key)
 		}
+	}
+}
+
+func TestSanitizePerfSnapshotLogicalProcessors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		in   int
+		want int
+	}{
+		{name: "unknown", in: 0, want: 0},
+		{name: "valid", in: 256, want: 256},
+		{name: "negative", in: -1, want: 0},
+		{name: "unreasonable", in: 4097, want: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := SanitizePerfSnapshot(PerfSnapshot{LogicalProcessors: test.in})
+			if got.LogicalProcessors != test.want {
+				t.Fatalf("LogicalProcessors = %d, want %d", got.LogicalProcessors, test.want)
+			}
+		})
 	}
 }
 
