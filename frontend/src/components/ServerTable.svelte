@@ -521,24 +521,26 @@
     }
 
     /**
-     * Return recent confirmed-spike intensity in chronological order. Intensity
-     * is observed/expected, so channels with different event volumes remain
-     * comparable. A single spike gets a zero baseline so it still renders.
+     * Normalize one confirmed spike to observed/expected intensity.
+     * @param {import('../lib/types.js').RecentSpike|undefined} spike
+     * @returns {number|null}
+     */
+    function spikeIntensity(spike) {
+        if (!spike) return null;
+        const observed = Number(spike.observed);
+        const expected = Number(spike.expected);
+        if (!Number.isFinite(observed)) return null;
+        return Number.isFinite(expected) && expected > 0 ? observed / expected : observed;
+    }
+
+    /**
+     * Return recent confirmed-spike intensity in chronological order. A single
+     * spike gets a zero baseline so it still renders.
      * @param {import('../lib/types.js').RecentSpike[]|undefined} spikes
      * @returns {number[]}
      */
     function spikeSparkData(spikes) {
-        const values = (spikes ?? [])
-            .slice()
-            .reverse()
-            .map((spike) => {
-                const observed = Number(spike.observed);
-                const expected = Number(spike.expected);
-                return Number.isFinite(observed) && Number.isFinite(expected) && expected > 0
-                    ? observed / expected
-                    : observed;
-            })
-            .filter(Number.isFinite);
+        const values = (spikes ?? []).slice().reverse().map(spikeIntensity).filter(Number.isFinite);
         return values.length === 1 ? [0, values[0]] : values;
     }
 
@@ -807,6 +809,7 @@
                             {@const srvHistory = appState.serverMetrics.get(srv.host)}
                             {@const spikeHistory = appState.recentSpikes.get(srv.host)}
                             {@const spikeData = spikeSparkData(spikeHistory)}
+                            {@const latestSpikeIntensity = spikeIntensity(spikeHistory?.[0])}
                             <tr
                                 class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
                                     srv.host,
@@ -841,7 +844,7 @@
                                     />
                                 </td>
                                 <td><span class="dot {srv.status}"></span></td>
-                                <td class="mono fw7">{srv.host.split('.')[0]}</td>
+                                <td class="mono fw7 host-cell">{srv.host.split('.')[0]}</td>
                                 <td>
                                     <span class="pill {srv.status}">{statusLabel(srv.status)}</span>
                                     {#if srv.status === 'grace'}
@@ -887,13 +890,11 @@
                                 </td>
                                 <td
                                     class="mono spark-cell"
-                                    title="{spikeHistory?.length ?? 0} recent confirmed EventSpike{spikeHistory?.length ===
-                                    1
-                                        ? ''
-                                        : 's'}; sparkline shows observed ÷ expected"
+                                    title="Latest confirmed EventSpike intensity (observed ÷ expected); plotting {spikeHistory?.length ??
+                                    0} most recent spike{spikeHistory?.length === 1 ? '' : 's'}"
                                 >
                                     <CellSparkline data={spikeData} color="var(--color-red)" />
-                                    {spikeHistory?.length ?? 0}
+                                    {latestSpikeIntensity == null ? '—' : latestSpikeIntensity.toFixed(1) + '×'}
                                 </td>
                                 <td class="mono muted">{rel(srv.last_seen, now)}</td>
                                 <td onclick={(e) => e.stopPropagation()}>
@@ -985,9 +986,12 @@
 <style>
     .grid {
         margin-bottom: 24px;
+        width: 100%;
+        min-width: 0;
     }
     .grid > .card {
-        overflow: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
     }
     .filter-bar {
         display: flex;
@@ -1106,6 +1110,7 @@
     }
     table.srv-tbl {
         width: 100%;
+        min-width: 1320px;
         border-collapse: separate;
         border-spacing: 0;
         font-size: 13px;
@@ -1144,6 +1149,10 @@
         border-bottom: 1px solid var(--color-border);
         vertical-align: middle;
         color: var(--color-fg);
+    }
+    .host-cell {
+        min-width: 150px;
+        white-space: nowrap;
     }
     th.sortable {
         cursor: pointer;
