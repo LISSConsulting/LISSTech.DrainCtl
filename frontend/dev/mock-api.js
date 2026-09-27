@@ -802,6 +802,7 @@ function genPerf(status) {
     return {
         cpu_pct: Math.round(cpu * 10) / 10,
         cpu_p95_pct: Math.round(Math.min(100, cpu * rand(1.05, 1.3)) * 10) / 10,
+        logical_processors: 16,
         mem_avail_mb: memAvailMb,
         mem_total_mb: memTotalMb,
         pages_sec: Math.round(rand(...base.pages) * 10) / 10,

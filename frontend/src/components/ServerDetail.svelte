@@ -193,6 +193,17 @@
                     </div>
                     <div class="d-leg-row">
                         <span class="d-leg-k has-tip"
+                            >Logical CPUs<span class="tip"
+                                >Logical processor count available to the DrainCtl service.</span
+                            ></span
+                        ><span class="d-leg-v"
+                            >{perf.logical_processors != null && perf.logical_processors > 0
+                                ? perf.logical_processors
+                                : '—'}</span
+                        >
+                    </div>
+                    <div class="d-leg-row">
+                        <span class="d-leg-k has-tip"
                             >P95<span class="tip"
                                 >95th percentile across all sessions — 95% of sessions use less than this value.</span
                             ></span

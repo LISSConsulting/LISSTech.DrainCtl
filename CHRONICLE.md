@@ -6,6 +6,7 @@
 - Higher-is-better RemoteFX charts keep normal upward geometry and bottom-origin area fills. Their service-floor P95 remains filled and P50 is dotted. Conventional charts nest P50 only while every comparable point stays inside the primary envelope; mixed-version or missing-data crossings dynamically switch P50 to a dotted line so Encode Time, TCP RTT, or any other crossed series cannot conceal P95.
 - RemoteFX P50 is rendered only where retained source reports supplied it. Historical high-is-better zeroes are treated as missing availability metadata; older buckets cannot be backfilled and remain P95-only.
 - The navbar, Overview, Servers, and Events share one liquid full-width gutter, with responsive 48–80px margins around 1600px-and-larger desktop windows. Server search matches hostname or authoritative RD Session Collection. Sessions, CPU, memory, and input-delay sparklines add up/down/flat arrows from five-sample endpoint averages; EventSpike remains in the expanded per-host swimlane.
+- Performance snapshots now carry the runtime-visible logical processor count once per report. The collector caches `runtime.NumCPU()` at startup, aggregation preserves it as constant host capacity, remote ingestion rejects negative or implausible values, and Server Detail shows it under Resource Utilization → CPU without adding a PDH query.
 
 ## Runtime resilience — 2026-09-26
 

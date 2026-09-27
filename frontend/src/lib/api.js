@@ -18,6 +18,7 @@ const BASE = '/api/v1';
  * @typedef {Object} PerfMetrics
  * @property {number}  cpu_pct                  - Host CPU % (0–100), average across samples
  * @property {number}  cpu_p95_pct              - Host CPU P95 % across samples
+ * @property {number}  [logical_processors]     - Logical processor count available to the service
  * @property {number}  mem_avail_mb             - Available memory in MB
  * @property {number}  mem_total_mb             - Total physical memory in MB
  * @property {number}  pages_sec                - Memory pages/sec

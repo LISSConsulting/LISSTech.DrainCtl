@@ -282,6 +282,9 @@ components:
           type: number
           format: double
           description: "95th percentile CPU utilization across samples."
+        logical_processors:
+          type: integer
+          description: "Logical processor count available to the DrainCtl service."
         mem_avail_mb:
           type: number
           format: double
