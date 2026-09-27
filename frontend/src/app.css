@@ -27,12 +27,22 @@
     --spacing-bw: 2.5px;
     --spacing-so: 4px;
 
+    /* Shared horizontal alignment for navbar and every primary dashboard page. */
+    --layout-gutter: 24px;
+
     /* ── Animation tokens ── */
     --anim-in-duration: 0.12s;
     --anim-out-duration: 0.08s;
     --anim-timing: linear;
     --anim-fly-in: 14px;
     --anim-fly-out: -8px;
+}
+
+/* A 1600px outer browser window yields roughly a 1568px content viewport. */
+@media (min-width: 1500px) {
+    :root {
+        --layout-gutter: clamp(48px, 4vw, 80px);
+    }
 }
 
 /* ─── Dark theme (system preference) ─────────────────────────────────────── */

@@ -3,9 +3,9 @@
 ## Dashboard chart interaction polish — 2026-09-26
 
 - Overview and per-host timeline panning now follows direct manipulation: dragging right moves plotted data right and reveals older history; dragging left returns toward live.
-- Higher-is-better RemoteFX charts keep normal upward geometry and bottom-origin area fills. Threshold polarity remains inverted—low FPS/quality is bad—without visually turning the chart upside down. On those inverted charts, P95 is the only filled area and P50 is a dotted line, avoiding the higher median concealing the lower service floor. Conventional lower-is-better charts retain the original nested P50 fill inside the P95 envelope.
+- Higher-is-better RemoteFX charts keep normal upward geometry and bottom-origin area fills. Their service-floor P95 remains filled and P50 is dotted. Conventional charts nest P50 only while every comparable point stays inside the primary envelope; mixed-version or missing-data crossings dynamically switch P50 to a dotted line so Encode Time, TCP RTT, or any other crossed series cannot conceal P95.
 - RemoteFX P50 is rendered only where retained source reports supplied it. Historical high-is-better zeroes are treated as missing availability metadata; older buckets cannot be backfilled and remain P95-only.
-- Overview, Servers, and Events use a liquid full-width shell, with responsive 48–80px side margins at desktop widths of 1600px and above. The Servers table keeps hostnames on one line and scrolls horizontally when necessary. Sessions, CPU, memory, and input delay retain historical sparklines; EventSpike remains in the expanded per-host swimlane and does not consume a summary-table column.
+- The navbar, Overview, Servers, and Events share one liquid full-width gutter, with responsive 48–80px margins around 1600px-and-larger desktop windows. Server search matches hostname or authoritative RD Session Collection. Sessions, CPU, memory, and input-delay sparklines add up/down/flat arrows from five-sample endpoint averages; EventSpike remains in the expanded per-host swimlane.
 
 ## Runtime resilience — 2026-09-26
 

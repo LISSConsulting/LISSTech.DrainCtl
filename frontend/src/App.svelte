@@ -588,15 +588,8 @@
     .main {
         flex: 1;
         margin: 0 auto;
-        padding: 28px 24px 48px;
+        padding: 28px var(--layout-gutter) 48px;
         width: 100%;
-    }
-
-    /* A 1600px outer browser window yields roughly a 1568px content viewport. */
-    @media (min-width: 1500px) {
-        .main {
-            padding-inline: clamp(48px, 4vw, 80px);
-        }
     }
 
     /* ── Auth loading screen ───────────────────────────────────── */

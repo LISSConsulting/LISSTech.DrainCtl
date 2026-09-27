@@ -121,7 +121,7 @@
             fmt: (v) => `${Math.round(v)}/s`,
             icon: FileText,
             helpText:
-                'Pages read from or written to disk each second, including pagefile, memory-mapped file, and prefetch activity. The outer area is the fleet average; the nested fill is the exact median host. Correlate sustained rises with available memory.',
+                'Pages read from or written to disk each second, including pagefile, memory-mapped file, and prefetch activity. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Correlate sustained rises with available memory.',
         },
         {
             key: 'tcpRetrans',
@@ -135,7 +135,7 @@
             fmt: (v) => `${v.toFixed(1)}/s`,
             icon: Network,
             helpText:
-                'TCP segments retransmitted each second. The outer area is the fleet average; the nested fill is the exact median host. A non-zero baseline can be normal, but sudden or sustained increases indicate congestion or link problems.',
+                'TCP segments retransmitted each second. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Sudden or sustained increases indicate congestion or link problems.',
         },
         {
             key: 'diskQueue',
@@ -149,7 +149,7 @@
             fmt: (v) => v.toFixed(2),
             icon: HardDrive,
             helpText:
-                'I/O requests waiting for disk. The outer area is the fleet average; the nested fill is the exact median host. Correlate spikes with storage latency, memory pressure, CPU scheduling, and workload.',
+                'I/O requests waiting for disk. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Correlate spikes with storage latency, memory pressure, CPU scheduling, and workload.',
         },
     ];
 
@@ -673,7 +673,7 @@
             icon: Cpu,
             timeKey: 'ts',
             helpText:
-                'Per-session CPU across the fleet. P95 is the translucent outer envelope; P50 is the solid nested fill. A widening gap means a small number of sessions are consuming most of the CPU.',
+                'Per-session CPU across the fleet. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. A widening gap means a small number of sessions are consuming most of the CPU.',
         },
         {
             key: 'sessionMemP95',
@@ -689,7 +689,7 @@
             timeKey: 'ts',
             transform: /** @param {number} v */ (v) => v / (1024 * 1024),
             helpText:
-                'Per-session working-set memory across the fleet. P95 is the translucent outer envelope; P50 is the solid nested fill. A rising median suggests broad application growth rather than isolated heavy users.',
+                'Per-session working-set memory across the fleet. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. A rising median suggests broad application growth rather than isolated heavy users.',
         },
     ];
 
@@ -728,7 +728,7 @@
             icon: Timer,
             timeKey: 'ts',
             helpText:
-                'Time spent encoding each frame. P95 is the translucent outer envelope; P50 is the solid nested fill. Above 33ms can cap output below 30fps. Higher values are worse.',
+                'Time spent encoding each frame. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Above 33ms can cap output below 30fps. Higher values are worse.',
         },
         {
             key: 'quality',
@@ -755,7 +755,7 @@
             icon: Activity,
             timeKey: 'ts',
             helpText:
-                'Server-resource plus network frames skipped per second; client-decoding skips are not included. P95 is the translucent outer envelope and P50 is the solid nested fill. Higher values are worse.',
+                'Server-resource plus network frames skipped per second; client-decoding skips are not included. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Higher values are worse.',
         },
         {
             key: 'rtt',
@@ -768,7 +768,7 @@
             icon: Network,
             timeKey: 'ts',
             helpText:
-                'TCP-channel round-trip time between server and client; it may not represent an active UDP transport. P95 is the translucent outer envelope and P50 is the solid nested fill. Higher values are worse.',
+                'TCP-channel round-trip time between server and client; it may not represent an active UDP transport. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Higher values are worse.',
         },
         {
             key: 'loss',
@@ -781,7 +781,7 @@
             icon: Network,
             timeKey: 'ts',
             helpText:
-                'Packet loss on the active RDP transport. P95 is the translucent outer envelope and P50 is the solid nested fill. UDP can recover losses with forward error correction; TCP responds with retransmission and congestion control.',
+                'Packet loss on the active RDP transport. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. UDP can recover losses with forward error correction; TCP responds with retransmission and congestion control.',
         },
     ];
 
@@ -1092,9 +1092,9 @@
                     </div>
                     {#if showHicHelp}
                         <p class="chart-desc">
-                            Input responsiveness, memory pressure, network reliability, and storage I/O. Input Delay
-                            compares the fleet average of each host's session P95 and P50. The other charts compare
-                            fleet average with exact median host: translucent outer area versus solid nested fill.
+                            Input responsiveness, memory pressure, network reliability, and storage I/O. P95 or fleet
+                            average remains filled. P50 or median nests inside only while ordered; if retained cohorts
+                            cross, it switches to a dotted line so it cannot conceal the primary series.
                         </p>
                     {/if}
 
@@ -1166,9 +1166,9 @@
                     </div>
                     {#if showSessionHelp}
                         <p class="chart-desc">
-                            Session count, capacity utilization, and per-session CPU and memory. For CPU and memory,
-                            P95 is the translucent outer envelope and P50 is the solid nested fill; their gap isolates
-                            heavy users from the typical session.
+                            Session count, capacity utilization, and per-session CPU and memory. P95 remains filled.
+                            P50 nests inside only while ordered and switches to a dotted line if retained cohorts cross,
+                            keeping both series visible.
                         </p>
                     {/if}
 
@@ -1241,10 +1241,10 @@
                     {#if showRfxHelp}
                         <p class="chart-desc">
                             Frame delivery, encoding, visual quality, and network conditions. FPS and Frame Quality
-                            use a filled P95 service floor with a dotted P50 median because higher is better. The
-                            lower-is-better charts use a translucent P95 outer envelope with a solid nested P50 fill.
-                            P50 appears only where the source report supplied it; older retained buckets remain
-                            P95-only instead of being presented as zero.
+                            use a filled P95 service floor with a dotted P50 median because higher is better. Other
+                            charts nest P50 only while it stays inside P95; crossed retained cohorts automatically use
+                            a dotted P50 line so P95 remains visible. P50 appears only where the source report supplied
+                            it; older retained buckets remain P95-only instead of being presented as zero.
                         </p>
                     {/if}
 
