@@ -81,9 +81,9 @@
     }
 
     .nav-in {
-        max-width: 1400px;
+        width: 100%;
         margin: 0 auto;
-        padding: 0 24px;
+        padding: 0 var(--layout-gutter);
         display: flex;
         align-items: center;
         justify-content: space-between;

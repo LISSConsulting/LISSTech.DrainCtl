@@ -176,6 +176,30 @@
     let paths = $derived(buildPaths(valueKey));
     let p50Paths = $derived(buildPaths(p50Key));
 
+    // A nested P50 fill is safe only while every comparable P50 point stays
+    // inside its primary envelope. Mixed-version/missing cohorts can cross,
+    // so fall back to a dotted P50 line for the whole chart instead of
+    // allowing its area to conceal P95.
+    let p50CanNest = $derived.by(() => {
+        if (!p50Key || invertThresholds) return false;
+        let comparable = 0;
+        for (const point of history) {
+            const primaryRaw = /** @type {any} */ (point)[valueKey];
+            const p50Raw = /** @type {any} */ (point)[p50Key];
+            if (
+                primaryRaw == null ||
+                p50Raw == null ||
+                !Number.isFinite(Number(primaryRaw)) ||
+                !Number.isFinite(Number(p50Raw))
+            ) {
+                continue;
+            }
+            comparable++;
+            if (transform(Number(p50Raw)) > transform(Number(primaryRaw))) return false;
+        }
+        return comparable > 0;
+    });
+
     /** Short datetime format based on the visible span; matches the shared
      * formatter used by DualAxisChart and InteractiveTimeChart so every
      * Overview chart's x-axis reads the same. */
@@ -442,17 +466,16 @@
                     opacity="0.7"
                 />
 
-                <!-- ── P95 area: outer envelope for normal metrics; sole fill for inverted metrics ── -->
+                <!-- P95 is always filled. P50 nests only when it never crosses P95. -->
                 {#if paths.area}
                     <path
                         d={paths.area}
                         fill={color}
-                        fill-opacity={p50Paths.area && !invertThresholds ? 0.4 : p50Paths.line ? 0.72 : 1}
+                        fill-opacity={p50CanNest ? 0.4 : p50Paths.line ? 0.72 : 1}
                     />
                 {/if}
 
-                <!-- Lower-is-better P50 sits inside P95, so its nested fill remains readable. -->
-                {#if p50Paths.area && !invertThresholds}
+                {#if p50Paths.area && p50CanNest}
                     <path d={p50Paths.area} fill={color} fill-opacity="1" />
                 {/if}
 

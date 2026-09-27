@@ -24,7 +24,7 @@
     import ConfirmDialog from './ConfirmDialog.svelte';
     import NotificationExclusionAction from './NotificationExclusionAction.svelte';
     import { toast } from '../lib/toast.svelte.js';
-    import { groupServersByRdSessionCollection } from '../lib/server-groups.js';
+    import { groupServersByRdSessionCollection, rdSessionCollectionFor } from '../lib/server-groups.js';
 
     let { onhistoryclick } = $props();
 
@@ -166,8 +166,12 @@
     });
 
     let sorted = $derived.by(() => {
+        const needle = search.trim().toLowerCase();
         let s = appState.servers.filter((sv) => {
-            const matchText = !search || sv.host.toLowerCase().includes(search.toLowerCase());
+            const matchText =
+                !needle ||
+                sv.host.toLowerCase().includes(needle) ||
+                rdSessionCollectionFor(sv).toLowerCase().includes(needle);
             const matchStatus = appState.serverFilter === 'all' || sv.status === appState.serverFilter;
             return matchText && matchStatus;
         });
@@ -545,10 +549,10 @@
         <input
             class="srv-search settings-input"
             type="search"
-            placeholder="Filter by hostname..."
-            aria-label="Filter servers by hostname"
+            placeholder="Filter by hostname or session collection..."
+            aria-label="Filter servers by hostname or RD Session Collection"
             bind:value={search}
-            style="max-width:300px"
+            style="max-width:380px"
         />
         <div class="filter-pills" role="group" aria-label="Filter servers by status">
             {#each ['all', 'ok', 'warning', 'grace', 'alert', 'off'] as f}

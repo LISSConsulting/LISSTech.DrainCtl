@@ -1704,11 +1704,12 @@ https://dashboard-server:49470</code></pre>
                 membership cannot currently be discovered, remains under <strong>Ungrouped</strong>. Color-coded:
                 green for healthy, amber for grace, red for alert, gray for offline. Offline is derived from the
                 dashboard's accepted-report time after exactly three effective heartbeat intervals; it does not change
-                the host's stored last result or last-seen value. Overview, Servers, and Events use the full available
-                viewport; desktops at 1600px and above receive responsive 48&ndash;80px side margins. The Servers table
-                keeps hostnames on one line and scrolls horizontally on narrower screens. Sessions, CPU, memory, and
-                input delay have per-host sparklines. EventSpike remains in each server's expanded swimlane instead of
-                consuming a summary-table column. Each expanded server includes a <strong>session gauge</strong>, while
+                the host's stored last result or last-seen value. The navbar, Overview, Servers, and Events share the
+                same liquid viewport and gutter; desktops around 1600px and above receive responsive 48&ndash;80px
+                side margins. Server search matches hostname or authoritative RD Session Collection. The table keeps
+                hostnames on one line and scrolls horizontally on narrower screens. Sessions, CPU, memory, and input
+                delay have per-host sparklines with up/down/flat endpoint-average trend arrows. EventSpike remains in
+                each server's expanded swimlane. Each expanded server includes a <strong>session gauge</strong>, while
                 Overview provides a <strong>LOAD chart</strong> that overlays CPU, CPU P95, Memory, and Sessions for
                 the entire fleet on one dual-axis canvas.
             </p>
@@ -1723,11 +1724,11 @@ https://dashboard-server:49470</code></pre>
                 Charts use retained SQLite data, not browser history. Select 5M, 15M where applicable, 1H, 1D, 3D,
                 5D, or 30D; the dashboard selects the appropriate retention tier for the requested range. Drag the
                 plotted timeline directly: right moves the data right and reveals older history; left returns toward
-                live. For latency, load, queues, and other lower-is-better measures, P95 is the upper-tail value and
-                P50 retains its nested fill inside the P95 envelope. FPS and frame quality are higher-is-better: their
-                displayed P95 is the service floor (numeric P5), while P50 is the median. On those inverted charts,
-                P95 is the sole filled area and P50 is a dotted line because the higher median would otherwise conceal
-                the lower service floor. Fleet Health Indicators show the actual P50 median, not a proxy.
+                live. For latency, load, queues, and other lower-is-better measures, P95 is the upper-tail value. P50
+                nests inside the filled primary envelope only while every comparable point remains ordered; crossed
+                mixed-version or missing-data cohorts automatically switch P50 to a dotted line. FPS and frame quality
+                are higher-is-better: their displayed P95 is the filled service floor (numeric P5), while P50 is the
+                dotted median. Fleet Health Indicators show the actual P50 median, not a proxy.
             </p>
 
             <p>
