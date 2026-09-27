@@ -1704,11 +1704,13 @@ https://dashboard-server:49470</code></pre>
                 membership cannot currently be discovered, remains under <strong>Ungrouped</strong>. Color-coded:
                 green for healthy, amber for grace, red for alert, gray for offline. Offline is derived from the
                 dashboard's accepted-report time after exactly three effective heartbeat intervals; it does not change
-                the host's stored last result or last-seen value. The table includes per-host Sessions, CPU, memory,
-                input-delay, and EventSpike sparklines. EventSpike plots recent confirmed-spike intensity as
-                <code>observed &divide; expected</code> and displays the recent retained count. Each expanded server
-                includes a <strong>session gauge</strong>, while Overview provides a <strong>LOAD chart</strong> that
-                overlays CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis canvas.
+                the host's stored last result or last-seen value. The liquid table expands across the available
+                viewport, keeps hostnames on one line, and scrolls horizontally on narrower screens. Sessions, CPU,
+                memory, input-delay, and EventSpike have per-host sparklines. EventSpike plots up to 20 recent
+                confirmed-spike intensities as <code>observed &divide; expected</code>; its adjacent value is the
+                latest intensity, not the capped sample count. Each expanded server includes a
+                <strong>session gauge</strong>, while Overview provides a <strong>LOAD chart</strong> that overlays
+                CPU, CPU P95, Memory, and Sessions for the entire fleet on one dual-axis canvas.
             </p>
 
             <p>

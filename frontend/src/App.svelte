@@ -555,7 +555,7 @@
 {:else}
     <Nav onconfigopen={() => (configOpen = true)} />
 
-    <main class="main">
+    <main class="main" class:main-wide={appState.currentView === 'servers'}>
         {#key appState.currentView}
             <div in:fly={{ y: 12, duration: 120, delay: 60 }} out:fly={{ y: -6, duration: 80 }}>
                 {#if appState.currentView === 'overview'}
@@ -591,6 +591,11 @@
         margin: 0 auto;
         padding: 28px 24px 48px;
         width: 100%;
+    }
+
+    .main.main-wide {
+        max-width: none;
+        padding-inline: 16px;
     }
 
     /* ── Auth loading screen ───────────────────────────────────── */
