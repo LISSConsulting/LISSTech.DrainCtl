@@ -76,8 +76,8 @@ func isLocalSystemForHost(r *http.Request, auth *AuthInfo, hostname string) bool
 }
 
 // requireSession returns middleware that validates the drainctl_session cookie
-// against the session store. Returns 401 JSON on missing or expired sessions.
-// No WWW-Authenticate header is set — prevents the browser credential dialog.
+// against the session store. Missing, invalid, and expired sessions all return
+// the same generic 401 JSON response without WWW-Authenticate.
 func requireSession(store *SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,14 +85,14 @@ func requireSession(store *SessionStore) func(http.Handler) http.Handler {
 			if err != nil || cookie.Value == "" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error":"session expired"}`))
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
 			}
 			sess := store.Get(cookie.Value)
 			if sess == nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error":"session expired"}`))
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
 			}
 			info := &AuthInfo{Username: sess.Username, Groups: sess.Groups}

@@ -356,8 +356,8 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 
-	// Public routes — no authentication required.
-	mux.Handle("GET /api/v1/health", rlw(http.HandlerFunc(ds.handleHealth)))
+	// No operational API route is public. Health includes fleet counts and is
+	// protected with the management/UI routes below.
 
 	// Agent routes — SSPI Negotiate authentication restricted to machine accounts.
 	// Human domain accounts are rejected; only COMPUTERNAME$ principals may call these.
@@ -409,6 +409,7 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	})))
 
 	// Management / UI routes — require a valid dashboard session cookie.
+	mux.Handle("GET /api/v1/health", rlw(rs(http.HandlerFunc(ds.handleHealth))))
 	mux.Handle("GET /api/v1/metrics", rlw(rs(http.HandlerFunc(ds.handleSeedMetrics))))
 	mux.Handle("GET /api/v1/metrics/{host}", rlw(rs(http.HandlerFunc(ds.handleMetrics))))
 	mux.Handle("GET /api/v1/audit", rlw(rs(http.HandlerFunc(ds.handleAudit))))

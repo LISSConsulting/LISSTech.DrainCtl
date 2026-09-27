@@ -7,6 +7,7 @@
 - RemoteFX P50 is rendered only where retained source reports supplied it. Historical high-is-better zeroes are treated as missing availability metadata; older buckets cannot be backfilled and remain P95-only.
 - The navbar, Overview, Servers, and Events share one liquid full-width gutter, with responsive 48–80px margins around 1600px-and-larger desktop windows. Server search matches hostname or authoritative RD Session Collection. Sessions, CPU, memory, and input-delay sparklines add up/down/flat arrows from five-sample endpoint averages; EventSpike remains in the expanded per-host swimlane.
 - Performance snapshots now carry the runtime-visible logical processor count once per report. The collector caches `runtime.NumCPU()` at startup, aggregation preserves it as constant host capacity, remote ingestion rejects negative or implausible values, and Server Detail shows it under Resource Utilization → CPU without adding a PDH query.
+- `GET /api/v1/health` is now session-authenticated because version and aggregate fleet status counts are operational data. Missing, invalid, and expired `drainctl_session` cookies receive the same generic `{"error":"unauthorized"}` JSON `401` without counts or session-state disclosure; authenticated dashboard behavior and the response schema remain unchanged.
 
 ## Runtime resilience — 2026-09-26
 

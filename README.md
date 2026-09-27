@@ -669,6 +669,7 @@ Authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener.
 
 | Endpoint | Returns |
 |---|---|
+| `GET /api/v1/health` | Dashboard version and aggregate fleet status counts. Requires a valid `drainctl_session`; missing, invalid, or expired sessions receive generic `{"error":"unauthorized"}` with HTTP `401` and no counts. |
 | `GET /api/v1/metrics/{host}` | Per-host time-series. `resolution=raw\|1min\|5min\|hourly\|auto`. Auto picks a tier from the requested window. |
 | `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host by default. Add repeated `host` filters only on this path (for example, `/api/v1/metrics/_fleet?host=RDSH-01&host=RDSH-02`) to aggregate a registered subset. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio). |
 | `GET /api/evtspike/spikes` | With `host` and no range, returns the compatibility recent-list array. With `host`, `from`, and `to`, returns `{spikes, total, truncated, as_of_id}` for `window_start ∈ [from,to)`: `total` is exact, `spikes` contains at most 500 newest-first rows, and `as_of_id` lets live SSE updates avoid double-counting rows already included in the snapshot. |
