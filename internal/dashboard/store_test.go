@@ -3,11 +3,17 @@
 package dashboard
 
 import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -23,12 +29,137 @@ func newTestServerState(t *testing.T) *ServerState {
 	return NewServerState(telemetry.NewServerStore(db))
 }
 
+func TestGetSettings_ProjectsCollectorSafeSessionsLikeRemoteConfig(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.Sessions = dc.SessionsConfig{
+		Enabled:            true,
+		CollectProcesses:   true,
+		TopProcesses:       5,
+		RetentionHours:     72,
+		AllowActions:       true,
+		IdentityVisibility: dc.SessionVisibilityMasked,
+		ClientVisibility:   dc.SessionVisibilityHidden,
+		ProcessVisibility:  dc.SessionVisibilityFull,
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	local, err := GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if local.Sessions == nil {
+		t.Fatal("in-process settings omitted sessions")
+	}
+	want := remoteSessionsConfig(cfg.Sessions)
+	if *local.Sessions != want {
+		t.Errorf("in-process sessions = %#v, want %#v", *local.Sessions, want)
+	}
+
+	ds := newTestServer(t)
+	response := httptest.NewRecorder()
+	ds.handleGetSettings(response, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/config status = %d: %s", response.Code, response.Body.String())
+	}
+	var remote RemoteSettings
+	if err := json.NewDecoder(response.Body).Decode(&remote); err != nil {
+		t.Fatalf("decode remote settings: %v", err)
+	}
+	if remote.Sessions == nil {
+		t.Fatal("remote settings omitted sessions")
+	}
+	if *local.Sessions != *remote.Sessions {
+		t.Errorf("in-process sessions = %#v, remote sessions = %#v", *local.Sessions, *remote.Sessions)
+	}
+
+	raw, err := json.Marshal(local)
+	if err != nil {
+		t.Fatalf("marshal in-process settings: %v", err)
+	}
+	var fields struct {
+		Sessions map[string]json.RawMessage `json:"sessions"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decode in-process settings JSON: %v", err)
+	}
+	if _, ok := fields.Sessions["allow_actions"]; ok {
+		t.Error("in-process sessions disclosed allow_actions")
+	}
+	if _, ok := fields.Sessions["retention_hours"]; ok {
+		t.Error("in-process sessions disclosed retention_hours")
+	}
+}
+
 // ── Construction ──────────────────────────────────────────────────────────────
 
 func TestServerState_FreshIsEmpty(t *testing.T) {
 	s := newTestServerState(t)
 	if got := s.All(); len(got) != 0 {
 		t.Errorf("All() = %d servers, want 0 for fresh store", len(got))
+	}
+}
+
+// ── Local session snapshots ───────────────────────────────────────────────────
+
+func TestReportSessionSnapshot_DeliversCallbackWithoutMutatingHostState(t *testing.T) {
+	s := newTestServerState(t)
+	s.Register("SRV01")
+	before := s.All()
+	snapshot := sessiondata.SessionSnapshot{
+		Schema:           sessiondata.SnapshotSchema,
+		Host:             "srv01.example.test",
+		AgentInstanceID:  "00000000-0000-0000-0000-000000000001",
+		Sequence:         7,
+		ObservedAtMS:     123,
+		CollectorVersion: "test",
+		LogicalCPUCount:  1,
+		Sessions:         []sessiondata.SessionRecord{},
+	}
+	var received sessiondata.SessionSnapshot
+	s.OnSessionSnapshot = func(got sessiondata.SessionSnapshot) error {
+		received = got
+		return nil
+	}
+
+	handled, err := s.ReportSessionSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("ReportSessionSnapshot() error = %v", err)
+	}
+	if !handled {
+		t.Fatal("ReportSessionSnapshot() handled = false, want true")
+	}
+	if !reflect.DeepEqual(received, snapshot) {
+		t.Errorf("callback snapshot = %#v, want %#v", received, snapshot)
+	}
+	if after := s.All(); !reflect.DeepEqual(after, before) {
+		t.Errorf("host state changed: before %#v, after %#v", before, after)
+	}
+}
+
+func TestReportSessionSnapshot_NilCallbackIsUnsupported(t *testing.T) {
+	handled, err := newTestServerState(t).ReportSessionSnapshot(sessiondata.SessionSnapshot{})
+	if err != nil {
+		t.Fatalf("ReportSessionSnapshot() error = %v, want nil", err)
+	}
+	if handled {
+		t.Fatal("ReportSessionSnapshot() handled = true, want false without callback")
+	}
+}
+
+func TestReportSessionSnapshot_PropagatesCallbackError(t *testing.T) {
+	want := errors.New("session store unavailable")
+	s := newTestServerState(t)
+	s.OnSessionSnapshot = func(sessiondata.SessionSnapshot) error { return want }
+
+	handled, err := s.ReportSessionSnapshot(sessiondata.SessionSnapshot{})
+	if !handled {
+		t.Fatal("ReportSessionSnapshot() handled = false, want true")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("ReportSessionSnapshot() error = %v, want %v", err, want)
 	}
 }
 

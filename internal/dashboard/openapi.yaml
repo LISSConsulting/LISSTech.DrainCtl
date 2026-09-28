@@ -38,6 +38,8 @@ tags:
     description: Notification target testing
   - name: evtspike
     description: Event-log anomaly detector status and confirmed spikes
+  - name: sessions
+    description: Administrator-only, privacy-projected current Fleet Sessions snapshots and guarded actions
 
 components:
   securitySchemes:
@@ -62,6 +64,24 @@ components:
         error:
           type: string
       required: [error]
+
+    UUIDv7:
+      type: string
+      format: uuid
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      description: Canonical lowercase RFC 9562 UUID version 7.
+
+    UInt64Decimal:
+      type: string
+      maxLength: 20
+      pattern: "^(?:0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|1844674407370955[0-0][0-9]{3}|18446744073709551[0-5][0-9]{2}|184467440737095516[0-0][0-9]{1}|1844674407370955161[0-4]|18446744073709551615)$"
+      description: Canonical unsigned base-10 integer string in the inclusive uint64 range 0–18446744073709551615. No sign, whitespace, decimal point, exponent, or leading zero is permitted except `0`.
+
+    SQLiteInt64Decimal:
+      type: string
+      maxLength: 19
+      pattern: "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+      description: Canonical unsigned base-10 integer string in the inclusive SQLite MaxInt64 range 0–9223372036854775807. No sign, whitespace, decimal point, exponent, or leading zero is permitted except `0`.
 
 
     ForceUpdateRequest:
@@ -990,6 +1010,322 @@ components:
           type: string
           description: "Go duration string. Minimum 1h; default 24h."
 
+    SessionsConfig:
+      type: object
+      description: |
+        Dashboard-authoritative Fleet Sessions policy. Collection is enabled by
+        default. Visibility is an ingest-time projection; changing any
+        visibility setting immediately purges retained snapshots/current rows
+        and expires active actions. A looser policy cannot restore purged data.
+      required: [enabled, collect_processes, top_processes, retention_hours, allow_actions, identity_visibility, client_visibility, process_visibility]
+      properties:
+        enabled:
+          type: boolean
+          default: true
+          description: Enables current-only session collection and snapshot ingestion. False stops new session snapshots.
+        collect_processes:
+          type: boolean
+          default: true
+          description: Enables bounded per-session process collection. False avoids process enumeration.
+        top_processes:
+          type: integer
+          minimum: 0
+          maximum: 5
+          default: 3
+          description: Maximum deterministic processes retained per session. Zero retains no process rows.
+        retention_hours:
+          type: integer
+          minimum: 1
+          maximum: 168
+          default: 24
+          description: Current snapshot retention window, independent of metrics, audit, and terminal action retention.
+        allow_actions:
+          type: boolean
+          default: false
+          description: Enables guarded administrator session actions. The dashboard only queues commands; the agent executes WTS.
+        identity_visibility:
+          $ref: "#/components/schemas/SessionVisibility"
+        client_visibility:
+          $ref: "#/components/schemas/SessionVisibility"
+        process_visibility:
+          $ref: "#/components/schemas/SessionVisibility"
+
+    SessionVisibility:
+      type: string
+      enum: [full, masked, hidden]
+      default: full
+      description: "Ingest-time projection: masked uses `***`; hidden persists null values or an empty process list."
+
+    SessionCapabilities:
+      type: object
+      additionalProperties: false
+      required: [session_actions, processes, input_delay, remotefx]
+      properties:
+        session_actions: { type: boolean }
+        processes: { type: boolean }
+        input_delay: { type: boolean }
+        remotefx: { type: boolean }
+
+    SnapshotCapabilities:
+      type: object
+      additionalProperties: false
+      required: [session_actions, processes, input_delay, remotefx]
+      description: Complete agent capability summary. Fatal collection-error snapshots require every value to be false.
+      properties:
+        session_actions: { type: boolean }
+        processes: { type: boolean }
+        input_delay: { type: boolean }
+        remotefx: { type: boolean }
+
+    SessionRemoteFX:
+      type: object
+      additionalProperties: false
+      required: [fps, quality_percent, encode_time_ms, rtt_ms, loss_percent, server_skipped_fps, network_skipped_fps]
+      properties:
+        fps: { type: number, nullable: true, exclusiveMinimum: 0, maximum: 240 }
+        quality_percent: { type: number, nullable: true, exclusiveMinimum: 0, maximum: 100 }
+        encode_time_ms: { type: number, nullable: true, minimum: 0, maximum: 60000 }
+        rtt_ms: { type: number, nullable: true, minimum: 0, maximum: 60000 }
+        loss_percent: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        server_skipped_fps: { type: number, nullable: true, minimum: 0, maximum: 1000000 }
+        network_skipped_fps: { type: number, nullable: true, minimum: 0, maximum: 1000000 }
+
+    SessionProcess:
+      type: object
+      additionalProperties: false
+      required: [pid, image_name, cpu_percent, working_set_bytes]
+      properties:
+        pid: { type: integer, minimum: 1, maximum: 4294967295 }
+        image_name: { type: string, minLength: 1, maxLength: 260, pattern: "^[^/\\\\:]+$", description: "Base filename only; `***` when process visibility is masked. `maxLength` is the OpenAPI character limit; the server enforces a 260-byte UTF-8 limit." }
+        cpu_percent: { type: number, nullable: true, minimum: 0, description: "Must not exceed 100 × logical_cpu_count." }
+        working_set_bytes: { $ref: "#/components/schemas/SQLiteInt64Decimal" }
+
+    SessionRecord:
+      type: object
+      additionalProperties: false
+      required: [session_id, logon_at_ms, user, domain, state, station, client_name, client_address, connect_at_ms, disconnect_at_ms, idle_since_ms, cpu_percent, working_set_bytes, input_delay_ms, remotefx, processes]
+      properties:
+        session_id: { type: integer, minimum: 0, maximum: 4294967295 }
+        logon_at_ms: { type: integer, nullable: true, minimum: 0 }
+        user: { type: string, nullable: true, maxLength: 256, description: "`maxLength` is the OpenAPI character limit; the server enforces a 256-byte UTF-8 limit." }
+        domain: { type: string, nullable: true, maxLength: 256, description: "`maxLength` is the OpenAPI character limit; the server enforces a 256-byte UTF-8 limit." }
+        state: { type: string, enum: [active, connected, connect_query, shadow, disconnected, idle, listen, reset, down, init, unknown] }
+        station: { type: string, nullable: true, maxLength: 256, description: "`maxLength` is the OpenAPI character limit; the server enforces a 256-byte UTF-8 limit." }
+        client_name: { type: string, nullable: true, maxLength: 256, description: "`maxLength` is the OpenAPI character limit; the server enforces a 256-byte UTF-8 limit." }
+        client_address: { type: string, nullable: true, maxLength: 128, description: "`maxLength` is the OpenAPI character limit; the server enforces a 128-byte UTF-8 limit." }
+        connect_at_ms: { type: integer, nullable: true, minimum: 0 }
+        disconnect_at_ms: { type: integer, nullable: true, minimum: 0 }
+        idle_since_ms: { type: integer, nullable: true, minimum: 0 }
+        cpu_percent: { type: number, nullable: true, minimum: 0, description: "Must not exceed 100 × logical_cpu_count." }
+        working_set_bytes: { allOf: [{ $ref: "#/components/schemas/SQLiteInt64Decimal" }], nullable: true }
+        input_delay_ms: { type: integer, nullable: true, minimum: 0, maximum: 600000 }
+        remotefx: { allOf: [{ $ref: "#/components/schemas/SessionRemoteFX" }], nullable: true }
+        processes:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/SessionProcess" }
+
+    SessionSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [schema, host, agent_instance_id, sequence, observed_at_ms, collector_version, logical_cpu_count, capabilities, collection_error, sessions]
+      properties:
+        schema: { type: string, const: drainctl.session-snapshot.v1 }
+        host: { type: string, pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$", maxLength: 253, description: "Canonical lowercase RFC 1123 hostname; ASCII-only, so the 253-character schema limit is also a 253-byte wire limit. IP literals and trailing dots are rejected." }
+        agent_instance_id: { $ref: "#/components/schemas/UUIDv7" }
+        sequence: { $ref: "#/components/schemas/UInt64Decimal" }
+        observed_at_ms: { type: integer, minimum: 0, maximum: 253402300799999, description: "Diagnostic only; receipt time determines freshness and sequence determines ordering." }
+        collector_version: { type: string, minLength: 1, maxLength: 64, pattern: "^[^\\u0000-\\u001f\\u007f]+$", description: "`maxLength` is the OpenAPI character limit; the server requires valid UTF-8 without controls and enforces 1–64 UTF-8 bytes." }
+        logical_cpu_count: { type: integer, minimum: 1, maximum: 1024 }
+        capabilities: { $ref: "#/components/schemas/SnapshotCapabilities" }
+        collection_error:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, enum: [wts_enumeration_failed, wts_metadata_failed, collector_timeout] }
+          description: "When non-null, sessions must be empty and all capability values false."
+        sessions:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/SessionRecord" }
+
+    SessionSnapshotAccepted:
+      type: object
+      required: [accepted, received_at_ms]
+      properties:
+        accepted: { type: boolean }
+        reason: { type: string, enum: [stale_snapshot] }
+        received_at_ms: { type: integer, minimum: 0 }
+        session_count: { type: integer, minimum: 0, maximum: 500 }
+        collection_error: { type: string, enum: [wts_enumeration_failed, wts_metadata_failed, collector_timeout] }
+
+    SessionFleetItem:
+      type: object
+      required: [host, mode, status, freshness, latest_attempt_instance_id, latest_attempt_sequence, latest_attempt_observed_at_ms, latest_attempt_received_at_ms, last_success_instance_id, last_success_sequence, last_success_observed_at_ms, last_success_received_at_ms, session_count, active_count, idle_count, disconnected_count, user_count, last_activity_at_ms, capabilities, collection_status, collection_error_code, detail_available]
+      properties:
+        host: { type: string }
+        mode: { type: string }
+        status: { type: string }
+        collection: { type: string }
+        freshness: { type: string, enum: [fresh, stale, offline, unknown] }
+        latest_attempt_instance_id: { $ref: "#/components/schemas/UUIDv7" }
+        latest_attempt_sequence: { $ref: "#/components/schemas/UInt64Decimal" }
+        latest_attempt_observed_at_ms: { type: integer, minimum: 0 }
+        latest_attempt_received_at_ms: { type: integer, minimum: 0 }
+        last_success_instance_id: { allOf: [{ $ref: "#/components/schemas/UUIDv7" }], nullable: true }
+        last_success_sequence: { allOf: [{ $ref: "#/components/schemas/UInt64Decimal" }], nullable: true }
+        last_success_observed_at_ms: { type: integer, nullable: true, minimum: 0 }
+        last_success_received_at_ms: { type: integer, nullable: true, minimum: 0 }
+        session_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        active_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        idle_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        disconnected_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        user_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        last_activity_at_ms: { type: integer, nullable: true, minimum: 0 }
+        capabilities: { allOf: [{ $ref: "#/components/schemas/SessionCapabilities" }], nullable: true }
+        collection_status: { type: string, enum: [ok, error] }
+        collection_error_code: { type: string, nullable: true, enum: [wts_enumeration_failed, wts_metadata_failed, collector_timeout] }
+        detail_available: { type: boolean }
+
+    SessionFleetResponse:
+      type: object
+      required: [query, total, page, server_now_ms, items]
+      properties:
+        query: { $ref: "#/components/schemas/SessionFleetQuery" }
+        total: { type: integer, minimum: 0 }
+        page:
+          type: object
+          required: [number, size, pages]
+          properties:
+            number: { type: integer, minimum: 1 }
+            size: { type: integer, enum: [15, 30, 50] }
+            pages: { type: integer, minimum: 0 }
+        server_now_ms: { type: integer, minimum: 0 }
+        items: { type: array, items: { $ref: "#/components/schemas/SessionFleetItem" } }
+
+    SessionFleetQuery:
+      type: object
+      required: [q, state, sort, dir, page, page_size]
+      properties:
+        q: { type: string, maxLength: 128, description: "`maxLength` is the OpenAPI character limit; the server requires valid UTF-8 without controls and enforces at most 128 UTF-8 bytes." }
+        state: { type: string, enum: [all, active, disconnected, idle] }
+        sort: { type: string, enum: [host, status, mode, sessions, active, idle, disconnected, users, last_activity] }
+        dir: { type: string, enum: [asc, desc] }
+        page: { type: integer, minimum: 1, maximum: 10000 }
+        page_size: { type: integer, enum: [15, 30, 50] }
+
+    SessionDetailResponse:
+      type: object
+      required: [host, freshness, latest_attempt_instance_id, latest_attempt_sequence, latest_attempt_observed_at_ms, latest_attempt_received_at_ms, last_success_instance_id, last_success_sequence, last_success_observed_at_ms, last_success_received_at_ms, session_count, active_count, idle_count, disconnected_count, user_count, last_activity_at_ms, capabilities, collection_status, collection_error_code, actions_available, summary, query, total, sessions]
+      properties:
+        host: { type: string }
+        freshness: { type: string, enum: [fresh, stale, offline, unknown] }
+        latest_attempt_instance_id: { $ref: "#/components/schemas/UUIDv7" }
+        latest_attempt_sequence: { $ref: "#/components/schemas/UInt64Decimal" }
+        latest_attempt_observed_at_ms: { type: integer, minimum: 0 }
+        latest_attempt_received_at_ms: { type: integer, minimum: 0 }
+        last_success_instance_id: { allOf: [{ $ref: "#/components/schemas/UUIDv7" }], nullable: true }
+        last_success_sequence: { allOf: [{ $ref: "#/components/schemas/UInt64Decimal" }], nullable: true }
+        last_success_observed_at_ms: { type: integer, nullable: true, minimum: 0 }
+        last_success_received_at_ms: { type: integer, nullable: true, minimum: 0 }
+        session_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        active_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        idle_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        disconnected_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        user_count: { type: integer, nullable: true, minimum: 0, maximum: 500 }
+        last_activity_at_ms: { type: integer, nullable: true, minimum: 0 }
+        capabilities: { allOf: [{ $ref: "#/components/schemas/SessionCapabilities" }], nullable: true }
+        collection_status: { type: string, enum: [ok, error] }
+        collection_error_code: { type: string, nullable: true, enum: [wts_enumeration_failed, wts_metadata_failed, collector_timeout] }
+        actions_available: { type: boolean }
+        summary:
+          type: object
+          required: [total, active, idle, disconnected, users, last_activity_at_ms]
+          properties:
+            total: { type: integer, minimum: 0 }
+            active: { type: integer, minimum: 0 }
+            idle: { type: integer, minimum: 0 }
+            disconnected: { type: integer, minimum: 0 }
+            users: { type: integer, minimum: 0 }
+            last_activity_at_ms: { type: integer, nullable: true, minimum: 0 }
+        query:
+          type: object
+          required: [q, page, page_size]
+          properties:
+            q: { type: string, maxLength: 128, description: "`maxLength` is the OpenAPI character limit; the server requires valid UTF-8 without controls and enforces at most 128 UTF-8 bytes." }
+            page: { type: integer, minimum: 1, maximum: 100 }
+            page_size: { type: integer, enum: [15, 30, 50] }
+        total: { type: integer, minimum: 0, maximum: 500 }
+        sessions: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/SessionRecord" } }
+
+    SessionActionRequest:
+      type: object
+      additionalProperties: false
+      required: [type, expected_logon_at_ms]
+      description: "The complete decoded action body is limited to 4096 bytes. Unknown properties are rejected."
+      properties:
+        type: { type: string, enum: [logoff, message, disconnect] }
+        expected_logon_at_ms: { type: integer, minimum: 0, maximum: 253402300799999 }
+        message: { type: string, maxLength: 256, pattern: "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f]*$", description: "For message, required after trim and 1–256 Unicode scalar values. For logoff and disconnect, omitted or exactly empty." }
+
+    SessionActionStatus:
+      type: object
+      required: [action_id, type, host, session_id, expected_logon_at_ms, state, created_at_ms, expires_at_ms, completed_at_ms, result_code]
+      properties:
+        action_id: { $ref: "#/components/schemas/UUIDv7" }
+        type: { type: string, enum: [logoff, message, disconnect] }
+        host: { type: string }
+        session_id: { type: integer, minimum: 0, maximum: 4294967295 }
+        expected_logon_at_ms: { type: integer, minimum: 0 }
+        state: { type: string, enum: [queued, delivered, completed, failed, expired, session_changed, unsupported] }
+        created_at_ms: { type: integer, minimum: 0 }
+        expires_at_ms: { type: integer, minimum: 0 }
+        completed_at_ms: { type: integer, nullable: true, minimum: 0 }
+        result_code: { type: string, nullable: true, enum: [completed, failed, expired, session_changed, unsupported, duplicate, privacy_policy_changed] }
+
+    SessionShadowResponse:
+      type: object
+      required: [command, protocol_uri]
+      properties:
+        command: { type: string, pattern: "^mstsc\\.exe /v:[a-z0-9.-]+ /shadow:[0-9]+ /control$", description: Exact copy fallback command; it never bypasses consent. }
+        protocol_uri: { type: string, pattern: "^drainctl-shadow://shadow\\?host=[a-z0-9.-]+&session=[0-9]+$", description: Exact validated local protocol URI. The browser navigates only to this endpoint-provided value. }
+    SessionActionEnqueueResponse:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: "#/components/schemas/SessionActionStatus"
+    RemoteSessionsConfig:
+      type: object
+      required: [enabled, collect_processes, top_processes, identity_visibility, client_visibility, process_visibility]
+      description: Collector-safe Sessions projection. Action authorization and retention remain dashboard-only.
+      properties:
+        enabled: { type: boolean }
+        collect_processes: { type: boolean }
+        top_processes: { type: integer, minimum: 0, maximum: 5 }
+        identity_visibility: { $ref: "#/components/schemas/SessionVisibility" }
+        client_visibility: { $ref: "#/components/schemas/SessionVisibility" }
+        process_visibility: { $ref: "#/components/schemas/SessionVisibility" }
+
+    RemoteSettingsResponse:
+      type: object
+      description: Machine-safe dashboard settings projection. It excludes `sessions.allow_actions` and `sessions.retention_hours`.
+      properties:
+        notifications: { type: array, items: { $ref: "#/components/schemas/NotificationTarget" } }
+        notification_exclusions: { type: array, items: { type: string } }
+        session_warning_threshold: { type: integer }
+        grace_period: { type: integer }
+        poll_interval: { type: integer }
+        performance: { $ref: "#/components/schemas/PerformanceConfig" }
+        update: { $ref: "#/components/schemas/UpdateConfig" }
+        evtspike: { $ref: "#/components/schemas/EvtSpikeSettings" }
+        sessions: { $ref: "#/components/schemas/RemoteSessionsConfig" }
+
+
+
     SettingsResponse:
       type: object
       properties:
@@ -1026,6 +1362,8 @@ components:
           $ref: "#/components/schemas/UpdateConfig"
         evtspike:
           $ref: "#/components/schemas/EvtSpikeSettings"
+        sessions:
+          $ref: "#/components/schemas/SessionsConfig"
 
     SettingsUpdate:
       type: object
@@ -1065,6 +1403,8 @@ components:
         evtspike:
           $ref: "#/components/schemas/EvtSpikeSettingsPatch"
           nullable: true
+        sessions:
+          $ref: "#/components/schemas/SessionsConfig"
 
     EvtSpikeSettings:
       type: object
@@ -1582,14 +1922,61 @@ paths:
                 type: string
                 const: "1"
 
+  /session-snapshot:
+    post:
+      tags: [agent]
+      summary: Ingest a current Fleet Sessions snapshot
+      description: |
+        Machine-authenticated, additive ingest. The body is limited to 512 KiB
+        before parsing and content encoding is rejected. The authenticated
+        machine must match the canonical lowercase body host. Complete
+        successful snapshots atomically replace current rows; fatal collection
+        attempts preserve the last successful rows. Ordering is by UUIDv7 agent
+        generation and unsigned decimal sequence, never observation time. A
+        valid stale snapshot returns 202 with `accepted:false` and changes nothing.
+      operationId: ingestSessionSnapshot
+      security:
+        - machineSSPI: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionSnapshotRequest"
+      responses:
+        "202":
+          description: Accepted snapshot or valid stale/idempotent snapshot.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SessionSnapshotAccepted" } } }
+        "400":
+          description: Invalid JSON, field, schema, or value (`invalid_snapshot`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401":
+          description: Missing or invalid machine credentials (`unauthorized_machine`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403":
+          description: Authenticated machine differs from body host (`host_identity_mismatch`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: Body exceeds 524288 bytes (`snapshot_too_large`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "415":
+          description: Not application/json or encoded (`unsupported_media_type`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: Machine rate limit exceeded.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503":
+          description: Storage failed and no transaction committed (`storage_error`).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
   /config:
     get:
       tags: [agent]
       summary: Get dashboard config (agent)
       description: |
-        Same payload as GET /settings but accessible to machine accounts.
-        Agents use this to fetch dashboard-managed settings (thresholds,
-        notification targets, performance config).
+        Machine-authenticated dashboard settings projection. It includes
+        collector controls but excludes dashboard-only session action
+        authorization and snapshot retention.
       operationId: getConfig
       security:
         - machineSSPI: []
@@ -1599,7 +1986,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SettingsResponse"
+                $ref: "#/components/schemas/RemoteSettingsResponse"
 
   /servers:
     get:
@@ -2099,6 +2486,140 @@ paths:
         "401":
           description: Not authenticated.
 
+  /sessions:
+    get:
+      tags: [sessions]
+      summary: List Fleet Sessions hosts
+      description: |
+        Administrator-only aggregate fleet view. It never returns identity,
+        client, process, logon time, or queued action data. `Cache-Control:
+        no-store`; freshness is derived from last successful snapshot receipt.
+        The `q` parameter must be valid UTF-8 without controls and is limited
+        to 128 UTF-8 bytes; its OpenAPI `maxLength` is a character limit, not
+        a byte limit.
+      operationId: listSessions
+      security: [{ session: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 128 }, description: "Server limit: 128 UTF-8 bytes, valid UTF-8, and no control characters. Schema `maxLength` is characters only." }
+        - { name: state, in: query, schema: { type: string, enum: [all, active, disconnected, idle], default: all } }
+        - { name: sort, in: query, schema: { type: string, enum: [host, status, mode, sessions, active, idle, disconnected, users, last_activity], default: host } }
+        - { name: dir, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 10000, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, enum: [15, 30, 50], default: 30 } }
+      responses:
+        "200": { description: Aggregate current snapshots, content: { application/json: { schema: { $ref: "#/components/schemas/SessionFleetResponse" } } } }
+        "400": { description: Invalid bounded query (`invalid_sessions_query`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: Not authenticated. }
+        "403": { description: Dashboard administrator required (`admin_required`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Sessions disabled (`sessions_disabled`).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Rate limited. }
+        "503": { description: Sessions storage unavailable (`sessions_unavailable`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /sessions/{host}:
+    get:
+      tags: [sessions]
+      summary: Get current sessions for one host
+      description: |
+        Administrator-only, privacy-projected current detail. At most 500
+        current rows are available and the response is never cached. The `q`
+        parameter must be valid UTF-8 without controls and is limited to 128
+        UTF-8 bytes; its OpenAPI `maxLength` is a character limit, not a byte
+        limit.
+      operationId: getSessionDetail
+      security: [{ session: [] }]
+      parameters:
+        - { name: host, in: path, required: true, schema: { type: string, maxLength: 253 }, description: Canonical lowercase RFC 1123 host. }
+        - { name: q, in: query, schema: { type: string, maxLength: 128 }, description: "Server limit: 128 UTF-8 bytes, valid UTF-8, and no control characters. Schema `maxLength` is characters only." }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, enum: [15, 30, 50], default: 30 } }
+      responses:
+        "200": { description: Current privacy-projected snapshot, content: { application/json: { schema: { $ref: "#/components/schemas/SessionDetailResponse" } } } }
+        "400": { description: Invalid host or query (`invalid_host` or `invalid_sessions_query`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: Not authenticated. }
+        "403": { description: Dashboard administrator required (`admin_required`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Unknown or retention-expired snapshot (`session_snapshot_not_found`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Sessions disabled (`sessions_disabled`).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Rate limited. }
+        "503": { description: Sessions storage unavailable (`sessions_unavailable`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /sessions/{host}/{session_id}/actions:
+    post:
+      tags: [sessions]
+      summary: Durably queue a guarded session action
+      description: |
+        Administrator-only and explicitly confirmation-gated by the browser.
+        Requires UUID `Idempotency-Key`, enabled actions, a fresh successful
+        snapshot, agent action capability, and exact current `(host, session_id,
+        logon_at_ms)`. The dashboard queues delivery only; it never calls WTS.
+        Same principal/endpoint/key/request replays the original action (200);
+        a different normalized request conflicts. Message text is not returned;
+        disconnect accepts no message.
+      operationId: createSessionAction
+      security: [{ session: [] }]
+      parameters:
+        - { name: host, in: path, required: true, schema: { type: string, maxLength: 253 } }
+        - { name: session_id, in: path, required: true, schema: { type: integer, minimum: 0, maximum: 4294967295 } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SessionActionRequest" } } }
+      responses:
+        "202": { description: New queued action, content: { application/json: { schema: { $ref: "#/components/schemas/SessionActionEnqueueResponse" } } } }
+        "200": { description: Idempotent replay of the original action, content: { application/json: { schema: { $ref: "#/components/schemas/SessionActionEnqueueResponse" } } } }
+        "400": { description: "`invalid_action_request`: malformed host, session ID, body (including Content-Type), UUID idempotency key, or message bound violation.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: Existing authentication failure (`unauthorized`). }
+        "403": { description: Dashboard administrator required (`admin_required`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: "`session_snapshot_not_found` or `session_not_found`.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`sessions_disabled`, `host_not_fresh`, `actions_unsupported`, `session_identity_changed`, or `idempotency_conflict`.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Rate limited (`rate_limited`). }
+        "503": { description: Storage failure and no enqueue (`storage_error`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /session-actions/{action_id}:
+    get:
+      tags: [sessions]
+      summary: Get safe session action status
+      description: Administrator-only safe action projection. It never returns identity, client, process, message, ciphertext, or diagnostics.
+      operationId: getSessionActionStatus
+      security: [{ session: [] }]
+      parameters:
+        - { name: action_id, in: path, required: true, schema: { $ref: "#/components/schemas/UUIDv7" } }
+      responses:
+        "200": { description: Retained action status, content: { application/json: { schema: { $ref: "#/components/schemas/SessionActionStatus" } } } }
+        "401": { description: Not authenticated. }
+        "403": { description: Dashboard administrator required (`admin_required`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Malformed, absent, or action-retention-expired action ID (`session_action_not_found`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Rate limited. }
+        "503": { description: Storage unavailable (`storage_error`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /sessions/{host}/{session_id}/shadow:
+    get:
+      tags: [sessions]
+      summary: Build a local Shadow launch and copy fallback
+      description: |
+        Administrator-only helper for a fresh current session. Returns the exact
+        installer-registered `drainctl-shadow://shadow?host=<host>&session=<id>`
+        URI for local launch and the exact copy fallback command. The helper
+        strictly validates protocol input before invoking local `mstsc`; it never
+        adds `/noConsentPrompt`, credentials, or arbitrary arguments. Browser and
+        Windows external-protocol confirmation and normal mstsc consent remain.
+        Any origin can invoke the registered protocol, so the helper parser is
+        the security boundary. This route is available independently of
+        allow_actions.
+      operationId: getSessionShadowCommand
+      security: [{ session: [] }]
+      parameters:
+        - { name: host, in: path, required: true, schema: { type: string, maxLength: 253 } }
+        - { name: session_id, in: path, required: true, schema: { type: integer, minimum: 0, maximum: 4294967295 } }
+      responses:
+        "200": { description: Endpoint-owned local launch URI and exact copy fallback command, content: { application/json: { schema: { $ref: "#/components/schemas/SessionShadowResponse" } } } }
+        "400": { description: Invalid host or uint32 session ID (`invalid_session_target`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: Not authenticated. }
+        "403": { description: Dashboard administrator required (`admin_required`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Unknown or retention-expired snapshot (`session_snapshot_not_found`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Sessions disabled, stale/error snapshot, or changed session (`sessions_unavailable` or `session_changed`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Rate limited. }
+        "503": { description: Sessions storage unavailable (`sessions_unavailable`), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /events:
     get:
       tags: [servers]
@@ -2112,11 +2633,10 @@ paths:
         Keepalive comments (`: keepalive`) are sent every 25 seconds to prevent
         intermediate proxies from closing idle connections.
 
-        Each `data:` line is a JSON-encoded `SSEEvent` object:
-
-        ```json
-        { "type": "<event-type>", "host": "<hostname>", "data": <payload>, "timestamp": "<RFC3339>" }
-        ```
+        Messages use standard SSE `event:` and `data:` framing. The Fleet Sessions
+        events below are named events: their JSON is the complete `data:` value,
+        not an `SSEEvent` wrapper and not a JSON object with `type`, `data`, or
+        `timestamp` properties.
 
         ### Event types
 
@@ -2175,6 +2695,28 @@ paths:
         Consumers SHOULD correlate terminal results with the initiating
         `command_id`; accepted commands remain in the durable outbox and may be
         redelivered until this acknowledgement is received.
+
+        **`session_snapshot`** — metadata-only invalidation after an accepted
+        newer collection attempt. The complete named frame is:
+        ```text
+        event: session_snapshot
+        data: {"host":"rdsh-07.example.test","latest_attempt_instance_id":"0195a584-5b25-7a00-91a5-7cbb4dac92d9","latest_attempt_sequence":"42","latest_attempt_observed_at_ms":1770000123456,"latest_attempt_received_at_ms":1770000123999,"last_success_instance_id":"0195a584-5b25-7a00-91a5-7cbb4dac92d9","last_success_sequence":"42","last_success_observed_at_ms":1770000123456,"last_success_received_at_ms":1770000123999,"freshness":"fresh","session_count":12,"active_count":9,"capabilities":{"session_actions":true,"processes":true,"input_delay":true,"remotefx":false},"actions_available":false,"collection_status":"ok","last_error":null}
+        ```
+        Its `data` has exactly the displayed properties. Last-success fields
+        are nullable; `latest_attempt_sequence` and `last_success_sequence`
+        are canonical uint64 decimal strings. It contains no per-session
+        identity, client, process, logon time, action ID, or message. Treat it
+        as a refetch hint; it has no replay.
+
+        **`session_action`** — privacy-safe action lifecycle hint. The complete
+        named frame is:
+        ```text
+        event: session_action
+        data: {"action_id":"0195a584-5b25-7a00-91a5-7cbb4dac92d9","state":"completed","completed_at_ms":1770000124999,"result_code":"completed"}
+        ```
+        Its `data` contains exactly `action_id`, `state`, `completed_at_ms`,
+        and `result_code`; host/session/identity/message/ciphertext are absent.
+        Poll `GET /api/v1/session-actions/{action_id}` for authoritative status.
 
         **`settings_update`** — emitted when configuration is saved via
         `PUT /api/v1/settings`. `host` is empty. `data` is:

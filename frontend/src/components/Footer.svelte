@@ -8,14 +8,9 @@
      *   onrefresh?: () => void,
      *   refreshing?: boolean,
      * }} */
-    let {
-        onrefresh,
-        refreshing = false,
-    } = $props();
+    let { onrefresh, refreshing = false } = $props();
 
-    const lastUpdatedStr = $derived(
-        appState.lastUpdated ? formatTime12(appState.lastUpdated, { seconds: true }) : '—',
-    );
+    const lastUpdatedStr = $derived(appState.lastUpdated ? formatTime12(appState.lastUpdated, { seconds: true }) : '—');
 
     const version = $derived(appState.health?.version ?? '—');
     const sessions = $derived(appState.counters.sessions);
@@ -25,8 +20,8 @@
     const displayUser = $derived(
         authState.username
             ? (authState.username.includes('\\')
-                ? authState.username.split('\\').pop()
-                : authState.username
+                  ? authState.username.split('\\').pop()
+                  : authState.username
               ).toUpperCase()
             : null,
     );
@@ -56,7 +51,15 @@
             <span class="session-count">{sessions.toLocaleString()}</span>
             <span class="session-label">sessions · {servers} servers</span>
         </span>
-        <span class="status-pill {appState.connected ? (appState.sseConnected ? 'live' : appState.sseReconnecting ? 'reconnecting' : 'connected') : 'disconnected'}">
+        <span
+            class="status-pill {appState.connected
+                ? appState.sseConnected
+                    ? 'live'
+                    : appState.sseReconnecting
+                      ? 'reconnecting'
+                      : 'connected'
+                : 'disconnected'}"
+        >
             {#if appState.connected && appState.sseConnected}
                 <Wifi size={11} strokeWidth={2.4} />
                 LIVE
@@ -229,8 +232,13 @@
     }
 
     @keyframes blink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.4; }
+        0%,
+        100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.4;
+        }
     }
 
     .disconnected {
@@ -264,8 +272,12 @@
     }
 
     @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .spin {

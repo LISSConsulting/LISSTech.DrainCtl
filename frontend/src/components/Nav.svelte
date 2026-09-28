@@ -2,7 +2,7 @@
     import { appState } from '../lib/state.svelte.js';
     import { toggleTheme, theme } from '../lib/theme.svelte.js';
     import { authState, logout } from '../lib/auth.svelte.js';
-    import { LayoutDashboard, Server, ScrollText, Sun, Moon, Monitor } from '@lucide/svelte';
+    import { LayoutDashboard, Server, ScrollText, Users, Sun, Moon, Monitor } from '@lucide/svelte';
 
     /** @type {{ onconfigopen: () => void }} */
     let { onconfigopen } = $props();
@@ -11,15 +11,16 @@
     const pref = $derived(theme.preference);
     const isDark = $derived(theme.resolved === 'dark');
     const themeLabel = $derived(
-        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode'
+        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode',
     );
 
-    /** @type {Array<{id: 'overview'|'servers'|'events', label: string, icon: any}>} */
+    /** @type {Array<{id: 'overview'|'servers'|'events'|'sessions', label: string, icon: any}>} */
     const TABS = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'servers', label: 'Servers', icon: Server },
         { id: 'events', label: 'Events', icon: ScrollText },
     ];
+    const SESSIONS_TAB = { id: 'sessions', label: 'Sessions', icon: Users };
 </script>
 
 <nav class="nav">
@@ -39,7 +40,7 @@
             </span>
 
             <div role="tablist" aria-label="Dashboard views" class="nav-tabs">
-                {#each TABS as tab}
+                {#each authState.isAdmin ? [...TABS, SESSIONS_TAB] : TABS as tab}
                     {@const Icon = tab.icon}
                     <button
                         role="tab"
@@ -58,13 +59,11 @@
             {#if authState.username}
                 <button class="btn-signout btn-brutal" onclick={logout}>SIGN OUT</button>
             {/if}
-            <button
-                class="btn-theme btn-brutal"
-                onclick={toggleTheme}
-                aria-label={themeLabel}
-                title={themeLabel}
-            >
-                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon size={15} strokeWidth={2.4} />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
+            <button class="btn-theme btn-brutal" onclick={toggleTheme} aria-label={themeLabel} title={themeLabel}>
+                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon
+                        size={15}
+                        strokeWidth={2.4}
+                    />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
             </button>
         </div>
     </div>
@@ -78,6 +77,8 @@
         background: var(--color-bg);
         border-bottom: var(--spacing-bw) solid var(--color-border);
         height: 52px;
+        overflow-x: auto;
+        overflow-y: hidden;
     }
 
     .nav-in {

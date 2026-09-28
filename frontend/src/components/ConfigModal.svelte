@@ -348,6 +348,18 @@
                     });
                 }
                 break;
+            case 'sessions':
+                config.sessions = {
+                    enabled: false,
+                    collect_processes: false,
+                    top_processes: 5,
+                    retention_hours: 48,
+                    allow_actions: false,
+                    identity_visibility: 'full',
+                    client_visibility: 'full',
+                    process_visibility: 'full',
+                };
+                break;
             case 'spikes':
                 resetEvtSpikeToDefaults();
                 break;
@@ -389,6 +401,28 @@
         }
         if (e.mean_per_bucket_prior < 0 || e.mean_per_bucket_prior > 1000) {
             return 'Prior mean must be 0–1000 events/bucket';
+        }
+        return null;
+    }
+
+    function validateSessions() {
+        const sessions = config?.sessions;
+        if (!sessions) return null;
+        if (
+            !Number.isInteger(Number(sessions.top_processes)) ||
+            sessions.top_processes < 0 ||
+            sessions.top_processes > 5
+        )
+            return 'Top processes must be an integer from 0–5';
+        if (
+            !Number.isInteger(Number(sessions.retention_hours)) ||
+            sessions.retention_hours < 1 ||
+            sessions.retention_hours > 168
+        )
+            return 'Session retention must be an integer from 1–168 hours';
+        for (const key of ['identity_visibility', 'client_visibility', 'process_visibility']) {
+            if (!['full', 'masked', 'hidden'].includes(sessions[key]))
+                return 'Session visibility must be full, masked, or hidden';
         }
         return null;
     }
@@ -468,6 +502,7 @@
 
     const CONFIG_TABS = [
         { id: 'alerts', label: 'Alerts & Performance' },
+        { id: 'sessions', label: 'Sessions' },
         { id: 'spikes', label: 'Event Spikes' },
         { id: 'notifications', label: 'Notifications' },
         { id: 'servers', label: 'Servers' },
@@ -689,7 +724,7 @@
     /** @returns {Promise<boolean>} true on success */
     async function save() {
         if (!config) return false;
-        const err = validateThresholds() ?? validateEvtSpike();
+        const err = validateThresholds() ?? validateEvtSpike() ?? validateSessions();
         if (channelCooldownError) {
             toast.err(channelCooldownError);
             return false;
@@ -1333,6 +1368,104 @@
                                         </label>
                                     </div>
                                 {/if}
+                            </div>
+                        {/if}
+                    </div>
+                {:else if activeTab === 'sessions'}
+                    <div id="config-panel-sessions" role="tabpanel" aria-labelledby="config-tab-sessions">
+                        {#if config.sessions}
+                            <div class="settings-group">
+                                <div class="section-header"><Users size={14} strokeWidth={2.5} /> Fleet Sessions</div>
+                                <div class="settings-hint">
+                                    Collect bounded workstation session summaries for administrators. Disabling this
+                                    stops new collection.
+                                </div>
+                                <label class="settings-check"
+                                    ><input type="checkbox" bind:checked={config.sessions.enabled} /> Enable Fleet Sessions</label
+                                >
+                            </div>
+                            <div class="settings-group">
+                                <div class="section-header">
+                                    <Monitor size={14} strokeWidth={2.5} /> Process collection
+                                </div>
+                                <div class="settings-hint">
+                                    Collect only the largest processes per session. Process names follow the process
+                                    visibility policy below.
+                                </div>
+                                <label class="settings-check"
+                                    ><input
+                                        type="checkbox"
+                                        bind:checked={config.sessions.collect_processes}
+                                        disabled={!config.sessions.enabled}
+                                    /> Collect processes</label
+                                >
+                                <div class="subsection">
+                                    <div class="settings-label">Top processes per session</div>
+                                    <div class="settings-hint">0 stores no processes; the hard cap is 5.</div>
+                                    <input
+                                        type="number"
+                                        class="settings-num"
+                                        bind:value={config.sessions.top_processes}
+                                        min="0"
+                                        max="5"
+                                        step="1"
+                                        disabled={!config.sessions.enabled || !config.sessions.collect_processes}
+                                    />
+                                    <span class="settings-num-label">processes (0–5)</span>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <div class="section-header">
+                                    <RefreshCw size={14} strokeWidth={2.5} /> Retention and actions
+                                </div>
+                                <div class="settings-hint">
+                                    Retention bounds persisted session data; queued actions are available only for fresh
+                                    hosts with action support.
+                                </div>
+                                <div class="subsection">
+                                    <div class="settings-label">Retention</div>
+                                    <input
+                                        type="number"
+                                        class="settings-num"
+                                        bind:value={config.sessions.retention_hours}
+                                        min="1"
+                                        max="168"
+                                        step="1"
+                                        disabled={!config.sessions.enabled}
+                                    />
+                                    <span class="settings-num-label">hours (1–168)</span>
+                                </div>
+                                <label class="settings-check"
+                                    ><input
+                                        type="checkbox"
+                                        bind:checked={config.sessions.allow_actions}
+                                        disabled={!config.sessions.enabled}
+                                    /> Allow message, disconnect, and logoff actions</label
+                                >
+                            </div>
+                            <div class="settings-group">
+                                <div class="section-header"><ShieldAlert size={14} strokeWidth={2.5} /> Visibility</div>
+                                <div class="settings-hint">
+                                    Full retains values, masked replaces values before display, and hidden omits them.
+                                    Tightening visibility purges affected retained data.
+                                </div>
+                                {#each [['identity_visibility', 'Identity'], ['client_visibility', 'Client'], ['process_visibility', 'Process']] as [key, label]}
+                                    <div class="subsection">
+                                        <div class="settings-label">{label} visibility</div>
+                                        <div class="repeat-pills">
+                                            {#each ['full', 'masked', 'hidden'] as value}
+                                                <button
+                                                    type="button"
+                                                    class="btn-brutal gp-pill"
+                                                    class:active={config.sessions[key] === value}
+                                                    aria-pressed={config.sessions[key] === value}
+                                                    onclick={() => (config.sessions[key] = value)}
+                                                    disabled={!config.sessions.enabled}>{value}</button
+                                                >
+                                            {/each}
+                                        </div>
+                                    </div>
+                                {/each}
                             </div>
                         {/if}
                     </div>

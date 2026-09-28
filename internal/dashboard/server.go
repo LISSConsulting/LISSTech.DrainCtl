@@ -19,6 +19,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -33,19 +34,25 @@ var openapiSpec []byte
 
 // DashboardServer holds the dashboard HTTP server state.
 type DashboardServer struct {
-	state                    *ServerState
-	cfg                      dc.DashboardConfig
-	server                   *http.Server
-	fingerprint              string        // SHA-256 fingerprint of the TLS certificate
-	sessionStore             *SessionStore // in-memory dashboard session store
-	broker                   *Broker       // SSE event broker for real-time updates
-	rdCollections            *rdCollectionResolver
-	ms                       metricsReader
-	as                       auditReader
-	mnt                      maintenanceReader
+	state            *ServerState
+	cfg              dc.DashboardConfig
+	server           *http.Server
+	fingerprint      string        // SHA-256 fingerprint of the TLS certificate
+	sessionStore     *SessionStore // in-memory dashboard session store
+	broker           *Broker       // SSE event broker for real-time updates
+	rdCollections    *rdCollectionResolver
+	ms               metricsReader
+	as               auditReader
+	mnt              maintenanceReader
+	sessionSnapshots sessionSnapshotWriter
+	sessionQueries   sessionQueryReader
+	sessionActions   sessionActionStore
+	freshness        *telemetry.FreshnessStore
+	// sessionPolicyMu serializes policy mutation with action enqueue and
+	// report-side delivery so no command crosses a policy transition.
+	sessionPolicyMu          sync.Mutex
 	heartbeatIntervalNanos   atomic.Int64
 	heartbeatIntervalChanged chan struct{}
-	freshness                *telemetry.FreshnessStore
 
 	// now and staleSweepTicks are deterministic test seams. Production uses
 	// time.Now and a timer derived from the current heartbeat interval.
@@ -297,6 +304,15 @@ func (ds *DashboardServer) wireServerStateCallbacks() {
 		ds.broadcastForceUpdateCompletion(payload.Host, payload)
 	}
 
+	// Local reports must use the same delivery, decryption, completion, and
+	// acknowledgement lifecycle as authenticated remote reports.
+	state.DeliverSessionActions = func(host string) ([]sessiondata.PendingSessionAction, error) {
+		return ds.deliverSessionActions(context.Background(), strings.ToLower(host))
+	}
+	state.CompleteSessionActions = func(host string, actions []sessiondata.CompletedSessionAction) ([]string, error) {
+		return ds.completeSessionActions(context.Background(), strings.ToLower(host), actions)
+	}
+
 	// Wire metrics ingest for both HTTP and local-report paths.
 	if ms != nil {
 		state.OnMetrics = func(r dc.CheckResult) {
@@ -310,6 +326,14 @@ func (ds *DashboardServer) wireServerStateCallbacks() {
 				slog.Warn("telemetry: metrics append failed", "host", r.Host, "error", err)
 			}
 		}
+	}
+
+	// Local collection bypasses HTTP. Keep the same validation, privacy
+	// projection, atomic Apply, and post-commit invalidation path as remote
+	// machine submissions.
+	state.OnSessionSnapshot = func(snapshot sessiondata.SessionSnapshot) error {
+		_, err := ds.ingestSessionSnapshot(context.Background(), snapshot)
+		return err
 	}
 }
 
@@ -353,6 +377,7 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	// requireSession validates the drainctl_session cookie for dashboard routes.
 	// Dev builds treat this as a no-op.
 	rs := requireSession(ds.sessionStore)
+	ra := requireAdmin(ds.sessionStore)
 
 	rlw := func(h http.Handler) http.Handler { return rateLimitMiddleware(rl, h) }
 
@@ -365,6 +390,7 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("POST /api/v1/register", rlw(wa(rma(http.HandlerFunc(ds.handleRegister)))))
 	mux.Handle("POST /api/v1/report", rlw(wa(rma(http.HandlerFunc(ds.handleReport)))))
 	mux.Handle("POST /api/v1/spike", rlw(wa(rma(http.HandlerFunc(ds.handleReportSpike)))))
+	mux.Handle("POST /api/v1/session-snapshot", rlw(wrapSnapshotAuth(ctx, requireSnapshotMachineAccount(http.HandlerFunc(ds.handleSessionSnapshot)))))
 
 	// Auth routes — create and invalidate dashboard sessions.
 	// POST /api/v1/auth/negotiate: short-circuits to 200 for existing valid sessions;
@@ -378,8 +404,7 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("POST /api/v1/auth/negotiate", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cookie, err := r.Cookie("drainctl_session"); err == nil && cookie.Value != "" {
 			if sess := ds.sessionStore.Get(cookie.Value); sess != nil {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]string{"username": sess.Username})
+				writeAuthResponse(w, sess.Username, sess.IsAdmin)
 				return
 			}
 		}
@@ -391,22 +416,8 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 
 	// GET /api/v1/me: lightweight session probe used on page load to restore an
 	// existing authenticated session without triggering a new Negotiate handshake.
-	// Returns {"user":"…"} with a valid session cookie; plain 401 otherwise.
 	// Must NOT set WWW-Authenticate — this endpoint is plain-fetch only.
-	mux.Handle("GET /api/v1/me", rlw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("drainctl_session")
-		if err != nil || cookie.Value == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		sess := ds.sessionStore.Get(cookie.Value)
-		if sess == nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"user": sess.Username})
-	})))
+	mux.Handle("GET /api/v1/me", rlw(handleMe(ds.sessionStore)))
 
 	// Management / UI routes — require a valid dashboard session cookie.
 	mux.Handle("GET /api/v1/metrics", rlw(rs(http.HandlerFunc(ds.handleSeedMetrics))))
@@ -439,6 +450,13 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("GET /api/v1/maintenance/status", rlw(rs(http.HandlerFunc(ds.handleMaintenance))))
 	mux.Handle("GET /api/evtspike/status", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeStatus))))
 	mux.Handle("GET /api/evtspike/spikes", rlw(rs(http.HandlerFunc(ds.handleEvtSpikeSpikes))))
+
+	// Fleet Sessions holds workstation-derived data and is administrator-only.
+	mux.Handle("GET /api/v1/sessions", rlw(ra(http.HandlerFunc(ds.handleSessionsFleet))))
+	mux.Handle("GET /api/v1/sessions/{host}", rlw(ra(http.HandlerFunc(ds.handleSessionDetail))))
+	mux.Handle("POST /api/v1/sessions/{host}/{sessionID}/actions", rlw(ra(http.HandlerFunc(ds.handleSessionAction))))
+	mux.Handle("GET /api/v1/session-actions/{actionID}", rlw(ra(http.HandlerFunc(ds.handleSessionActionStatus))))
+	mux.Handle("GET /api/v1/sessions/{host}/{sessionID}/shadow", rlw(ra(http.HandlerFunc(ds.handleSessionShadow))))
 
 	// SSE event stream — session auth, no rate limit (long-lived connection).
 	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
@@ -488,6 +506,27 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	// SPA HTML is served without authentication — the Svelte app handles the
 	// auth flow client-side via POST /api/v1/auth/negotiate and /auth/login.
 	mux.Handle("GET /", rlw(http.HandlerFunc(ds.handleUI)))
+}
+
+// handleMe returns the current server-issued dashboard session projection.
+func handleMe(store *SessionStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("drainctl_session")
+		if err != nil || cookie.Value == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		sess := store.Get(cookie.Value)
+		if sess == nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			User    string `json:"user"`
+			IsAdmin bool   `json:"is_admin"`
+		}{User: sess.Username, IsAdmin: sess.IsAdmin})
+	}
 }
 
 // cspBase is the Content-Security-Policy value applied to all responses.

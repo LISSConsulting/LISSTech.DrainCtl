@@ -208,6 +208,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		Performance             dc.PerformanceConfig `json:"performance"`
 		EvtSpike                evtspikeView         `json:"evtspike"`
 		Update                  dc.UpdateConfig      `json:"update"`
+		Sessions                dc.SessionsConfig    `json:"sessions"`
 	}{
 		Notifications:           makeNotifyTargetViews(cfg.Notifications),
 		NotificationExclusions:  cfg.NotificationExclusions,
@@ -218,6 +219,7 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 		Performance:             cfg.Performance,
 		EvtSpike:                buildEvtSpikeView(cfg.EvtSpike),
 		Update:                  cfg.Update,
+		Sessions:                cfg.Sessions,
 	}
 	if resp.NotificationExclusions == nil {
 		resp.NotificationExclusions = []string{}
@@ -309,8 +311,13 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case msg := <-ch:
-			_, err := fmt.Fprintf(w, "data: %s\n\n", msg)
-			if err != nil {
+			var event SSEEvent
+			if json.Unmarshal(msg, &event) == nil && (event.Type == "session_snapshot" || event.Type == "session_action") {
+				_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
+				if err != nil {
+					return
+				}
+			} else if _, err := fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
 				return
 			}
 			flusher.Flush()

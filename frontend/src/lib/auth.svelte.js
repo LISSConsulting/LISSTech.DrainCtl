@@ -5,12 +5,40 @@
  * Null username means the user is not authenticated.
  */
 
+import { clearSessionState } from './state.svelte.js';
+import { SESSION_ACTION_STORAGE_KEY, stopSessionActionPolling } from './session-actions.svelte.js';
+
+function applyAuthenticatedUser(data) {
+    const wasAdmin = authState.isAdmin;
+    authState.username = data.user ?? data.username ?? null;
+    authState.isAdmin = data.is_admin === true;
+    if (wasAdmin && !authState.isAdmin) clearSessionClientState();
+    authState.error = null;
+}
+
+export function clearSessionClientState() {
+    clearSessionState();
+    stopSessionActionPolling();
+    try {
+        if (typeof window !== 'undefined') window.sessionStorage.removeItem(SESSION_ACTION_STORAGE_KEY);
+    } catch {
+        // Storage may be unavailable in a privacy-restricted browser context.
+    }
+}
+
+function clearAuthenticatedUser() {
+    authState.username = null;
+    authState.isAdmin = false;
+    clearSessionClientState();
+}
+
 /**
  * Shared authentication state. Null username = not logged in.
- * @type {{ username: string|null, loading: boolean, error: string|null }}
+ * @type {{ username: string|null, isAdmin: boolean, loading: boolean, error: string|null }}
  */
 export const authState = $state({
     username: null,
+    isAdmin: false,
     /** True while a session check or auth operation is in flight. Initialised
      *  true so the loading indicator shows on app load while checkSession runs. */
     loading: true,
@@ -30,12 +58,13 @@ export async function checkSession() {
         const res = await fetch('/api/v1/me', { credentials: 'include' });
         if (res.ok) {
             const data = await res.json();
-            authState.username = data.user;
-            authState.error = null;
+            applyAuthenticatedUser(data);
+        } else {
+            clearAuthenticatedUser();
         }
         // 401 = no valid session → show login, no error state needed
     } catch {
-        // Network error → show login
+        clearAuthenticatedUser();
     } finally {
         authState.loading = false;
     }
@@ -56,8 +85,7 @@ export async function signInWithWindows() {
         });
         if (res.ok) {
             const data = await res.json();
-            authState.username = data.username;
-            authState.error = null;
+            applyAuthenticatedUser(data);
         } else {
             authState.error = 'windows_auth_failed';
         }
@@ -84,8 +112,7 @@ export async function loginWithCredentials(username, password) {
         });
         if (res.ok) {
             const data = await res.json();
-            authState.username = data.username;
-            authState.error = null;
+            applyAuthenticatedUser(data);
         } else if (res.status === 401 || res.status === 403) {
             try {
                 const body = await res.json();
@@ -113,7 +140,7 @@ export async function logout() {
     } catch {
         // Ignore network errors — always complete the client-side logout.
     } finally {
-        authState.username = null;
+        clearAuthenticatedUser();
         authState.error = null;
         authState.loading = false;
     }

@@ -41,6 +41,14 @@ type pdhFmtCountervalueItemDouble struct {
 	Value pdhFmtCountervalueDouble
 }
 
+// pdhInstanceValue is one value returned for a wildcard PDH counter. Instance
+// is copied while PDH's result buffer is still valid so callers can safely
+// correlate it with another data source.
+type pdhInstanceValue struct {
+	Instance string
+	Value    float64
+}
+
 var (
 	modPdh = windows.NewLazySystemDLL("pdh.dll")
 
@@ -124,6 +132,46 @@ func pdhGetDouble(counter syscall.Handle) (float64, error) {
 }
 
 func pdhGetDoubleArray(counter syscall.Handle) ([]float64, error) {
+	buf, itemCount, err := pdhGetDoubleArrayBuffer(counter)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]float64, 0, itemCount)
+	itemSize := unsafe.Sizeof(pdhFmtCountervalueItemDouble{})
+	for i := range itemCount {
+		item := (*pdhFmtCountervalueItemDouble)(unsafe.Pointer(&buf[uintptr(i)*itemSize]))
+		if item.Value.CStatus == pdhCStatusValidData || item.Value.CStatus == pdhCStatusNewData {
+			values = append(values, item.Value.Value)
+		}
+	}
+	return values, nil
+}
+
+// pdhGetDoubleArrayInstances reads a wildcard counter without discarding its
+// instance names. PDH's array buffer is only valid for the duration of this
+// call, so names must be converted before returning.
+func pdhGetDoubleArrayInstances(counter syscall.Handle) ([]pdhInstanceValue, error) {
+	buf, itemCount, err := pdhGetDoubleArrayBuffer(counter)
+	if err != nil {
+		return nil, err
+	}
+	itemSize := unsafe.Sizeof(pdhFmtCountervalueItemDouble{})
+	values := make([]pdhInstanceValue, 0, itemCount)
+	for i := range itemCount {
+		item := (*pdhFmtCountervalueItemDouble)(unsafe.Pointer(&buf[uintptr(i)*itemSize]))
+		if item.Value.CStatus != pdhCStatusValidData && item.Value.CStatus != pdhCStatusNewData {
+			continue
+		}
+		instance := ""
+		if item.Name != nil {
+			instance = windows.UTF16PtrToString(item.Name)
+		}
+		values = append(values, pdhInstanceValue{Instance: instance, Value: item.Value.Value})
+	}
+	return values, nil
+}
+
+func pdhGetDoubleArrayBuffer(counter syscall.Handle) ([]byte, uint32, error) {
 	var bufSize, itemCount uint32
 	ret, _, _ := procPdhGetFormattedCounterArray.Call(
 		uintptr(counter), pdhFmtDouble,
@@ -132,10 +180,10 @@ func pdhGetDoubleArray(counter syscall.Handle) ([]float64, error) {
 		0,
 	)
 	if ret != pdhMoreData && ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW size: 0x%08X", ret)
+		return nil, 0, fmt.Errorf("PdhGetFormattedCounterArrayW size: 0x%08X", ret)
 	}
 	if itemCount == 0 || bufSize == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	buf := make([]byte, bufSize)
@@ -146,18 +194,9 @@ func pdhGetDoubleArray(counter syscall.Handle) ([]float64, error) {
 		uintptr(unsafe.Pointer(&buf[0])),
 	)
 	if ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW: 0x%08X", ret)
+		return nil, 0, fmt.Errorf("PdhGetFormattedCounterArrayW: 0x%08X", ret)
 	}
-
-	itemSize := unsafe.Sizeof(pdhFmtCountervalueItemDouble{})
-	values := make([]float64, 0, itemCount)
-	for i := uint32(0); i < itemCount; i++ {
-		item := (*pdhFmtCountervalueItemDouble)(unsafe.Pointer(&buf[uintptr(i)*itemSize]))
-		if item.Value.CStatus == pdhCStatusValidData || item.Value.CStatus == pdhCStatusNewData {
-			values = append(values, item.Value.Value)
-		}
-	}
-	return values, nil
+	return buf, itemCount, nil
 }
 
 func pdhCloseQuery(query syscall.Handle) {

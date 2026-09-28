@@ -1498,6 +1498,49 @@ drainctl configure --session-warning-threshold 90
                 utilization at a glance.
             </p>
 
+            <h3>Fleet Sessions operator guide</h3>
+            <p>
+                The dashboard&rsquo;s <strong>Sessions</strong> tab is an administrator-only, current-state view for
+                registered hosts. Collection is enabled by default. It is not a session-history or chart feature:
+                each accepted complete snapshot replaces that host&rsquo;s current rows, and a successful empty snapshot
+                means that no current sessions remain. Retention only keeps the last accepted current snapshot for the
+                configured window; it does not create historical session records.
+            </p>
+            <p>
+                Open <strong>Configuration &rarr; Sessions</strong> to enable or disable collection, choose whether
+                bounded per-session processes are collected, set the top-process count (0&ndash;5; default 3), and set
+                current-snapshot retention (1&ndash;168 hours; default 24). Disabling Sessions makes fleet and host
+                detail unavailable even while retained rows wait for normal expiry. It also stops new snapshot
+                collection; disabling actions prevents command delivery in agent report responses.
+            </p>
+            <p>
+                Identity, client, and process visibility are independently <strong>full</strong>,
+                <strong>masked</strong>, or <strong>hidden</strong>. The selected projection is applied before storage.
+                Changing any visibility setting immediately removes retained session detail and expires affected
+                actions; changing back to a looser setting cannot restore what was purged. Use hidden when the
+                dashboard must retain counts without session identity, client, or process detail.
+            </p>
+            <p>
+                Actions are disabled by default. When an administrator explicitly enables them, Message, Disconnect,
+                and Log Off each require explicit confirmation and a fresh, error-free snapshot. The agent binds every
+                action to the exact numeric session ID and logon time, then rechecks both immediately before the local
+                WTS call, so a reused session ID is refused. Shadow
+                launches only the endpoint-provided <code>drainctl-shadow://shadow?host=&lt;host&gt;&amp;session=&lt;id&gt;</code>
+                URI through the installed local helper, with
+                <code>mstsc.exe /v:&lt;host&gt; /shadow:&lt;id&gt; /control</code> available as a copy fallback. Any
+                site or local app can invoke this protocol, so the helper strictly validates its complete URI before
+                starting local mstsc with fixed arguments. Normal browser/Windows external-protocol confirmation and
+                mstsc consent remain; DrainCtl never adds <code>/noConsentPrompt</code>, credentials, or arbitrary arguments.
+            </p>
+            <p>
+                <strong>Freshness:</strong> a host with no successful snapshot is unknown; it is stale after more than
+                three heartbeat intervals and offline after more than ten, or when the registry marks it offline. A
+                fatal collection error is shown separately and keeps the last successful current rows rather than
+                claiming an empty host. If Sessions appears unavailable, first confirm that Sessions is enabled, the
+                host remains registered and reporting, and the agent can reach the dashboard; then inspect the
+                collection error/capability state before changing privacy or action policy.
+            </p>
+
             <!-- ── Dashboard ──────────────────────────────────────────────────────── -->
             <h2 id="dashboard">9. Multi-Server Dashboard</h2>
 

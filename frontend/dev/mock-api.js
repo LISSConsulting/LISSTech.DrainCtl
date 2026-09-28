@@ -44,6 +44,17 @@ const APP_VERSION = currentAppVersion();
 /** Clamp n to [lo, hi]. */
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
+/** Pure contract guard shared by the mock route and Node-only fixture tests. */
+export function sessionQueryIsValid(query = {}) {
+    return (
+        ['all', 'active', 'disconnected', 'idle'].includes(query.state ?? 'all') &&
+        ['host', 'status', 'mode', 'sessions', 'active', 'idle', 'disconnected', 'users', 'last_activity'].includes(
+            query.sort ?? 'host',
+        ) &&
+        ['asc', 'desc'].includes(query.dir ?? 'asc') &&
+        [15, 30, 50].includes(Number(query.page_size ?? 30))
+    );
+}
 /** Random float in [lo, hi). */
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 
@@ -630,7 +641,279 @@ let mockSettings = {
         channel: 'stable',
         poll_interval: '24h0m0s',
     },
+    sessions: {
+        enabled: true,
+        collect_processes: true,
+        top_processes: 5,
+        retention_hours: 48,
+        allow_actions: true,
+        identity_visibility: 'full',
+        client_visibility: 'masked',
+        process_visibility: 'masked',
+    },
 };
+let mockUser = { user: 'DEV\\mockadmin', is_admin: true };
+
+// Fleet Sessions deliberately covers every collection/freshness/capability
+// combination without leaking a session record through the fleet projection.
+const SESSION_HOSTS = [
+    {
+        host: 'rdsh01.contoso.com',
+        freshness: 'fresh',
+        collection_status: 'ok',
+        capabilities: { session_actions: true, processes: true, input_delay: true, remotefx: true },
+    },
+    {
+        host: 'rdsh02.contoso.com',
+        freshness: 'fresh',
+        collection_status: 'ok',
+        capabilities: { session_actions: false, processes: true, input_delay: true, remotefx: false },
+    },
+    {
+        host: 'rdsh03.contoso.com',
+        freshness: 'stale',
+        collection_status: 'ok',
+        capabilities: { session_actions: true, processes: true, input_delay: false, remotefx: false },
+    },
+    {
+        host: 'rdsh04.contoso.com',
+        freshness: 'unknown',
+        collection_status: 'error',
+        capabilities: null,
+        collection_error_code: 'collector_timeout',
+    },
+    {
+        host: 'rdsh05.contoso.com',
+        freshness: 'fresh',
+        collection_status: 'ok',
+        capabilities: { session_actions: true, processes: false, input_delay: true, remotefx: false },
+    },
+    {
+        host: 'rdsh06.contoso.com',
+        freshness: 'fresh',
+        collection_status: 'ok',
+        capabilities: { session_actions: true, processes: true, input_delay: true, remotefx: false },
+    },
+];
+
+// A snapshot's session rows are immutable until a replacement snapshot arrives.
+// Keeping one timestamp basis lets action preconditions survive the detail → POST round trip.
+const SESSION_RECORDS_AT_MS = Date.now();
+const sessionActions = new Map();
+let nextSessionAction = 1;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CANONICAL_HOST_PATTERN =
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Required wire keys for the session detail fixture. Keep synchronized with SessionRecord. */
+export const SESSION_DETAIL_SESSION_KEYS = Object.freeze([
+    'session_id',
+    'state',
+    'logon_at_ms',
+    'user',
+    'domain',
+    'station',
+    'client_name',
+    'client_address',
+    'connect_at_ms',
+    'disconnect_at_ms',
+    'idle_since_ms',
+    'cpu_percent',
+    'working_set_bytes',
+    'input_delay_ms',
+    'remotefx',
+    'processes',
+]);
+export const SESSION_PROCESS_KEYS = Object.freeze(['pid', 'image_name', 'cpu_percent', 'working_set_bytes']);
+export const SESSION_ACTION_STATUS_KEYS = Object.freeze([
+    'action_id',
+    'host',
+    'session_id',
+    'expected_logon_at_ms',
+    'type',
+    'state',
+    'created_at_ms',
+    'expires_at_ms',
+    'completed_at_ms',
+    'result_code',
+]);
+
+/** Validate the action body's exact wire shape before lifecycle processing. */
+export function sessionActionRequestIsValid(body) {
+    return (
+        body &&
+        typeof body === 'object' &&
+        !Array.isArray(body) &&
+        !Object.keys(body).some((field) => !['type', 'expected_logon_at_ms', 'message'].includes(field)) &&
+        ['disconnect', 'message', 'logoff'].includes(body.type) &&
+        Number.isSafeInteger(body.expected_logon_at_ms) &&
+        body.expected_logon_at_ms >= 0 &&
+        (body.type === 'disconnect' || body.type === 'logoff'
+            ? body.message === undefined || body.message === ''
+            : typeof body.message === 'string' &&
+              !!body.message.trim() &&
+              Array.from(body.message.trim()).length <= 256 &&
+              !/[\u0000-\u0009\u000b-\u001f\u007f]/.test(body.message.trim()))
+    );
+}
+
+function sessionRecords(hostIndex) {
+    const now = SESSION_RECORDS_AT_MS;
+    const states = ['active', 'disconnected', 'idle', 'connected', 'unknown'];
+    return states.map((state, i) => ({
+        session_id: hostIndex * 100 + i + 1,
+        state,
+        logon_at_ms: i === 4 ? null : now - (i + 1) * 3_600_000,
+        last_activity_at_ms: i === 1 ? null : now - (i + 2) * 120_000,
+        user: i === 4 ? null : `user${hostIndex}${i + 1}`,
+        domain: i === 4 ? null : 'CONTOSO',
+        station: i === 3 ? 'LAB-WS-17' : `WS-${hostIndex}${i + 1}`,
+        client_name: i === 4 ? null : `client-${hostIndex}${i + 1}`,
+        client_address: i === 4 ? null : `10.40.${hostIndex}.${i + 10}`,
+        connect_at_ms: i === 1 || i === 4 ? null : now - (i + 1) * 3_590_000,
+        disconnect_at_ms: i === 1 ? now - (i + 1) * 60_000 : null,
+        idle_since_ms: i === 2 ? now - 15 * 60_000 : null,
+        cpu_percent: i === 4 ? null : Math.round((3.4 + i * 4.1) * 10) / 10,
+        working_set_bytes: i === 4 ? null : i === 0 ? '9223372036854775807' : String(104857600 + i * 52428800),
+        input_delay_ms: i === 3 || i === 4 ? null : 8 + i * 6,
+        remotefx:
+            hostIndex === 0 && i === 0
+                ? {
+                      fps: 59.9,
+                      quality_percent: 92.5,
+                      encode_time_ms: 4.3,
+                      rtt_ms: 18.2,
+                      loss_percent: 0.01,
+                      server_skipped_fps: 0,
+                      network_skipped_fps: 0,
+                  }
+                : null,
+        processes:
+            i === 0
+                ? [
+                      {
+                          pid: 4120,
+                          image_name: 'outlook.exe',
+                          cpu_percent: 1.6,
+                          working_set_bytes: '9223372036854775807',
+                      },
+                      { pid: 4864, image_name: 'excel.exe', cpu_percent: null, working_set_bytes: '104857600' },
+                  ]
+                : [],
+    }));
+}
+
+/** Stable fixture for Node contract tests; it follows the live detail projection. */
+export function sessionDetailFixture(hostIndex = 0) {
+    return sessionRecords(hostIndex).map(({ last_activity_at_ms, ...record }) => record);
+}
+
+function sessionHostView(def, index) {
+    const hasSnapshot = def.freshness !== 'unknown';
+    const records = hasSnapshot ? sessionRecords(index) : [];
+    const counts = records.reduce(
+        (a, s) => {
+            a.session_count++;
+            if (s.state === 'active' || s.state === 'connected') a.active_count++;
+            if (s.state === 'idle') a.idle_count++;
+            if (s.state === 'disconnected') a.disconnected_count++;
+            if (s.user) a.user_count++;
+            return a;
+        },
+        { session_count: 0, active_count: 0, idle_count: 0, disconnected_count: 0, user_count: 0 },
+    );
+    const received = Date.now() - (def.freshness === 'stale' ? 20 * 60_000 : 5_000);
+    return {
+        host: def.host,
+        mode: index % 2 ? 'drain' : 'serve',
+        status: index === 3 ? 'alert' : 'ok',
+        collection: index < 4 ? 'RDS Production' : 'RDS Apps',
+        freshness: def.freshness,
+        latest_attempt_instance_id: `mock-session-agent-${index + 1}`,
+        latest_attempt_sequence: String(9007199254740993n + BigInt(index)),
+        latest_attempt_observed_at_ms: received - 2_000,
+        latest_attempt_received_at_ms: received,
+        last_success_instance_id: hasSnapshot ? `mock-session-agent-${index + 1}` : null,
+        last_success_sequence: hasSnapshot ? String(9007199254740993n + BigInt(index)) : null,
+        last_success_observed_at_ms: hasSnapshot ? received - 2_000 : null,
+        last_success_received_at_ms: hasSnapshot ? received : null,
+        ...(hasSnapshot
+            ? counts
+            : {
+                  session_count: null,
+                  active_count: null,
+                  idle_count: null,
+                  disconnected_count: null,
+                  user_count: null,
+              }),
+        last_activity_at_ms: hasSnapshot
+            ? (records.find((s) => s.last_activity_at_ms)?.last_activity_at_ms ?? null)
+            : null,
+        capabilities: def.capabilities,
+        collection_status: def.collection_status,
+        collection_error_code: def.collection_error_code ?? null,
+        detail_available: hasSnapshot,
+    };
+}
+
+function sessionActionStatus(action) {
+    return {
+        action_id: action.action_id,
+        host: action.host,
+        session_id: action.session_id,
+        expected_logon_at_ms: action.expected_logon_at_ms,
+        type: action.type,
+        state: action.state,
+        created_at_ms: action.created_at_ms,
+        expires_at_ms: action.expires_at_ms,
+        completed_at_ms: action.completed_at_ms ?? null,
+        result_code: action.result_code ?? null,
+    };
+}
+
+function sessionActionSSEStatus(action) {
+    return {
+        action_id: action.action_id,
+        state: action.state,
+        completed_at_ms: action.completed_at_ms ?? null,
+        result_code: action.result_code ?? null,
+    };
+}
+
+export function sessionActionSSEStatusFixture() {
+    return sessionActionSSEStatus(sessionActionStatusFixture());
+}
+
+/** Stable fixture for Node contract tests; terminal action statuses retain every timestamp. */
+export function sessionActionStatusFixture() {
+    return sessionActionStatus({
+        action_id: '019b0000-0000-7000-8000-000000000001',
+        host: 'rdsh01.contoso.com',
+        session_id: 1,
+        expected_logon_at_ms: 1_700_000_000_000,
+        type: 'logoff',
+        state: 'completed',
+        created_at_ms: 1_700_000_000_000,
+        expires_at_ms: 1_700_000_300_000,
+        completed_at_ms: 1_700_000_001_000,
+        result_code: 'completed',
+    });
+}
+
+/** The API preserves the command as a copy fallback and owns the launch URI. */
+export function mockShadowCommand(host, sessionID) {
+    return `mstsc.exe /v:${host} /shadow:${sessionID} /control`;
+}
+
+export function mockShadowProtocolURI(host, sessionID) {
+    return `drainctl-shadow://shadow?host=${host}&session=${sessionID}`;
+}
+
+function sessionActionID() {
+    const id = `019b0000-0000-7000-8000-${String(nextSessionAction++).padStart(12, '0')}`;
+    return id;
+}
 
 /**
  * Seed a perf-metrics ring buffer with MAX_PERF_HISTORY plausible past samples.
@@ -951,15 +1234,19 @@ function seedHistory(host, currentStatus) {
 const sseClients = new Set();
 
 /**
- * Broadcast a DrainCtl SSE event to all connected clients.
- * Silently ignores clients whose connections have already closed.
- * @param {'server_update'|'server_deleted'|'settings_update'} type
- * @param {object|null} data
- * @param {string} [host]
+ * Serialize exactly as the production event stream: snapshot and action
+ * updates use named events whose data is the raw privacy-safe payload.
  */
-function broadcastSSE(type, data, host) {
+export function mockSSEFrame(type, data, host) {
+    if (type === 'session_snapshot' || type === 'session_action') {
+        return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+    }
     const payload = JSON.stringify({ type, host, data, timestamp: new Date().toISOString() });
-    const frame = `data: ${payload}\n\n`;
+    return `data: ${payload}\n\n`;
+}
+
+function broadcastSSE(type, data, host) {
+    const frame = mockSSEFrame(type, data, host);
     for (const res of sseClients) {
         try {
             res.write(frame);
@@ -1097,6 +1384,39 @@ function startEvolution() {
                 broadcastSSE('server_update', serverView(host), host);
             }
         }
+        // Match the production metadata-only invalidation event: no identities,
+        // client data, processes, action payloads, or session records leave SSE.
+        const index = Math.floor(now / 10_000) % SESSION_HOSTS.length;
+        const snapshot = sessionHostView(SESSION_HOSTS[index], index);
+        broadcastSSE(
+            'session_snapshot',
+            {
+                host: snapshot.host,
+                latest_attempt_instance_id: snapshot.latest_attempt_instance_id,
+                latest_attempt_sequence: snapshot.latest_attempt_sequence,
+                latest_attempt_observed_at_ms: snapshot.latest_attempt_observed_at_ms,
+                latest_attempt_received_at_ms: snapshot.latest_attempt_received_at_ms,
+                last_success_instance_id: snapshot.last_success_instance_id,
+                last_success_sequence: snapshot.last_success_sequence,
+                last_success_observed_at_ms: snapshot.last_success_observed_at_ms,
+                last_success_received_at_ms: snapshot.last_success_received_at_ms,
+                freshness: snapshot.freshness,
+                session_count: snapshot.session_count ?? 0,
+                active_count: snapshot.active_count ?? 0,
+                capabilities: snapshot.capabilities ?? {},
+                actions_available: !!(
+                    mockSettings.sessions.enabled &&
+                    mockSettings.sessions.allow_actions &&
+                    snapshot.freshness === 'fresh' &&
+                    snapshot.capabilities?.session_actions
+                ),
+                collection_status: snapshot.collection_status,
+                last_error: snapshot.collection_error_code
+                    ? { code: snapshot.collection_error_code, at_ms: snapshot.latest_attempt_received_at_ms }
+                    : null,
+            },
+            snapshot.host,
+        );
     }, 10_000); // every 10 seconds
 }
 
@@ -1176,8 +1496,222 @@ function matchRoute(pattern, pathname) {
     return params;
 }
 
-function handleRequest(method, pathname, body, query = {}) {
+/**
+ * Match a fleet/detail query without leaking identity metadata hidden by policy.
+ * Session IDs are always searchable; identities are searchable only when fully visible.
+ */
+export function mockSessionMatchesQuery(record, query, identityVisibility = 'full') {
+    const q = String(query ?? '').toLowerCase();
+    if (!q) return true;
+    const searchable = [String(record.session_id)];
+    if (identityVisibility === 'full') searchable.push(record.user, record.domain);
+    return searchable.filter(Boolean).join(' ').toLowerCase().includes(q);
+}
+
+function handleRequest(method, pathname, body, query = {}, headers = {}) {
     ensureState();
+    if (method === 'GET' && pathname === '/api/v1/me') return { status: 200, body: mockUser };
+
+    // Fleet Sessions: fleet rows are metadata-only; identities and processes
+    // exist only on the bounded host-detail route.
+    const isSessionsAdmin = () => mockUser.is_admin;
+    const detailRecord = (record) => {
+        const policy = mockSettings.sessions;
+        const visible = (value, setting) =>
+            setting === 'hidden' ? null : setting === 'masked' && value ? '••••' : value;
+        const { last_activity_at_ms, ...safe } = record;
+        return {
+            ...safe,
+            user: visible(record.user, policy.identity_visibility),
+            domain: visible(record.domain, policy.identity_visibility),
+            station: visible(record.station, policy.client_visibility),
+            client_name: visible(record.client_name, policy.client_visibility),
+            client_address: visible(record.client_address, policy.client_visibility),
+            processes:
+                !policy.collect_processes || policy.process_visibility === 'hidden'
+                    ? []
+                    : record.processes.map((p) => ({
+                          ...p,
+                          image_name: visible(p.image_name, policy.process_visibility),
+                      })),
+        };
+    };
+    const sessionMatchesQuery = (record, q) =>
+        mockSessionMatchesQuery(record, q, mockSettings.sessions.identity_visibility);
+    const validFleetQuery = () => sessionQueryIsValid(query);
+    if (
+        (pathname.startsWith('/api/v1/sessions') || pathname.startsWith('/api/v1/session-actions/')) &&
+        !isSessionsAdmin()
+    ) {
+        return { status: 403, body: { error: 'admin_required' } };
+    }
+    if (method === 'GET' && pathname === '/api/v1/sessions') {
+        const page = Number(query.page ?? 1),
+            pageSize = Number(query.page_size ?? 30);
+        if (!validFleetQuery() || !Number.isInteger(page) || page < 1 || page > 10000)
+            return { status: 400, body: { error: 'invalid_sessions_query' } };
+        const q = String(query.q ?? '').toLowerCase(),
+            stateFilter = query.state ?? 'all',
+            sort = query.sort ?? 'host',
+            dir = query.dir === 'desc' ? -1 : 1;
+        const items = SESSION_HOSTS.map(sessionHostView).filter(
+            (item, index) =>
+                (!q ||
+                    `${item.host} ${item.collection}`.toLowerCase().includes(q) ||
+                    sessionRecords(index).some((record) => sessionMatchesQuery(record, q))) &&
+                (stateFilter === 'all' || (item[`${stateFilter}_count`] ?? 0) > 0),
+        );
+        const fields = {
+            sessions: 'session_count',
+            active: 'active_count',
+            idle: 'idle_count',
+            disconnected: 'disconnected_count',
+            users: 'user_count',
+            last_activity: 'last_activity_at_ms',
+        };
+        items.sort((a, b) => {
+            const av = a[fields[sort] ?? sort] ?? -1,
+                bv = b[fields[sort] ?? sort] ?? -1;
+            return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir || a.host.localeCompare(b.host);
+        });
+        return {
+            status: 200,
+            body: {
+                query: {
+                    q: query.q ?? '',
+                    state: stateFilter,
+                    sort,
+                    dir: query.dir ?? 'asc',
+                    page,
+                    page_size: pageSize,
+                },
+                total: items.length,
+                page: { number: page, size: pageSize, pages: Math.ceil(items.length / pageSize) },
+                server_now_ms: Date.now(),
+                items: items.slice((page - 1) * pageSize, page * pageSize),
+            },
+        };
+    }
+    const detail = matchRoute('/api/v1/sessions/:host', pathname);
+    if (method === 'GET' && detail) {
+        const index = SESSION_HOSTS.findIndex((x) => x.host === detail.host),
+            page = Number(query.page ?? 1),
+            pageSize = Number(query.page_size ?? 30);
+        if (index < 0) return { status: 404, body: { error: 'session_snapshot_not_found' } };
+        if (![15, 30, 50].includes(pageSize) || !Number.isInteger(page) || page < 1 || page > 100)
+            return { status: 400, body: { error: 'invalid_sessions_query' } };
+        const metadata = sessionHostView(SESSION_HOSTS[index], index);
+        if (!metadata.detail_available) return { status: 404, body: { error: 'session_snapshot_not_found' } };
+        const q = String(query.q ?? '').toLowerCase(),
+            records = sessionRecords(index).filter((record) => sessionMatchesQuery(record, q));
+        const { detail_available, mode, status, collection, ...safe } = metadata;
+        return {
+            status: 200,
+            body: {
+                ...safe,
+                actions_available: !!(
+                    mockSettings.sessions.enabled &&
+                    mockSettings.sessions.allow_actions &&
+                    metadata.freshness === 'fresh' &&
+                    metadata.capabilities?.session_actions
+                ),
+                summary: {
+                    total: metadata.session_count ?? 0,
+                    active: metadata.active_count ?? 0,
+                    idle: metadata.idle_count ?? 0,
+                    disconnected: metadata.disconnected_count ?? 0,
+                    users: metadata.user_count ?? 0,
+                    last_activity_at_ms: metadata.last_activity_at_ms,
+                },
+                query: { q: query.q ?? '', page, page_size: pageSize },
+                total: records.length,
+                sessions: records.slice((page - 1) * pageSize, page * pageSize).map(detailRecord),
+            },
+        };
+    }
+    const shadow = matchRoute('/api/v1/sessions/:host/:sessionID/shadow', pathname);
+    if (method === 'GET' && shadow) {
+        const index = SESSION_HOSTS.findIndex((x) => x.host === shadow.host),
+            metadata = index < 0 ? null : sessionHostView(SESSION_HOSTS[index], index);
+        if (!metadata || !sessionRecords(index).some((s) => s.session_id === Number(shadow.sessionID)))
+            return { status: 409, body: { error: 'session_changed' } };
+        return {
+            status: 200,
+            body: {
+                command: mockShadowCommand(shadow.host, shadow.sessionID),
+                protocol_uri: mockShadowProtocolURI(shadow.host, shadow.sessionID),
+            },
+        };
+    }
+    const actionRoute = matchRoute('/api/v1/sessions/:host/:sessionID/actions', pathname);
+    if (method === 'POST' && actionRoute) {
+        const index = SESSION_HOSTS.findIndex((x) => x.host === actionRoute.host),
+            target =
+                index < 0 ? null : sessionRecords(index).find((s) => s.session_id === Number(actionRoute.sessionID));
+        const key = String(headers['idempotency-key'] ?? ''),
+            metadata = index < 0 ? null : sessionHostView(SESSION_HOSTS[index], index);
+        if (
+            !CANONICAL_HOST_PATTERN.test(actionRoute.host) ||
+            !UUID_PATTERN.test(key) ||
+            !/^(?:0|[1-9]\d*)$/.test(actionRoute.sessionID) ||
+            Number(actionRoute.sessionID) > 0xffffffff ||
+            !sessionActionRequestIsValid(body)
+        ) {
+            return { status: 400, body: { error: 'invalid_action_request' } };
+        }
+        if (!mockSettings.sessions.enabled || !mockSettings.sessions.allow_actions)
+            return { status: 409, body: { error: 'sessions_disabled' } };
+        if (!metadata) return { status: 404, body: { error: 'session_snapshot_not_found' } };
+        if (metadata.collection_status !== 'ok' || metadata.freshness !== 'fresh')
+            return { status: 409, body: { error: 'host_not_fresh' } };
+        if (!metadata.capabilities?.session_actions) return { status: 409, body: { error: 'actions_unsupported' } };
+        if (!target) return { status: 404, body: { error: 'session_not_found' } };
+        const normalizedMessage = body.type === 'message' ? body.message.trim() : '';
+        const fingerprint = JSON.stringify([body.type, body.expected_logon_at_ms, normalizedMessage]);
+        const replay = [...sessionActions.values()].find(
+            (a) => a.key === key && a.host === actionRoute.host && a.session_id === target.session_id,
+        );
+        if (replay) {
+            return replay.fingerprint === fingerprint
+                ? { status: 200, body: { action: sessionActionStatus(replay) } }
+                : { status: 409, body: { error: 'idempotency_conflict' } };
+        }
+        if (target.logon_at_ms == null || body.expected_logon_at_ms !== target.logon_at_ms)
+            return { status: 409, body: { error: 'session_identity_changed' } };
+        const now = Date.now();
+        const action = {
+            action_id: sessionActionID(),
+            key,
+            fingerprint,
+            host: actionRoute.host,
+            session_id: target.session_id,
+            expected_logon_at_ms: target.logon_at_ms,
+            type: body.type,
+            state: 'queued',
+            created_at_ms: now,
+            expires_at_ms: now + 300_000,
+            completed_at_ms: null,
+            result_code: null,
+        };
+        sessionActions.set(action.action_id, action);
+        broadcastSSE('session_action', sessionActionSSEStatus(action), action.host);
+        setTimeout(() => {
+            if (action.state === 'queued') {
+                action.state = 'completed';
+                action.completed_at_ms = Date.now();
+                action.result_code = 'completed';
+                broadcastSSE('session_action', sessionActionSSEStatus(action), action.host);
+            }
+        }, 750);
+        return { status: 202, body: { action: sessionActionStatus(action) } };
+    }
+    const actionStatus = matchRoute('/api/v1/session-actions/:actionID', pathname);
+    if (method === 'GET' && actionStatus) {
+        const action = sessionActions.get(actionStatus.actionID);
+        return action
+            ? { status: 200, body: sessionActionStatus(action) }
+            : { status: 404, body: { error: 'session_action_not_found' } };
+    }
 
     // GET /api/v1/health
     if (method === 'GET' && pathname === '/api/v1/health') {
@@ -1777,6 +2311,22 @@ function handleRequest(method, pathname, body, query = {}) {
                     },
                 };
             }
+            const sessions = body.sessions;
+            const visibility = ['full', 'masked', 'hidden'];
+            if (
+                sessions &&
+                (!Number.isInteger(sessions.top_processes) ||
+                    sessions.top_processes < 0 ||
+                    sessions.top_processes > 5 ||
+                    !Number.isInteger(sessions.retention_hours) ||
+                    sessions.retention_hours < 1 ||
+                    sessions.retention_hours > 168 ||
+                    !['identity_visibility', 'client_visibility', 'process_visibility'].every((key) =>
+                        visibility.includes(sessions[key]),
+                    ))
+            ) {
+                return { status: 400, body: { error: 'invalid_sessions_config' } };
+            }
             const { rd_connection_broker: _broker, ...settingsPatch } = body;
             mockSettings = {
                 ...mockSettings,
@@ -1849,15 +2399,16 @@ function handleRequest(method, pathname, body, query = {}) {
         return { status: 200, body: { ok: true, message: 'Test notification sent (mock)' } };
     }
 
-    // POST /api/v1/auth/negotiate — always succeeds in dev mode
+    // Usernames containing "viewer" exercise the non-admin navigation boundary.
     if (method === 'POST' && pathname === '/api/v1/auth/negotiate') {
-        return { status: 200, body: { username: 'DEV\\mockuser' } };
+        mockUser = { user: 'DEV\\mockadmin', is_admin: true };
+        return { status: 200, body: { username: mockUser.user, is_admin: true } };
     }
 
-    // POST /api/v1/auth/login — succeeds for any non-empty credentials
     if (method === 'POST' && pathname === '/api/v1/auth/login') {
-        if (body && body.username && body.password) {
-            return { status: 200, body: { username: body.username } };
+        if (body?.username && body?.password) {
+            mockUser = { user: body.username, is_admin: !/viewer|readonly|nonadmin/i.test(body.username) };
+            return { status: 200, body: { username: body.username, is_admin: mockUser.is_admin } };
         }
         return { status: 401, body: { error: 'invalid credentials' } };
     }
@@ -1931,11 +2482,11 @@ export default function mockApi() {
                         try {
                             body = JSON.parse(bodyStr);
                         } catch {}
-                        const result = handleRequest(method, pathname, body, query);
+                        const result = handleRequest(method, pathname, body, query, req.headers);
                         sendResult(res, result, next);
                     });
                 } else {
-                    const result = handleRequest(method, pathname, null, query);
+                    const result = handleRequest(method, pathname, null, query, req.headers);
                     sendResult(res, result, next);
                 }
             });

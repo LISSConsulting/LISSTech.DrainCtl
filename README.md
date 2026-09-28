@@ -44,12 +44,13 @@ Query from CLI, PowerShell, or your RMM. Local answers come from a named pipe in
 
 <h2 id="latest-release">▎ Latest stable release</h2>
 
-The [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) completes the runtime-resilience work while preserving existing fleet workflows:
-
+The [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest) completes the runtime-resilience work and adds Fleet Sessions while preserving existing fleet workflows:
 - **Bounded service recovery** — Windows SCM restarts the first and second unexpected service exits after five seconds, then leaves a third failure stopped; the failure count resets after one day.
 - **Protected local crash evidence** — WER LocalDumps creates up to three `drainctld.exe` mini dumps in a SYSTEM/Administrators-only ProgramData directory. DrainCtl never uploads or adds dump contents to telemetry.
 - **Durable host freshness** — SQLite-backed report epochs survive dashboard restarts and produce one additive offline and one recovery SSE event per outage without changing the compatible `server_update` event.
 - **Trustworthy RemoteFX history** — local and remote reports reject invalid values before persistence; inactive zero FPS/quality becomes a chart gap while valid lower-is-better zeroes remain meaningful.
+- **Current-only Fleet Sessions** — enabled collection publishes up to 500 current WTS session rows per host to an administrator-only dashboard view, with deterministic process compaction and no session-history charts.
+- **Guarded session actions** — administrators can launch a consent-preserving local Shadow session through the installer-registered protocol (with an accessible command-copy fallback), or explicitly queue a five-minute disconnect, logoff, or message action bound to the reviewed session's logon time; the agent, not the dashboard, performs WTS work at most once.
 - **Incident-ready diagnostics** — the installed hourly collector records service recovery policy, WER settings, crash events, and metadata-only dump inventory in protected local storage.
 
 [Download the latest stable MSI](https://github.com/LISSConsulting/LISSTech.DrainCtl/releases/latest), install the [PowerShell module](https://www.powershellgallery.com/packages/LISSTech.DrainCtl), or use the [operator guide](https://lissconsulting.github.io/LISSTech.DrainCtl/guide.html).
@@ -57,7 +58,7 @@ The [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/
 
 <h2 id="toc">▎ Table of contents</h2>
 
-[Latest stable release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Crash diagnostics](#crash-diagnostics) · [Notifications](#notifications) · [EventSpike](#evtspike) · [Configuration](#configuration) · [Telemetry & charts](#telemetry-charts) · [Troubleshooting](#troubleshooting) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
+[Latest stable release](#latest-release) · [Architecture](#architecture) · [Install](#install) · [Quick start](#quick-start) · [CLI](#cli) · [PowerShell](#powershell) · [Service](#service) · [Crash diagnostics](#crash-diagnostics) · [Notifications](#notifications) · [EventSpike](#evtspike) · [Configuration](#configuration) · [Fleet Sessions](#fleet-sessions) · [Telemetry & charts](#telemetry-charts) · [Troubleshooting](#troubleshooting) · [Audit setup](#audit-setup) · [Build](#build) · [Project layout](#project-layout) · [License](#license)
 
 ---
 
@@ -576,6 +577,16 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
     "load_alert_delay_sec": 120, "input_delay_alert_delay_sec": 180,
     "collect_remotefx": false, "collect_per_session": true
   },
+  "sessions": {
+    "enabled": true,
+    "collect_processes": true,
+    "top_processes": 3,
+    "retention_hours": 24,
+    "allow_actions": false,
+    "identity_visibility": "full",
+    "client_visibility": "full",
+    "process_visibility": "full"
+  },
   "dashboard": { "url": "", "rd_connection_broker": "" },
   "update": { "enabled": false, "channel": "stable", "poll_interval": "24h" },
   "notification_exclusions": ["rdsh01.example.test"],
@@ -625,6 +636,11 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `performance.input_delay_warn_ms` / `input_delay_crit_ms` | int | `50` / `100` | Input delay P95 thresholds. |
 | `performance.collect_remotefx` | bool | `false` | RemoteFX Graphics + Network counters. |
 | `performance.collect_per_session` | bool | `true` | Per-session CPU, memory, input delay. |
+| `sessions.enabled` | bool | `true` | Enables current-only machine snapshots. `false` stops new session collection/ingestion. |
+| `sessions.collect_processes` / `top_processes` | bool / int | `true` / `3` | Enables bounded Toolhelp collection; retain `0..5` deterministic top processes per session. |
+| `sessions.retention_hours` | int | `24` | Current snapshot retention, `1..168` hours; independent of metrics, drain audit, and terminal action retention. |
+| `sessions.allow_actions` | bool | `false` | Enables only explicitly confirmed, admin-only disconnect/logoff/message queueing. Dashboard never executes WTS. |
+| `sessions.identity_visibility` / `client_visibility` / `process_visibility` | enum | `full` | `full`, `masked`, or `hidden` ingest-time projection. A change purges all current snapshots and expires active actions. |
 | `performance.sample_interval_sec` | int | `60` | PDH sampling cadence; range 10–300 seconds. |
 | `performance.load_alert_delay_sec` | int | `120` | CPU/memory threshold sustain window (two default samples). |
 | `performance.input_delay_alert_delay_sec` | int | `180` | Input-delay threshold sustain window (three default samples). |
@@ -645,6 +661,47 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 | `repeat_minutes` | int | no | Re-alert interval while condition persists (`0` = once) |
 
 > SMTP transport: authenticated send (`secret` set) requires STARTTLS or implicit TLS (`smtps://`). DrainCtl refuses to transmit `AUTH` over cleartext — the error names the offending host.
+
+<h2 id="fleet-sessions">▎ Fleet Sessions</h2>
+
+Fleet Sessions is an **administrator-only, current-state** view for registered RDSH hosts. It is enabled by default: each agent enumerates current WTS sessions, collects per-session process data, and sends a separate machine-authenticated snapshot to the dashboard. It is not a retained per-session telemetry system: there are no session charts or history API.
+
+### Default collection and bounds
+
+The default `sessions` policy is:
+
+```json
+{
+  "sessions": {
+    "enabled": true,
+    "collect_processes": true,
+    "top_processes": 3,
+    "retention_hours": 24,
+    "allow_actions": false,
+    "identity_visibility": "full",
+    "client_visibility": "full",
+    "process_visibility": "full"
+  }
+}
+```
+
+Snapshots are independent of the legacy heartbeat and are machine-authenticated. A decoded snapshot is at most **512 KiB**, contains at most **500** current sessions, and retains at most **5** processes per session. The agent uses deterministic compaction before sending: it drops optional enrichment first but never silently drops a session row from a successful compacted snapshot. A fatal WTS collection error records a safe error status and preserves the last complete successful snapshot; a later successful empty snapshot deliberately clears it.
+
+The dashboard accepts a strictly newer per-agent sequence only. Each service start reserves a UUIDv7 generation; the dashboard compares parsed UUID bytes, retains the generation fence through privacy and retention cleanup, and never lets a delayed older generation replace current data. Snapshot receipt time—not the agent clock—is the freshness source: fresh through three heartbeat intervals, stale after three, and offline after ten (or immediately when the host registry is offline).
+
+### Configure collection, privacy, and retention
+
+Dashboard Settings is authoritative for registered agents. `enabled:false` stops new session collection/snapshot ingestion; it does not turn Fleet Sessions into an opt-in feature on a default installation. `collect_processes:false` avoids Toolhelp process work. `top_processes` is `0..5`; `0` keeps session metrics but no process rows. `retention_hours` is `1..168` and defaults to 24.
+
+`identity_visibility`, `client_visibility`, and `process_visibility` each accept `full`, `masked`, or `hidden`. Masked values are stored and shown as `***`; hidden identity/client values are stored as null and hidden processes as `[]`. This projection occurs before persistence, not only in the browser. Changing **any** visibility policy immediately purges all retained session snapshots/current rows, retains only the generation fence, and expires queued or delivered actions with protected message data erased. Loosening a policy does not recover previously purged values. Snapshot retention is independent of action/audit retention.
+
+The dashboard view and all detail/action routes require an authenticated dashboard administrator. Fleet lists contain aggregate metadata only; full detail is fetched only after an administrator opens a host. Do not use the dashboard SSE stream as a data feed: `session_snapshot` is metadata-only and `session_action` contains only action ID, lifecycle state, completion time, and result code.
+
+### Safe actions and Shadow
+
+Actions are disabled by default. Enabling `allow_actions` permits an administrator, after an explicit browser confirmation, to queue only a **disconnect**, **logoff**, or **message** for an exact current `(host, session_id, logon_at_ms)`. Every request needs a UUID `Idempotency-Key`; a same principal/endpoint/key and normalized request replays the original command, while a changed request conflicts. Disconnect and logoff accept no message; the dashboard stores protected message text only for messages, never returns it, and queues delivery through normal agent reports. Commands expire after five minutes; before WTS the agent durably claims the ID, rechecks the exact logon time, and executes at most once.
+
+Shadow is separate from actions. For a fresh safe target, the endpoint returns the exact installer-registered `drainctl-shadow://shadow?host=<host>&session=<id>` URI for local launch and preserves `mstsc.exe /v:<host> /shadow:<id> /control` as a copy fallback. Any site or local app can invoke the registered protocol, so its helper strictly validates the complete URI before starting local `mstsc` with fixed arguments. DrainCtl never adds `/noConsentPrompt`, credentials, or arbitrary arguments; normal browser/Windows external-protocol confirmation and mstsc consent remain.
 
 ### Retention & storage
 
@@ -673,6 +730,12 @@ Authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener.
 | `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host by default. Add repeated `host` filters only on this path (for example, `/api/v1/metrics/_fleet?host=RDSH-01&host=RDSH-02`) to aggregate a registered subset. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio). |
 | `GET /api/evtspike/spikes` | With `host` and no range, returns the compatibility recent-list array. With `host`, `from`, and `to`, returns `{spikes, total, truncated, as_of_id}` for `window_start ∈ [from,to)`: `total` is exact, `spikes` contains at most 500 newest-first rows, and `as_of_id` lets live SSE updates avoid double-counting rows already included in the snapshot. |
 | `GET /api/v1/audit` | Time-range query over drain-mode audit events. `host`, `actor`, `changes_only` filters. Cursor pagination. |
+| `GET /api/v1/sessions` | Administrator-only bounded fleet summary: aggregate metadata only, filter/sort/page, 15/30/50 rows per page. |
+| `GET /api/v1/sessions/{host}` | Administrator-only, no-store current privacy-projected detail: at most 500 rows, local query/page controls only. |
+| `POST /api/v1/sessions/{host}/{session_id}/actions` | Administrator-only guarded enqueue. New request is 202; idempotent same-request replay is 200. |
+| `GET /api/v1/session-actions/{action_id}` | Administrator-only safe action status; no identity, client, process, message, ciphertext, or diagnostics. |
+| `GET /api/v1/sessions/{host}/{session_id}/shadow` | Administrator-only endpoint-owned local Shadow `protocol_uri` plus the exact consent-preserving command copy fallback. |
+| `POST /api/v1/session-snapshot` | Machine-authenticated current snapshot ingest; 512 KiB decoded body, 500 sessions, and 5 processes/session maximum. |
 
 The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`.
 
@@ -705,6 +768,10 @@ From the Servers table, **Force Update** queues a durable command for each selec
 | Repeated offline/recovery notices | Dashboard SSE timestamps and active `poll_interval` | Offline is exactly three effective heartbeat intervals. One event pair per report epoch is expected; duplicates without a new accepted report are actionable diagnostics. |
 | RemoteFX looks empty or discontinuous | `collect_remotefx`, role/counter availability, diagnostic logs | Missing counters and inactive zero FPS/quality chart as gaps. Zero lower-is-better values are retained; invalid/outlier values are rejected before storage rather than rendered as a bad session. |
 | Need a local incident bundle | Protected `diags` directory and `\LISS Technologies\DrainCtl-Diags` task | Enable the installed task for hourly metadata diagnostics. Use `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only with approved local authorization; dump archives remain in protected `dumps` and are never uploaded. |
+| Sessions are missing after a privacy change | `sessions.*_visibility` in Dashboard Settings and the timestamp of the change | Expected: every visibility-policy change deletes the prior current snapshots immediately. Ingest a new complete snapshot under the new policy; a looser policy cannot restore old data. |
+| Sessions show stale/offline or a collection error | Host reporting, `dashboard.url`, snapshot diagnostics, and last successful receipt time | Snapshot freshness is independent of the normal report display: it is stale after three heartbeat intervals and offline after ten. A fatal collection error preserves last-good rows but disables actions until a fresh successful snapshot arrives. |
+| Action remains queued, is refused, or expires | Action status, agent reports, and session logon time | Actions require a fresh, successful, action-capable snapshot and exact reviewed logon time. They expire after five minutes; do not retry with the same key but altered request—use a new explicit confirmation. |
+| Expected process/user/client data is absent | `collect_processes`, `top_processes`, and the three visibility settings | `collect_processes:false` and `top_processes:0` intentionally omit process rows. `masked` returns `***`; `hidden` removes the value before persistence. Missing metrics are unavailable, not zero. |
 
 ---
 

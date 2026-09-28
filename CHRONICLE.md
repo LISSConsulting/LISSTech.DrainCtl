@@ -1,5 +1,13 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Fleet Sessions — 2026-09-26
+
+- Fleet Sessions is enabled by default and is strictly current-only: agents send a separate machine-authenticated snapshot (512 KiB decoded; 500 sessions; five processes/session) while the legacy 64 KiB heartbeat remains unchanged. Default policy collects processes, retains snapshots for 24 hours, keeps the top three processes, leaves actions disabled, and projects identity/client/process data as full.
+- Snapshot ordering is a durable UUIDv7 generation fence plus canonical unsigned-decimal `uint64` sequence, compared as parsed UUID bytes rather than locale text or observation time. Every new accepted complete snapshot atomically replaces current rows; a fatal collection error advances latest-attempt status but preserves last success; only a valid empty complete snapshot clears a host. The generation fence survives privacy and retention cleanup.
+- Sessions list/detail/action/shadow/status routes are administrator-only; list data is aggregate-only and detail is privacy-projected/no-store. Snapshot freshness is from last successful receipt: fresh through three heartbeats, stale after three, offline after ten or an offline registry host. `session_snapshot` SSE is named, metadata-only invalidation; `session_action` SSE is named safe lifecycle metadata only.
+- Visibility policy is ingest-time and destructive: `masked` persists `***`; `hidden` persists null/empty values. Any visibility change deletes retained snapshots/current rows and expires active actions with protected message data erased; loosening cannot recreate old data. Snapshot retention remains independent from terminal outbox/audit/agent-ledger retention.
+- Actions require an explicit administrator confirmation, UUID idempotency key, fresh action-capable snapshot, and exact `(host, session ID, logon time)`. The dashboard queues at most five-minute commands and never invokes WTS; the agent durably claims, rechecks logon time, and executes at most once. Shadow receives an endpoint-owned `drainctl-shadow://shadow?host=<host>&session=<id>` local launch URI plus the exact `mstsc.exe /v:<host> /shadow:<id> /control` copy fallback. Because any site or local app can invoke the protocol, its GUI helper strictly validates the complete URI then starts mstsc with fixed arguments only; browser/Windows external-protocol confirmation and mstsc consent remain, and `/noConsentPrompt`, credentials, and arbitrary arguments are prohibited.
+
 ## Dashboard chart interaction polish — 2026-09-26
 
 - Overview and per-host timeline panning now follows direct manipulation: dragging right moves plotted data right and reveals older history; dragging left returns toward live.

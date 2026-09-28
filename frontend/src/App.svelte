@@ -16,10 +16,20 @@
         dropOverviewSelection,
         pruneOverviewSelectionFor,
         recordForceUpdateCompletion,
+        invalidateSessionData,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, settingsFromWire } from './lib/api.js';
+    import {
+        fetchServers,
+        fetchHealth,
+        fetchSettings,
+        fetchAllServerMetrics,
+        fetchSessionActionStatus,
+        queueSessionAction,
+        settingsFromWire,
+    } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
+    import { toast } from './lib/toast.svelte.js';
     import { formatTime12 } from './lib/utils.js';
 
     import Nav from './components/Nav.svelte';
@@ -33,6 +43,20 @@
     import ConfigModal from './components/ConfigModal.svelte';
     import HistoryModal from './components/HistoryModal.svelte';
     import Toast from './components/Toast.svelte';
+    import SessionsTable from './components/SessionsTable.svelte';
+    import {
+        clearSessionActionPolling,
+        configureSessionActionDependencies,
+        handleSessionActionEvent as accelerateSessionActionPolling,
+        resumeSessionActionPolling,
+    } from './lib/session-actions.svelte.js';
+
+    const sessionActionDependencies = {
+        fetchSessionActionStatus,
+        queueSessionAction,
+        notify: (kind, message) => toast[kind](message),
+        storage: () => window.sessionStorage,
+    };
 
     // ---------------------------------------------------------------------------
     // Initialise theme once on load
@@ -348,6 +372,19 @@
         untrack(() => checkSession());
     });
 
+    // Pending actions survive a reload in sessionStorage. Recovery belongs to
+    // the authenticated admin shell rather than a particular detail route, so
+    // Overview and collapsed Sessions restore them too.
+    $effect(() => {
+        if (authState.loading) return;
+        if (authState.username && authState.isAdmin) {
+            configureSessionActionDependencies(sessionActionDependencies);
+            untrack(() => resumeSessionActionPolling());
+            return;
+        }
+        clearSessionActionPolling();
+    });
+
     // Poll for fresh data every 30 seconds — only while authenticated.
     // Also trigger a full sync when the tab regains focus (SSE events may
     // have been missed or throttled while the tab was backgrounded).
@@ -371,6 +408,57 @@
         };
     });
 
+    function handleSessionSnapshotEvent(raw) {
+        if (!authState.isAdmin || !raw || typeof raw !== 'object') return;
+        const snapshot = /** @type {Record<string, unknown>} */ (raw);
+        if (
+            typeof snapshot.host !== 'string' ||
+            typeof snapshot.latest_attempt_instance_id !== 'string' ||
+            typeof snapshot.latest_attempt_sequence !== 'string' ||
+            typeof snapshot.freshness !== 'string' ||
+            typeof snapshot.session_count !== 'number' ||
+            typeof snapshot.active_count !== 'number' ||
+            typeof snapshot.actions_available !== 'boolean' ||
+            typeof snapshot.collection_status !== 'string'
+        ) {
+            invalidateSessionData();
+            return;
+        }
+        appState.handleSessionSnapshot({
+            host: snapshot.host,
+            latest_attempt_instance_id: snapshot.latest_attempt_instance_id,
+            latest_attempt_sequence: snapshot.latest_attempt_sequence,
+            last_success_instance_id:
+                typeof snapshot.last_success_instance_id === 'string' ? snapshot.last_success_instance_id : null,
+            last_success_sequence:
+                typeof snapshot.last_success_sequence === 'string' ? snapshot.last_success_sequence : null,
+            freshness: snapshot.freshness,
+            session_count: snapshot.session_count,
+            active_count: snapshot.active_count,
+            actions_available: snapshot.actions_available,
+            collection_status: snapshot.collection_status,
+        });
+    }
+
+    function handleSessionActionEvent(raw) {
+        if (!authState.isAdmin || !raw || typeof raw !== 'object') return;
+        const action = /** @type {Record<string, unknown>} */ (raw);
+        if (
+            typeof action.action_id !== 'string' ||
+            typeof action.state !== 'string' ||
+            (action.completed_at_ms !== null && typeof action.completed_at_ms !== 'number') ||
+            (action.result_code !== null && typeof action.result_code !== 'string')
+        ) {
+            return;
+        }
+        appState.handleSessionAction({
+            action_id: action.action_id,
+            state: action.state,
+            completed_at_ms: /** @type {number|null} */ (action.completed_at_ms),
+            result_code: /** @type {string|null} */ (action.result_code),
+        });
+    }
+
     // SSE: real-time event stream — supplements polling with instant updates.
     // EventSource auto-reconnects on network errors (~3s default retry).
     $effect(() => {
@@ -378,9 +466,34 @@
 
         const es = new EventSource('/api/v1/events');
 
+        const onSessionSnapshot = (event) => {
+            try {
+                handleSessionSnapshotEvent(JSON.parse(event.data));
+            } catch {
+                // A malformed event is still an invalidation hint.
+                if (authState.isAdmin) invalidateSessionData();
+            }
+        };
+        const onSessionAction = (event) => {
+            try {
+                const action = JSON.parse(event.data);
+                handleSessionActionEvent(action);
+                // Polling remains authoritative; named SSE only moves an existing
+                // pending status check forward.
+                accelerateSessionActionPolling(event.data);
+            } catch {
+                // Malformed advisory action events are ignored.
+            }
+        };
+        if (authState.isAdmin) {
+            es.addEventListener('session_snapshot', onSessionSnapshot);
+            es.addEventListener('session_action', onSessionAction);
+        }
+
         es.onopen = () => {
             appState.sseConnected = true;
             appState.sseReconnecting = false;
+            if (authState.isAdmin) invalidateSessionData();
         };
 
         es.onmessage = (e) => {
@@ -509,6 +622,7 @@
                     // % free memory thresholds to the UI's % used values.
                     const cfg = settingsFromWire(event.data);
                     appState.config = cfg;
+                    if (authState.isAdmin) invalidateSessionData();
                     addEvent({
                         time: formatTime12(new Date(), { seconds: true }),
                         host: '',
@@ -539,6 +653,8 @@
         };
 
         return () => {
+            es.removeEventListener('session_snapshot', onSessionSnapshot);
+            es.removeEventListener('session_action', onSessionAction);
             es.close();
             appState.sseConnected = false;
             appState.sseReconnecting = false;
@@ -566,6 +682,8 @@
                     <ServerTable onhistoryclick={(host) => (historyHost = host)} />
                 {:else if appState.currentView === 'events'}
                     <EventLog />
+                {:else if appState.currentView === 'sessions' && authState.isAdmin}
+                    <SessionsTable />
                 {/if}
             </div>
         {/key}

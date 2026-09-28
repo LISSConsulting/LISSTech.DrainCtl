@@ -116,6 +116,27 @@ func (s *sharedServerCred) release() {
 // every ServerContext for the lifetime of the middleware. Per-request acquisition
 // leaks lsass.exe state at ~2.5 MB/h on hosts with active dashboard auth.
 func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
+	return negotiateMiddleware(ctx, next, func(w http.ResponseWriter, status int, message string) {
+		http.Error(w, message, status)
+	})
+}
+
+// snapshotNegotiateMiddleware maps only credential failures to the
+// session-snapshot error contract. It leaves a Negotiate challenge header set
+// by the protocol machinery intact.
+func snapshotNegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
+	return negotiateMiddleware(ctx, next, func(w http.ResponseWriter, status int, message string) {
+		if status == http.StatusUnauthorized || status == http.StatusBadRequest {
+			writeSessionsError(w, http.StatusUnauthorized, "unauthorized_machine")
+			return
+		}
+		http.Error(w, message, status)
+	})
+}
+
+type negotiateFailureWriter func(http.ResponseWriter, int, string)
+
+func negotiateMiddleware(ctx context.Context, next http.Handler, writeFailure negotiateFailureWriter) http.Handler {
 	creds := &sharedServerCred{acquire: acquireServerCredentials}
 	var pending sync.Map // remoteAddr → *pendingCtx
 
@@ -159,7 +180,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Negotiate ") {
 			w.Header().Set("WWW-Authenticate", "Negotiate")
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			writeFailure(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
 
@@ -167,7 +188,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		token, err := base64.StdEncoding.DecodeString(tokenB64)
 		if err != nil {
 			slog.Warn("sspi: bad base64 token", "error", err)
-			http.Error(w, "invalid token", http.StatusBadRequest)
+			writeFailure(w, http.StatusBadRequest, "invalid token")
 			return
 		}
 
@@ -189,7 +210,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 				releasePendingContext(pc)
 				slog.Warn("sspi: negotiate leg2 failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
-				http.Error(w, "authentication failed", http.StatusUnauthorized)
+				writeFailure(w, http.StatusUnauthorized, "authentication failed")
 				return
 			}
 		} else {
@@ -197,14 +218,14 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 			cred, errCred := creds.get()
 			if errCred != nil {
 				slog.Error("sspi: acquire credentials failed", "error", errCred)
-				http.Error(w, "server auth error", http.StatusInternalServerError)
+				writeFailure(w, http.StatusInternalServerError, "server auth error")
 				return
 			}
 			sc, authDone, responseToken, err = negotiate.NewServerContext(cred, token)
 			if err != nil {
 				slog.Warn("sspi: negotiate failed", "error", err)
 				w.Header().Set("WWW-Authenticate", "Negotiate")
-				http.Error(w, "authentication failed", http.StatusUnauthorized)
+				writeFailure(w, http.StatusUnauthorized, "authentication failed")
 				return
 			}
 			sspimetrics.Live.Add(1)
@@ -245,7 +266,7 @@ func NegotiateMiddleware(ctx context.Context, next http.Handler) http.Handler {
 		// work for NTLM contexts, so we always use the impersonation path.
 		username, groups := extractIdentity(sc)
 		if username == "" {
-			http.Error(w, "auth error", http.StatusUnauthorized)
+			writeFailure(w, http.StatusUnauthorized, "auth error")
 			return
 		}
 		slog.Debug("sspi: negotiate complete", "user", username)

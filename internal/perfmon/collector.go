@@ -79,6 +79,7 @@ type Collector struct {
 	rfxRTTH         syscall.Handle
 	rfxLossH        syscall.Handle
 
+	logicalCPUCount uint16
 	memTotalMB      float64
 	primed          bool
 	skipNextCollect bool
@@ -126,6 +127,7 @@ func Open(cfg dc.PerformanceConfig) (*Collector, error) {
 	c := &Collector{
 		collectPerSession: cfg.CollectPerSession,
 		collectRemoteFX:   cfg.CollectRemoteFX,
+		logicalCPUCount:   boundedLogicalCPUCount(runtime.NumCPU()),
 		memTotalMB:        totalPhysicalMemoryMB(),
 		sampleInterval:    sampleInterval,
 		loggedErrors:      make(map[string]bool),
@@ -139,6 +141,16 @@ func Open(cfg dc.PerformanceConfig) (*Collector, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func boundedLogicalCPUCount(count int) uint16 {
+	if count < 1 {
+		return 1
+	}
+	if count > 1024 {
+		return 1024
+	}
+	return uint16(count)
 }
 
 func (c *Collector) open() error {
@@ -563,12 +575,21 @@ func (c *Collector) Close() {
 	}
 	c.closeOnce.Do(func() {
 		close(c.stopCh)
-		c.do(func() {
-			pdhCloseQuery(c.hostQuery)
-			c.hostQuery = 0
-			pdhCloseQuery(c.sessionQuery)
-			c.sessionQuery = 0
-		})
+		request := request{
+			fn: func() {
+				c.closeQueries(pdhCloseQuery)
+			},
+			done: make(chan struct{}),
+		}
+		c.reqCh <- request
+		<-request.done
 		close(c.reqCh)
 	})
+}
+
+func (c *Collector) closeQueries(closeQuery func(syscall.Handle)) {
+	closeQuery(c.hostQuery)
+	c.hostQuery = 0
+	closeQuery(c.sessionQuery)
+	c.sessionQuery = 0
 }

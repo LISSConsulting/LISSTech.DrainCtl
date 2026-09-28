@@ -366,18 +366,7 @@ input[type='checkbox']:focus-visible {
     }
 }
 
-/* ─── Reduce-motion escape hatch ─────────────────────────────────────────────
-   Set by App.svelte when appState.reduceMotion is true (toggled in the
-   Config modal, initial value derived from the OS prefers-reduced-motion
-   signal). Neutralises every keyframe animation, transition, and
-   backdrop blur in the whole tree.
-
-   RDP sessions cannot composite backdrop-filter / continuous animations
-   without real CPU cost on the remote endpoint — opting out there turns
-   the dashboard from "laggy over the wire" into "flat but instant". The
-   dashboard is an operator tool, not a marketing site; holding on to the
-   motion polish isn't worth the responsiveness tax.
-   ────────────────────────────────────────────────────────────────────────── */
+/* ─── Reduce-motion escape hatch ───────────────────────────────────────────── */
 body[data-reduce-motion='true'] *,
 body[data-reduce-motion='true'] *::before,
 body[data-reduce-motion='true'] *::after {
@@ -388,4 +377,17 @@ body[data-reduce-motion='true'] *::after {
     transition-delay: 0ms !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+}
+
+/* ─── Screen-reader utility ─────────────────────────────────────────────── */
+.sr-only {
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+    width: 1px;
 }

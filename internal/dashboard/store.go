@@ -14,6 +14,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -149,6 +150,17 @@ type ServerState struct {
 	// a forced update would never emit a force_update SSE event because
 	// the HTTP report path is bypassed entirely.
 	OnLocalForceUpdateCompletion func(payload ForceUpdateCompletionPayload)
+
+	// DeliverSessionActions and CompleteSessionActions bridge the local service
+	// report path to the same durable action lifecycle used by remote reports.
+	// They are intentionally callbacks because ServerState owns no action store.
+	DeliverSessionActions  func(host string) ([]sessiondata.PendingSessionAction, error)
+	CompleteSessionActions func(host string, actions []sessiondata.CompletedSessionAction) ([]string, error)
+
+	// OnSessionSnapshot, if non-nil, ingests a complete Fleet Sessions
+	// snapshot from the in-process local service runtime. It is wired by
+	// DashboardServer after its session stores are ready.
+	OnSessionSnapshot func(snapshot sessiondata.SessionSnapshot) error
 }
 
 // GetConsumeForceUpdate returns the wired ConsumeForceUpdate closure.
@@ -161,6 +173,50 @@ type ServerState struct {
 // to the registry's internal struct layout.
 func (s *ServerState) GetConsumeForceUpdate() func(string) *ForceUpdatePendingCommand {
 	return s.ConsumeForceUpdate
+}
+
+// ReportSessionSnapshot delivers a complete local Fleet Sessions snapshot to
+// the dashboard callback. It returns handled=false when this ServerState has
+// no local sessions consumer, allowing the service runtime to fall back to the
+// remote dashboard endpoint. Callback errors are returned unchanged.
+func (s *ServerState) ReportSessionSnapshot(snapshot sessiondata.SessionSnapshot) (handled bool, err error) {
+	if s.OnSessionSnapshot == nil {
+		return false, nil
+	}
+	return true, s.OnSessionSnapshot(snapshot)
+}
+
+// DeliverPendingSessionActions obtains local actions from the dashboard. It
+// returns handled=false when no dashboard action lifecycle is wired, allowing
+// the service runtime to use its remote report path unchanged.
+func (s *ServerState) DeliverPendingSessionActions(host string) (handled bool, actions []sessiondata.PendingSessionAction, err error) {
+	if s.DeliverSessionActions == nil {
+		return false, nil, nil
+	}
+	actions, err = s.DeliverSessionActions(host)
+	return true, actions, err
+}
+
+// CompletePendingSessionActions records local terminal action outcomes through
+// the dashboard lifecycle. Acknowledgements contain only action IDs.
+func (s *ServerState) CompletePendingSessionActions(host string, actions []sessiondata.CompletedSessionAction) (handled bool, acknowledged []string, err error) {
+	if s.CompleteSessionActions == nil {
+		return false, nil, nil
+	}
+	acknowledged, err = s.CompleteSessionActions(host, actions)
+	return true, acknowledged, err
+}
+
+// GetDeliverSessionActions returns the local action-delivery callback for the
+// service runtime without exposing dashboard storage details.
+func (s *ServerState) GetDeliverSessionActions() func(string) ([]sessiondata.PendingSessionAction, error) {
+	return s.DeliverSessionActions
+}
+
+// GetCompleteSessionActions returns the local action-completion callback for
+// the service runtime without exposing dashboard storage details.
+func (s *ServerState) GetCompleteSessionActions() func(string, []sessiondata.CompletedSessionAction) ([]string, error) {
+	return s.CompleteSessionActions
 }
 
 // NewServerState wraps a serverReader (typically *telemetry.ServerStore) with
@@ -577,6 +633,7 @@ func GetSettings() (*RemoteSettings, error) {
 	}
 	view := buildEvtSpikeView(cfg.EvtSpike)
 	remoteEvtSpike := remoteEvtSpikeFromView(view)
+	remoteSessions := remoteSessionsConfig(cfg.Sessions)
 	return &RemoteSettings{
 		Notifications:           notifications,
 		NotificationExclusions:  exclusions,
@@ -586,6 +643,7 @@ func GetSettings() (*RemoteSettings, error) {
 		Performance:             &cfg.Performance,
 		EvtSpike:                &remoteEvtSpike,
 		Update:                  &cfg.Update,
+		Sessions:                &remoteSessions,
 	}, nil
 }
 

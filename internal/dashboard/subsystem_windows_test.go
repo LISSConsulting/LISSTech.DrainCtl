@@ -17,6 +17,7 @@ import (
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
 func writeSubsystemTestTLS(t *testing.T) (string, string) {
@@ -78,7 +79,7 @@ func TestSubsystem_RDCollectionResolverLifecycleAndBrokerUpdate(t *testing.T) {
 		TLSCert:            certPath,
 		TLSKey:             keyPath,
 		RDConnectionBroker: "initial-broker.example.test",
-	}, t.TempDir(), nil, nil, nil, nil, nil, nil, nil, false)
+	}, t.TempDir(), SubsystemDependencies{})
 	s.rdCollections = resolver
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -135,7 +136,7 @@ func TestSubsystem_RDCollectionResolverPreservesPreStartBrokerUpdate(t *testing.
 		TLSCert:            certPath,
 		TLSKey:             keyPath,
 		RDConnectionBroker: "initial-broker.example.test",
-	}, t.TempDir(), nil, nil, nil, nil, nil, nil, nil, false)
+	}, t.TempDir(), SubsystemDependencies{})
 	s.rdCollections = resolver
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -155,12 +156,16 @@ func TestSubsystem_RDCollectionResolverPreservesPreStartBrokerUpdate(t *testing.
 func TestSubsystem_StopDrainsStaleHostTransitionWorker(t *testing.T) {
 	certPath, keyPath := writeSubsystemTestTLS(t)
 	state := newTestServerState(t)
+	serverStore, ok := state.store.(*telemetry.ServerStore)
+	if !ok {
+		t.Fatalf("state store type = %T, want *telemetry.ServerStore", state.store)
+	}
 	s := NewSubsystem(dc.DashboardConfig{
 		Port:              0,
 		TLSCert:           certPath,
 		TLSKey:            keyPath,
 		HeartbeatInterval: time.Hour,
-	}, t.TempDir(), nil, nil, nil, state.store, nil, nil, nil, false)
+	}, t.TempDir(), SubsystemDependencies{Servers: serverStore})
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -43,6 +44,21 @@ type serverReader interface {
 	Import(ctx context.Context, infos []telemetry.ServerInfo) (int, error)
 }
 
+// sessionSnapshotWriter is the dashboard-owned write surface for complete
+// Fleet Sessions snapshots. It deliberately excludes action and query methods.
+type sessionSnapshotWriter interface {
+	Apply(context.Context, sessiondata.SessionSnapshot, sessiondata.PrivacyPolicy) (telemetry.SnapshotApplyResult, error)
+	PurgeSnapshots(context.Context, int, time.Time) (int64, error)
+	PurgeForPrivacy(context.Context) error
+}
+
+// sessionQueryReader is the read-only Fleet Sessions projection used by the
+// administrator API and metadata-only SSE notifications.
+type sessionQueryReader interface {
+	Fleet(context.Context, telemetry.FleetSessionQuery) (telemetry.FleetSessionPage, error)
+	Detail(context.Context, string, telemetry.SessionDetailQuery) (telemetry.SessionDetail, error)
+}
+
 // eventSpikeReader is the subset of *telemetry.EventSpikeStore the dashboard
 // uses. Insert is part of this set because the dashboard owns the ingestion
 // path that funnels SSE events.
@@ -50,4 +66,18 @@ type eventSpikeReader interface {
 	Insert(ctx context.Context, spike telemetry.EventSpike) (telemetry.EventSpike, bool, error)
 	Recent(ctx context.Context, host string, limit int) ([]telemetry.EventSpike, error)
 	Range(ctx context.Context, host string, from, to time.Time, maxLimit int) (telemetry.EventSpikeRange, error)
+}
+
+// sessionActionStore is the dashboard's action lifecycle surface. Delivery
+// exposes protected message ciphertext only to the authenticated agent-report
+// path; every other dashboard surface uses SessionActionStatus.
+type sessionActionStore interface {
+	Enqueue(context.Context, telemetry.SessionActionEnqueue) (sessiondata.SessionActionStatus, bool, error)
+	Deliver(context.Context, string, time.Time) ([]telemetry.SessionActionDelivery, error)
+	Complete(context.Context, string, string, sessiondata.SessionActionOutcome, time.Time) (sessiondata.SessionActionStatus, error)
+	Status(context.Context, string) (sessiondata.SessionActionStatus, error)
+	Expire(context.Context, time.Time) ([]sessiondata.SessionActionStatus, error)
+	CancelForPrivacy(context.Context, time.Time) ([]sessiondata.SessionActionStatus, error)
+	PurgeSnapshotsForPrivacy(context.Context, time.Time) ([]sessiondata.SessionActionStatus, error)
+	Retain(context.Context, time.Time, time.Time, int) (int, int, error)
 }

@@ -143,6 +143,21 @@ cli: frontend-copy resource
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
 
+# Build the GUI protocol helper that starts consent-preserving mstsc shadowing.
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+shadow-helper:
+    $ts = Get-Date -Format 'h:mm:ss tt'
+    Write-Host "`n🔨 Building Shadow protocol helper  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $env:CGO_ENABLED = "1"
+    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -H=windowsgui -X github.com/LISSConsulting/LISSTech.DrainCtl/cmd/drainctl-shadow.Version=$ver" -o "{{bin_dir}}/drainctl-shadow.exe" ./cmd/drainctl-shadow/
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl-shadow.exe").Length / 1MB)
+    Write-Host "   drainctl-shadow.exe ($size) — v$ver" -ForegroundColor DarkGray
+
+
 # Build the Windows service host binary.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
@@ -177,12 +192,13 @@ dll:
 # not currently emit Control Flow Guard instrumentation (golang/go#35940).
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-pecheck: cli daemon dll
+pecheck: cli daemon shadow-helper dll
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🛡️ Verifying PE hardening  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     & "{{justfile_directory()}}/scripts/check-pe-hardening.ps1" @(
         "{{bin_dir}}/drainctl.exe",
         "{{bin_dir}}/drainctld.exe",
+        "{{bin_dir}}/drainctl-shadow.exe",
         "{{bin_dir}}/drainctl.dll"
     )
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -293,6 +309,7 @@ sign-binaries:
     foreach ($file in @(
         (Join-Path $binDir "drainctl.exe"),
         (Join-Path $binDir "drainctld.exe"),
+        (Join-Path $binDir "drainctl-shadow.exe"),
         (Join-Path $binDir "drainctl.dll")
     )) {
         if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
@@ -425,20 +442,89 @@ release-preflight:
         if ($LASTEXITCODE -ne 0) { Write-Error "git checkout docs/install.ps1 failed"; exit $LASTEXITCODE }
     }
 
+# Releases must have a usable signing certificate and signtool. Development
+# recipes intentionally do not depend on this preflight and may remain unsigned.
+[private]
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+release-signing-preflight:
+    $thumbprint = "{{signing_thumbprint}}"
+    if (-not $thumbprint) {
+        Write-Error "CODE_SIGNING_CERTIFICATE_THUMBPRINT is required for releases"
+        exit 1
+    }
+
+    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $thumbprint
+    if (-not $cert) { $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object Thumbprint -eq $thumbprint }
+    if (-not $cert) {
+        Write-Error "Certificate with thumbprint $thumbprint not found"
+        exit 1
+    }
+    if (-not $cert.HasPrivateKey) {
+        Write-Error "Certificate with thumbprint $thumbprint has no private key"
+        exit 1
+    }
+
+    $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+    if (-not $signtool) {
+        $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $signtool = Get-ChildItem "$sdkBin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) {
+        Write-Error "signtool.exe not found in PATH or the Windows 10 SDK"
+        exit 1
+    }
+
+# Verify the release payload after all signing and packaging steps complete.
+[private]
+[script('pwsh', '-NoProfile')]
+[extension('.ps1')]
+release-verify-signatures:
+    $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+    if (-not $signtool) {
+        $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $signtool = Get-ChildItem "$sdkBin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) {
+        Write-Error "signtool.exe not found in PATH or the Windows 10 SDK"
+        exit 1
+    }
+
+    foreach ($file in @(
+        "{{bin_dir}}/drainctl.exe",
+        "{{bin_dir}}/drainctld.exe",
+        "{{bin_dir}}/drainctl-shadow.exe",
+        "{{bin_dir}}/drainctl.dll",
+        "{{dist_dir}}/LISSTech.DrainCtl.msi"
+    )) {
+        if (-not (Test-Path $file)) { Write-Error "Not found: $file"; exit 1 }
+        $name = [System.IO.Path]::GetFileName($file)
+        $out = & $signtool verify /pa /all /v $file 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Authenticode verification failed: $name`n$out"
+            exit $LASTEXITCODE
+        }
+        Write-Host "   ✅ Verified $name" -ForegroundColor Green
+    }
+
 # Build and sign everything: binaries → sign → MSI → sign MSI → sign manifest
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-release: (header "release") release-preflight gotest psmodule sign-binaries msi sign-msi sign-release-manifest
+release: (header "release") release-preflight release-signing-preflight gotest psmodule sign-binaries msi sign-msi sign-release-manifest release-verify-signatures
     $exe = Get-Item "{{bin_dir}}/drainctl.exe"
     $daemon = Get-Item "{{bin_dir}}/drainctld.exe"
+    $shadow = Get-Item "{{bin_dir}}/drainctl-shadow.exe"
     $dll = Get-Item "{{bin_dir}}/drainctl.dll"
     $msi = Get-Item "{{dist_dir}}/LISSTech.DrainCtl.msi"
     $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
     Write-Host ""
     Write-Host "🚀 Release complete" -ForegroundColor Green
-    Write-Host ("   drainctl.exe  {0,5:N1} MB" -f ($exe.Length / 1MB)) -ForegroundColor DarkGray
-    Write-Host ("   drainctld.exe {0,5:N1} MB" -f ($daemon.Length / 1MB)) -ForegroundColor DarkGray
-    Write-Host ("   drainctl.dll  {0,5:N1} MB" -f ($dll.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   drainctl.exe        {0,5:N1} MB" -f ($exe.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   drainctld.exe       {0,5:N1} MB" -f ($daemon.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   drainctl-shadow.exe {0,5:N1} MB" -f ($shadow.Length / 1MB)) -ForegroundColor DarkGray
+    Write-Host ("   drainctl.dll        {0,5:N1} MB" -f ($dll.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host ("   MSI           {0,5:N1} MB" -f ($msi.Length / 1MB)) -ForegroundColor DarkGray
     Write-Host "   Version       $($vi.FileVersion)" -ForegroundColor DarkGray
     Write-Host ""

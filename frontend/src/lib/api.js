@@ -7,8 +7,7 @@
  * All routes are at /api/v1/.
  */
 
-import { authState } from './auth.svelte.js';
-
+import { authState, clearSessionClientState } from './auth.svelte.js';
 const BASE = '/api/v1';
 
 /**
@@ -165,6 +164,18 @@ const BASE = '/api/v1';
  */
 
 /**
+ * @typedef {Object} SessionsConfig
+ * @property {boolean} enabled
+ * @property {boolean} collect_processes
+ * @property {number} top_processes
+ * @property {number} retention_hours
+ * @property {boolean} allow_actions
+ * @property {'full'|'masked'|'hidden'} identity_visibility
+ * @property {'full'|'masked'|'hidden'} client_visibility
+ * @property {'full'|'masked'|'hidden'} process_visibility
+ */
+
+/**
  * @typedef {Object} UpdateSettings
  * @property {boolean} enabled
  * @property {'stable'|'prerelease'} channel
@@ -181,6 +192,7 @@ const BASE = '/api/v1';
  * @property {NotifyTarget[]} notifications
  * @property {string[]} notification_exclusions - canonical hosts suppressed across every target and trigger
  * @property {EvtSpikeSettings} [evtspike]
+ * @property {SessionsConfig} [sessions]
  * @property {UpdateSettings} [update]
  */
 
@@ -242,7 +254,12 @@ async function apiFetch(path, options = {}) {
     if (!response.ok) {
         if (response.status === 401) {
             authState.username = null;
+            authState.isAdmin = false;
             authState.error = 'session_expired';
+            clearSessionClientState();
+        } else if (response.status === 403) {
+            authState.isAdmin = false;
+            clearSessionClientState();
         }
         let detail = '';
         try {
@@ -276,6 +293,253 @@ export class ApiError extends Error {
         this.detail = detail;
         this.path = path;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fleet Sessions (admin-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {'all'|'active'|'disconnected'|'idle'} SessionFleetState
+ * @typedef {'host'|'status'|'mode'|'sessions'|'active'|'idle'|'disconnected'|'users'|'last_activity'} SessionFleetSort
+ * @typedef {'asc'|'desc'} SessionSortDirection
+ * @typedef {'fresh'|'stale'|'offline'|'unknown'} SessionFreshness
+ * @typedef {'queued'|'delivered'|'completed'|'failed'|'expired'|'session_changed'|'unsupported'} SessionActionState
+ *
+ * @typedef {Object} SessionCapabilities
+ * @property {boolean} session_actions
+ * @property {boolean} processes
+ * @property {boolean} input_delay
+ * @property {boolean} remotefx
+ *
+ * @typedef {Object} SessionFleetItem
+ * @property {string} host
+ * @property {string} mode
+ * @property {string} status
+ * @property {SessionFreshness} freshness
+ * @property {string} latest_attempt_instance_id
+ * @property {string} latest_attempt_sequence
+ * @property {number} latest_attempt_observed_at_ms
+ * @property {number} latest_attempt_received_at_ms
+ * @property {string|null} last_success_instance_id
+ * @property {string|null} last_success_sequence
+ * @property {number|null} last_success_observed_at_ms
+ * @property {number|null} last_success_received_at_ms
+ * @property {number|null} session_count
+ * @property {number|null} active_count
+ * @property {number|null} idle_count
+ * @property {number|null} disconnected_count
+ * @property {number|null} user_count
+ * @property {number|null} last_activity_at_ms
+ * @property {SessionCapabilities|null} capabilities
+ * @property {string} collection_status
+ * @property {string|null} collection_error_code
+ * @property {boolean} detail_available
+ *
+ * @typedef {Object} SessionFleetResponse
+ * @property {{q:string,state:SessionFleetState,sort:SessionFleetSort,dir:SessionSortDirection,page:number,page_size:15|30|50}} query
+ * @property {number} total
+ * @property {{number:number,size:15|30|50,pages:number}} page
+ * @property {number} server_now_ms
+ * @property {SessionFleetItem[]} items
+ *
+ * @typedef {Object} SessionDetailResponse
+ * @property {string} host
+ * @property {string} latest_attempt_instance_id
+ * @property {string} latest_attempt_sequence
+ * @property {SessionFreshness} freshness
+ * @property {boolean} actions_available
+ * @property {{total:number,active:number,idle:number,disconnected:number,users:number,last_activity_at_ms:number|null}} summary
+ * @property {{q:string,page:number,page_size:15|30|50}} query
+ * @property {number} total
+ * @property {Array<{session_id:number,logon_at_ms:number|null,user:string|null,domain:string|null,state:string,station:string|null,client_name:string|null,client_address:string|null,connect_at_ms:number|null,disconnect_at_ms:number|null,idle_since_ms:number|null,cpu_percent:number|null,working_set_bytes:string|null,input_delay_ms:number|null,remotefx:object|null,processes:Array<{pid:number,image_name:string|null,cpu_percent:number|null,working_set_bytes:string|null}>}>} sessions
+ *
+ * @typedef {Object} SessionActionStatus
+ * @property {string} action_id
+ * @property {'disconnect'|'logoff'|'message'} type
+ * @property {string} host
+ * @property {number} session_id
+ * @property {number} expected_logon_at_ms
+ * @property {SessionActionState} state
+ * @property {number} created_at_ms
+ * @property {number} expires_at_ms
+ * @property {number|null} completed_at_ms
+ * @property {string|null} result_code
+ */
+
+const SESSION_PAGE_SIZES = new Set([15, 30, 50]);
+const SESSION_FLEET_STATES = new Set(['all', 'active', 'disconnected', 'idle']);
+const SESSION_FLEET_SORTS = new Set([
+    'host',
+    'status',
+    'mode',
+    'sessions',
+    'active',
+    'idle',
+    'disconnected',
+    'users',
+    'last_activity',
+]);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertSessionPage(page, max) {
+    if (!Number.isInteger(page) || page < 1 || page > max)
+        throw new TypeError(`Session page must be an integer from 1 to ${max}`);
+}
+
+function assertSessionPageSize(pageSize) {
+    if (!SESSION_PAGE_SIZES.has(pageSize)) throw new TypeError('Session page size must be 15, 30, or 50');
+}
+
+function assertSessionQuery(query) {
+    if (
+        typeof query !== 'string' ||
+        new TextEncoder().encode(query).length > 128 ||
+        /[\u0000-\u001f\u007f]/.test(query)
+    ) {
+        throw new TypeError('Session query must be at most 128 UTF-8 bytes and contain no control characters');
+    }
+}
+
+function assertSessionHost(host) {
+    if (
+        typeof host !== 'string' ||
+        !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(host)
+    ) {
+        throw new TypeError('Session host must be a canonical RFC 1123 hostname');
+    }
+}
+
+function assertSessionID(sessionID) {
+    if (!Number.isInteger(sessionID) || sessionID < 0 || sessionID > 0xffffffff)
+        throw new TypeError('Session ID must be a uint32');
+}
+
+function assertSessionAction(action) {
+    if (
+        !action ||
+        !['disconnect', 'logoff', 'message'].includes(action.type) ||
+        !Number.isSafeInteger(action.expected_logon_at_ms) ||
+        action.expected_logon_at_ms < 0
+    ) {
+        throw new TypeError('Invalid session action');
+    }
+    if (action.type === 'disconnect' || action.type === 'logoff') {
+        if (action.message !== undefined && action.message !== '')
+            throw new TypeError(
+                `${action.type === 'disconnect' ? 'Disconnect' : 'Logoff'} actions cannot include a message`,
+            );
+        return;
+    }
+    if (typeof action.message !== 'string') throw new TypeError('Message actions require a message');
+    const message = action.message.trim();
+    if (!message || Array.from(message).length > 256 || /[\u0000-\u0009\u000b-\u001f\u007f]/.test(message)) {
+        throw new TypeError('Message actions require 1–256 characters with no control characters except line feed');
+    }
+}
+
+function sessionSearchParams(values) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(values)) {
+        if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    return params.toString();
+}
+
+/**
+ * GET /api/v1/sessions
+ * @param {{q?:string,state?:SessionFleetState,sort?:SessionFleetSort,dir?:SessionSortDirection,page?:number,pageSize?:15|30|50,signal?:AbortSignal}} [options]
+ * @returns {Promise<SessionFleetResponse>}
+ */
+export async function fetchSessions(options = {}) {
+    const { q = '', state = 'all', sort = 'host', dir = 'asc', page = 1, pageSize = 30, signal } = options;
+    assertSessionQuery(q);
+    if (!SESSION_FLEET_STATES.has(state)) throw new TypeError('Invalid session state filter');
+    if (!SESSION_FLEET_SORTS.has(sort)) throw new TypeError('Invalid session sort');
+    if (dir !== 'asc' && dir !== 'desc') throw new TypeError('Invalid session sort direction');
+    assertSessionPage(page, 10_000);
+    assertSessionPageSize(pageSize);
+    const query = sessionSearchParams({ q, state, sort, dir, page, page_size: pageSize });
+    return (await apiFetch(`/sessions?${query}`, { signal })).json();
+}
+
+/**
+ * GET /api/v1/sessions/{host}
+ * @param {string} host
+ * @param {{q?:string,page?:number,pageSize?:15|30|50,signal?:AbortSignal}} [options]
+ * @returns {Promise<SessionDetailResponse>}
+ */
+export async function fetchSessionDetail(host, options = {}) {
+    const { q = '', page = 1, pageSize = 30, signal } = options;
+    assertSessionHost(host);
+    assertSessionQuery(q);
+    assertSessionPage(page, 100);
+    assertSessionPageSize(pageSize);
+    const query = sessionSearchParams({ q, page, page_size: pageSize });
+    return (await apiFetch(`/sessions/${encodeURIComponent(host)}?${query}`, { signal })).json();
+}
+
+/**
+ * POST /api/v1/sessions/{host}/{session_id}/actions
+ * @param {string} host
+ * @param {number} sessionID
+ * @param {{type:'disconnect'|'logoff'|'message',expected_logon_at_ms:number,message?:string}} action
+ * @param {{idempotencyKey:string,signal?:AbortSignal}} options
+ * @returns {Promise<SessionActionStatus>}
+ */
+export async function queueSessionAction(host, sessionID, action, { idempotencyKey, signal } = {}) {
+    assertSessionHost(host);
+    assertSessionID(sessionID);
+    if (!UUID_PATTERN.test(idempotencyKey ?? '')) throw new TypeError('Session action idempotency key must be a UUID');
+    assertSessionAction(action);
+    const body = { type: action.type, expected_logon_at_ms: action.expected_logon_at_ms };
+    if (action.type === 'message') body.message = action.message.trim();
+    const response = await apiFetch(`/sessions/${encodeURIComponent(host)}/${sessionID}/actions`, {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!result || typeof result !== 'object' || !result.action || typeof result.action !== 'object') {
+        throw new TypeError('Invalid session action enqueue response');
+    }
+    return result.action;
+}
+
+/**
+ * GET /api/v1/session-actions/{action_id}
+ * @param {string} actionID
+ * @param {{signal?:AbortSignal}} [options]
+ * @returns {Promise<SessionActionStatus>}
+ */
+export async function fetchSessionActionStatus(actionID, { signal } = {}) {
+    if (!UUID_PATTERN.test(actionID)) throw new TypeError('Session action ID must be a UUID');
+    return (await apiFetch(`/session-actions/${encodeURIComponent(actionID)}`, { signal })).json();
+}
+
+/**
+ * GET /api/v1/sessions/{host}/{session_id}/shadow
+ * @param {string} host
+ * @param {number} sessionID
+ * @param {{signal?:AbortSignal}} [options]
+ * @returns {Promise<{command:string,protocol_uri:string}>}
+ */
+export async function fetchSessionShadow(host, sessionID, { signal } = {}) {
+    assertSessionHost(host);
+    assertSessionID(sessionID);
+    const result = await (
+        await apiFetch(`/sessions/${encodeURIComponent(host)}/${sessionID}/shadow`, { signal })
+    ).json();
+    if (
+        !result ||
+        typeof result !== 'object' ||
+        typeof result.command !== 'string' ||
+        typeof result.protocol_uri !== 'string'
+    ) {
+        throw new TypeError('Invalid shadow response');
+    }
+    return result;
 }
 
 // ---------------------------------------------------------------------------

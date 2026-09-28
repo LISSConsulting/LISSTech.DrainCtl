@@ -21,6 +21,11 @@ func TestApplySchema_FreshDB(t *testing.T) {
 		"server_exclusions",
 		"host_freshness",
 		"force_update_outbox",
+		"session_snapshots",
+		"session_generation_fence",
+		"session_action_outbox",
+		"session_action_audit",
+		"session_action_ledger",
 	}
 	for _, tbl := range wantTables {
 		var name string

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:sessions": "node --test src/lib/sessions.test.js src/lib/session-actions.test.js dev/mock-api.sessions.test.js",
     "preview": "vite preview"
   },
   "devDependencies": {

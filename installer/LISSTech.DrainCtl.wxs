@@ -203,6 +203,30 @@
                 System="yes" />
         </Component>
 
+        <!-- drainctl-shadow.exe: GUI protocol helper, launched in the browser
+             user's context and limited to the fixed consent-preserving mstsc
+             shadow arguments by its strict URI parser. Registry values are
+             installer-owned and removed with this component on uninstall. -->
+        <Component Id="ShadowProtocolHelper" Directory="BinFolder"
+            Guid="e6f7a8b9-c0d1-4e2f-8a3b-4c5d6e7f8a9b">
+            <File Id="drainctl_shadow.exe"
+                Source="..\dist\LISSTech.DrainCtl\bin\drainctl-shadow.exe" />
+            <RegistryValue Root="HKLM"
+                Key="Software\Classes\drainctl-shadow"
+                Value="URL:DrainCtl Shadow Protocol"
+                Type="string"
+                KeyPath="yes" />
+            <RegistryValue Root="HKLM"
+                Key="Software\Classes\drainctl-shadow"
+                Name="URL Protocol"
+                Value=""
+                Type="string" />
+            <RegistryValue Root="HKLM"
+                Key="Software\Classes\drainctl-shadow\shell\open\command"
+                Value="&quot;[BinFolder]drainctl-shadow.exe&quot; &quot;%1&quot;"
+                Type="string" />
+        </Component>
+
         <!-- drainctld.exe: Windows service host -->
         <Component Id="ServiceExe" Directory="BinFolder"
             Guid="b645b4fd-3d62-45aa-a1cc-00d12d7af5cf">
@@ -432,6 +456,7 @@
         <ComponentGroup Id="AllComponents">
             <ComponentRef Id="MainExe" />
             <ComponentRef Id="ServiceExe" />
+            <ComponentRef Id="ShadowProtocolHelper" />
             <ComponentRef Id="MainDll" />
             <ComponentRef Id="ETWProvider" />
             <ComponentRef Id="DefaultConfig" />

@@ -310,13 +310,31 @@ let removedServersRevision = $state(0);
  */
 let forceUpdateCompletions = $state(new Map());
 
+/**
+ * Metadata-only latest Fleet Sessions invalidation. It deliberately excludes
+ * user, client, process, logon, and message fields; detail responses remain
+ * the only source of those projected values.
+ * @type {{host:string,latest_attempt_instance_id:string,latest_attempt_sequence:string,last_success_instance_id:string|null,last_success_sequence:string|null,freshness:string,session_count:number,active_count:number,actions_available:boolean,collection_status:string}|null}
+ */
+let latestSessionSnapshot = $state(null);
+
+/** Incremented after a Fleet Sessions snapshot invalidation or policy reset. */
+let sessionRevision = $state(0);
+
+/**
+ * Safe action statuses keyed by action ID. SSE supplies no target or message
+ * data, and the map is bounded in `handleSessionAction`.
+ * @type {Map<string, {action_id:string,state:string,completed_at_ms:number|null,result_code:string|null}>}
+ */
+let sessionActionStatuses = $state(new Map());
+
 // UI state
 let connected = $state(false);
 let sseConnected = $state(false);
 /** True while EventSource is in CONNECTING state after a transient error. */
 let sseReconnecting = $state(false);
 
-/** @type {'overview'|'servers'|'events'} */
+/** @type {'overview'|'servers'|'events'|'sessions'} */
 let currentView = $state('overview');
 
 /** @type {'all'|'ok'|'warning'|'grace'|'alert'|'off'} */
@@ -582,6 +600,19 @@ export const appState = {
         return forceUpdateCompletions;
     },
 
+    /** Metadata-only latest Fleet Sessions snapshot invalidation. */
+    get latestSessionSnapshot() {
+        return latestSessionSnapshot;
+    },
+    /** Incremented when the fleet list or expanded host detail must refetch. */
+    get sessionRevision() {
+        return sessionRevision;
+    },
+    /** Safe status-only action updates keyed by action ID. */
+    get sessionActionStatuses() {
+        return sessionActionStatuses;
+    },
+
     /**
      * Set of hosts currently selected for a Servers-table batch action.
      * Mutate via the `selection` helper exports below (setSelection,
@@ -746,7 +777,45 @@ export const appState = {
         servers = servers.filter((s) => s.host !== host);
         lastUpdated = new Date();
     },
+
+    /**
+     * Record a metadata-only session snapshot cue. Consumers refetch their
+     * bounded list/detail payload instead of merging this event into PII state.
+     * @param {NonNullable<typeof latestSessionSnapshot>} snapshot
+     */
+    handleSessionSnapshot(snapshot) {
+        latestSessionSnapshot = snapshot;
+        sessionRevision++;
+    },
+
+    /**
+     * Record a safe action transition for pending-action polling acceleration.
+     * @param {{action_id:string,state:string,completed_at_ms:number|null,result_code:string|null}} status
+     */
+    handleSessionAction(status) {
+        const next = new Map(sessionActionStatuses);
+        next.delete(status.action_id);
+        next.set(status.action_id, status);
+        while (next.size > 100) next.delete(next.keys().next().value);
+        sessionActionStatuses = next;
+    },
 };
+
+/**
+ * Remove all Fleet Sessions data and return to a non-admin view. Called on
+ * logout and immediately after an admin-only API response is forbidden.
+ */
+export function clearSessionState() {
+    latestSessionSnapshot = null;
+    sessionActionStatuses = new Map();
+    sessionRevision++;
+    if (currentView === 'sessions') currentView = 'overview';
+}
+
+/** Invalidate bounded Sessions list/detail caches without discarding pending action status. */
+export function invalidateSessionData() {
+    sessionRevision++;
+}
 
 // ---------------------------------------------------------------------------
 // Mutation helpers
