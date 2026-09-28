@@ -4,27 +4,34 @@
      *
      * Renders a single dual-axis chart carrying CPU average, a CPU P95
      * background envelope, Memory, and Sessions for one host, with shared
-     * window presets through 30D, drag-pan, series toggles, and a current-value
-     * readout. Mirrors Overview's LOAD chart visual grammar.
+     * window presets through 30D, drag-pan, persisted series toggles, and a
+     * current-value readout. Mirrors Overview's LOAD chart visual grammar.
      *
-     * Fetches from /api/v1/metrics/{host} — each instance owns its fetch,
-     * window, pan, and toggle state. The window preset persists per-instance
-     * under a host-qualified localStorage key so an operator's preferred
-     * zoom survives navigation between server cards.
+     * Fetches from /api/v1/metrics/{host}. Each instance owns its fetch,
+     * window, pan, and host-qualified localStorage preferences.
      */
+    import { untrack } from 'svelte';
     import { LayerCake, Svg } from 'layercake';
     import { OVERVIEW_WINDOW_PRESETS } from '../lib/state.svelte.js';
     import { fetchMetrics } from '../lib/api.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
-    import { Cpu, MemoryStick, Users, Gauge } from '@lucide/svelte';
+    import {
+        LOAD_SERIES_META,
+        hostLoadVisibilityKey,
+        readLoadVisibility,
+        writeLoadVisibility,
+    } from '../lib/chart-contracts.js';
+    import { Cpu, MemoryStick, Users, Gauge, HelpCircle } from '@lucide/svelte';
 
     /** @type {{ host: string }} */
     let { host } = $props();
+    let showHelp = $state(false);
+    const initialHost = untrack(() => host);
 
-    // ── Window preset (persisted per-host) ────────────────────────────────
-    const LS_KEY = 'drainctl.hostLoadChart.window';
+    // ── Window preset and visibility (persisted per host) ─────────────────
+    const LS_KEY = `drainctl.hostLoadChart.window:${initialHost.trim().toLowerCase()}`;
     function readStoredWindow() {
         try {
             const raw = localStorage.getItem(LS_KEY);
@@ -44,60 +51,28 @@
         }
     });
 
-    // ── Series toggles ────────────────────────────────────────────────────
-    let showCpu = $state(true);
-    let showCpuP95 = $state(true);
-    let showMem = $state(true);
-    let showSessions = $state(true);
+    let visibility = $state(readLoadVisibility(localStorage, hostLoadVisibilityKey(initialHost)));
+    let showCpu = $derived(visibility.cpu);
+    let showCpuP95 = $derived(visibility.cpuP95);
+    let showMem = $derived(visibility.mem);
+    let showSessions = $derived(visibility.sessions);
+    $effect(() => {
+        writeLoadVisibility(localStorage, hostLoadVisibilityKey(initialHost), {
+            cpu: visibility.cpu,
+            cpuP95: visibility.cpuP95,
+            mem: visibility.mem,
+            sessions: visibility.sessions,
+        });
+    });
 
-    const LOAD_SERIES = [
-        {
-            key: 'cpu',
-            label: 'CPU %',
-            color: 'var(--color-accent)',
-            axis: 'left',
-            lineOnly: false,
-            show: () => showCpu,
-            toggle: () => {
-                showCpu = !showCpu;
-            },
+    const LOAD_SERIES = LOAD_SERIES_META.map((series) => ({
+        ...series,
+        show: () => visibility[series.key],
+        toggle: () => {
+            visibility[series.key] = !visibility[series.key];
         },
-        {
-            key: 'cpuP95',
-            label: 'CPU P95',
-            color: 'var(--color-amber)',
-            axis: 'left',
-            lineOnly: false,
-            fillOpacity: 0.92,
-            hideStroke: true,
-            show: () => showCpuP95,
-            toggle: () => {
-                showCpuP95 = !showCpuP95;
-            },
-        },
-        {
-            key: 'mem',
-            label: 'Memory %',
-            color: 'var(--color-green)',
-            axis: 'left',
-            lineOnly: false,
-            show: () => showMem,
-            toggle: () => {
-                showMem = !showMem;
-            },
-        },
-        {
-            key: 'sessions',
-            label: 'Sessions',
-            color: 'var(--color-blue)',
-            axis: 'right',
-            lineOnly: true,
-            show: () => showSessions,
-            toggle: () => {
-                showSessions = !showSessions;
-            },
-        },
-    ];
+    }));
+    const LOAD_META = Object.fromEntries(LOAD_SERIES_META.map((series) => [series.key, series]));
 
     // ── Config-derived thresholds ─────────────────────────────────────────
     let perfCfg = $derived(appState.config?.performance ?? null);
@@ -319,30 +294,30 @@
     );
     let loadCurrents = $derived([
         {
-            label: 'CPU',
+            label: LOAD_META.cpu.shortLabel,
             value: displayPoint ? `${(+displayPoint.cpu).toFixed(1)}%` : '—',
-            color: 'var(--color-accent)',
+            color: LOAD_META.cpu.color,
             icon: Cpu,
             show: () => showCpu,
         },
         {
-            label: 'CPU P95',
+            label: LOAD_META.cpuP95.shortLabel,
             value: displayPoint ? `${(+(displayPoint.cpuP95 ?? displayPoint.cpu)).toFixed(1)}%` : '—',
-            color: 'var(--color-amber)',
+            color: LOAD_META.cpuP95.color,
             icon: Cpu,
             show: () => showCpuP95,
         },
         {
-            label: 'MEM',
+            label: LOAD_META.mem.shortLabel,
             value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%` : '—',
-            color: 'var(--color-green)',
+            color: LOAD_META.mem.color,
             icon: MemoryStick,
             show: () => showMem,
         },
         {
-            label: 'SESS',
+            label: LOAD_META.sessions.shortLabel,
             value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
-            color: 'var(--color-blue)',
+            color: LOAD_META.sessions.color,
             icon: Users,
             show: () => showSessions,
         },
@@ -355,8 +330,23 @@
 <div class="h-load">
     <div class="sub-label">
         <Gauge size={12} strokeWidth={2.4} /> HOST LOAD
+        <button
+            class="help-toggle"
+            class:active={showHelp}
+            onclick={() => (showHelp = !showHelp)}
+            aria-label="Toggle Host Load help text"
+            aria-pressed={showHelp}
+        >
+            <HelpCircle size={11} strokeWidth={2.2} />
+        </button>
     </div>
-
+    {#if showHelp}
+        <p class="chart-desc">
+            From foreground to background: CPU average rose, Memory green, Sessions blue, and CPU P95 amber. Every
+            series has a translucent area fill; its line, fill, legend, and tooltip use the same color. Window and
+            series choices persist for this host.
+        </p>
+    {/if}
     <div class="window-pills">
         {#each OVERVIEW_WINDOW_PRESETS as preset}
             <button
@@ -383,12 +373,11 @@
                 onclick={s.toggle}
             >
                 {#if s.lineOnly}
-                    <span class="t-dash" aria-hidden="true"></span>
+                    <span class={s.dash ? 't-dash' : 't-line'} aria-hidden="true"></span>
                 {:else}
                     <span class="t-dot" aria-hidden="true"></span>
                 {/if}
                 {s.label}
-                {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
             </button>
         {/each}
     </div>
@@ -434,10 +423,30 @@
                             SERIES={LOAD_SERIES}
                             {rightTicks}
                             thresholds={[
-                                { pct: cpuThresh.warn, opacity: 0.25, label: 'CPU WARN', show: () => showCpu },
-                                { pct: cpuThresh.crit, opacity: 0.35, label: 'CPU CRIT', show: () => showCpu },
-                                { pct: memThresh.warn, opacity: 0.25, label: 'MEM WARN', show: () => showMem },
-                                { pct: memThresh.crit, opacity: 0.35, label: 'MEM CRIT', show: () => showMem },
+                                {
+                                    pct: cpuThresh.warn,
+                                    opacity: 0.25,
+                                    label: 'CPU WARN',
+                                    show: () => showCpu && cpuThresh.warn >= 0,
+                                },
+                                {
+                                    pct: cpuThresh.crit,
+                                    opacity: 0.35,
+                                    label: 'CPU CRIT',
+                                    show: () => showCpu && cpuThresh.crit >= 0,
+                                },
+                                {
+                                    pct: memThresh.warn,
+                                    opacity: 0.25,
+                                    label: 'MEM WARN',
+                                    show: () => showMem && memThresh.warn >= 0,
+                                },
+                                {
+                                    pct: memThresh.crit,
+                                    opacity: 0.35,
+                                    label: 'MEM CRIT',
+                                    show: () => showMem && memThresh.crit >= 0,
+                                },
                             ]}
                             {history}
                             visible={loadVisible}
@@ -491,6 +500,37 @@
         display: flex;
         align-items: center;
         gap: 5px;
+    }
+
+    .help-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2px 4px;
+        margin-left: 4px;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        color: var(--color-muted);
+        opacity: 0.55;
+        cursor: pointer;
+        line-height: 0;
+    }
+
+    .help-toggle:hover,
+    .help-toggle.active {
+        opacity: 1;
+        color: var(--color-accent);
+        border-color: var(--color-accent);
+    }
+
+    .chart-desc {
+        font-family: 'Work Sans', sans-serif;
+        font-size: 0.72rem;
+        line-height: 1.5;
+        color: var(--color-muted);
+        margin: -2px 0 10px;
+        max-width: 760px;
     }
 
     .window-pills {
@@ -594,6 +634,18 @@
         border-color: rgba(255, 255, 255, 0.4);
     }
 
+    .t-line {
+        width: 18px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--sc);
+        flex-shrink: 0;
+    }
+
+    .chart-toggle.active .t-line {
+        background: rgba(255, 255, 255, 0.9);
+    }
+
     .t-dash {
         width: 18px;
         height: 3px;
@@ -615,12 +667,6 @@
             transparent 7px,
             transparent 11px
         );
-    }
-
-    .t-axis {
-        font-size: 0.52rem;
-        opacity: 0.55;
-        margin-left: -2px;
     }
 
     .chart-panel {

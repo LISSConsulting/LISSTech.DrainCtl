@@ -292,6 +292,14 @@ let recentSpikes = $state(new Map());
 let selectedHosts = $state(/** @type {Set<string>} */ (new Set()));
 
 /**
+ * Hosts whose Server-table detail rows are expanded. This is session UI state:
+ * it survives view unmount/remount while navigating between dashboard tabs,
+ * but is deliberately not persisted across a browser reload.
+ * @type {Set<string>}
+ */
+let expandedServerHosts = $state(/** @type {Set<string>} */ (new Set()));
+
+/**
  * Hosts scoped into the Overview metrics query. An empty set deliberately means
  * "all registered hosts", unlike `selectedHosts`, which means no batch action.
  * Every mutation assigns a fresh Set so rune reactivity observes the change.
@@ -599,6 +607,14 @@ export const appState = {
     get selectedHosts() {
         return selectedHosts;
     },
+    /**
+     * Expanded Server-table rows. Mutate with the expanded-host helpers so
+     * every change assigns a fresh Set and remains reactive.
+     * @type {Set<string>}
+     */
+    get expandedServerHosts() {
+        return expandedServerHosts;
+    },
 
     /**
      * Hosts scoped into Overview charts. Empty means all registered hosts.
@@ -891,6 +907,40 @@ export function dropSelection(host) {
 export function clearSelection() {
     if (selectedHosts.size === 0) return;
     selectedHosts = new Set();
+}
+
+// ---------------------------------------------------------------------------
+// Servers-table expanded-row helpers
+// ---------------------------------------------------------------------------
+
+/** @param {string} host */
+export function toggleExpandedServerHost(host) {
+    const next = new Set(expandedServerHosts);
+    if (next.has(host)) next.delete(host);
+    else next.add(host);
+    expandedServerHosts = next;
+}
+
+/** @param {string} host */
+export function dropExpandedServerHost(host) {
+    if (!expandedServerHosts.has(host)) return;
+    const next = new Set(expandedServerHosts);
+    next.delete(host);
+    expandedServerHosts = next;
+}
+
+/**
+ * Remove expanded rows whose hosts no longer exist in the live roster.
+ * @param {Iterable<string>} liveHosts
+ * @returns {boolean}
+ */
+export function pruneExpandedServerHosts(liveHosts) {
+    if (expandedServerHosts.size === 0) return false;
+    const live = liveHosts instanceof Set ? liveHosts : new Set(liveHosts);
+    const next = new Set([...expandedServerHosts].filter((host) => live.has(host)));
+    if (next.size === expandedServerHosts.size) return false;
+    expandedServerHosts = next;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

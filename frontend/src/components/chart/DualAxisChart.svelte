@@ -7,7 +7,7 @@
      * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
      *             raw: { cpu: number, mem: number, sessions: number } }} NormPoint
      * @typedef {{ key: string, label: string, color: string, axis: string, lineOnly?: boolean,
-     *             fillOpacity?: number, hideStroke?: boolean }} SeriesDef
+     *             fillOpacity?: number, foregroundRank?: number, dash?: string }} SeriesDef
      */
 
     /**
@@ -20,15 +20,13 @@
 
     const GRID_PCTS = [0, 25, 50, 75, 100];
 
-    // Sessions is the first/back layer. Filled metric layers and threshold
-    // lines are painted afterward.
-    /** @type {Record<string, { width: number, dash?: string, halo?: number }>} */
+    /** @type {Record<string, { width: number, dash?: string }>} */
     const STROKE_CFG = {
         cpu: { width: 3.5 },
+        cpuP95: { width: 3 },
         mem: { width: 3.5 },
-        sessions: { width: 3, halo: 1.5 },
+        sessions: { width: 3 },
     };
-    const SESSIONS_STROKE = 'color-mix(in srgb, var(--color-blue) 52%, var(--color-muted))';
 
     /** Pick a short datetime format based on the visible time span. Mirrors
      * the formatter used in InteractiveTimeChart so every Overview chart
@@ -89,18 +87,9 @@
         })(),
     );
 
-    // Memory is the base metric fill. CPU P95 follows as a translucent
-    // envelope, then average CPU paints last as the primary foreground signal.
-    const LAYER_ORDER = ['mem', 'cpuP95', 'cpu'];
-    let layerRenderOrder = $derived(
-        [...SERIES]
-            .filter((s) => s.key !== 'sessions')
-            .sort((a, b) => {
-                const ai = LAYER_ORDER.indexOf(a.key);
-                const bi = LAYER_ORDER.indexOf(b.key);
-                return (ai === -1 ? LAYER_ORDER.length : ai) - (bi === -1 ? LAYER_ORDER.length : bi);
-            }),
-    );
+    // SVG paints later paths in front. Shared foreground ranks therefore sort
+    // from background to foreground: CPU P95 → Sessions → Memory → CPU average.
+    let layerRenderOrder = $derived([...SERIES].sort((a, b) => (a.foregroundRank ?? 0) - (b.foregroundRank ?? 0)));
 
     // ── Hover state ──
     // Pinned index takes priority → then local hover → then global hover.
@@ -174,31 +163,6 @@
     }
 </script>
 
-<!-- ── Sessions: independent right-axis area painted first, behind every metric layer ── -->
-{#if visible.sessions && allPaths.sessions?.line}
-    {@const sessionCfg = STROKE_CFG.sessions}
-    <path d={allPaths.sessions.area} fill={SESSIONS_STROKE} fill-opacity="1" />
-    <path
-        d={allPaths.sessions.line}
-        stroke="var(--color-surface)"
-        stroke-width={sessionCfg.width + (sessionCfg.halo ?? 0) * 2}
-        stroke-opacity="0.65"
-        fill="none"
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-dasharray={sessionCfg.dash ?? ''}
-    />
-    <path
-        d={allPaths.sessions.line}
-        stroke={SESSIONS_STROKE}
-        stroke-width={sessionCfg.width}
-        stroke-opacity="0.82"
-        fill="none"
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        stroke-dasharray={sessionCfg.dash ?? ''}
-    />
-{/if}
 <!-- ── Left-axis labels (no grid lines) ── -->
 {#each GRID_PCTS as pct}
     {@const y = $yScale(pct)}
@@ -218,21 +182,21 @@
 <line x1={0} y1={0} x2={0} y2={$height} stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 <line x1={0} y1={$height} x2={$width} y2={$height} stroke="var(--color-border)" stroke-width="2" opacity="0.7" />
 
-<!-- ── Filled series and their strokes: memory → CPU → CPU P95 ── -->
+<!-- ── Filled layers, painted from background to foreground ── -->
 {#each layerRenderOrder as s}
     {#if visible[s.key] && allPaths[s.key]?.line}
         {@const cfg = STROKE_CFG[s.key] ?? { width: 3.5 }}
         {#if !s.lineOnly}
             <path d={allPaths[s.key].area} fill={s.color} fill-opacity={s.fillOpacity ?? 1} />
-            {#if !s.hideStroke}
-                <path
-                    d={allPaths[s.key].line}
-                    fill="none"
-                    stroke-linejoin="round"
-                    stroke-linecap="round"
-                    style="stroke: color-mix(in srgb, {s.color} 65%, black); stroke-width: {cfg.width}"
-                />
-            {/if}
+            <path
+                d={allPaths[s.key].line}
+                fill="none"
+                stroke={s.color}
+                stroke-width={cfg.width}
+                stroke-linejoin="round"
+                stroke-linecap="round"
+                stroke-dasharray={s.dash ?? cfg.dash ?? ''}
+            />
         {:else}
             <path
                 d={allPaths[s.key].line}
@@ -241,7 +205,7 @@
                 fill="none"
                 stroke-linejoin="round"
                 stroke-linecap="round"
-                stroke-dasharray={cfg.dash ?? ''}
+                stroke-dasharray={s.dash ?? cfg.dash ?? ''}
             />
         {/if}
     {/if}

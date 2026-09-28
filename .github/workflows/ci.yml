@@ -32,10 +32,11 @@ jobs:
           working-directory: frontend
           install: false
 
-      - name: Build frontend
+      - name: Test and build frontend
         run: |
           cd frontend
           pnpm install --frozen-lockfile
+          pnpm test
           pnpm build
         shell: pwsh
 

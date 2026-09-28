@@ -2,11 +2,11 @@
 
 ## Dashboard chart interaction polish — 2026-09-26
 
-- Overview and per-host timeline panning now follows direct manipulation: dragging right moves plotted data right and reveals older history; dragging left returns toward live.
-- Higher-is-better RemoteFX charts keep normal upward geometry and bottom-origin area fills. Their service-floor P95 remains filled and P50 is dotted. Conventional charts nest P50 only while every comparable point stays inside the primary envelope; mixed-version or missing-data crossings dynamically switch P50 to a dotted line so Encode Time, TCP RTT, or any other crossed series cannot conceal P95.
-- RemoteFX P50 is rendered only where retained source reports supplied it. Historical high-is-better zeroes are treated as missing availability metadata; older buckets cannot be backfilled and remain P95-only.
-- The navbar, Overview, Servers, and Events share one liquid full-width gutter, with responsive 48–80px margins around 1600px-and-larger desktop windows. Server search matches hostname or authoritative RD Session Collection. Sessions, CPU, memory, and input-delay sparklines add up/down/flat arrows from five-sample endpoint averages; EventSpike remains in the expanded per-host swimlane.
-- Performance snapshots now carry the runtime-visible logical processor count once per report. The collector caches `runtime.NumCPU()` at startup, aggregation preserves it as constant host capacity, remote ingestion rejects negative or implausible values, and Server Detail shows it under Resource Utilization → CPU without adding a PDH query.
+- Fleet and host LOAD now share one translucent-fill contract. Foreground to background: CPU average rose, Memory used green, Sessions blue, and CPU P95 amber. Overview visibility persists globally; host windows and visibility persist under host-qualified keys.
+- Health Indicator, Session, and RemoteFX consumers use distinct primary-blue and secondary-violet fills, lines, legends, tooltip swatches, and values. Green/amber/red remain reserved for threshold zones and current-value severity.
+- Fleet adapters select explicit semantics without switching consumers: Host P95 is the highest participating-host tail, Host P50 is the exact median reporting host, Fleet AVG remains the arithmetic fleet average where labeled, and the RemoteFX 95% Service Floor is numeric P5. Missing or incompatible Host P50 remains a gap.
+- Every P50 chart has a solid/dotted legend using the same labels as its tooltip. Disabled negative thresholds no longer color every value red or draw phantom zones.
+- Expanded Server rows survive dashboard-tab navigation. Wide table layouts keep one active host summary/sparkline row sticky while its detail panel scrolls; narrow layouts retain table-local horizontal scrolling.
 - `GET /api/v1/health` is now session-authenticated because version and aggregate fleet status counts are operational data. Missing, invalid, and expired `drainctl_session` cookies receive the same generic `{"error":"unauthorized"}` JSON `401` without counts or session-state disclosure; authenticated dashboard behavior and the response schema remain unchanged.
 
 ## Runtime resilience — 2026-09-26
@@ -34,6 +34,7 @@
 - Session capacity discovery now reads the policy and `RDP-Tcp` listener `MaxInstanceCount` locations before the legacy `UserSessionLimit`, and treats Windows' `0xffffffff` and `999999` unlimited sentinels as unknown capacity. Fleet utilization therefore uses the configured finite capacity instead of silently dividing by an unlimited sentinel or missing the listener value.
 - A configured limit of `9999` is also an unlimited sentinel in the deployed farm. It is normalized on local collection and remote report ingestion, and excluded at every fleet query tier so retained rows cannot poison the utilization denominator.
 - Auto-update no longer cancels the service immediately after `cmd.Start`. Installer spawn is not install success; MSI `ServiceControl` now exclusively owns stop/install/start, and the updater clears its ETag without advancing `highest_seen` so a later msiexec failure leaves the dashboard available and the same release retryable.
+
 ## Servers-table multi-select and batch actions — 2026-09-24
 
 - Added a styled accessible checkbox column to the Servers table with a tri-state select-all header (`none | some | all`). Selecting a checkbox or the select-all control never expands the row — `stopPropagation` on both click and keydown handlers is mandatory because the row itself is a clickable expand trigger. Indeterminate state is driven off `eligibleHosts ∩ selection` (not just selection size) so a hidden filter can't lie about the count.
@@ -41,6 +42,7 @@
 - Reconciliation safety net: a `$effect` watches `appState.servers` and prunes any selected host that is no longer in the live list. The App.svelte SSE handler also calls `dropSelection` on every `server_deleted` and `server_permanently_removed` event so a removed host is gone from selection in the same tick — the toolbar can never operate on a stale or invisible row.
 - Permanent-remove confirm modal shows the EXACT count and comma-joined hostnames before invoking the batch endpoint. The batch response shape `{removed[], skipped[], errors[]}` drives per-row removal locally; the SSE event reconciles other browser sessions a moment later. We always drop the targeted hosts from selection even on errors so the operator doesn't double-click.
 - Force-update fan-out mints a fresh `crypto.randomUUID()` per host (with a Math.random fallback for environments without `crypto.randomUUID`) so 24-hour server-side idempotency dedupes correctly even when an operator clicks "Force update" twice on the same fleet. The toolbar renders per-host outcomes in a non-blocking toast with `accepted → green`, `offline → amber`, `unsupported → red`, `duplicate → muted`.
+
 ## Event-spike operator controls + defaults analysis — 2026-09-24
 
 - The dashboard Settings modal now edits every operator-safe evtspike knob
@@ -71,7 +73,7 @@
   subscriptions now clear their counters but never observe or mature buckets,
   preventing stale-event spikes after recovery.
 - Status-pill semantics are documented in `specs/008-sqlite-chart-consumers/
-  evtspike-defaults-analysis.md`. The owner selected a durable seven-day
+evtspike-defaults-analysis.md`. The owner selected a durable seven-day
   warm-up: status remains `training` until the elapsed-time and existing
   channel-readiness gates both pass, while scoring and confirmed spike
   emission continue. `baseline.json` schema 2 persists the start immediately;
@@ -110,23 +112,27 @@
 Remediates 16 confirmed items from the 2026-04-24 codex full-codebase review (scope-pruned; plan at `docs/reviews/codex-2026-04-24-fullcodebase-remediation-plan.md`). Five user stories landed; one task deferred.
 
 **Credential paths (US1/US2)**:
+
 - Dashboard fingerprint mismatch refusal: once pinned, `Dashboard.TLSFingerprint` is immutable via the automatic register path. Legitimate cert rotation now requires manually clearing the field in `config.json` before re-registering. CLI returns a non-zero exit with `fingerprint mismatch` in the error; service logs `slog.Error("dashboard=fingerprint-mismatch", ...)` on every retry.
 - Authenticated SMTP relays now require STARTTLS (port 587 flow) or `smtps://` (port 465). Drainctl refuses to send `AUTH` on a cleartext session. Plain-port-25 AUTH is rejected with a host-naming error; unauthenticated relays keep opportunistic behavior with a `slog.Warn`.
 - `config.json` ACL: SERVICE (S-1-5-6) ACE dropped. Only SYSTEM and Administrators. Post-install `icacls` check confirms no stray SERVICE grant.
 - DPAPI entropy constant (`LISSTech.DrainCtl/v1/notify-secret`) added. Greenfield — no migration path; any secret encrypted under the zero-entropy scheme will blank on load.
 
 **Pipeline correctness (US3)**:
+
 - Evtspike `Subscribe` now fires its `loss` callback on terminal `EvtNext` errors (previously discarded). Function-pointer test seams (`createEvent`, `evtNextCall`, etc.) let tests inject a closed-handle scenario.
 - Atomic config read-modify-write via `readModifyWrite(f)` under the existing named mutex. Every scoped updater (`UpdateNotifySettings`, `UpdateEvtSpikeEnabled`, `InstallCertificate`) brackets Load → mutate → Save under one lock. 20-goroutine stress test verifies no lost updates.
 - Named-pipe server shares `readPipeMessage` with the response path; 1 MiB cap; `ERROR_MORE_DATA` loop. Requests >4 KB no longer silently truncate.
 
 **Defense in depth (US4)**:
+
 - Pipe caller-SID check for privileged verbs (`register`, `remove-server`, `baseline-reset`): `GetNamedPipeClientProcessId` + `OpenProcessToken` + `Token.IsMember(adminSID)`. Denied calls get `access denied`, a `slog.Warn("pipe=access_denied", ...)`, and an `EvtAccessDenied` audit event. Read-only verbs (`status`, `history`, `servers`) still accessible to any OS-permitted caller.
 - Email rendering swapped from `text/template` to `html/template`. Crafted event-log fields can no longer inject HTML into admin inboxes.
 - Registry-change attribution uses the event's own `SystemTime` (RFC3339Nano), not wall-clock `time.Now()`. Buffered audit-log deliveries no longer stamp the wrong transition.
 - ~~Cloud-metadata IP rejection~~ **withdrawn 2026-04-24**: an earlier 009 revision rejected `http://169.254.169.254` notification targets as a "cheap cloud-metadata hedge." Removed during 009 codex post-review after the literal-string check was shown to be bypassable via IPv6-mapped (`[::ffff:169.254.169.254]`), decimal/hex IPv4, trailing-dot, and 302 redirect (default Go HTTP client follows redirects). Hedge value was zero while the spec implied a guarantee we couldn't deliver. RFC1918 LAN webhooks were always allowed; that's unchanged. See `docs/reviews/codex-2026-04-24-009-branch-remediation.md` Step 1.
 
 **Surface drift cleanup (US5)**:
+
 - Deleted four dead `Update*` exports (`UpdateNotifications`, `UpdateSessionThreshold`, `UpdateGracePeriod`, `UpdatePerformanceConfig`). `UpdateNotifySettings` is the sole write path now.
 - ETW event-ID constants moved from root `drainctl` to `internal/etwids/`.
 - `DefaultAuditPath` deprecated in favor of `DefaultDBPath`; `GetHistory` accepts either a file or directory path (`os.Stat` branches).
@@ -169,6 +175,7 @@ Added a **light-weight codex pre-commit step** (BUILD.md §4): pipe the staged d
 Why YOLO flag: codex 0.121.0's Windows sandbox fails with `CreateProcessWithLogonW 1326` on every PowerShell spawn (see `reference_codex_yolo_windows` memory). `--dangerously-bypass-approvals-and-sandbox` is the only reliable invocation on this host; safe because `codex exec` is `approval: never` non-interactive.
 
 Key Ralph-friendly discipline encoded in the runbook:
+
 - Stop conditions are explicit: all-tasks-done, design drift, test-fail-after-3-tries, codex-confirmed-and-unresolved, lint-loop, diff > 1000 lines.
 - Pre-commit hook failure **aborts the commit** (nothing is created); fix, re-stage, retry. Never `--amend` (rewrites the prior commit), never `--no-verify`.
 - Tick `- [ ]` → `- [x]` in `tasks.md` **in the same commit** as the implementation, never separately.

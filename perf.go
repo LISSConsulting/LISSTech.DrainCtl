@@ -119,6 +119,18 @@ func SanitizePerfSnapshot(p PerfSnapshot) PerfSnapshot {
 			p.P50Present &^= presence
 		}
 	}
+	clearIncompatibleLowerP50 := func(primary float64, median *float64, presence PerfP50Presence) {
+		if p.HasP50(presence, *median) && primary > 0 && *median > primary {
+			*median = 0
+			p.P50Present &^= presence
+		}
+	}
+	clearIncompatibleHigherP50 := func(floor float64, median *float64, presence PerfP50Presence) {
+		if p.HasP50(presence, *median) && floor > 0 && *median > 0 && *median < floor {
+			*median = 0
+			p.P50Present &^= presence
+		}
+	}
 	if p.LogicalProcessors < 0 || p.LogicalProcessors > 4096 {
 		p.LogicalProcessors = 0
 	}
@@ -176,6 +188,13 @@ func SanitizePerfSnapshot(p PerfSnapshot) PerfSnapshot {
 	sanitizeP50("rfx_rtt_ms_p50", PerfP50RFXRTT, &p.RFXRTTP50)
 	sanitize("rfx_loss_pct", &p.RFXLoss)
 	sanitizeP50("rfx_loss_pct_p50", PerfP50RFXLoss, &p.RFXLossP50)
+	clearIncompatibleHigherP50(p.RFXFPSOut, &p.RFXFPSOutP50, PerfP50RFXFPSOut)
+	clearIncompatibleLowerP50(p.RFXSkipServer, &p.RFXSkipServerP50, PerfP50RFXSkipServer)
+	clearIncompatibleLowerP50(p.RFXSkipNet, &p.RFXSkipNetP50, PerfP50RFXSkipNet)
+	clearIncompatibleLowerP50(p.RFXEncodeMS, &p.RFXEncodeMSP50, PerfP50RFXEncodeMS)
+	clearIncompatibleHigherP50(p.RFXQuality, &p.RFXQualityP50, PerfP50RFXQuality)
+	clearIncompatibleLowerP50(p.RFXRTT, &p.RFXRTTP50, PerfP50RFXRTT)
+	clearIncompatibleLowerP50(p.RFXLoss, &p.RFXLossP50, PerfP50RFXLoss)
 
 	// Zero FPS or frame quality represents no active RemoteFX stream rather
 	// than a collected high-is-better percentile.
