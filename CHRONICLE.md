@@ -1,8 +1,13 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Windows control-path diagnostics — 2026-09-27
+
+- Named-pipe accept now joins its cancellation helper before closing the event handle. This prevents a delayed `SetEvent` from targeting a recycled handle, spuriously waking the next overlapped `ConnectNamedPipe`, and producing `GetOverlappedResult: Overlapped I/O event is not in a signaled state`.
+- RD Session Collection discovery now emits the PowerShell exception even when Windows PowerShell routes it to stdout under non-interactive service hosting. Warnings identify the attempted target and include the supported elevated `broker-setup` remediation while retaining the last good collection map.
+
 ## Dashboard chart interaction polish — 2026-09-26
 
-- Fleet and host LOAD now share one translucent-fill contract. Foreground to background: CPU average rose, Memory used green, Sessions blue, and CPU P95 amber. Overview visibility persists globally; host windows and visibility persist under host-qualified keys.
+- Fleet and host LOAD now share one translucent-fill contract. Foreground to background: `CPU AVG` rose, `Memory` green, `Sessions` blue, and `CPU P95` amber. Overview visibility persists globally; host windows and visibility persist under host-qualified keys.
 - Health Indicator, Session, and RemoteFX consumers use distinct primary-blue and secondary-violet fills, lines, legends, tooltip swatches, and values. Green/amber/red remain reserved for threshold zones and current-value severity.
 - Fleet adapters select explicit semantics without switching consumers: Host P95 is the highest participating-host tail, Host P50 is the exact median reporting host, Fleet AVG remains the arithmetic fleet average where labeled, and the RemoteFX 95% Service Floor is numeric P5. Missing or incompatible Host P50 remains a gap.
 - Every P50 chart has a solid/dotted legend using the same labels as its tooltip. Disabled negative thresholds no longer color every value red or draw phantom zones.
