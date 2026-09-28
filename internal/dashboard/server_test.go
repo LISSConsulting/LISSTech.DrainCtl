@@ -21,6 +21,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -3011,6 +3012,142 @@ func TestHandleSSE_ClosesOnSessionExpiry(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("handleSSE did not close after session was deleted")
 	}
+}
+
+func TestSharedEvents_RejectsMissingAndStaleDashboardSessionsBeforeSubscription(t *testing.T) {
+	ds := newTestServer(t)
+	storeCtx, cancelStore := context.WithCancel(context.Background())
+	t.Cleanup(cancelStore)
+	ds.sessionStore = NewSessionStore(storeCtx)
+	mux := http.NewServeMux()
+	registerRoutes(context.Background(), ds, mux)
+
+	missing := httptest.NewRecorder()
+	mux.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/v1/events", nil))
+	if missing.Code != http.StatusUnauthorized || missing.Body.String() != `{"error":{"code":"session_expired"}}` {
+		t.Fatalf("missing session = %d %q", missing.Code, missing.Body.String())
+	}
+	if got := missing.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Fatalf("missing session content type = %q", got)
+	}
+
+	loginSnapshot := &AuthInfo{Username: "operator", Groups: []string{"Other Group"}}
+	token, err := ds.sessionStore.Create(loginSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mutating the login input cannot grant access: only the stored snapshot is
+	// considered and no directory lookup occurs during stream authorization.
+	loginSnapshot.Groups[0] = "Domain Admins"
+	stale := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	request.AddCookie(&http.Cookie{Name: "drainctl_session", Value: token})
+	mux.ServeHTTP(stale, request)
+	if stale.Code != http.StatusForbidden || stale.Body.String() != `{"error":{"code":"access_denied"}}` {
+		t.Fatalf("stale group session = %d %q", stale.Code, stale.Body.String())
+	}
+	if got := stale.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Fatalf("stale group session content type = %q", got)
+	}
+	if got := ds.broker.Count(); got != 0 {
+		t.Fatalf("rejected request subscribed %d streams", got)
+	}
+}
+
+func TestHandleSSE_PeriodicallyClosesStaleGroupSnapshotWithoutEvents(t *testing.T) {
+	originalInterval := sseSessionCheckInterval
+	sseSessionCheckInterval = 20 * time.Millisecond
+	t.Cleanup(func() { sseSessionCheckInterval = originalInterval })
+
+	ds := newTestServer(t)
+	storeCtx, cancelStore := context.WithCancel(context.Background())
+	t.Cleanup(cancelStore)
+	ds.sessionStore = NewSessionStore(storeCtx)
+	token, err := ds.sessionStore.Create(&AuthInfo{Username: "operator", Groups: []string{"Domain Admins"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
+	r = r.WithContext(context.WithValue(r.Context(), authInfoKey, &AuthInfo{Username: "operator", Groups: []string{"Domain Admins"}}))
+	r.AddCookie(&http.Cookie{Name: "drainctl_session", Value: token})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ds.handleSSE(w, r)
+	}()
+	waitForSubscriber(t, ds.broker)
+
+	ds.dashboardGroupMu.Lock()
+	ds.dashboardGroup = "Other Group"
+	ds.dashboardGroupSet = true
+	ds.dashboardGroupMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not close after group snapshot became stale")
+	}
+	ds.PublishSessionDrop(sessiondrop.SSEEvent{SchemaVersion: 1, SourceKind: "session_drop", SourceID: "1"})
+	if strings.Contains(w.Body.String(), "session_drop") {
+		t.Fatalf("closed stream received feature event: %q", w.Body.String())
+	}
+}
+
+func TestSetDashboardGroup_InvalidatesSessionsAndClosesSharedStreams(t *testing.T) {
+	ds := newTestServer(t)
+	storeCtx, cancelStore := context.WithCancel(context.Background())
+	t.Cleanup(cancelStore)
+	ds.sessionStore = NewSessionStore(storeCtx)
+	token, err := ds.sessionStore.Create(&AuthInfo{Username: "operator", Groups: []string{"Domain Admins"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherToken, err := ds.sessionStore.Create(&AuthInfo{Username: "second", Groups: []string{"Domain Admins"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
+	r.AddCookie(&http.Cookie{Name: "drainctl_session", Value: token})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ds.handleSSE(w, r)
+	}()
+	waitForSubscriber(t, ds.broker)
+
+	ds.SetDashboardGroup("Replacement Group")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not close after dashboard group changed")
+	}
+	if ds.sessionStore.Get(token) != nil || ds.sessionStore.Get(otherToken) != nil {
+		t.Fatal("dashboard group change left an active session")
+	}
+	ds.PublishSessionDrop(sessiondrop.SSEEvent{SchemaVersion: 1, SourceKind: "session_drop", SourceID: "1"})
+	if strings.Contains(w.Body.String(), "session_drop") {
+		t.Fatalf("closed stream received feature event: %q", w.Body.String())
+	}
+}
+
+func waitForSubscriber(t *testing.T, broker *Broker) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if broker.Count() == 1 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("handler did not subscribe")
 }
 
 // TestHandleReport_BroadcastsSSEUpdate verifies the end-to-end SSE wiring:

@@ -70,7 +70,7 @@ func (s *SessionStore) Create(info *AuthInfo) (string, error) {
 	s.sessions[token] = &Session{
 		Token:      token,
 		Username:   info.Username,
-		Groups:     info.Groups,
+		Groups:     append([]string(nil), info.Groups...),
 		CreatedAt:  now,
 		LastSeenAt: now,
 	}
@@ -103,5 +103,14 @@ func (s *SessionStore) Get(token string) *Session {
 func (s *SessionStore) Delete(token string) {
 	s.mu.Lock()
 	delete(s.sessions, token)
+	s.mu.Unlock()
+}
+
+// InvalidateAll removes every active dashboard session. Dashboard-group
+// changes use this rather than attempting to reinterpret sessions created
+// under the previous authorization boundary.
+func (s *SessionStore) InvalidateAll() {
+	s.mu.Lock()
+	clear(s.sessions)
 	s.mu.Unlock()
 }

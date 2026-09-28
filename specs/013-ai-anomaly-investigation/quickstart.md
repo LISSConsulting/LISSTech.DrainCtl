@@ -133,6 +133,51 @@ Use synthetic host A and host B as an isolation control. Train both, then pass A
 
 **Expected:** only valid confirmed unexplained drops are provider eligible. The injected count remains zero unless a deliberately authorized investigation test begins. Existing evtspike remains unchanged, and permanent removal is the sole state-clearing path.
 
+
+### Real-browser no-network fixture procedure
+
+`frontend/dev/mock-api.js` is the only browser fixture. From `frontend/`, run
+`pnpm build` to validate the production bundle, then run `pnpm dev` with the
+default `DRAINCTL_MOCK` setting. The Vite fixture handles every `/api/` request
+in-process; it performs no provider, proxy, or external network I/O.
+
+Sign in with any non-empty password and one of these synthetic usernames:
+`dashboard`, `stale`, `machine`, or `non_dashboard`. `dashboard` is the
+dashboard-group session. `stale` represents a login-time group snapshot that
+does not include the current configured dashboard group; `machine` is the
+machine-role identity; and `non_dashboard` is an ordinary non-member. The last
+three must receive only the common safe authorization failure and must not
+create an attempt or subscribe to shared SSE. Direct protocol checks may send
+the same identity in `X-Mock-Identity` (or `mock_identity` query parameter);
+the production browser flow uses its login cookie.
+
+The fixture's dashboard session can exercise all safe feature routes:
+
+- `GET`/`PUT /api/v1/investigation/settings`, `GET
+  /api/v1/investigation/status`, source history/detail, create, and retry;
+  settings accepts only the exact closed eight-clause acknowledgement object
+  and explicit `preserve`, `replace`, or `clear` credential commands.
+- Create source IDs `998` and `999` to observe the independent safe
+  `429 queue_full` and `409 attempt_limit_reached` cases. Seeded history also
+  includes a completed report, local `evidence_unavailable` insufficiency,
+  provider-valid insufficiency with an empty terminal reason, and a canonical
+  `response_invalid` failure suitable for retry.
+- `GET /api/v1/session-drops` and `GET /api/v1/session-drops/201` provide a
+  closed list/detail split, decimal IDs, 2-of-3 confirmation flags, RFC3339
+  confirmation timestamps, normal-training readiness timestamps, and complete
+  retained attempt summaries. The list deliberately has no attempt summary.
+- `GET /api/v1/events` emits literal `data:` envelopes only. Feature
+  lifecycle/session-drop payloads are source-kind/decimal-source-ID-only, and
+  an unknown additive event is emitted for forward-compatibility. No fixture
+  feature event contains a host or provider material.
+
+To prove session invalidation, establish a dashboard SSE connection, then
+`PUT /api/v1/settings` with a nonempty `dashboard_group` value. This
+fixture-only control simulates a `Dashboard.Group` change: it closes all
+streams and invalidates every existing login cookie. Reauthenticate as
+`dashboard` before calling feature routes or subscribing again. It is a
+login-time snapshot/current-config exercise, never a live directory-membership
+lookup.
 ## 9. Production dashboard browser fixture (US1–US4; SC-007)
 
 1. Run production frontend in a real browser against an in-process synthetic harness with recording non-dialing fixed-URL transport. Seed only synthetic source/anomaly/history data and dashboard/non-dashboard/machine identities.

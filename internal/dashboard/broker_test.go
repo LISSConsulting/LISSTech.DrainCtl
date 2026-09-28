@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/investigation"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 )
 
 // drainBroker reads every message currently sitting in the subscriber channel
@@ -199,6 +201,46 @@ func TestBroker_PublishRecentSpike_EmitsEveryCall(t *testing.T) {
 		}
 		if entry.ID != int64(i+1) {
 			t.Errorf("event[%d].data.id = %d, want %d", i, entry.ID, i+1)
+		}
+	}
+}
+
+func TestBroker_PublishesHostFreeFeatureEventsInEstablishedEnvelope(t *testing.T) {
+	b := NewBroker()
+	id, ch, _, err := b.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Unsubscribe(id)
+
+	if !b.PublishInvestigationUpdate(investigation.Update{
+		Kind: "attempt",
+		Attempt: &investigation.AttemptUpdate{
+			AttemptID: "7",
+			Source:    investigation.SourceLink{SourceKind: investigation.SourceKindSessionDrop, SourceID: "9"},
+			State:     investigation.AttemptStateQueued,
+		},
+	}) {
+		t.Fatal("investigation update was not published")
+	}
+	if !b.PublishSessionDrop(sessiondrop.SSEEvent{
+		SchemaVersion: 1,
+		SourceKind:    sessiondrop.SourceKind,
+		SourceID:      "9",
+	}) {
+		t.Fatal("session-drop event was not published")
+	}
+
+	events := drainBroker(t, ch)
+	if len(events) != 2 {
+		t.Fatalf("got %d feature events, want 2", len(events))
+	}
+	for _, event := range events {
+		if event.Host != "" {
+			t.Fatalf("%s event exposed host %q", event.Type, event.Host)
+		}
+		if event.Type != "investigation_update" && event.Type != "session_drop" {
+			t.Fatalf("unexpected feature event type %q", event.Type)
 		}
 	}
 }

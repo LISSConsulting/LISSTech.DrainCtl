@@ -3,6 +3,8 @@
 package dashboard
 
 import (
+	"context"
+	"database/sql"
 	"sync"
 	"testing"
 	"time"
@@ -15,12 +17,18 @@ import (
 // telemetry DB rooted at t.TempDir(). The DB is closed on test cleanup.
 func newTestServerState(t *testing.T) *ServerState {
 	t.Helper()
+	state, _ := newTestServerStateWithDB(t)
+	return state
+}
+
+func newTestServerStateWithDB(t *testing.T) (*ServerState, *telemetry.DB) {
+	t.Helper()
 	db, err := telemetry.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("telemetry.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return NewServerState(telemetry.NewServerStore(db))
+	return NewServerState(telemetry.NewServerStore(db)), db
 }
 
 // ── Construction ──────────────────────────────────────────────────────────────
@@ -197,6 +205,226 @@ func TestUpdate_FiresOnMetricsOnlyForRegisteredHost(t *testing.T) {
 	s.Update("SRV01", &dc.CheckResult{Host: "SRV01"})
 	if count != 1 {
 		t.Errorf("OnMetrics count=%d, want 1", count)
+	}
+}
+
+type countingSessionDropInboxWaker struct {
+	count int
+	state *ServerState
+	db    *telemetry.DB
+}
+
+func (w *countingSessionDropInboxWaker) WakeSessionDropInbox() {
+	w.count++
+	if got := w.state.Get("SRV01"); got == nil || got.LastResult == nil {
+		panic("session-drop wake occurred before accepted result persisted")
+	}
+	pending, err := telemetry.NewSessionDropStore(w.db).PendingObservation(context.Background())
+	if err != nil || pending == nil {
+		panic("session-drop wake occurred before durable inbox insert")
+	}
+}
+
+func TestUpdate_WakesSessionDropInboxOnlyAfterAcceptedResultCommit(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	waker := &countingSessionDropInboxWaker{state: s, db: db}
+	s.SetSessionDropInboxWaker(waker)
+
+	s.Update("SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now().UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	})
+	pending, err := telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation: %v", err)
+	}
+	if pending == nil {
+		t.Fatal("accepted report did not persist a durable session-drop observation")
+	}
+	if pending.CanonicalHost != "SRV01" || pending.ReportEpochMs <= 0 {
+		t.Fatalf("pending observation = %#v, want SRV01 with report epoch", pending)
+	}
+	acceptedSequence := pending.AcceptedSequence
+
+	s.Update("SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.UnixMilli(pending.ReportEpochMs).UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	})
+	pending, err = telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation after duplicate: %v", err)
+	}
+	if pending == nil || pending.AcceptedSequence != acceptedSequence {
+		t.Fatalf("duplicate report replaced durable observation: %#v, want sequence %d", pending, acceptedSequence)
+	}
+
+	if waker.count != 2 {
+		t.Fatalf("inbox wake count = %d, want 2 for two accepted reports; durable inbox remains idempotent", waker.count)
+	}
+}
+
+func TestUpdate_DurableInboxSurvivesMissedWakeAndConsumesOnce(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	s.Update("SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now().UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 4, DisconnectedSessions: 2},
+	})
+
+	if got := s.Get("SRV01"); got == nil || got.LastResult == nil {
+		t.Fatal("accepted result was not durable before missed wake simulation")
+	}
+	inbox := telemetry.NewSessionDropStore(db)
+	if pending, err := inbox.PendingObservation(context.Background()); err != nil || pending == nil {
+		t.Fatalf("pending observation after missed wake = (%#v, %v), want durable row", pending, err)
+	}
+
+	consumed := 0
+	drained, err := inbox.ConsumeNext(context.Background(), func(_ context.Context, _ *sql.Tx, observation telemetry.SessionDropObservation) error {
+		consumed++
+		if observation.CanonicalHost != "SRV01" {
+			t.Fatalf("consumed host = %q, want SRV01", observation.CanonicalHost)
+		}
+		return nil
+	})
+	if err != nil || !drained {
+		t.Fatalf("startup drain = (%v, %v), want (true, nil)", drained, err)
+	}
+	drained, err = inbox.ConsumeNext(context.Background(), func(context.Context, *sql.Tx, telemetry.SessionDropObservation) error {
+		t.Fatal("consumed the same durable observation twice")
+		return nil
+	})
+	if err != nil || drained {
+		t.Fatalf("second startup drain = (%v, %v), want (false, nil)", drained, err)
+	}
+	if consumed != 1 {
+		t.Fatalf("consumed observations = %d, want exactly once", consumed)
+	}
+}
+
+func TestUpdate_InboxDrainUsesAcceptanceSequenceNotReportEpoch(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	s.Register("SRV02")
+	reportEpoch := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+
+	// Deliberately accept the newer report epoch first. Detector drain order
+	// must preserve acceptance order, not reorder it by the report timestamp.
+	s.Update("SRV02", &dc.CheckResult{Host: "SRV02", Timestamp: reportEpoch.Add(time.Minute)})
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Timestamp: reportEpoch})
+
+	inbox := telemetry.NewSessionDropStore(db)
+	var drainedHosts []string
+	for range 2 {
+		drained, err := inbox.ConsumeNext(context.Background(), func(_ context.Context, _ *sql.Tx, observation telemetry.SessionDropObservation) error {
+			drainedHosts = append(drainedHosts, observation.CanonicalHost)
+			return nil
+		})
+		if err != nil || !drained {
+			t.Fatalf("ConsumeNext = (%v, %v), want (true, nil)", drained, err)
+		}
+	}
+	if len(drainedHosts) != 2 || drainedHosts[0] != "SRV02" || drainedHosts[1] != "SRV01" {
+		t.Fatalf("drain order = %v, want acceptance order [SRV02 SRV01]", drainedHosts)
+	}
+}
+
+func TestUpdate_WithoutReportEpochPersistsResultWithoutInboxObservation(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	if got := s.Get("SRV01"); got == nil || got.LastResult == nil {
+		t.Fatal("report without an observation identity did not persist last result")
+	}
+	pending, err := telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation: %v", err)
+	}
+	if pending != nil {
+		t.Fatalf("report without epoch created inbox observation %#v", pending)
+	}
+}
+
+func TestSessionDropObservationPreservesNilAndSuccessfulZeroSessions(t *testing.T) {
+	acceptedAt := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+	reportedAt := acceptedAt.Add(-time.Minute)
+
+	nilSessions := sessionDropObservation("SRV01", &dc.CheckResult{Timestamp: reportedAt}, acceptedAt)
+	if nilSessions.SessionPresence != "nil" || nilSessions.ActiveSessions != nil || nilSessions.DisconnectedSessions != nil {
+		t.Fatalf("nil session observation = %#v, want typed nil enumeration", nilSessions)
+	}
+
+	zeroSessions := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp: reportedAt,
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	}, acceptedAt)
+	if zeroSessions.SessionPresence != "present" || zeroSessions.ActiveSessions == nil || zeroSessions.DisconnectedSessions == nil {
+		t.Fatalf("zero session observation = %#v, want present typed zero counts", zeroSessions)
+	}
+	if *zeroSessions.ActiveSessions != 0 || *zeroSessions.DisconnectedSessions != 0 {
+		t.Fatalf("zero session counts = (%d, %d), want (0, 0)", *zeroSessions.ActiveSessions, *zeroSessions.DisconnectedSessions)
+	}
+}
+
+func TestSessionDropObservationUsesSourceLocalReportTime(t *testing.T) {
+	sourceLocal := time.Date(2026, time.September, 27, 0, 15, 0, 0, time.FixedZone("UTC-7", -7*60*60))
+	observation := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      sourceLocal,
+		DrainModeValue: uint32(dc.DrainPersistent),
+	}, sourceLocal.UTC().Add(time.Second))
+
+	if observation.ReportEpochMs != sourceLocal.UTC().UnixMilli() {
+		t.Fatalf("report epoch = %d, want %d", observation.ReportEpochMs, sourceLocal.UTC().UnixMilli())
+	}
+	if observation.LocalOffsetMinutes != -420 || observation.LocalDate != "2026-09-27" {
+		t.Fatalf("source-local context = (%d, %q), want (-420, 2026-09-27)", observation.LocalOffsetMinutes, observation.LocalDate)
+	}
+	if observation.DrainContext != "overlap" {
+		t.Fatalf("drain context = %q, want overlap", observation.DrainContext)
+	}
+}
+
+func TestSessionDropObservationClassifiesProductionReportContexts(t *testing.T) {
+	acceptedAt := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+	reportedAt := acceptedAt.Add(-time.Minute)
+
+	normal := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp: reportedAt,
+		Sessions:  &dc.SessionSummary{ActiveSessions: 2, DisconnectedSessions: 1},
+	}, acceptedAt)
+	if normal.SessionPresence != "present" || normal.FreshnessContext != "fresh" || normal.DrainContext != "none" || normal.ClassificationContext != "unexplained" {
+		t.Fatalf("normal observation = %#v, want fresh unexplained typed session report", normal)
+	}
+
+	unavailable := sessionDropObservation("SRV01", &dc.CheckResult{Timestamp: reportedAt}, acceptedAt)
+	if unavailable.SessionPresence != "nil" || unavailable.ClassificationContext != "not_scored" {
+		t.Fatalf("unavailable observation = %#v, want not_scored", unavailable)
+	}
+
+	invalid := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      reportedAt,
+		DrainModeValue: uint32(dc.DrainPersistent),
+		Sessions:       &dc.SessionSummary{ActiveSessions: -1, DisconnectedSessions: 0},
+	}, acceptedAt)
+	if invalid.SessionPresence != "invalid" || invalid.DrainContext != "overlap" || invalid.ClassificationContext != "not_scored" {
+		t.Fatalf("invalid observation = %#v, want not_scored drain context", invalid)
+	}
+
+	draining := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      reportedAt,
+		DrainModeValue: uint32(dc.DrainPersistent),
+		Sessions:       &dc.SessionSummary{ActiveSessions: 2, DisconnectedSessions: 1},
+	}, acceptedAt)
+	if draining.SessionPresence != "present" || draining.DrainContext != "overlap" || draining.ClassificationContext != "drain_associated" {
+		t.Fatalf("draining observation = %#v, want drain-associated typed session report", draining)
 	}
 }
 

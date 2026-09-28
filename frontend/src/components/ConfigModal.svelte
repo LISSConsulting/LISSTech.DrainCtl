@@ -3,6 +3,9 @@
     import {
         fetchSettings,
         saveSettings,
+        fetchInvestigationSettings,
+        fetchInvestigationStatus,
+        saveInvestigationSettings,
         sendNotifyTest,
         fetchMaintenance,
         addNotificationTarget,
@@ -46,6 +49,59 @@
     let showConfirmClose = $state(false);
     let closing = $state(false);
     const CLOSE_MS = 150;
+
+    const PRIVACY_ACKNOWLEDGEMENT = {
+        version: 'openai_responses_privacy_v1',
+        third_party_subprocessors: true,
+        no_training_without_opt_in: true,
+        default_abuse_monitoring_up_to_30_days: true,
+        store_false_application_state_only: true,
+        temporary_prompt_cache_possible: true,
+        zdr_mam_separate_approval: true,
+        audit_days_local_only: true,
+        global_endpoint_no_regional_guarantee: true,
+    };
+    let investigationSettings = $state(null);
+    let investigationStatus = $state(null);
+    let credentialOperation = $state('preserve');
+    let credentialValue = $state('');
+    let providerSaving = $state(false);
+
+    async function loadInvestigationSettings() {
+        try {
+            [investigationSettings, investigationStatus] = await Promise.all([fetchInvestigationSettings(), fetchInvestigationStatus()]);
+        } catch (e) {
+            toast.err('Failed to load investigation settings: ' + e.message);
+        }
+    }
+
+    async function saveInvestigation() {
+        if (!investigationSettings || providerSaving) return;
+        providerSaving = true;
+        try {
+            const provider = investigationSettings.provider;
+            const acknowledgment = provider.access_enabled || provider.automatic_enabled ? PRIVACY_ACKNOWLEDGEMENT : undefined;
+            investigationSettings = await saveInvestigationSettings({
+                provider: {
+                    access_enabled: provider.access_enabled,
+                    automatic_enabled: provider.automatic_enabled,
+                    ...(acknowledgment ? { privacy_acknowledgement: acknowledgment } : {}),
+                    credential: credentialOperation === 'replace'
+                        ? { operation: 'replace', value: credentialValue }
+                        : { operation: credentialOperation },
+                },
+                session_drop: investigationSettings.session_drop,
+            });
+            credentialValue = '';
+            credentialOperation = 'preserve';
+            investigationStatus = await fetchInvestigationStatus();
+            toast.ok('Investigation settings saved');
+        } catch (e) {
+            toast.err('Investigation settings failed: ' + (e?.code ?? e.message));
+        } finally {
+            providerSaving = false;
+        }
+    }
 
     function animateClose() {
         closing = true;
@@ -206,6 +262,7 @@
 
     $effect(() => {
         loadConfig();
+        loadInvestigationSettings();
     });
 
     async function loadConfig() {
@@ -470,6 +527,7 @@
         { id: 'alerts', label: 'Alerts & Performance' },
         { id: 'spikes', label: 'Event Spikes' },
         { id: 'notifications', label: 'Notifications' },
+        { id: 'investigation', label: 'AI Investigation' },
         { id: 'servers', label: 'Servers' },
         { id: 'system', label: 'System' },
     ];
@@ -1501,6 +1559,37 @@
                             bind:editIdx
                             bind:deleteIdx
                         />
+                    </div>
+                {:else if activeTab === 'investigation'}
+                    <div id="config-panel-investigation" role="tabpanel" aria-labelledby="config-tab-investigation">
+                        {#if investigationSettings}
+                            <div class="settings-group">
+                                <div class="section-header">OpenAI Responses investigation</div>
+                                <div class="settings-hint">Fixed profile: {investigationSettings.provider.profile}; fixed endpoint: {investigationSettings.provider.endpoint}; fixed model: {investigationSettings.provider.model}.</div>
+                                <label class="settings-check"><input type="checkbox" bind:checked={investigationSettings.provider.access_enabled} /> Enable provider access</label>
+                                <label class="settings-check"><input type="checkbox" bind:checked={investigationSettings.provider.automatic_enabled} disabled={!investigationSettings.provider.access_enabled} /> Enable automatic investigation</label>
+                                <p class="settings-hint">Acknowledgement version: {investigationSettings.provider.privacy_acknowledgement_version || 'not acknowledged'}. Credential configured: {investigationSettings.provider.has_credential ? 'yes' : 'no'}.</p>
+                            </div>
+                            <div class="settings-group">
+                                <div class="settings-label">Credential command</div>
+                                <select class="settings-input" bind:value={credentialOperation}><option value="preserve">Preserve existing credential</option><option value="replace">Replace credential</option><option value="clear">Clear credential</option></select>
+                                {#if credentialOperation === 'replace'}<input class="settings-input" type="password" bind:value={credentialValue} placeholder="Write-only credential" autocomplete="new-password" />{/if}
+                            </div>
+                            <div class="settings-group">
+                                <div class="settings-label">Required privacy acknowledgement</div>
+                                <p class="settings-hint">Submitting access enablement sends exactly version {PRIVACY_ACKNOWLEDGEMENT.version} with all required clauses true:</p>
+                                <ul class="settings-hint">{#each Object.keys(PRIVACY_ACKNOWLEDGEMENT).filter(key => key !== 'version') as clause}<li>{clause}</li>{/each}</ul>
+                            </div>
+                            <div class="settings-group"><div class="settings-label">Session-drop bounds</div>
+                                <label>Lower-tail threshold <input class="settings-num" type="number" step="any" bind:value={investigationSettings.session_drop.lower_tail_threshold} /></label>
+                                <label>Minimum sessions <input class="settings-num" type="number" bind:value={investigationSettings.session_drop.minimum_drop_sessions} /></label>
+                                <label>Minimum percent <input class="settings-num" type="number" step="any" bind:value={investigationSettings.session_drop.minimum_drop_percent} /></label>
+                                <label>Baseline half-life hours <input class="settings-num" type="number" bind:value={investigationSettings.session_drop.baseline_half_life_hours} /></label>
+                                <label>Cooldown minutes <input class="settings-num" type="number" bind:value={investigationSettings.session_drop.cooldown_minutes} /></label>
+                            </div>
+                            <button type="button" class="btn-brutal btn-save" onclick={saveInvestigation} disabled={providerSaving}>{providerSaving ? 'Saving…' : 'Save investigation settings'}</button>
+                            {#if investigationStatus}<p class="settings-hint">Operational state: {investigationStatus.operational_state}.</p>{/if}
+                        {:else}<p class="settings-hint">Loading investigation settings…</p>{/if}
                     </div>
                 {:else if activeTab === 'servers'}
                     <div id="config-panel-servers" role="tabpanel" aria-labelledby="config-tab-servers">

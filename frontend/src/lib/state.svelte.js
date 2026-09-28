@@ -26,7 +26,7 @@ const MAX_RECENT_SPIKES = 50;
  * Bump both when the mock fleet definition changes; mismatched localStorage
  * data is wiped automatically on the next page load.
  */
-const MOCK_VERSION = '3.8';
+const MOCK_VERSION = '3.9';
 
 // ---------------------------------------------------------------------------
 // localStorage persistence helpers
@@ -372,6 +372,15 @@ let pinnedChartIndex = $state(/** @type {number|null} */ (null));
  */
 let reduceMotion = $state(lsGetReduceMotion());
 
+// Feature 013 state is deliberately detached from persisted servers, health,
+// and events. It is source-ID-only and disappears on reload.
+let investigationSettings = $state(null);
+let investigationStatus = $state(null);
+let investigationAttempts = $state(new Map());
+let investigationDetails = $state(new Map());
+let sessionDropSummaries = $state([]);
+let sessionDropDetails = $state(new Map());
+
 // ---------------------------------------------------------------------------
 // localStorage persistence effects (module-level, outside any component)
 // ---------------------------------------------------------------------------
@@ -598,6 +607,26 @@ export const appState = {
     },
     get selectedHosts() {
         return selectedHosts;
+    },
+
+    // Feature 013 transient, source-ID-only state. No setter feeds persistent state.
+    get investigationSettings() {
+        return investigationSettings;
+    },
+    get investigationStatus() {
+        return investigationStatus;
+    },
+    get investigationAttempts() {
+        return investigationAttempts;
+    },
+    get investigationDetails() {
+        return investigationDetails;
+    },
+    get sessionDropSummaries() {
+        return sessionDropSummaries;
+    },
+    get sessionDropDetails() {
+        return sessionDropDetails;
     },
 
     /**
@@ -1056,4 +1085,67 @@ export function recordForceUpdateCompletion(completion) {
         next.delete(next.keys().next().value);
     }
     forceUpdateCompletions = next;
+}
+
+/** Replace safe settings/status views without putting them into persisted config. */
+export function setInvestigationSettings(value) {
+    investigationSettings = value;
+}
+export function setInvestigationStatus(value) {
+    investigationStatus = value;
+}
+
+/** Merge a host-free attempt summary by durable attempt ID. */
+export function upsertInvestigationAttempt(attempt) {
+    if (!attempt?.attempt_id || !attempt?.source?.source_kind || !attempt?.source?.source_id) return;
+    const next = new Map(investigationAttempts);
+    next.set(attempt.attempt_id, { ...next.get(attempt.attempt_id), ...attempt });
+    investigationAttempts = next;
+}
+
+export function setInvestigationDetail(detail) {
+    const attempt = detail?.attempt;
+    if (!attempt?.attempt_id) return;
+    const next = new Map(investigationDetails);
+    next.set(attempt.attempt_id, detail);
+    investigationDetails = next;
+    upsertInvestigationAttempt(attempt);
+}
+
+export function setSessionDropSummaries(items) {
+    sessionDropSummaries = Array.isArray(items) ? items.slice(0, 200) : [];
+}
+
+export function setSessionDropDetail(detail) {
+    if (!detail?.source?.id) return;
+    const attemptsByID = new Map();
+    for (const attempt of Array.isArray(detail.attempts) ? detail.attempts : []) {
+        if (attempt?.attempt_id) attemptsByID.set(attempt.attempt_id, attempt);
+    }
+    const normalized = {
+        ...detail,
+        attempts: [...attemptsByID.values()].sort((left, right) => left.attempt_number - right.attempt_number),
+    };
+    const next = new Map(sessionDropDetails);
+    next.set(normalized.source.id, normalized);
+    sessionDropDetails = next;
+}
+
+/** Applies only the exact host-free feature SSE payloads; source details stay REST-authoritative. */
+export function dispatchFeatureSSE(event) {
+    if (!event || event.host || !event.data || typeof event.type !== 'string') return null;
+    if (event.type === 'investigation_update') {
+        if (event.data.kind === 'attempt' && event.data.attempt?.source && event.data.attempt?.attempt_id) {
+            upsertInvestigationAttempt(event.data.attempt);
+            return { kind: 'attempt', attemptId: event.data.attempt.attempt_id };
+        }
+        if (event.data.kind === 'status' && event.data.status) {
+            investigationStatus = { ...investigationStatus, ...event.data.status };
+            return { kind: 'status' };
+        }
+    }
+    if (event.type === 'session_drop' && event.data.schema_version === 1 && event.data.source_kind === 'session_drop' && typeof event.data.source_id === 'string') {
+        return { kind: 'session_drop', sourceId: event.data.source_id };
+    }
+    return null;
 }

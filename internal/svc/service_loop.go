@@ -17,6 +17,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/selfmetrics"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/spikereport"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -31,6 +32,54 @@ type dashboardStopper interface {
 func disableDashboardRuntime(sub dashboardStopper, handler *serviceHandler, cfg dc.ServiceConfig) {
 	sub.Stop()
 	handler.publish(cfg, nil)
+}
+
+// dashboardSubsystemDependencies are the central stores shared by every
+// dashboard lifetime. Keeping construction in one place ensures a listener
+// re-enable receives the same durable owners and callbacks as initial startup.
+type dashboardSubsystemDependencies struct {
+	telemetry             *telemetry.DB
+	metrics               *telemetry.MetricsStore
+	audit                 *telemetry.AuditStore
+	maintenance           *telemetry.MaintenanceStore
+	servers               *telemetry.ServerStore
+	spikes                *telemetry.EventSpikeStore
+	removals              *telemetry.RemovalStore
+	outbox                *telemetry.ForceUpdateOutboxStore
+	freshness             *telemetry.FreshnessStore
+	sessionDrop           dc.SessionDropConfig
+	featureRuntimeFactory func() dashboard.FeatureRuntime
+}
+
+func (d dashboardSubsystemDependencies) newFeatureRuntime() dashboard.FeatureRuntime {
+	if d.featureRuntimeFactory != nil {
+		return d.featureRuntimeFactory()
+	}
+	settings := d.sessionDrop
+	return dashboard.NewFeatureRuntime(d.telemetry, sessiondrop.Settings{
+		LowerTailThreshold:    settings.LowerTailThreshold,
+		MinimumDropSessions:   settings.MinimumDropSessions,
+		MinimumDropPercent:    settings.MinimumDropPercent,
+		BaselineHalfLifeHours: settings.BaselineHalfLifeHours,
+		CooldownMinutes:       settings.CooldownMinutes,
+	})
+}
+
+func newDashboardSubsystem(cfg dc.DashboardConfig, serviceCfg dc.ServiceConfig, deps dashboardSubsystemDependencies) *dashboard.Subsystem {
+	return dashboard.NewSubsystem(
+		cfg,
+		dc.DefaultDataDir(),
+		deps.metrics,
+		deps.audit,
+		deps.maintenance,
+		deps.servers,
+		deps.spikes,
+		deps.removals,
+		deps.outbox,
+		!serviceCfg.DashboardOnly,
+		deps.freshness,
+		deps.newFeatureRuntime(),
+	)
 }
 
 // Execute is the Windows service main loop.
@@ -162,6 +211,19 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		return false, 1
 	}
 	defer func() { _ = auditStore.Close() }()
+
+	dashboardDeps := dashboardSubsystemDependencies{
+		telemetry:   telDB,
+		metrics:     metricsStore,
+		audit:       auditStore,
+		maintenance: maintenanceStore,
+		servers:     serverStore,
+		spikes:      eventSpikeStore,
+		removals:    removalStore,
+		outbox:      forceUpdateOutboxStore,
+		freshness:   freshnessStore,
+		sessionDrop: fullCfg.SessionDrop,
+	}
 
 	// A dashboard-only host is a management server, not an RDSH. Do not
 	// inspect its local drain registry value or create a synthetic audit row.
@@ -314,7 +376,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	var dashState *dashboard.ServerState
 	var dashSub *dashboard.Subsystem
 	if dashCfg.Enabled {
-		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
+		sub := newDashboardSubsystem(dashCfg, cfg, dashboardDeps)
 		if err := sub.Start(ctx); err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
@@ -698,7 +760,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 
 			if dashSub != nil {
+				dashSub.WakeFeatureRuntime()
 				dashSub.UpdateHeartbeatInterval(newDashCfg.HeartbeatInterval)
+				if server := dashSub.Server(); server != nil && newDashCfg.Group != dashCfg.Group {
+					server.SetDashboardGroup(newDashCfg.Group)
+				}
 				dashSub.SetLocalForceUpdateSupported(!cfg.DashboardOnly)
 				if newDashCfg.RDConnectionBroker != dashCfg.RDConnectionBroker {
 					dashSub.UpdateRDConnectionBroker(newDashCfg.RDConnectionBroker)
@@ -715,7 +781,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				dashRegistered = false
 				slog.Info("dashboard=stopped", "reason", "config reload")
 			} else if newDashCfg.Enabled && dashState == nil {
-				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
+				sub := newDashboardSubsystem(newDashCfg, cfg, dashboardDeps)
 				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {

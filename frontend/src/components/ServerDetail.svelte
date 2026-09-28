@@ -4,9 +4,10 @@
     import HostLoadChart from './HostLoadChart.svelte';
     import SpikeSwimlane from './SpikeSwimlane.svelte';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
-    import { appState } from '../lib/state.svelte.js';
+    import { appState, setRecentSpikes, upsertInvestigationAttempt } from '../lib/state.svelte.js';
+    import { createInvestigation, fetchInvestigationHistory, fetchRecentSpikes } from '../lib/api.js';
+    import InvestigationPanel from './InvestigationPanel.svelte';
     import { rel, dur, modeLabel, formatTs } from '../lib/utils.js';
-
     let { server, now = Date.now(), onhistoryclick = undefined, onremove = undefined } = $props();
 
     let perf = $derived(server.perf || {});
@@ -91,6 +92,50 @@
     });
     function updateSpikeSummary(summary) {
         spikeSummary = summary;
+    }
+
+    let selectedInvestigationAttempt = $state(null);
+    let investigationError = $state('');
+    let eventSpikeAttempts = $state([]);
+    let eventSpike = $derived(appState.recentSpikes.get(server.host)?.[0] ?? null);
+
+    // Expanded detail must fetch its bounded source list so investigation is
+    // available before a future evtspike SSE arrival.
+    $effect(() => {
+        const host = server.host;
+        fetchRecentSpikes(host, 20).then((spikes) => setRecentSpikes(host, spikes)).catch(() => {});
+    });
+    async function refreshEventSpikeHistory() {
+        if (!eventSpike) return;
+        const history = await fetchInvestigationHistory('event_spike', String(eventSpike.id));
+        eventSpikeAttempts = history.attempts;
+        history.attempts.forEach(upsertInvestigationAttempt);
+        return history.attempts;
+    }
+    $effect(() => {
+        eventSpike?.id;
+        eventSpikeAttempts = [];
+        if (eventSpike) refreshEventSpikeHistory().catch((e) => investigationError = e.message);
+    });
+    async function openEventSpikeHistory() {
+        if (!eventSpike) return;
+        investigationError = '';
+        try {
+            const attempts = await refreshEventSpikeHistory();
+            selectedInvestigationAttempt = attempts.at(-1)?.attempt_id ?? null;
+        } catch (e) { investigationError = e.message; }
+    }
+    async function createEventSpikeInvestigation() {
+        if (!eventSpike || eventSpikeAttempts.length) return;
+        investigationError = '';
+        try {
+            const attempt = await createInvestigation('event_spike', String(eventSpike.id));
+            upsertInvestigationAttempt(attempt);
+            await refreshEventSpikeHistory();
+            selectedInvestigationAttempt = attempt.attempt_id;
+        } catch (e) {
+            investigationError = e?.code === 'queue_full' ? 'queue full' : e?.code === 'attempt_limit_reached' ? 'attempt limit reached' : e.message;
+        }
     }
 
     // Event Spikes tile always renders on the expanded row — the detector-
@@ -469,6 +514,11 @@
             </span>
         </div>
         <SpikeSwimlane host={server.host} onSummaryChange={updateSpikeSummary} />
+        {#if eventSpike}
+            <div class="d-actions"><button class="btn-brutal" type="button" onclick={openEventSpikeHistory}>Investigation history</button>{#if eventSpikeAttempts.length === 0}<button class="btn-brutal" type="button" onclick={createEventSpikeInvestigation}>Investigate latest spike</button>{/if}</div>
+        {/if}
+        {#if investigationError}<p class="d-investigation-error">{investigationError}</p>{/if}
+        {#if selectedInvestigationAttempt}<InvestigationPanel attemptId={selectedInvestigationAttempt} onclose={() => selectedInvestigationAttempt = null} onretry={() => refreshEventSpikeHistory().catch((e) => investigationError = e.message)} />{/if}
     </div>
 </div>
 

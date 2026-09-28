@@ -149,6 +149,18 @@ type ServerState struct {
 	// a forced update would never emit a force_update SSE event because
 	// the HTTP report path is bypassed entirely.
 	OnLocalForceUpdateCompletion func(payload ForceUpdateCompletionPayload)
+	// sessionDropInboxWaker is invoked only after the accepted-result
+	// transaction commits. It is intentionally payload-free because the
+	// durable inbox, rather than this callback, owns detector correctness.
+	sessionDropInboxWaker sessionDropInboxWaker
+}
+
+// SetSessionDropInboxWaker attaches the detector wakeup used after the
+// accepted-result transaction commits. It receives no observation data: the
+// durable inbox is the sole detector input and callback delivery is best
+// effort only.
+func (s *ServerState) SetSessionDropInboxWaker(waker sessionDropInboxWaker) {
+	s.sessionDropInboxWaker = waker
 }
 
 // GetConsumeForceUpdate returns the wired ConsumeForceUpdate closure.
@@ -330,7 +342,7 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	// Capture before ServerStore writes so this accepted epoch cannot exceed
 	// the persisted Unix-millisecond last_seen used by a later stale sweep.
 	acceptedAt := time.UnixMilli(time.Now().UTC().UnixMilli()).UTC()
-	updated, err := s.store.Update(ctx, hostname, lastJSON)
+	updated, err := s.updateAccepted(ctx, hostname, lastJSON, result, acceptedAt)
 	if err != nil {
 		// DB write failed — do NOT populate the cache. The DB is the source
 		// of truth; caching unpersisted data would let GetCached return a
@@ -340,6 +352,9 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	}
 	if !updated {
 		return
+	}
+	if _, ok := s.store.(acceptedResultWriter); ok && result != nil && !result.Timestamp.IsZero() && s.sessionDropInboxWaker != nil {
+		s.sessionDropInboxWaker.WakeSessionDropInbox()
 	}
 	recovered := false
 	if s.freshness != nil {
@@ -396,6 +411,67 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if s.OnMetrics != nil && result != nil {
 		s.OnMetrics(*result)
 	}
+}
+
+// updateAccepted persists a heartbeat through the feature-aware transactional
+// store when available. The pre-feature fallback keeps legacy reader fixtures
+// usable; production ServerStore implements acceptedResultWriter, so its
+// accepted result and detector input have one durable commit boundary.
+func (s *ServerState) updateAccepted(ctx context.Context, hostname, lastResultJSON string, result *dc.CheckResult, acceptedAt time.Time) (bool, error) {
+	writer, ok := s.store.(acceptedResultWriter)
+	if !ok || result == nil || result.Timestamp.IsZero() {
+		return s.store.Update(ctx, hostname, lastResultJSON)
+	}
+	return writer.UpdateAccepted(ctx, hostname, lastResultJSON, sessionDropObservation(hostname, result, acceptedAt))
+}
+
+// sessionDropObservation extracts only the fixed session-drop input fields
+// from an existing CheckResult. It never changes the agent wire result and it
+// deliberately carries neither result JSON nor a callback-owned identifier.
+func sessionDropObservation(hostname string, result *dc.CheckResult, acceptedAt time.Time) telemetry.SessionDropObservation {
+	observation := telemetry.SessionDropObservation{
+		CanonicalHost:         hostname,
+		AcceptedAtMs:          acceptedAt.UTC().UnixMilli(),
+		SessionPresence:       "nil",
+		FreshnessContext:      "fresh",
+		DrainContext:          "none",
+		ClassificationContext: "not_scored",
+	}
+	if result == nil || result.Timestamp.IsZero() {
+		return observation
+	}
+
+	reportTime := result.Timestamp
+	_, offsetSeconds := reportTime.Zone()
+	observation.ReportEpochMs = reportTime.UTC().UnixMilli()
+	observation.LocalOffsetMinutes = offsetSeconds / 60
+	observation.LocalDate = reportTime.Format("2006-01-02")
+	if result.DrainModeValue != uint32(dc.AllowAll) {
+		observation.DrainContext = "overlap"
+	}
+	if result.Sessions == nil {
+		return observation
+	}
+	if result.Sessions.ActiveSessions < 0 || result.Sessions.DisconnectedSessions < 0 {
+		observation.SessionPresence = "invalid"
+		return observation
+	}
+	active := int64(result.Sessions.ActiveSessions)
+	disconnected := int64(result.Sessions.DisconnectedSessions)
+	const maxSessionCount = int64(1<<31 - 1)
+	if active > maxSessionCount-disconnected {
+		observation.SessionPresence = "invalid"
+		return observation
+	}
+	observation.SessionPresence = "present"
+	observation.ActiveSessions = &active
+	observation.DisconnectedSessions = &disconnected
+	if observation.DrainContext == "overlap" {
+		observation.ClassificationContext = "drain_associated"
+	} else {
+		observation.ClassificationContext = "unexplained"
+	}
+	return observation
 }
 
 // lookupRegisteredAt returns the cached registered_at for hostname or, on a
