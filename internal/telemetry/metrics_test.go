@@ -267,6 +267,64 @@ func TestQueryRangeFleet_ExactP50HandlesOddEvenAndMissingHosts(t *testing.T) {
 	}
 }
 
+func TestQueryRangeFleetRemoteFXTailInputsHandleMissingP50Host(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02", "SRV03"}
+
+	samples := []Sample{
+		{Ts: base, Host: "SRV01", Counter: "rfx_encode_ms", Value: 100},
+		{Ts: base, Host: "SRV01", Counter: "rfx_encode_ms_p50", Value: 50},
+		{Ts: base, Host: "SRV02", Counter: "rfx_encode_ms", Value: 80},
+		{Ts: base, Host: "SRV02", Counter: "rfx_encode_ms_p50", Value: 40},
+		{Ts: base, Host: "SRV03", Counter: "rfx_encode_ms", Value: 120},
+		{Ts: base, Host: "SRV01", Counter: "rfx_fps_out", Value: 20},
+		{Ts: base, Host: "SRV01", Counter: "rfx_fps_out_p50", Value: 30},
+		{Ts: base, Host: "SRV02", Counter: "rfx_fps_out", Value: 15},
+		{Ts: base, Host: "SRV02", Counter: "rfx_fps_out_p50", Value: 25},
+		{Ts: base, Host: "SRV03", Counter: "rfx_fps_out", Value: 10},
+		// Historical bucket with primary tail data but no paired P50 data.
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "rfx_encode_ms", Value: 130},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "rfx_encode_ms", Value: 90},
+	}
+	if err := ms.Append(ctx, samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	series, err := ms.QueryRangeFleet(ctx, hosts, base, base.Add(2*time.Minute), TierRaw, nil, 60_000)
+	if err != nil {
+		t.Fatalf("QueryRangeFleet: %v", err)
+	}
+
+	encodeP95 := series.Data["rfx_encode_ms"]
+	encodeP50 := series.Data["rfx_encode_ms_p50"]
+	if encodeP95 == nil || encodeP50 == nil {
+		t.Fatalf("encode series missing: P95=%+v P50=%+v", encodeP95, encodeP50)
+	}
+	if got, want := encodeP95.Max, []float64{120, 130}; !slices.Equal(got, want) {
+		t.Fatalf("encode max = %v, want %v", got, want)
+	}
+	if got, want := encodeP50.P50, []float64{45}; !slices.Equal(got, want) {
+		t.Fatalf("encode median-host P50 = %v, want %v", got, want)
+	}
+	if encodeP95.Max[0] < encodeP50.P50[0] {
+		t.Fatalf("encode worst-host P95 %v < median-host P50 %v", encodeP95.Max[0], encodeP50.P50[0])
+	}
+	if len(encodeP50.T) != 1 || encodeP50.T[0] != encodeP95.T[0] {
+		t.Fatalf("unpaired historical bucket must have no P50 point: P95.T=%v P50.T=%v", encodeP95.T, encodeP50.T)
+	}
+
+	fpsFloor := series.Data["rfx_fps_out"]
+	fpsP50 := series.Data["rfx_fps_out_p50"]
+	if fpsFloor == nil || fpsP50 == nil {
+		t.Fatalf("FPS series missing: floor=%+v P50=%+v", fpsFloor, fpsP50)
+	}
+	if fpsFloor.Min[0] != 10 || fpsP50.P50[0] != 27.5 {
+		t.Fatalf("FPS floor/P50 = (%v, %v), want (10, 27.5)", fpsFloor.Min[0], fpsP50.P50[0])
+	}
+}
+
 func TestQueryRange_RawTier(t *testing.T) {
 	ms, _ := newMetricsStore(t)
 

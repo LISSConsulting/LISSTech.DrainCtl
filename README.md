@@ -39,7 +39,6 @@ A Windows service that watches `TSServerDrainMode` on RDSH hosts and tells you:
 
 Query from CLI, PowerShell, or your RMM. Local answers come from a named pipe in under 1 ms; registered agents report to the dashboard for fleet operations. No cloud is required, and DNS SRV discovery eliminates per-host dashboard URLs when your domain publishes `_drainctl._tcp`.
 
-
 ---
 
 <h2 id="latest-release">▎ Latest stable release</h2>
@@ -62,7 +61,6 @@ The [latest stable release](https://github.com/LISSConsulting/LISSTech.DrainCtl/
 ---
 
 <h2 id="architecture">▎ Architecture</h2>
-
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#a3475b', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d1a1a', 'secondaryColor': '#f5ebe8', 'tertiaryColor': '#fdf8f6', 'lineColor': '#2d1a1a', 'fontFamily': 'monospace', 'fontSize': '13px'}}}%%
@@ -235,11 +233,11 @@ drainctl broker-setup         Probe and save RD Connection Broker discovery
 
 **Global flags**
 
-| Flag | Default | What |
-|---|---|---|
-| `--db` | `%ProgramData%\…\drainctl.db` | Path to the SQLite DB or its parent dir. Always opened read-only — the service owns the writer. Legacy `audit.jsonl` paths are accepted and resolved to `drainctl.db` in the same folder. |
-| `--format` | `plain` (check) / `table` (history) | `plain`, `table`, `csv`, `json` |
-| `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| Flag          | Default                             | What                                                                                                                                                                                      |
+| ------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--db`        | `%ProgramData%\…\drainctl.db`       | Path to the SQLite DB or its parent dir. Always opened read-only — the service owns the writer. Legacy `audit.jsonl` paths are accepted and resolved to `drainctl.db` in the same folder. |
+| `--format`    | `plain` (check) / `table` (history) | `plain`, `table`, `csv`, `json`                                                                                                                                                           |
+| `--log-level` | `info`                              | `debug`, `info`, `warn`, `error`                                                                                                                                                          |
 
 **`check` flags** — `--grace <minutes>` (default 60), `--retention <days>` (legacy; service-side `retention.*` supersedes).
 **`history` flags** — `--limit <n>` (default 50), `--changes-only`.
@@ -254,18 +252,18 @@ drainctl broker-setup         Probe and save RD Connection Broker discovery
 Import-Module LISSTech.DrainCtl
 ```
 
-| Cmdlet | Returns | What |
-|---|---|---|
-| `Get-RDSHDrainMode` | `PSObject` | Full drain-mode state with audit data |
-| `Test-RDSHDrainMode` | `bool` | `$true` if connections allowed |
-| `Get-RDSHDrainHistory` | `PSObject[]` | Audit trail records |
-| `Install-RDSHDrainAudit` | — | Configure registry auditing (one-time) |
-| `Get-RDSHDrainNotification` | `PSObject` | Current notification configuration |
-| `Test-RDSHDrainNotification` | — | Send test notification to all backends |
-| `Get-RDSHDrainNotificationTarget` | `PSObject[]` | All configured targets, with detail |
-| `Add-RDSHDrainNotificationTarget` | — | Add a target with per-target triggers |
-| `Remove-RDSHDrainNotificationTarget` | — | Remove a target by URL |
-| `Set-RDSHDrainNotification` | — | *(deprecated — use the target cmdlets)* |
+| Cmdlet                               | Returns      | What                                    |
+| ------------------------------------ | ------------ | --------------------------------------- |
+| `Get-RDSHDrainMode`                  | `PSObject`   | Full drain-mode state with audit data   |
+| `Test-RDSHDrainMode`                 | `bool`       | `$true` if connections allowed          |
+| `Get-RDSHDrainHistory`               | `PSObject[]` | Audit trail records                     |
+| `Install-RDSHDrainAudit`             | —            | Configure registry auditing (one-time)  |
+| `Get-RDSHDrainNotification`          | `PSObject`   | Current notification configuration      |
+| `Test-RDSHDrainNotification`         | —            | Send test notification to all backends  |
+| `Get-RDSHDrainNotificationTarget`    | `PSObject[]` | All configured targets, with detail     |
+| `Add-RDSHDrainNotificationTarget`    | —            | Add a target with per-target triggers   |
+| `Remove-RDSHDrainNotificationTarget` | —            | Remove a target by URL                  |
+| `Set-RDSHDrainNotification`          | —            | _(deprecated — use the target cmdlets)_ |
 
 ```powershell
 Get-RDSHDrainMode
@@ -326,16 +324,16 @@ Bound to `127.0.0.1` only. Off by default. Unset the variable and restart to dis
 
 Source `DrainCtl` on the Application channel:
 
-| ID | Level | Meaning |
-|---|---|---|
-| 1000 | Info | Service started |
-| 1001 | Info | Service stopped |
-| 1002 | Info | Check: healthy |
-| 1003 | Info | Configuration reloaded |
-| 1004 | Info | State transition detected |
-| 2000 | Warning | Drain mode in grace period |
-| 3000 | Error | Drain mode alert (grace exceeded) |
-| 3001 | Error | Registry read failure |
+| ID   | Level   | Meaning                           |
+| ---- | ------- | --------------------------------- |
+| 1000 | Info    | Service started                   |
+| 1001 | Info    | Service stopped                   |
+| 1002 | Info    | Check: healthy                    |
+| 1003 | Info    | Configuration reloaded            |
+| 1004 | Info    | State transition detected         |
+| 2000 | Warning | Drain mode in grace period        |
+| 3000 | Error   | Drain mode alert (grace exceeded) |
+| 3001 | Error   | Registry read failure             |
 
 ### Logging sinks
 
@@ -408,18 +406,18 @@ drainctl notify test
 
 ### Triggers
 
-| Name | When |
-|---|---|
-| `drain_on` | Drain activated (new connections blocked) |
-| `drain_off` | Drain deactivated |
-| `grace_entered` | Drain entered grace period |
-| `alert` | Drain exceeded grace period |
-| `healthy` | Returned to healthy |
-| `session_warning` | Session utilization above threshold |
-| `cpu_warning` / `cpu_critical` | CPU above threshold (2 consecutive polls) |
-| `memory_warning` / `memory_critical` | Available memory below threshold (2 consecutive polls) |
-| `input_delay_warning` / `input_delay_critical` | Input delay P95 above threshold |
-| `event_spike` | Confirmed anomalous activity on a watched event-log channel while the detector is enabled |
+| Name                                           | When                                                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `drain_on`                                     | Drain activated (new connections blocked)                                                 |
+| `drain_off`                                    | Drain deactivated                                                                         |
+| `grace_entered`                                | Drain entered grace period                                                                |
+| `alert`                                        | Drain exceeded grace period                                                               |
+| `healthy`                                      | Returned to healthy                                                                       |
+| `session_warning`                              | Session utilization above threshold                                                       |
+| `cpu_warning` / `cpu_critical`                 | CPU above threshold (2 consecutive polls)                                                 |
+| `memory_warning` / `memory_critical`           | Available memory below threshold (2 consecutive polls)                                    |
+| `input_delay_warning` / `input_delay_critical` | Input delay P95 above threshold                                                           |
+| `event_spike`                                  | Confirmed anomalous activity on a watched event-log channel while the detector is enabled |
 
 Omit `--triggers` to receive every event type, including `event_spike`; configure an explicit list when a target should receive only selected alerts.
 
@@ -427,23 +425,30 @@ Omit `--triggers` to receive every event type, including `event_spike`; configur
 
 ```json
 {
-  "event": "drain_on",
-  "host": "RDSH01",
-  "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
-  "previous_mode": "ALLOW_ALL_CONNECTIONS",
-  "status": "Grace",
-  "message": "Drain mode active, within grace period (45m remaining).",
-  "changed_by": "DOMAIN\\admin",
-  "state_duration_seconds": 900,
-  "timestamp": "2026-04-29T13:03:01-04:00",
-  "sessions": {
-    "active_sessions": 12, "disconnected_sessions": 3,
-    "total_sessions": 15, "max_sessions": 25, "utilization_pct": 60
-  },
-  "performance": {
-    "cpu_pct": 78.3, "mem_avail_mb": 2048, "mem_total_mb": 16384,
-    "input_delay_p95_ms": 42, "input_delay_max_ms": 88, "disk_queue": 0.3
-  }
+    "event": "drain_on",
+    "host": "RDSH01",
+    "drain_mode": "ALLOW_RECONNECTIONS_PREVENT_NEW_LOGONS",
+    "previous_mode": "ALLOW_ALL_CONNECTIONS",
+    "status": "Grace",
+    "message": "Drain mode active, within grace period (45m remaining).",
+    "changed_by": "DOMAIN\\admin",
+    "state_duration_seconds": 900,
+    "timestamp": "2026-04-29T13:03:01-04:00",
+    "sessions": {
+        "active_sessions": 12,
+        "disconnected_sessions": 3,
+        "total_sessions": 15,
+        "max_sessions": 25,
+        "utilization_pct": 60
+    },
+    "performance": {
+        "cpu_pct": 78.3,
+        "mem_avail_mb": 2048,
+        "mem_total_mb": 16384,
+        "input_delay_p95_ms": 42,
+        "input_delay_max_ms": 88,
+        "disk_queue": 0.3
+    }
 }
 ```
 
@@ -465,15 +470,15 @@ Opt-in event-log anomaly detector. Watches 54 curated Windows channels (Winlogon
 
 ```json
 {
-  "evtspike": { "enabled": true },
-  "notifications": [
-    {
-      "type": "webhook",
-      "url": "https://hooks.example.com/drainctl-spikes",
-      "triggers": ["event_spike"],
-      "repeat_minutes": 30
-    }
-  ]
+    "evtspike": { "enabled": true },
+    "notifications": [
+        {
+            "type": "webhook",
+            "url": "https://hooks.example.com/drainctl-spikes",
+            "triggers": ["event_spike"],
+            "repeat_minutes": 30
+        }
+    ]
 }
 ```
 
@@ -485,11 +490,11 @@ In the dashboard, **Chill**, **Steady**, and **Vigilant** presets each enable th
 
 ```json
 {
-  "evtspike": {
-    "enabled": true,
-    "disabled_channels": ["Microsoft-Windows-Crashdump/Operational"],
-    "added_channels": ["Microsoft-Windows-PowerShell/Operational"]
-  }
+    "evtspike": {
+        "enabled": true,
+        "disabled_channels": ["Microsoft-Windows-Crashdump/Operational"],
+        "added_channels": ["Microsoft-Windows-PowerShell/Operational"]
+    }
 }
 ```
 
@@ -509,18 +514,20 @@ The 54-channel default is in `internal/evtspike/channels.go`. Operators tailor b
 
 ```json
 {
-  "event": "event_spike",
-  "host": "RDSH01",
-  "status": "warning",
-  "message": "Event spike on Application (20 vs ~0.1)",
-  "timestamp": "2026-04-29T13:03:01-04:00",
-  "spike": {
-    "channel": "Application",
-    "observed": 20, "expected": 0.1, "tail_probability": 0,
-    "window_start": "2026-04-29T13:02:51-04:00",
-    "window_end":   "2026-04-29T13:03:01-04:00",
-    "confirmation_count": 2
-  }
+    "event": "event_spike",
+    "host": "RDSH01",
+    "status": "warning",
+    "message": "Event spike on Application (20 vs ~0.1)",
+    "timestamp": "2026-04-29T13:03:01-04:00",
+    "spike": {
+        "channel": "Application",
+        "observed": 20,
+        "expected": 0.1,
+        "tail_probability": 0,
+        "window_start": "2026-04-29T13:02:51-04:00",
+        "window_end": "2026-04-29T13:03:01-04:00",
+        "confirmation_count": 2
+    }
 }
 ```
 
@@ -528,21 +535,21 @@ ntfy uses priority 3 for `warning`, 4 for `alert`, with tags `["evtspike", <host
 
 ### Config
 
-| Key | Type | Default | What |
-|---|---|---|---|
-| `evtspike.enabled` | bool | `false` | Master opt-in. When `false`, the subsystem is constructed but quiescent. |
-| `evtspike.security_channel_enabled` | bool | `false` | Adds `Security` to the watched list; enables `SeSecurityPrivilege` on the service token at Start. |
-| `evtspike.disabled_channels` | string[] | `[]` | Remove from the default list (case-insensitive). |
-| `evtspike.added_channels` | string[] | `[]` | Extra channels beyond the default. |
-| `evtspike.threshold` | float | `1e-4` | Negative-binomial tail probability threshold for "anomalous". |
-| `evtspike.min_count` | int | `10` | Lower observed-event floor; below this never flags. |
-| `evtspike.cooldown_minutes` | int | `60` | Default min time between spikes for the same `(host, channel)`; based on 81% of observed repeats arriving within one hour. |
-| `evtspike.channel_cooldown_minutes` | object | `{}` | Exact Windows Event Log channel-name overrides (1–1440 minutes; maximum 256). In the dashboard enter each override as `Channel=Minutes`; unmatched channels use `cooldown_minutes`. |
-| `evtspike.slot_maturity_observations` | int | `630` | Observations before a slot posterior is mature: seven visits at 90 observations/day. |
-| `evtspike.persist_interval_seconds` | int | `900` | Baseline file write cadence. |
-| `evtspike.half_life_buckets` | int | `630` | Exponential-forgetting half-life in 10-s buckets. |
-| `evtspike.prior_strength` | float | `60.0` | Gamma prior α/β strength (bucket-equivalents of "pretend evidence"). |
-| `evtspike.mean_per_bucket_prior` | float | `0.1` | Gamma prior mean: expected events per 10-s bucket before learning. |
+| Key                                   | Type     | Default | What                                                                                                                                                                                |
+| ------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evtspike.enabled`                    | bool     | `false` | Master opt-in. When `false`, the subsystem is constructed but quiescent.                                                                                                            |
+| `evtspike.security_channel_enabled`   | bool     | `false` | Adds `Security` to the watched list; enables `SeSecurityPrivilege` on the service token at Start.                                                                                   |
+| `evtspike.disabled_channels`          | string[] | `[]`    | Remove from the default list (case-insensitive).                                                                                                                                    |
+| `evtspike.added_channels`             | string[] | `[]`    | Extra channels beyond the default.                                                                                                                                                  |
+| `evtspike.threshold`                  | float    | `1e-4`  | Negative-binomial tail probability threshold for "anomalous".                                                                                                                       |
+| `evtspike.min_count`                  | int      | `10`    | Lower observed-event floor; below this never flags.                                                                                                                                 |
+| `evtspike.cooldown_minutes`           | int      | `60`    | Default min time between spikes for the same `(host, channel)`; based on 81% of observed repeats arriving within one hour.                                                          |
+| `evtspike.channel_cooldown_minutes`   | object   | `{}`    | Exact Windows Event Log channel-name overrides (1–1440 minutes; maximum 256). In the dashboard enter each override as `Channel=Minutes`; unmatched channels use `cooldown_minutes`. |
+| `evtspike.slot_maturity_observations` | int      | `630`   | Observations before a slot posterior is mature: seven visits at 90 observations/day.                                                                                                |
+| `evtspike.persist_interval_seconds`   | int      | `900`   | Baseline file write cadence.                                                                                                                                                        |
+| `evtspike.half_life_buckets`          | int      | `630`   | Exponential-forgetting half-life in 10-s buckets.                                                                                                                                   |
+| `evtspike.prior_strength`             | float    | `60.0`  | Gamma prior α/β strength (bucket-equivalents of "pretend evidence").                                                                                                                |
+| `evtspike.mean_per_bucket_prior`      | float    | `0.1`   | Gamma prior mean: expected events per 10-s bucket before learning.                                                                                                                  |
 
 All scalar fields hot-reload. See `specs/006-evtspike-detection/quickstart.md` for end-to-end setup, injection recipes, and troubleshooting.
 
@@ -560,89 +567,101 @@ JSON file, hot-reloaded via `ReadDirectoryChangesW` with poll fallback.
 
 ```json
 {
-  "grace_period": 60,
-  "retention_days": 90,
-  "retention": { "metrics_days": 30, "audit_days": 365 },
-  "telemetry": { "aggregator_interval_seconds": 300, "retention_interval_minutes": 60 },
-  "poll_interval": 300,
-  "memory_limit_mb": 32,
-  "session_warning_threshold": 80,
-  "performance": {
-    "enabled": true,
-    "cpu_warn_pct": 70, "cpu_crit_pct": 85,
-    "mem_warn_pct": 20, "mem_crit_pct": 10,
-    "input_delay_warn_ms": 50, "input_delay_crit_ms": 100,
-    "sample_interval_sec": 60,
-    "load_alert_delay_sec": 120, "input_delay_alert_delay_sec": 180,
-    "collect_remotefx": false, "collect_per_session": true
-  },
-  "dashboard": { "url": "", "rd_connection_broker": "" },
-  "update": { "enabled": false, "channel": "stable", "poll_interval": "24h" },
-  "notification_exclusions": ["rdsh01.example.test"],
-  "notifications": [
-    {
-      "type": "webhook",
-      "url": "https://hooks.slack.com/services/T.../B.../xxx",
-      "triggers": ["drain_on", "drain_off", "alert", "healthy"],
-      "server_exclusions": [
-        { "server": "RDSH01", "triggers": ["alert", "healthy"] }
-      ],
-      "repeat_minutes": 30
+    "grace_period": 60,
+    "retention_days": 90,
+    "retention": { "metrics_days": 30, "audit_days": 365 },
+    "telemetry": {
+        "aggregator_interval_seconds": 300,
+        "retention_interval_minutes": 60
     },
-    {
-      "type": "ntfy", "url": "https://ntfy.sh/my-alerts",
-      "triggers": ["alert", "session_warning"], "repeat_minutes": 0
+    "poll_interval": 300,
+    "memory_limit_mb": 32,
+    "session_warning_threshold": 80,
+    "performance": {
+        "enabled": true,
+        "cpu_warn_pct": 70,
+        "cpu_crit_pct": 85,
+        "mem_warn_pct": 20,
+        "mem_crit_pct": 10,
+        "input_delay_warn_ms": 50,
+        "input_delay_crit_ms": 100,
+        "sample_interval_sec": 60,
+        "load_alert_delay_sec": 120,
+        "input_delay_alert_delay_sec": 180,
+        "collect_remotefx": false,
+        "collect_per_session": true
     },
-    {
-      "type": "email", "url": "smtp://smtp.example.com:587",
-      "to": ["ops@example.com", "oncall@example.com"],
-      "from": "drainctl@example.com", "secret": "smtp-password",
-      "triggers": ["drain_on", "drain_off", "alert"]
-    }
-  ]
+    "dashboard": { "url": "", "rd_connection_broker": "" },
+    "update": { "enabled": false, "channel": "stable", "poll_interval": "24h" },
+    "notification_exclusions": ["rdsh01.example.test"],
+    "notifications": [
+        {
+            "type": "webhook",
+            "url": "https://hooks.slack.com/services/T.../B.../xxx",
+            "triggers": ["drain_on", "drain_off", "alert", "healthy"],
+            "server_exclusions": [
+                { "server": "RDSH01", "triggers": ["alert", "healthy"] }
+            ],
+            "repeat_minutes": 30
+        },
+        {
+            "type": "ntfy",
+            "url": "https://ntfy.sh/my-alerts",
+            "triggers": ["alert", "session_warning"],
+            "repeat_minutes": 0
+        },
+        {
+            "type": "email",
+            "url": "smtp://smtp.example.com:587",
+            "to": ["ops@example.com", "oncall@example.com"],
+            "from": "drainctl@example.com",
+            "secret": "smtp-password",
+            "triggers": ["drain_on", "drain_off", "alert"]
+        }
+    ]
 }
 ```
 
-| Key | Type | Default | What |
-|---|---|---|---|
-| `grace_period` | int | `60` | Minutes drain must persist before alerting. |
-| `retention_days` | int | `90` | Legacy audit-retention knob, preserved for pre-007 installs. New `retention.*` fields supersede. |
-| `retention.metrics_days` | int | `30` | Hourly rollup retention, 1–365. Raw + 5-min tiers have fixed retention (25 h and 6 d) — only hourly is operator-tunable. |
-| `retention.audit_days` | int | `365` | Audit-record retention, 1–3650. |
-| `telemetry.aggregator_interval_seconds` | int | `300` | Tick interval for 5-min and hourly rollups. |
-| `telemetry.retention_interval_minutes` | int | `60` | Cadence of the retention + WAL-checkpoint worker. |
-| `poll_interval` | int | `300` | Safety-net poll interval; registry changes are still event-driven. |
-| `memory_limit_mb` | int | `32` | Go runtime soft memory limit for non-dashboard agents. |
-| `session_warning_threshold` | int | `80` | Session utilization % that triggers `session_warning` (0 = disabled). |
-| `dashboard_only` | bool | `false` | Run listener, authentication, SQLite storage, and retention only—no local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, or updater. |
-| `dashboard.rd_connection_broker` | string | *(empty)* | Config/runtime field: `RDConnectionBroker`. This RD Connection Broker hostname drives authoritative session-collection discovery; blank means the local machine running the DrainCtl service and works only when that host is the broker. The dashboard displays it read-only; use elevated `drainctl broker-setup --connection-broker HOST` to change it. Manual `config.json` editing is an advanced administrator-controlled path. |
-| `dashboard.tls_cert` / `tls_key` | string | *(empty)* | PEM paths; auto-generated self-signed if empty. |
-| `dashboard.tls_fingerprint` | string | *(empty)* | SHA-256 cert fingerprint for agent-side pinning. |
-| `update.enabled` / `channel` / `poll_interval` | bool / string / duration | `false` / `stable` / `24h` | Opt-in self-update policy for agents. Dashboard **System** settings distribute it to connected agents. |
-| `performance.enabled` | bool | `false` | Master switch for PDH counter collection. |
-| `performance.cpu_warn_pct` / `cpu_crit_pct` | int | `70` / `85` | CPU thresholds (`0` = use default, `-1` = disabled). |
-| `performance.mem_warn_pct` / `mem_crit_pct` | int | `20` / `10` | Memory % free thresholds. |
-| `performance.input_delay_warn_ms` / `input_delay_crit_ms` | int | `50` / `100` | Input delay P95 thresholds. |
-| `performance.collect_remotefx` | bool | `false` | RemoteFX Graphics + Network counters. |
-| `performance.collect_per_session` | bool | `true` | Per-session CPU, memory, input delay. |
-| `performance.sample_interval_sec` | int | `60` | PDH sampling cadence; range 10–300 seconds. |
-| `performance.load_alert_delay_sec` | int | `120` | CPU/memory threshold sustain window (two default samples). |
-| `performance.input_delay_alert_delay_sec` | int | `180` | Input-delay threshold sustain window (three default samples). |
-| `notifications` | array | `[]` | Notification targets — see below. |
-| `notification_exclusions` | string[] | `[]` | Canonical hosts suppressed for every notification target and trigger. This catch-all policy is independent of `server_exclusions`; matching ignores case and a terminal DNS dot, but does not equate a short name with an FQDN. |
+| Key                                                       | Type                     | Default                    | What                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------- | ------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grace_period`                                            | int                      | `60`                       | Minutes drain must persist before alerting.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `retention_days`                                          | int                      | `90`                       | Legacy audit-retention knob, preserved for pre-007 installs. New `retention.*` fields supersede.                                                                                                                                                                                                                                                                                                                                      |
+| `retention.metrics_days`                                  | int                      | `30`                       | Hourly rollup retention, 1–365. Raw + 5-min tiers have fixed retention (25 h and 6 d) — only hourly is operator-tunable.                                                                                                                                                                                                                                                                                                              |
+| `retention.audit_days`                                    | int                      | `365`                      | Audit-record retention, 1–3650.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `telemetry.aggregator_interval_seconds`                   | int                      | `300`                      | Tick interval for 5-min and hourly rollups.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `telemetry.retention_interval_minutes`                    | int                      | `60`                       | Cadence of the retention + WAL-checkpoint worker.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `poll_interval`                                           | int                      | `300`                      | Safety-net poll interval; registry changes are still event-driven.                                                                                                                                                                                                                                                                                                                                                                    |
+| `memory_limit_mb`                                         | int                      | `32`                       | Go runtime soft memory limit for non-dashboard agents.                                                                                                                                                                                                                                                                                                                                                                                |
+| `session_warning_threshold`                               | int                      | `80`                       | Session utilization % that triggers `session_warning` (0 = disabled).                                                                                                                                                                                                                                                                                                                                                                 |
+| `dashboard_only`                                          | bool                     | `false`                    | Run listener, authentication, SQLite storage, and retention only—no local drain monitoring, performance/EventSpike collection, registration/reporting, notifications, or updater.                                                                                                                                                                                                                                                     |
+| `dashboard.rd_connection_broker`                          | string                   | _(empty)_                  | Config/runtime field: `RDConnectionBroker`. This RD Connection Broker hostname drives authoritative session-collection discovery; blank means the local machine running the DrainCtl service and works only when that host is the broker. The dashboard displays it read-only; use elevated `drainctl broker-setup --connection-broker HOST` to change it. Manual `config.json` editing is an advanced administrator-controlled path. |
+| `dashboard.tls_cert` / `tls_key`                          | string                   | _(empty)_                  | PEM paths; auto-generated self-signed if empty.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `dashboard.tls_fingerprint`                               | string                   | _(empty)_                  | SHA-256 cert fingerprint for agent-side pinning.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `update.enabled` / `channel` / `poll_interval`            | bool / string / duration | `false` / `stable` / `24h` | Opt-in self-update policy for agents. Dashboard **System** settings distribute it to connected agents.                                                                                                                                                                                                                                                                                                                                |
+| `performance.enabled`                                     | bool                     | `false`                    | Master switch for PDH counter collection.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `performance.cpu_warn_pct` / `cpu_crit_pct`               | int                      | `70` / `85`                | CPU thresholds (`0` = use default, `-1` = disabled).                                                                                                                                                                                                                                                                                                                                                                                  |
+| `performance.mem_warn_pct` / `mem_crit_pct`               | int                      | `20` / `10`                | Memory % free thresholds.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `performance.input_delay_warn_ms` / `input_delay_crit_ms` | int                      | `50` / `100`               | Input delay P95 thresholds.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `performance.collect_remotefx`                            | bool                     | `false`                    | RemoteFX Graphics + Network counters.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `performance.collect_per_session`                         | bool                     | `true`                     | Per-session CPU, memory, input delay.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `performance.sample_interval_sec`                         | int                      | `60`                       | PDH sampling cadence; range 10–300 seconds.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `performance.load_alert_delay_sec`                        | int                      | `120`                      | CPU/memory threshold sustain window (two default samples).                                                                                                                                                                                                                                                                                                                                                                            |
+| `performance.input_delay_alert_delay_sec`                 | int                      | `180`                      | Input-delay threshold sustain window (three default samples).                                                                                                                                                                                                                                                                                                                                                                         |
+| `notifications`                                           | array                    | `[]`                       | Notification targets — see below.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `notification_exclusions`                                 | string[]                 | `[]`                       | Canonical hosts suppressed for every notification target and trigger. This catch-all policy is independent of `server_exclusions`; matching ignores case and a terminal DNS dot, but does not equate a short name with an FQDN.                                                                                                                                                                                                       |
 
 **Notification target fields**
 
-| Field | Type | Required | What |
-|---|---|---|---|
-| `type` | string | yes | `"webhook"`, `"ntfy"`, or `"email"` |
-| `url` | string | yes | Endpoint (`https://` for webhook/ntfy, `smtp://` or `smtps://` for email) |
-| `to` | string[] | email | Recipient addresses |
-| `from` | string | email | Sender address |
-| `secret` | string | no | HMAC-SHA256 signing secret (webhook) or SMTP password (email) |
-| `triggers` | string[] | no | Event types to notify on (omit for all) |
-| `server_exclusions` | object[] | no | Per-server trigger suppressions. Each entry has a `server` hostname and `triggers` array; matching is case-insensitive and a short name matches its reported FQDN. |
-| `repeat_minutes` | int | no | Re-alert interval while condition persists (`0` = once) |
+| Field               | Type     | Required | What                                                                                                                                                               |
+| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`              | string   | yes      | `"webhook"`, `"ntfy"`, or `"email"`                                                                                                                                |
+| `url`               | string   | yes      | Endpoint (`https://` for webhook/ntfy, `smtp://` or `smtps://` for email)                                                                                          |
+| `to`                | string[] | email    | Recipient addresses                                                                                                                                                |
+| `from`              | string   | email    | Sender address                                                                                                                                                     |
+| `secret`            | string   | no       | HMAC-SHA256 signing secret (webhook) or SMTP password (email)                                                                                                      |
+| `triggers`          | string[] | no       | Event types to notify on (omit for all)                                                                                                                            |
+| `server_exclusions` | object[] | no       | Per-server trigger suppressions. Each entry has a `server` hostname and `triggers` array; matching is case-insensitive and a short name matches its reported FQDN. |
+| `repeat_minutes`    | int      | no       | Re-alert interval while condition persists (`0` = once)                                                                                                            |
 
 > SMTP transport: authenticated send (`secret` set) requires STARTTLS or implicit TLS (`smtps://`). DrainCtl refuses to transmit `AUTH` over cleartext — the error names the offending host.
 
@@ -667,13 +686,13 @@ Installs that previously wrote `audit.jsonl` migrate automatically on the first 
 
 Authenticated (Kerberos SSO via `Negotiate`) HTTP API on the dashboard listener. JSON. Schemas in `internal/dashboard/openapi.yaml`.
 
-| Endpoint | Returns |
-|---|---|
-| `GET /api/v1/health` | Dashboard version and aggregate fleet status counts. Requires a valid `drainctl_session`; missing, invalid, or expired sessions receive generic `{"error":"unauthorized"}` with HTTP `401` and no counts. |
-| `GET /api/v1/metrics/{host}` | Per-host time-series. `resolution=raw\|1min\|5min\|hourly\|auto`. Auto picks a tier from the requested window. |
-| `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host by default. Add repeated `host` filters only on this path (for example, `/api/v1/metrics/_fleet?host=RDSH-01&host=RDSH-02`) to aggregate a registered subset. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio). |
-| `GET /api/evtspike/spikes` | With `host` and no range, returns the compatibility recent-list array. With `host`, `from`, and `to`, returns `{spikes, total, truncated, as_of_id}` for `window_start ∈ [from,to)`: `total` is exact, `spikes` contains at most 500 newest-first rows, and `as_of_id` lets live SSE updates avoid double-counting rows already included in the snapshot. |
-| `GET /api/v1/audit` | Time-range query over drain-mode audit events. `host`, `actor`, `changes_only` filters. Cursor pagination. |
+| Endpoint                     | Returns                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`         | Dashboard version and aggregate fleet status counts. Requires a valid `drainctl_session`; missing, invalid, or expired sessions receive generic `{"error":"unauthorized"}` with HTTP `401` and no counts.                                                                                                                                                 |
+| `GET /api/v1/metrics/{host}` | Per-host time-series. `resolution=raw\|1min\|5min\|hourly\|auto`. Auto picks a tier from the requested window.                                                                                                                                                                                                                                            |
+| `GET /api/v1/metrics/_fleet` | Same shape, aggregated across every known host by default. Add repeated `host` filters only on this path (for example, `/api/v1/metrics/_fleet?host=RDSH-01&host=RDSH-02`) to aggregate a registered subset. Includes the synthetic `mem_used_pct` counter — per-host pressure averaged across hosts (not the total-weighted ratio).                      |
+| `GET /api/evtspike/spikes`   | With `host` and no range, returns the compatibility recent-list array. With `host`, `from`, and `to`, returns `{spikes, total, truncated, as_of_id}` for `window_start ∈ [from,to)`: `total` is exact, `spikes` contains at most 500 newest-first rows, and `as_of_id` lets live SSE updates avoid double-counting rows already included in the snapshot. |
+| `GET /api/v1/audit`          | Time-range query over drain-mode audit events. `host`, `actor`, `changes_only` filters. Cursor pagination.                                                                                                                                                                                                                                                |
 
 The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now returns **HTTP 410 Gone** with `{"error":"use /api/v1/metrics/{host} or /api/v1/audit"}`.
 
@@ -681,14 +700,14 @@ The legacy `GET /api/v1/history/{host}` endpoint was removed in 007 and now retu
 
 LayerCake + Svelte 5 frontend embedded into the service binary:
 
-- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD** (CPU / memory used / Sessions), **Health Indicators** (input delay, pages/sec, TCP retransmits, disk queue), **Sessions** (active / disconnected / total), and **RemoteFX** (when enabled for any host). Its optional multi-server filter applies to every chart family; with no selected hosts, every registered host participates.
-- **Liquid layout** — the navbar plus Overview, Servers, and Events share the full available viewport and one gutter token. At desktop widths around 1600px and above, responsive side margins grow from 48px to 80px; narrower screens retain compact 24px margins.
-- **Windows** — use `5M`, `15M` where the chart has sufficient source resolution, `1H`, `1D`, `3D`, `5D`, or `30D`. SQLite retained telemetry, not browser-local history, supplies the series.
-- **Pan interaction** — drag the plotted timeline directly: right moves the data right and reveals older history; left moves back toward live. The same direct-manipulation direction applies to Overview and per-host Host Load charts.
-- **Percentiles** — frame quality and FPS are higher-is-better: displayed `P95` is the service-floor numeric `P5`, while `P50` is the median, so P95 is filled and P50 is dotted. Other charts nest P50 inside the filled primary envelope only while every comparable point remains ordered; crossed mixed-version or missing-data cohorts automatically switch P50 to a dotted line so it cannot conceal P95. Fleet Health Indicator P50 is the exact median across participating hosts for each bucket. At coarse resolution, Host Load CPU P95 is the maximum retained agent sampling-window P95 in its bucket, preserving spikes. Missing P50 remains a gap.
-- **RemoteFX data quality** — local collection and remote reports validate each optional field before state, fleet aggregation, or SQLite persistence: FPS `(0,240]`, quality `(0,100]`, encode/RTT `[0,60000]`, loss `[0,100]`, and server/network skip rates `[0,1000000]`. `NaN`, infinity, negatives, and outliers are dropped individually without discarding valid sibling counters. Zero FPS or quality denotes an inactive stream and charts as a gap; zero encode time, RTT, loss, or skip rate is valid, including its P50.
-- **Server Detail** — Resource Utilization reports the logical processor count available to the service alongside host CPU and per-session P95. Host Load combines host counters with drain-mode audit events on one time axis; Event Spikes provides detector state and recent confirmed spikes. Its header shows the exact number of spikes whose `window_start` is in the visible `[from, to)` range, while the swimlane renders at most 500 newest-first dots; incoming SSE spikes are deduplicated by ID.
-- **Servers table** — search matches either hostname or authoritative RD Session Collection. Hostnames stay on one line and the table scrolls horizontally on narrow screens. Sessions, CPU, memory, and input delay retain per-host sparklines with up/down/flat endpoint-average trend arrows; EventSpike remains in each server's expanded swimlane.
+- **Overview** — fleet charts driven by `/api/v1/metrics/_fleet`: **LOAD**, **Health Indicators**, **Sessions**, and optional **RemoteFX**. The optional multi-server filter applies to every family; no selected hosts means all registered hosts.
+- **Chart persistence** — Overview LOAD visibility persists as one browser preference. Each host's LOAD window and CPU average / CPU P95 / Memory / Sessions visibility persist under a host-qualified key, so hosts never overwrite one another.
+- **LOAD contract** — all four metrics are translucent area fills. Foreground to background: CPU average rose, Memory used green, Sessions blue, and CPU P95 amber. Each line, fill, toggle, and tooltip uses the same metric color.
+- **Thresholded chart colors** — primary values use neutral blue and secondary/median values use neutral violet, with matching fills, lines, legends, and tooltips. Green, amber, and red remain reserved for threshold zones and current-value severity.
+- **Windows and panning** — use `5M`, `15M` where source resolution allows, `1H`, `1D`, `3D`, `5D`, or `30D`. Drag right to reveal older retained SQLite history and left toward live.
+- **Percentiles and averages** — labels describe parallel series, not a mode switch. `Host P95` is the highest participating host's P95 and `Host P50` is the exact median reporting host. `Fleet AVG` remains the arithmetic fleet average for Pages/sec, TCP retransmits, and disk queue. Higher-is-better RemoteFX FPS and Frame Quality use `95% Service Floor`: 95% of active sessions are at or above that floor, which is numeric P5. Missing or incompatible Host P50 is a gap.
+- **RemoteFX data quality** — reports validate each field independently. Invalid values and incompatible RemoteFX P50 ordering are rejected while primary values remain. Zero FPS or quality is inactive; valid lower-is-better zeroes remain data.
+- **Server Detail** — expanded hosts remain open while navigating dashboard tabs. On wide table layouts, their summary row and sparklines stay pinned below the navbar while the corresponding detail panel scrolls; narrower layouts retain table-local horizontal scrolling. Resource Utilization orders CPU as Used, P95, Cores and Memory as Used, P95, Total.
 - **Offline detection** — freshness is durable in SQLite schema v3 and keyed by canonical host plus accepted report epoch. A host becomes offline at exactly `3 × poll_interval`; an interval reload wakes the timer immediately. Each outage emits one additive `host_offline`, and the next accepted report emits one `host_recovered`; dashboard restart and repeated checks cannot duplicate them. Existing `server_update` remains available, and freshness transitions never rewrite `last_seen`.
 
 ### Force Update
@@ -699,14 +718,14 @@ From the Servers table, **Force Update** queues a durable command for each selec
 
 <h2 id="troubleshooting">▎ Troubleshooting</h2>
 
-| Symptom | Check | Operator action |
-|---|---|---|
-| Service stays stopped after failures | `sc.exe qfailure DrainCtl` and SCM/Application events | The first two unexpected exits restart after five seconds; a third in one day is intentionally left stopped. Preserve the failure evidence and investigate the process fault—do not add an in-process restart loop. |
-| No dump after an unexpected exit | WER LocalDumps registry key, protected `dumps` ACL, WER Operational events, free space | WER policy, service, storage, or ACL may have prevented collection. A missing historical dump does not establish where the process crashed. Repair the approved installation; do not create an unprotected or remote fallback. |
-| Dump inventory shows more than three `.dmp` files | `DumpCount` under the `drainctld.exe` LocalDumps key | Preserve evidence and investigate the WER policy. DrainCtl does not delete WER-managed dumps because concurrent cleanup could race WER retention. |
-| Repeated offline/recovery notices | Dashboard SSE timestamps and active `poll_interval` | Offline is exactly three effective heartbeat intervals. One event pair per report epoch is expected; duplicates without a new accepted report are actionable diagnostics. |
-| RemoteFX looks empty or discontinuous | `collect_remotefx`, role/counter availability, diagnostic logs | Missing counters and inactive zero FPS/quality chart as gaps. Zero lower-is-better values are retained; invalid/outlier values are rejected before storage rather than rendered as a bad session. |
-| Need a local incident bundle | Protected `diags` directory and `\LISS Technologies\DrainCtl-Diags` task | Enable the installed task for hourly metadata diagnostics. Use `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only with approved local authorization; dump archives remain in protected `dumps` and are never uploaded. |
+| Symptom                                           | Check                                                                                  | Operator action                                                                                                                                                                                                                |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Service stays stopped after failures              | `sc.exe qfailure DrainCtl` and SCM/Application events                                  | The first two unexpected exits restart after five seconds; a third in one day is intentionally left stopped. Preserve the failure evidence and investigate the process fault—do not add an in-process restart loop.            |
+| No dump after an unexpected exit                  | WER LocalDumps registry key, protected `dumps` ACL, WER Operational events, free space | WER policy, service, storage, or ACL may have prevented collection. A missing historical dump does not establish where the process crashed. Repair the approved installation; do not create an unprotected or remote fallback. |
+| Dump inventory shows more than three `.dmp` files | `DumpCount` under the `drainctld.exe` LocalDumps key                                   | Preserve evidence and investigate the WER policy. DrainCtl does not delete WER-managed dumps because concurrent cleanup could race WER retention.                                                                              |
+| Repeated offline/recovery notices                 | Dashboard SSE timestamps and active `poll_interval`                                    | Offline is exactly three effective heartbeat intervals. One event pair per report epoch is expected; duplicates without a new accepted report are actionable diagnostics.                                                      |
+| RemoteFX looks empty or discontinuous             | `collect_remotefx`, role/counter availability, diagnostic logs                         | Missing counters and inactive zero FPS/quality chart as gaps. Zero lower-is-better values are retained; invalid/outlier values are rejected before storage rather than rendered as a bad session.                              |
+| Need a local incident bundle                      | Protected `diags` directory and `\LISS Technologies\DrainCtl-Diags` task               | Enable the installed task for hourly metadata diagnostics. Use `DRAINCTL_INCLUDE_CRASH_DUMPS=1` only with approved local authorization; dump archives remain in protected `dumps` and are never uploaded.                      |
 
 ---
 
@@ -727,7 +746,7 @@ This configures:
 
 > **Domain-joined hosts:** local `auditpol` settings are overwritten by Group Policy refresh (~90 min). Configure the equivalent GPO:
 >
-> *Computer Configuration → Policies → Windows Settings → Security Settings → Advanced Audit Policy Configuration → Object Access → Audit Registry → Success*
+> _Computer Configuration → Policies → Windows Settings → Security Settings → Advanced Audit Policy Configuration → Object Access → Audit Registry → Success_
 
 ---
 

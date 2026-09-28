@@ -187,19 +187,8 @@
                 <div class="d-leg-col">
                     <div class="d-leg-head">CPU</div>
                     <div class="d-leg-row">
-                        <span class="d-leg-k">Host</span><span class="d-leg-v"
+                        <span class="d-leg-k">Used</span><span class="d-leg-v"
                             >{perf.cpu_pct != null ? perf.cpu_pct.toFixed(0) + '%' : '—'}</span
-                        >
-                    </div>
-                    <div class="d-leg-row">
-                        <span class="d-leg-k has-tip"
-                            >Logical CPUs<span class="tip"
-                                >Logical processor count available to the DrainCtl service.</span
-                            ></span
-                        ><span class="d-leg-v"
-                            >{perf.logical_processors != null && perf.logical_processors > 0
-                                ? perf.logical_processors
-                                : '—'}</span
                         >
                     </div>
                     <div class="d-leg-row">
@@ -210,6 +199,16 @@
                         ><span class="d-leg-v"
                             >{perf.session_cpu_p95_pct != null && perf.session_cpu_p95_pct > 0
                                 ? perf.session_cpu_p95_pct.toFixed(0) + '%'
+                                : '—'}</span
+                        >
+                    </div>
+                    <div class="d-leg-row">
+                        <span class="d-leg-k has-tip"
+                            >Cores<span class="tip">Logical processor count available to the DrainCtl service.</span
+                            ></span
+                        ><span class="d-leg-v"
+                            >{perf.logical_processors != null && perf.logical_processors > 0
+                                ? perf.logical_processors
                                 : '—'}</span
                         >
                     </div>
@@ -224,17 +223,17 @@
                         >
                     </div>
                     <div class="d-leg-row">
-                        <span class="d-leg-k">Total</span><span class="d-leg-v"
-                            >{perf.mem_total_mb ? (perf.mem_total_mb / 1024).toFixed(1) + ' GB' : '—'}</span
-                        >
-                    </div>
-                    <div class="d-leg-row">
                         <span class="d-leg-k has-tip"
                             >P95<span class="tip">95th percentile per-session memory usage.</span></span
                         ><span class="d-leg-v"
                             >{perf.session_mem_p95_bytes != null && perf.session_mem_p95_bytes > 0
                                 ? (perf.session_mem_p95_bytes / (1024 * 1024)).toFixed(0) + ' MB'
                                 : '—'}</span
+                        >
+                    </div>
+                    <div class="d-leg-row">
+                        <span class="d-leg-k">Total</span><span class="d-leg-v"
+                            >{perf.mem_total_mb ? (perf.mem_total_mb / 1024).toFixed(1) + ' GB' : '—'}</span
                         >
                     </div>
                 </div>

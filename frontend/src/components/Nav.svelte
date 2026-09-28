@@ -11,7 +11,7 @@
     const pref = $derived(theme.preference);
     const isDark = $derived(theme.resolved === 'dark');
     const themeLabel = $derived(
-        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode'
+        pref === 'light' ? 'Switch to dark mode' : pref === 'dark' ? 'Switch to system theme' : 'Switch to light mode',
     );
 
     /** @type {Array<{id: 'overview'|'servers'|'events', label: string, icon: any}>} */
@@ -58,13 +58,11 @@
             {#if authState.username}
                 <button class="btn-signout btn-brutal" onclick={logout}>SIGN OUT</button>
             {/if}
-            <button
-                class="btn-theme btn-brutal"
-                onclick={toggleTheme}
-                aria-label={themeLabel}
-                title={themeLabel}
-            >
-                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon size={15} strokeWidth={2.4} />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
+            <button class="btn-theme btn-brutal" onclick={toggleTheme} aria-label={themeLabel} title={themeLabel}>
+                {#if pref === 'light'}<Sun size={15} strokeWidth={2.4} />{:else if pref === 'dark'}<Moon
+                        size={15}
+                        strokeWidth={2.4}
+                    />{:else}<Monitor size={15} strokeWidth={2.4} />{/if}
             </button>
         </div>
     </div>
@@ -77,7 +75,7 @@
         z-index: 100;
         background: var(--color-bg);
         border-bottom: var(--spacing-bw) solid var(--color-border);
-        height: 52px;
+        height: var(--nav-height);
     }
 
     .nav-in {

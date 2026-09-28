@@ -352,6 +352,43 @@ func TestSanitizePerfSnapshotRemoteFXSemantics(t *testing.T) {
 	}
 }
 
+func TestSanitizePerfSnapshotRejectsReversedRemotePercentiles(t *testing.T) {
+	got := dc.SanitizePerfSnapshot(dc.PerfSnapshot{
+		InputDelayP95: 10,
+		InputDelayP50: 20,
+		RFXAvailable:  true,
+		RFXFPSOut:     30, RFXFPSOutP50: 20,
+		RFXEncodeMS: 5, RFXEncodeMSP50: 87,
+		RFXQuality: 90, RFXQualityP50: 80,
+		RFXRTT: 5, RFXRTTP50: 87,
+		P50Present: dc.PerfP50InputDelay |
+			dc.PerfP50RFXFPSOut |
+			dc.PerfP50RFXEncodeMS |
+			dc.PerfP50RFXQuality |
+			dc.PerfP50RFXRTT,
+	})
+
+	if got.InputDelayP95 != 10 || got.InputDelayP50 != 20 {
+		t.Fatalf("non-RemoteFX percentiles changed: P95=%v P50=%v", got.InputDelayP95, got.InputDelayP50)
+	}
+	for name, test := range map[string]struct {
+		primary  float64
+		median   float64
+		presence dc.PerfP50Presence
+		want     float64
+	}{
+		"fps":     {got.RFXFPSOut, got.RFXFPSOutP50, dc.PerfP50RFXFPSOut, 30},
+		"encode":  {got.RFXEncodeMS, got.RFXEncodeMSP50, dc.PerfP50RFXEncodeMS, 5},
+		"quality": {got.RFXQuality, got.RFXQualityP50, dc.PerfP50RFXQuality, 90},
+		"rtt":     {got.RFXRTT, got.RFXRTTP50, dc.PerfP50RFXRTT, 5},
+	} {
+		if test.primary != test.want || test.median != 0 || got.HasP50(test.presence, test.median) {
+			t.Errorf("%s = (primary=%v, P50=%v, present=%v), want (%v, 0, false)",
+				name, test.primary, test.median, got.HasP50(test.presence, test.median), test.want)
+		}
+	}
+}
+
 func TestAggregateRetainsPresentLowerIsBetterZeroP50(t *testing.T) {
 	got := aggregate([]dc.PerfSnapshot{
 		{RFXAvailable: true, RFXLossP50: 0, P50Present: dc.PerfP50RFXLoss},
