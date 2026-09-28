@@ -30,17 +30,25 @@ const (
 // exist. The broker is read only from the process environment so its value is
 // never interpolated into PowerShell source.
 const rdCollectionPowerShell = `$ErrorActionPreference = 'Stop'
-Import-Module RemoteDesktop
-$broker = $env:DRAINCTL_RD_CONNECTION_BROKER
-$collections = if ([string]::IsNullOrWhiteSpace($broker)) { Get-RDSessionCollection } else { Get-RDSessionCollection -ConnectionBroker $broker }
-$records = @(
-    $collections | ForEach-Object {
-        $collection = $_.CollectionName
-        $hosts = if ([string]::IsNullOrWhiteSpace($broker)) { Get-RDSessionHost -CollectionName $collection } else { Get-RDSessionHost -CollectionName $collection -ConnectionBroker $broker }
-        $hosts | ForEach-Object { [pscustomobject]@{ host = $_.SessionHost; collection = $collection } }
-    }
-)
-ConvertTo-Json -InputObject $records -Compress`
+$ProgressPreference = 'SilentlyContinue'
+try {
+    Import-Module RemoteDesktop
+    $broker = $env:DRAINCTL_RD_CONNECTION_BROKER
+    $collections = if ([string]::IsNullOrWhiteSpace($broker)) { Get-RDSessionCollection } else { Get-RDSessionCollection -ConnectionBroker $broker }
+    $records = @(
+        $collections | ForEach-Object {
+            $collection = $_.CollectionName
+            $hosts = if ([string]::IsNullOrWhiteSpace($broker)) { Get-RDSessionHost -CollectionName $collection } else { Get-RDSessionHost -CollectionName $collection -ConnectionBroker $broker }
+            $hosts | ForEach-Object { [pscustomobject]@{ host = $_.SessionHost; collection = $collection } }
+        }
+    )
+    ConvertTo-Json -InputObject $records -Compress
+} catch {
+    $message = $_.Exception.Message
+    if ([string]::IsNullOrWhiteSpace($message)) { $message = $_.ToString() }
+    [Console]::Error.WriteLine($message)
+    exit 1
+}`
 
 type rdCollectionLoader func(context.Context, string) ([]byte, error)
 
@@ -190,7 +198,16 @@ func (r *rdCollectionResolver) refresh(ctx context.Context) {
 
 	data, err := r.loader(ctx, broker)
 	if err != nil {
-		slog.Warn("dashboard: RD Session Collection discovery failed", "error", err)
+		target := broker
+		if target == "" {
+			target = "local service host"
+		}
+		slog.Warn(
+			"dashboard: RD Session Collection discovery failed",
+			"target", target,
+			"error", err,
+			"remediation", "run elevated drainctl broker-setup --connection-broker HOST",
+		)
 		return
 	}
 
@@ -295,7 +312,14 @@ func runRDCollectionCommand(cmd *exec.Cmd) ([]byte, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, wrapRDCollectionCommandError(err, stderr.String())
+		diagnostic := stderr.String()
+		if strings.TrimSpace(diagnostic) == "" {
+			// Windows PowerShell can route terminating-error text to stdout
+			// under non-interactive service hosting. Keep the error actionable
+			// without mixing successful JSON and diagnostics.
+			diagnostic = stdout.String()
+		}
+		return nil, wrapRDCollectionCommandError(err, diagnostic)
 	}
 	return stdout.Bytes(), nil
 }

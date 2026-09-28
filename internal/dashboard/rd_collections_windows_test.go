@@ -138,6 +138,35 @@ func TestRunRDCollectionCommandIncludesTrimmedStderrOnFailure(t *testing.T) {
 	}
 }
 
+func TestRunRDCollectionCommandPrefersStderrDiagnosticOnFailure(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "echo partial stdout & echo authoritative stderr 1>&2 & exit 1")
+
+	_, err := runRDCollectionCommand(cmd)
+
+	if err == nil {
+		t.Fatal("runRDCollectionCommand succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "authoritative stderr") {
+		t.Fatalf("error = %q, want stderr diagnostic", err)
+	}
+	if strings.Contains(err.Error(), "partial stdout") {
+		t.Fatalf("error = %q, stdout masked the stderr diagnostic", err)
+	}
+}
+
+func TestRunRDCollectionCommandFallsBackToStdoutDiagnosticOnFailure(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "echo RemoteDesktop discovery failed & exit 1")
+
+	_, err := runRDCollectionCommand(cmd)
+
+	if err == nil {
+		t.Fatal("runRDCollectionCommand succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "RemoteDesktop discovery failed") {
+		t.Fatalf("error = %q, want stdout diagnostic", err)
+	}
+}
+
 func TestWrapRDCollectionCommandErrorBoundsStderr(t *testing.T) {
 	exitErr := errors.New("exit status 1")
 	stderr := strings.Repeat("x", rdCollectionCommandStderrMaxSize+1)

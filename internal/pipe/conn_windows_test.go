@@ -4,11 +4,15 @@ package pipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // uniquePipeName returns a per-test pipe name so tests don't collide with an
@@ -113,36 +117,142 @@ func TestAcceptPipeConnHelperExits(t *testing.T) {
 	}
 }
 
-// TestAcceptPipeConnHelperExitsOnError drives the ctx-cancellation early-return
-// path and verifies the helper goroutine still exits. Before the B1 fix it
-// would have been parked on the parent ctx, which is exactly the leak we want
-// to prove gone.
+func TestAcceptPipeConnJoinsCancelHelperBeforeReturning(t *testing.T) {
+	uniquePipeName(t)
+	waitFor(t, time.Second, func() bool { return helperGoroutineCount.Load() == 0 })
+
+	originalSetEvent := setAcceptCancelEvent
+	helperEntered := make(chan struct{})
+	releaseHelper := make(chan struct{})
+	var enteredOnce sync.Once
+	setAcceptCancelEvent = func(event windows.Handle) error {
+		enteredOnce.Do(func() { close(helperEntered) })
+		<-releaseHelper
+		return windows.SetEvent(event)
+	}
+	t.Cleanup(func() {
+		setAcceptCancelEvent = originalSetEvent
+		select {
+		case <-releaseHelper:
+		default:
+			close(releaseHelper)
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type acceptResult struct {
+		conn net.Conn
+		err  error
+	}
+	accepted := make(chan acceptResult, 1)
+	go func() {
+		conn, err := acceptPipeConn(ctx)
+		accepted <- acceptResult{conn: conn, err: err}
+	}()
+
+	var client net.Conn
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		client, err = dialPipe()
+		if err == nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("dialPipe: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	select {
+	case <-helperEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel helper did not run after successful connection")
+	}
+
+	select {
+	case result := <-accepted:
+		if result.conn != nil {
+			_ = result.conn.Close()
+		}
+		t.Fatalf("acceptPipeConn returned before its cancel helper exited: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseHelper)
+	select {
+	case result := <-accepted:
+		if result.err != nil {
+			t.Fatalf("acceptPipeConn: %v", result.err)
+		}
+		_ = result.conn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("acceptPipeConn did not return after cancel helper exited")
+	}
+	if got := helperGoroutineCount.Load(); got != 0 {
+		t.Fatalf("helperGoroutineCount = %d after accept returned, want 0", got)
+	}
+}
+
+// TestAcceptPipeConnHelperExitsOnError drives context cancellation after the
+// helper signals cancelEvent, then blocks that helper before it returns. The
+// accept call must not return or close the event until the helper exits.
 func TestAcceptPipeConnHelperExitsOnError(t *testing.T) {
 	uniquePipeName(t)
 	waitFor(t, time.Second, func() bool { return helperGoroutineCount.Load() == 0 })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	originalSetEvent := setAcceptCancelEvent
+	helperSignaled := make(chan struct{})
+	releaseHelper := make(chan struct{})
+	var signaledOnce sync.Once
+	setAcceptCancelEvent = func(event windows.Handle) error {
+		err := windows.SetEvent(event)
+		signaledOnce.Do(func() { close(helperSignaled) })
+		<-releaseHelper
+		return err
+	}
+	t.Cleanup(func() {
+		setAcceptCancelEvent = originalSetEvent
+		select {
+		case <-releaseHelper:
+		default:
+			close(releaseHelper)
+		}
+	})
 
+	ctx, cancel := context.WithCancel(context.Background())
 	acceptDone := make(chan error, 1)
 	go func() {
 		_, err := acceptPipeConn(ctx)
 		acceptDone <- err
 	}()
 
-	// Give acceptPipeConn time to enter ConnectNamedPipe and spawn the
-	// helper goroutine before we cancel.
 	waitFor(t, time.Second, func() bool { return helperGoroutineCount.Load() >= 1 })
-
 	cancel()
 
 	select {
-	case err := <-acceptDone:
-		if err == nil {
-			t.Fatal("expected error from cancelled acceptPipeConn, got nil")
-		}
+	case <-helperSignaled:
 	case <-time.After(2 * time.Second):
-		t.Fatal("acceptPipeConn did not return after ctx cancel")
+		t.Fatal("cancel helper did not signal the cancellation event")
+	}
+	select {
+	case err := <-acceptDone:
+		t.Fatalf("acceptPipeConn returned before its cancel helper exited: %v", err)
+	case <-time.After(100 * time.Millisecond):
 	}
 
-	waitFor(t, time.Second, func() bool { return helperGoroutineCount.Load() == 0 })
+	close(releaseHelper)
+	select {
+	case err := <-acceptDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("acceptPipeConn error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acceptPipeConn did not return after cancel helper exited")
+	}
+	if got := helperGoroutineCount.Load(); got != 0 {
+		t.Fatalf("helperGoroutineCount = %d after cancellation returned, want 0", got)
+	}
 }

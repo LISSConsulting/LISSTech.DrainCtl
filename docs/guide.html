@@ -2081,8 +2081,9 @@ https://dashboard-server:49470</code></pre>
 
             <p>
                 LOAD uses one shared translucent-area contract. From foreground
-                to background it paints CPU average in rose, Memory used in
-                green, Sessions in blue, and CPU P95 in amber. Each metric uses
+                to background it paints <strong>CPU AVG</strong> in rose,
+                <strong>Memory</strong> in green, <strong>Sessions</strong> in
+                blue, and <strong>CPU P95</strong> in amber. Each metric uses
                 the same color for its line, fill, toggle, and tooltip.
                 Thresholded single-metric charts use blue for the primary
                 consumer and violet for the secondary or median consumer; green,
@@ -2139,7 +2140,10 @@ https://dashboard-server:49470</code></pre>
                 needs the module and appropriate administrative/RDS-management
                 rights on the selected Connection Broker. A failed discovery
                 retains the last good membership map rather than removing
-                existing groups.
+                existing groups. Its warning identifies the attempted target,
+                preserves the PowerShell exception even when non-interactive
+                Windows PowerShell routes it to stdout, and points to the
+                supported elevated <code>broker-setup</code> remediation.
             </p>
 
             <h3>Validate and save a Connection Broker</h3>
@@ -2640,14 +2644,15 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
             <p>
                 Overview summary cards show live fleet counts and severity. The
                 fleet-wide <strong>LOAD chart</strong> paints four translucent
-                areas from foreground to background: rose CPU average, green
-                Memory, blue Sessions, and amber CPU P95. Line, fill, legend,
-                and tooltip colors match for each metric. Series visibility
-                persists in the browser. The optional multi-server Overview
-                filter applies consistently to LOAD, Health Indicators,
-                Sessions, and RemoteFX; its all-server default sends no
-                <code>host</code> filters, and selected servers use repeated
-                <code>host</code> parameters on
+                areas from foreground to background: rose
+                <strong>CPU AVG</strong>, green <strong>Memory</strong>, blue
+                <strong>Sessions</strong>, and amber <strong>CPU P95</strong>.
+                Line, fill, legend, and tooltip colors match for each metric.
+                Series visibility persists in the browser. The optional
+                multi-server Overview filter applies consistently to LOAD,
+                Health Indicators, Sessions, and RemoteFX. Its all-server
+                default sends no <code>host</code> filters; selected servers use
+                repeated <code>host</code> parameters on
                 <code>/api/v1/metrics/_fleet</code>.
             </p>
             <p>
@@ -2858,9 +2863,9 @@ Install-RDSHDrainCertificate -CertPath C:\certs\dashboard.pem -KeyPath C:\certs\
                     consecutive poll counts
                 </li>
                 <li>
-                    <strong>CPU P95 envelope</strong>: toggle the amber
-                    background envelope on fleet or host LOAD charts to reveal
-                    retained tail spikes that the CPU-average fill smooths over
+                    <strong>CPU P95 area</strong>: toggle the amber background
+                    area on fleet or host LOAD charts to reveal retained tail
+                    spikes that the CPU AVG fill smooths over
                 </li>
             </ul>
 
