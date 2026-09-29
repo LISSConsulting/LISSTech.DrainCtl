@@ -184,8 +184,8 @@ func TestHandleHealth_StatusCounts(t *testing.T) {
 	ds.state.Register("SRV02")
 	ds.state.Register("SRV03")
 
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
-	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Alert"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV02", &dc.CheckResult{Host: "SRV02", Status: "Alert"})
 	// SRV03 has no report → unknown
 
 	w := httptest.NewRecorder()
@@ -219,7 +219,7 @@ func TestHandleHealth_StaleServerCountedAsOffline(t *testing.T) {
 	ds := newTestServer(t)
 	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	// Three expected reports have been missed.
 	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-3*time.Minute-time.Second)); err != nil {
@@ -248,7 +248,7 @@ func TestHandleHealth_FreshServerNotOffline(t *testing.T) {
 	ds := newTestServer(t)
 	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	if err := ds.state.store.(*telemetry.ServerStore).BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-3*time.Minute+time.Second)); err != nil {
 		t.Fatalf("BackdateLastSeen: %v", err)
 	}
@@ -276,8 +276,8 @@ func TestHandleHealth_StaleAlertAndGraceCountedAsOffline(t *testing.T) {
 	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
 	ds.state.Register("SRV02")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
-	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	mustUpdate(t, ds.state, "SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
 
 	store := ds.state.store.(*telemetry.ServerStore)
 	if err := store.BackdateLastSeen(context.Background(), "SRV01", time.Now().Add(-4*time.Minute)); err != nil {
@@ -988,9 +988,9 @@ func TestHandleHealth_GraceCountedSeparatelyFromHealthy(t *testing.T) {
 	ds.state.Register("SRV03")
 	ds.state.Register("SRV04")
 
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
-	ds.state.Update("SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
-	ds.state.Update("SRV03", &dc.CheckResult{Host: "SRV03", Status: "Alert"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV02", &dc.CheckResult{Host: "SRV02", Status: "Grace"})
+	mustUpdate(t, ds.state, "SRV03", &dc.CheckResult{Host: "SRV03", Status: "Alert"})
 	// SRV04 has no report → unknown
 
 	w := httptest.NewRecorder()
@@ -1030,7 +1030,7 @@ func TestHandleHealth_GraceCountedSeparatelyFromHealthy(t *testing.T) {
 func TestHandleHealth_GraceFieldPresentWhenZero(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -1103,7 +1103,7 @@ func TestHandleServers_ReturnsSortedByHostname(t *testing.T) {
 func TestHandleServers_IncludesStatus(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
@@ -1129,7 +1129,7 @@ func TestHandleServers_RDSessionCollectionUsesEffectiveResultHost(t *testing.T) 
 	})
 	ds.rdCollections.refresh(context.Background())
 	ds.state.Register("registered-rd.example.test")
-	ds.state.Update("registered-rd.example.test", &dc.CheckResult{
+	mustUpdate(t, ds.state, "registered-rd.example.test", &dc.CheckResult{
 		Host:   "effective-rd.example.test",
 		Status: "Healthy",
 	})
@@ -1176,7 +1176,7 @@ func TestHandleGetServer_RDSessionCollectionUnknownOrResolverAbsentIsOmitted(t *
 				resolver.refresh(context.Background())
 			}
 			ds.state.Register("rd.example.test")
-			ds.state.Update("rd.example.test", &dc.CheckResult{Host: "rd.example.test", Status: "Healthy"})
+			mustUpdate(t, ds.state, "rd.example.test", &dc.CheckResult{Host: "rd.example.test", Status: "Healthy"})
 
 			w := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/rd.example.test", nil)
@@ -2457,7 +2457,7 @@ func TestHandleUI_BodyContainsDashboard(t *testing.T) {
 func TestHandleHealth_GraceServerCounted(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Grace"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Grace"})
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -2485,7 +2485,7 @@ func TestHandleHealth_ErrorStatusCountedAsUnknown(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
 	// "Error" is not a recognised status value — falls through to default: unknown++.
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Error"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Error"})
 
 	w := httptest.NewRecorder()
 	ds.handleHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -2549,7 +2549,7 @@ func TestHandleGetServer_ReturnsServerView(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
 	result := &dc.CheckResult{Host: "SRV01", Status: "Healthy", DrainModeLabel: "AllowAll"}
-	ds.state.Update("SRV01", result)
+	mustUpdate(t, ds.state, "SRV01", result)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/servers/SRV01", nil)
@@ -3217,7 +3217,7 @@ func waitForSubscriber(t *testing.T, broker *Broker) {
 }
 
 // TestHandleReport_BroadcastsSSEUpdate verifies the end-to-end SSE wiring:
-// handleReport → state.Update() → state.OnUpdate → broker.Broadcast() delivers
+// handleReport → state.Update → state.OnUpdate → broker.Broadcast() delivers
 // a server_update event to a connected subscriber.
 func TestHandleReport_BroadcastsSSEUpdate(t *testing.T) {
 	ds := newTestServer(t)
@@ -3266,7 +3266,7 @@ func TestBroadcastServerUpdate_IncludesRDSessionCollection(t *testing.T) {
 	})
 	ds.rdCollections.refresh(context.Background())
 	ds.state.Register("registered-rd.example.test")
-	ds.state.Update("registered-rd.example.test", &dc.CheckResult{
+	mustUpdate(t, ds.state, "registered-rd.example.test", &dc.CheckResult{
 		Host:   "effective-rd.example.test",
 		Status: "Healthy",
 	})
@@ -3615,7 +3615,7 @@ func TestServerState_Update_OnUpdateCallback_NoDeadlock(t *testing.T) {
 	}
 
 	result := &dc.CheckResult{Host: "SRV01", Status: "Healthy"}
-	state.Update("SRV01", result)
+	mustUpdate(t, state, "SRV01", result)
 
 	select {
 	case host := <-called:
@@ -6551,7 +6551,7 @@ func staleTransitionFixture(t *testing.T, status string) (*DashboardServer, time
 	ds.wireServerStateCallbacks()
 	ds.setHeartbeatInterval(time.Minute)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: status})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: status})
 	return ds, time.Now().UTC().Add(3 * time.Minute)
 }
 
@@ -6629,7 +6629,7 @@ func TestStaleHostSweep_RestartDedupesSameEpoch(t *testing.T) {
 	first := newDashboard()
 	first.setHeartbeatInterval(time.Minute)
 	first.state.Register("SRV01")
-	first.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, first.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	now := time.Now().UTC().Add(3 * time.Minute)
 	id, ch, _, err := first.broker.Subscribe()
 	if err != nil {
@@ -6667,7 +6667,7 @@ func TestStaleHostSweep_RecoveryAndReoutage(t *testing.T) {
 	_ = readSSEEvent(t, ch)
 	_ = readSSEEvent(t, ch)
 	time.Sleep(time.Millisecond)
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	if event := readSSEEvent(t, ch); event.Type != "host_recovered" {
 		t.Fatalf("recovery event = %#v", event)
 	}

@@ -31,6 +31,15 @@ func newTestServerStateWithDB(t *testing.T) (*ServerState, *telemetry.DB) {
 	return NewServerState(telemetry.NewServerStore(db)), db
 }
 
+// mustUpdate keeps fixture writes explicit about persistence errors while
+// allowing tests to inspect both accepted and unregistered-host behavior.
+func mustUpdate(t *testing.T, state *ServerState, host string, result *dc.CheckResult) {
+	t.Helper()
+	if _, err := state.Update(host, result); err != nil {
+		t.Errorf("Update(%q): %v", host, err)
+	}
+}
+
 // ── Construction ──────────────────────────────────────────────────────────────
 
 func TestServerState_FreshIsEmpty(t *testing.T) {
@@ -141,7 +150,7 @@ func TestUpdate_SetsLastResult(t *testing.T) {
 	s.Register("SRV01")
 
 	result := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
-	s.Update("SRV01", result)
+	mustUpdate(t, s, "SRV01", result)
 
 	all := s.All()
 	if all[0].LastResult == nil {
@@ -166,7 +175,7 @@ func TestUpdate_SetsLastSeen(t *testing.T) {
 	s.Register("SRV01")
 	before := time.Now()
 
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	all := s.All()
 	if all[0].LastSeen.Before(before.Add(-time.Second)) {
@@ -176,7 +185,7 @@ func TestUpdate_SetsLastSeen(t *testing.T) {
 
 func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
 	s := newTestServerState(t)
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
 
 	if len(s.All()) != 0 {
 		t.Error("Update() on unregistered host should not create a ServerInfo entry")
@@ -188,13 +197,13 @@ func TestUpdate_FiresOnUpdateOnlyForRegisteredHost(t *testing.T) {
 	var fired []string
 	s.OnUpdate = func(h string) { fired = append(fired, h) }
 
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST"})
 	if len(fired) != 0 {
 		t.Errorf("OnUpdate fired for unregistered host: %v", fired)
 	}
 
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01"})
 	if len(fired) != 1 || fired[0] != "SRV01" {
 		t.Errorf("OnUpdate fired = %v, want [SRV01]", fired)
 	}
@@ -205,13 +214,13 @@ func TestUpdate_FiresOnMetricsOnlyForRegisteredHost(t *testing.T) {
 	var count int
 	s.OnMetrics = func(r dc.CheckResult) { count++ }
 
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST"})
 	if count != 0 {
 		t.Errorf("OnMetrics fired for unregistered host: count=%d", count)
 	}
 
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01"})
 	if count != 1 {
 		t.Errorf("OnMetrics count=%d, want 1", count)
 	}
@@ -240,7 +249,7 @@ func TestUpdate_WakesSessionDropInboxOnlyAfterAcceptedResultCommit(t *testing.T)
 	waker := &countingSessionDropInboxWaker{state: s, db: db}
 	s.SetSessionDropInboxWaker(waker)
 
-	s.Update("SRV01", &dc.CheckResult{
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
 		Host:      "SRV01",
 		Timestamp: time.Now().UTC(),
 		Status:    "Healthy",
@@ -258,7 +267,7 @@ func TestUpdate_WakesSessionDropInboxOnlyAfterAcceptedResultCommit(t *testing.T)
 	}
 	acceptedSequence := pending.AcceptedSequence
 
-	s.Update("SRV01", &dc.CheckResult{
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
 		Host:      "SRV01",
 		Timestamp: time.UnixMilli(pending.ReportEpochMs).UTC(),
 		Status:    "Healthy",
@@ -280,7 +289,7 @@ func TestUpdate_WakesSessionDropInboxOnlyAfterAcceptedResultCommit(t *testing.T)
 func TestUpdate_DurableInboxSurvivesMissedWakeAndConsumesOnce(t *testing.T) {
 	s, db := newTestServerStateWithDB(t)
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
 		Host:      "SRV01",
 		Timestamp: time.Now().UTC(),
 		Status:    "Healthy",
@@ -326,8 +335,8 @@ func TestUpdate_InboxDrainUsesAcceptanceSequenceNotReportEpoch(t *testing.T) {
 
 	// Deliberately accept the newer report epoch first. Detector drain order
 	// must preserve acceptance order, not reorder it by the report timestamp.
-	s.Update("SRV02", &dc.CheckResult{Host: "SRV02", Timestamp: reportEpoch.Add(time.Minute)})
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Timestamp: reportEpoch})
+	mustUpdate(t, s, "SRV02", &dc.CheckResult{Host: "SRV02", Timestamp: reportEpoch.Add(time.Minute)})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Timestamp: reportEpoch})
 
 	inbox := telemetry.NewSessionDropStore(db)
 	var drainedHosts []string
@@ -348,7 +357,7 @@ func TestUpdate_InboxDrainUsesAcceptanceSequenceNotReportEpoch(t *testing.T) {
 func TestUpdate_WithoutReportEpochPersistsResultWithoutInboxObservation(t *testing.T) {
 	s, db := newTestServerStateWithDB(t)
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	if got := s.Get("SRV01"); got == nil || got.LastResult == nil {
 		t.Fatal("report without an observation identity did not persist last result")
@@ -503,7 +512,7 @@ func TestPersistence_LastResultSurvivesReload(t *testing.T) {
 	}
 	s1 := NewServerState(telemetry.NewServerStore(db1))
 	s1.Register("SRV01")
-	s1.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	mustUpdate(t, s1, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 	_ = db1.Close()
 
 	db2, err := telemetry.Open(dir)
@@ -543,7 +552,7 @@ func TestServerState_ConcurrentAccess(t *testing.T) {
 			case 0:
 				s.Register(host)
 			case 1:
-				s.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"})
+				mustUpdate(t, s, host, &dc.CheckResult{Host: host, Status: "Healthy"})
 			case 2:
 				s.IsRegistered(host)
 			case 3:
@@ -572,7 +581,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 	ds.state.Register("SRV01")
 
 	baseline := ds.state.storeGetCalls.Load()
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	afterFirst := ds.state.storeGetCalls.Load()
 
 	if afterFirst != baseline+1 {
@@ -580,7 +589,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+		mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	}
 	afterSteadyState := ds.state.storeGetCalls.Load()
 
@@ -596,7 +605,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 func TestBroadcastServerUpdateUsesCache(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	before := ds.state.storeGetCalls.Load()
 	ds.broadcastServerUpdate("SRV01")
@@ -627,7 +636,7 @@ func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
 		t.Fatalf("db.Close: %v", err)
 	}
 
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 
 	if got := s.GetCached("SRV01"); got != nil {
 		t.Fatalf("GetCached after failed Update = %+v, want nil (cache must not be poisoned)", got)
@@ -639,7 +648,7 @@ func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
 func TestRemoveClearsCache(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	if ds.state.GetCached("SRV01") == nil {
 		t.Fatal("precondition: cache should be populated after Update")
@@ -670,7 +679,7 @@ func TestCachedServerInfoIsImmutable(t *testing.T) {
 	s.Register("SRV01")
 
 	first := &dc.CheckResult{Host: "SRV01", Status: "Healthy"}
-	s.Update("SRV01", first)
+	mustUpdate(t, s, "SRV01", first)
 
 	captured := s.GetCached("SRV01")
 	if captured == nil || captured.LastResult == nil {
@@ -682,7 +691,7 @@ func TestCachedServerInfoIsImmutable(t *testing.T) {
 
 	// Second Update with a DIFFERENT result.
 	second := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
-	s.Update("SRV01", second)
+	mustUpdate(t, s, "SRV01", second)
 
 	if captured.LastResult.Status != "Healthy" {
 		t.Errorf("first cached snapshot mutated by second Update: status=%q, want Healthy", captured.LastResult.Status)

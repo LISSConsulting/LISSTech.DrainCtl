@@ -30,7 +30,7 @@ func newForceUpdateTestServer(t *testing.T, host string, version string, lastSee
 	}
 	// Populate the cached ServerInfo so handleForceUpdate's GetCached
 	// short-circuits and handleForceUpdate reads the version we set.
-	ds.state.Update(host, &dc.CheckResult{
+	mustUpdate(t, ds.state, host, &dc.CheckResult{
 		Version:   version,
 		Timestamp: lastSeen,
 		Host:      host,
