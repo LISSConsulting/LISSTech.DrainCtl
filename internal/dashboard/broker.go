@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/investigation"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 )
 
 // SSEEvent is a single event broadcast to all connected browsers.
@@ -104,28 +106,37 @@ func (b *Broker) Unsubscribe(id string) {
 	}
 }
 
-// Broadcast sends a pre-marshaled payload to all subscribers. Slow subscribers
-// whose channel buffer is full are evicted. The lock is held only to snapshot
-// the subscriber list; channel sends happen outside the lock.
-func (b *Broker) Broadcast(payload []byte) {
-	// Snapshot subscribers under read lock.
-	b.mu.RLock()
-	snapshot := make([]*subscriber, 0, len(b.subscribers))
-	for _, sub := range b.subscribers {
-		snapshot = append(snapshot, sub)
+// CloseAll stops and removes every active stream. It is used when the
+// dashboard-group authorization boundary changes.
+func (b *Broker) CloseAll() {
+	b.mu.Lock()
+	for id, sub := range b.subscribers {
+		sub.stop()
+		delete(b.subscribers, id)
 	}
-	b.mu.RUnlock()
+	b.mu.Unlock()
+}
 
-	// Send outside the lock — no contention with Subscribe/Unsubscribe.
+// Broadcast sends a pre-marshaled payload to all subscribers. Slow subscribers
+// whose channel buffer is full are evicted. The read lock keeps a concurrent
+// CloseAll from racing a post-invalidation send.
+func (b *Broker) Broadcast(payload []byte) {
+	b.mu.RLock()
 	var evict []*subscriber
-	for _, sub := range snapshot {
+	for _, sub := range b.subscribers {
 		select {
+		case <-sub.done:
+			continue
+		default:
+		}
+		select {
+		case <-sub.done:
 		case sub.ch <- payload:
-			// delivered
 		default:
 			evict = append(evict, sub)
 		}
 	}
+	b.mu.RUnlock()
 
 	// Evict slow subscribers under write lock.
 	if len(evict) > 0 {
@@ -213,4 +224,35 @@ func (b *Broker) PublishRecentSpike(entry evtspike.RecentSpikeEntry) {
 		return
 	}
 	b.Broadcast(payload)
+}
+
+// PublishInvestigationUpdate publishes the host-free lifecycle or status
+// projection. The typed payload prevents feature callers from attaching a
+// registered-host field to the shared event envelope.
+func (b *Broker) PublishInvestigationUpdate(update investigation.Update) bool {
+	return b.publishFeatureEvent("investigation_update", update)
+}
+
+// PublishSessionDrop publishes the source-ID-only session-drop projection.
+func (b *Broker) PublishSessionDrop(event sessiondrop.SSEEvent) bool {
+	return b.publishFeatureEvent("session_drop", event)
+}
+
+func (b *Broker) publishFeatureEvent(eventType string, data any) bool {
+	body, err := json.Marshal(data)
+	if err != nil {
+		slog.Warn("sse: feature event marshal failed", "type", eventType, "error", err)
+		return false
+	}
+	payload, err := json.Marshal(SSEEvent{
+		Type:      eventType,
+		Data:      body,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.Warn("sse: feature envelope marshal failed", "type", eventType, "error", err)
+		return false
+	}
+	b.Broadcast(payload)
+	return true
 }

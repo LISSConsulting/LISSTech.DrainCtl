@@ -319,7 +319,7 @@ func svcRunCheck(
 			} else {
 				result.Message = savedMessage
 			}
-			dc.SendNotificationWithExclusions(targets, exclusions, notifyState, result, trigger, changedBy)
+			sendAsyncNotification(targets, exclusions, notifyState, result, trigger, changedBy)
 		}
 		result.Message = savedMessage
 	}
@@ -371,7 +371,7 @@ func svcRunCheck(
 			if dashState.ReportLocal(result.Host, result, toDashboardCompletion(localCompletion, result.Host)) {
 				slog.Debug("dashboard heartbeat (local)", "host", result.Host)
 			} else {
-				slog.Warn("dashboard heartbeat (local): host not registered", "host", result.Host)
+				slog.Warn("dashboard heartbeat (local): report not accepted", "host", result.Host)
 			}
 		} else {
 			slog.Debug("dashboard heartbeat sending", "url", dashCfg.URL)
@@ -409,6 +409,8 @@ func svcRunCheck(
 // to any active notification target, preventing stale rate-limit state from
 // affecting new or renamed targets.
 func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
+	state.DispatchMu.Lock()
+	defer state.DispatchMu.Unlock()
 	active := make(map[string]bool, len(targets))
 	for _, t := range targets {
 		if t.URL != "" {

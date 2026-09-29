@@ -38,6 +38,10 @@ tags:
     description: Notification target testing
   - name: evtspike
     description: Event-log anomaly detector status and confirmed spikes
+  - name: investigation
+    description: Session-only OpenAI Responses investigation settings, lifecycle, and safe reports
+  - name: session-drops
+    description: Session-only deterministic lower-tail session-drop sources
 
 components:
   securitySchemes:
@@ -1232,7 +1236,676 @@ components:
           type: boolean
           nullable: true
 
+    InvestigationError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code]
+          properties:
+            code:
+              type: string
+    PositiveDecimalId:
+      type: string
+      pattern: "^[1-9][0-9]{0,18}$"
+    Rfc3339Timestamp:
+      type: string
+      format: date-time
+      pattern: '^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\.[0-9]{3}Z$'
+      description: Exact UTC RFC3339 timestamp with three fractional-second digits.
+    InvestigationTerminalReason:
+      type: string
+      enum: ["", authentication_failed, configuration_disabled, configuration_invalid, evidence_unavailable, interrupted, network_error, provider_rate_limited, provider_request_rejected, provider_refused, redirect_refused, request_limit, response_incomplete, response_invalid, response_limit, storage_unavailable, timeout, upstream_error]
+    InvestigationFailureReason:
+      type: string
+      enum: [authentication_failed, configuration_disabled, configuration_invalid, interrupted, network_error, provider_rate_limited, provider_request_rejected, provider_refused, redirect_refused, request_limit, response_incomplete, response_invalid, response_limit, storage_unavailable, timeout, upstream_error]
+    InvestigationSource:
+      type: object
+      additionalProperties: false
+      required: [source_kind, source_id]
+      properties:
+        source_kind:
+          type: string
+          enum: [event_spike, session_drop]
+        source_id:
+          $ref: "#/components/schemas/PositiveDecimalId"
+    PrivacyAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [version, third_party_subprocessors, no_training_without_opt_in, default_abuse_monitoring_up_to_30_days, store_false_application_state_only, temporary_prompt_cache_possible, zdr_mam_separate_approval, audit_days_local_only, global_endpoint_no_regional_guarantee]
+      properties:
+        version:
+          type: string
+          const: openai_responses_privacy_v1
+        third_party_subprocessors: {type: boolean, const: true}
+        no_training_without_opt_in: {type: boolean, const: true}
+        default_abuse_monitoring_up_to_30_days: {type: boolean, const: true}
+        store_false_application_state_only: {type: boolean, const: true}
+        temporary_prompt_cache_possible: {type: boolean, const: true}
+        zdr_mam_separate_approval: {type: boolean, const: true}
+        audit_days_local_only: {type: boolean, const: true}
+        global_endpoint_no_regional_guarantee: {type: boolean, const: true}
+    CredentialCommand:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [operation]
+          properties:
+            operation: {type: string, const: preserve}
+        - required: [operation, value]
+          properties:
+            operation: {type: string, const: replace}
+            value: {type: string, minLength: 1, maxLength: 4096}
+        - required: [operation]
+          properties:
+            operation: {type: string, const: clear}
+      properties:
+        operation:
+          type: string
+          enum: [preserve, replace, clear]
+        value:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    InvestigationProviderView:
+      type: object
+      additionalProperties: false
+      required: [profile, endpoint, model, access_enabled, acknowledged, privacy_acknowledgement_version, automatic_enabled, has_credential]
+      properties:
+        profile: {type: string, const: openai_responses}
+        endpoint: {type: string, const: "https://api.openai.com/v1/responses"}
+        model: {type: string, const: gpt-6-astra}
+        access_enabled: {type: boolean}
+        acknowledged: {type: boolean}
+        privacy_acknowledgement_version: {type: string}
+        automatic_enabled: {type: boolean}
+        has_credential: {type: boolean}
+    SessionDropDetectorConstants:
+      type: object
+      additionalProperties: false
+      required: [slots_per_day, confirmation_required, confirmation_window, slot_maturity_eligible_days, fallback_minimum_observations, fallback_minimum_span_hours]
+      properties:
+        slots_per_day: {type: integer, const: 96}
+        confirmation_required: {type: integer, const: 2}
+        confirmation_window: {type: integer, const: 3}
+        slot_maturity_eligible_days: {type: integer, const: 7}
+        fallback_minimum_observations: {type: integer, const: 20}
+        fallback_minimum_span_hours: {type: integer, const: 24}
+    SessionDropSettings:
+      type: object
+      additionalProperties: false
+      required: [lower_tail_threshold, minimum_drop_sessions, minimum_drop_percent, baseline_half_life_hours, cooldown_minutes]
+      properties:
+        lower_tail_threshold: {type: number, minimum: 1.0e-9, maximum: 0.1}
+        minimum_drop_sessions: {type: integer, minimum: 1, maximum: 1000000}
+        minimum_drop_percent: {type: number, minimum: 1, maximum: 99}
+        baseline_half_life_hours: {type: integer, minimum: 24, maximum: 8760}
+        cooldown_minutes: {type: integer, minimum: 1, maximum: 1440}
+    InvestigationSettingsView:
+      type: object
+      additionalProperties: false
+      required: [provider, session_drop]
+      properties:
+        provider:
+          $ref: "#/components/schemas/InvestigationProviderView"
+        session_drop:
+          type: object
+          additionalProperties: false
+          required: [lower_tail_threshold, minimum_drop_sessions, minimum_drop_percent, baseline_half_life_hours, cooldown_minutes, detector]
+          properties:
+            lower_tail_threshold: {type: number, minimum: 1.0e-9, maximum: 0.1}
+            minimum_drop_sessions: {type: integer, minimum: 1, maximum: 1000000}
+            minimum_drop_percent: {type: number, minimum: 1, maximum: 99}
+            baseline_half_life_hours: {type: integer, minimum: 24, maximum: 8760}
+            cooldown_minutes: {type: integer, minimum: 1, maximum: 1440}
+            detector:
+              $ref: "#/components/schemas/SessionDropDetectorConstants"
+    InvestigationSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [provider, session_drop]
+      properties:
+        provider:
+          type: object
+          additionalProperties: false
+          required: [access_enabled, automatic_enabled, credential]
+          properties:
+            access_enabled: {type: boolean}
+            privacy_acknowledgement:
+              $ref: "#/components/schemas/PrivacyAcknowledgement"
+            automatic_enabled: {type: boolean}
+            credential:
+              $ref: "#/components/schemas/CredentialCommand"
+        session_drop:
+          $ref: "#/components/schemas/SessionDropSettings"
+    InvestigationAttemptCounts:
+      type: object
+      additionalProperties: false
+      required: [queued, running, completed, insufficient_evidence, failed]
+      properties:
+        queued: {type: integer, minimum: 0}
+        running: {type: integer, minimum: 0}
+        completed: {type: integer, minimum: 0}
+        insufficient_evidence: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+    InvestigationStatus:
+      type: object
+      additionalProperties: false
+      required: [operational_state, provider, attempt_counts, worker, latest_failure]
+      properties:
+        operational_state: {type: string, enum: [disabled, configured, ready, automatic_enabled, degraded, failing]}
+        provider:
+          $ref: "#/components/schemas/InvestigationProviderView"
+        attempt_counts:
+          $ref: "#/components/schemas/InvestigationAttemptCounts"
+        worker:
+          type: object
+          additionalProperties: false
+          required: [workers, max_nonterminal_attempts, requests_per_minute, burst, request_timeout_seconds]
+          properties:
+            workers: {type: integer, const: 1}
+            max_nonterminal_attempts: {type: integer, const: 100}
+            requests_per_minute: {type: integer, const: 10}
+            burst: {type: integer, const: 2}
+            request_timeout_seconds: {type: integer, const: 30}
+        latest_failure:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [reason, at]
+              properties:
+                reason: {$ref: "#/components/schemas/InvestigationFailureReason"}
+                at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+    OmissionCode:
+      type: string
+      enum: [pre_upgrade_context, retention_expired, freshness_unavailable, drain_unavailable, detector_unavailable, local_points, fleet_points, local_aggregate, fleet_aggregate]
+    InvestigationAttemptSummary:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, attempt_number, initiation, retry_of_attempt_id, state, created_at, started_at, send_authorized_at, send_completed_at, completed_at, terminal_reason, evidence_version, omission_codes]
+      properties:
+        attempt_id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        attempt_number: {type: integer, minimum: 1}
+        initiation: {type: string, enum: [automatic, manual, retry]}
+        retry_of_attempt_id:
+          oneOf: [{$ref: "#/components/schemas/PositiveDecimalId"}, {type: "null"}]
+        state: {type: string, enum: [queued, running, completed, insufficient_evidence, failed]}
+        created_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        started_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        send_authorized_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        send_completed_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        completed_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        terminal_reason: {$ref: "#/components/schemas/InvestigationTerminalReason"}
+        evidence_version: {type: integer, const: 1}
+        omission_codes:
+          type: array
+          maxItems: 9
+          items: {$ref: "#/components/schemas/OmissionCode"}
+      allOf:
+        - if:
+            properties:
+              terminal_reason: {const: evidence_unavailable}
+            required: [terminal_reason]
+          then:
+            properties:
+              state: {const: insufficient_evidence}
+    InvestigationEvidenceSummary:
+      type: object
+      additionalProperties: false
+      required: [version, snapshot_kind, snapshot_at, window_start, window_end, fact_ids, omission_codes]
+      properties:
+        version: {type: integer, const: 1}
+        snapshot_kind: {type: string, enum: [available, unavailable]}
+        snapshot_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        window_start: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        window_end: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        fact_ids:
+          type: array
+          maxItems: 134
+          items: {type: string, pattern: "^F(0(0[1-9]|[1-9][0-9])|1([0-2][0-9]|3[0-4]))$"}
+        omission_codes:
+          type: array
+          maxItems: 9
+          items: {$ref: "#/components/schemas/OmissionCode"}
+    FactText:
+      type: object
+      additionalProperties: false
+      required: [text_kind, text, fact_ids]
+      properties:
+        text_kind: {type: string, enum: [untrusted_summary]}
+        text: {type: string, minLength: 1, maxLength: 1280}
+        fact_ids:
+          type: array
+          minItems: 1
+          maxItems: 12
+          uniqueItems: true
+          items: {type: string, pattern: "^F(0(0[1-9]|[1-9][0-9])|1([0-2][0-9]|3[0-4]))$"}
+    InvestigationResult:
+      type: object
+      additionalProperties: false
+      required: [result_version, summary, overall_assessment, evidence_sufficiency, human_review_required, hypotheses, missing_evidence, recommended_diagnostic_checks]
+      properties:
+        result_version: {type: integer, const: 1}
+        summary: {$ref: "#/components/schemas/FactText"}
+        overall_assessment: {type: string, enum: [insufficient_evidence, indeterminate, likely_localized_operational_issue, likely_fleet_wide_operational_issue, likely_expected_or_maintenance_related]}
+        evidence_sufficiency: {type: string, enum: [insufficient, partial, sufficient]}
+        human_review_required: {type: boolean}
+        hypotheses:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            required: [rank, confidence, text_kind, text, supporting_fact_ids, contradicting_fact_ids]
+            properties:
+              rank: {type: integer, minimum: 1, maximum: 5}
+              confidence: {type: string, enum: [low, medium, high]}
+              text_kind: {type: string, const: untrusted_hypothesis}
+              text: {type: string, minLength: 1, maxLength: 960}
+              supporting_fact_ids: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^F[0-9]{3}$"}}
+              contradicting_fact_ids: {type: array, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^F[0-9]{3}$"}}
+        missing_evidence:
+          type: array
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required: [category, text_kind, text, related_fact_ids]
+            properties:
+              category: {type: string, enum: [additional_time_series, host_health_detail, service_state, authentication_detail, network_dependency_detail, change_or_maintenance_context, fleet_comparison, other]}
+              text_kind: {type: string, const: untrusted_missing_evidence}
+              text: {type: string, minLength: 1, maxLength: 640}
+              related_fact_ids: {type: array, maxItems: 8, uniqueItems: true, items: {type: string, pattern: "^F[0-9]{3}$"}}
+        recommended_diagnostic_checks:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required: [rank, check_type, text_kind, text, fact_ids, hypothesis_ranks]
+            properties:
+              rank: {type: integer, minimum: 1, maximum: 6}
+              check_type: {type: string, enum: [inspect_retained_metrics, verify_service_state, verify_authentication_state, verify_network_or_dependency, verify_change_or_maintenance_context, compare_fleet, collect_additional_observation]}
+              text_kind: {type: string, const: untrusted_diagnostic_check}
+              text: {type: string, minLength: 1, maxLength: 960}
+              fact_ids: {type: array, maxItems: 8, uniqueItems: true, items: {type: string, pattern: "^F[0-9]{3}$"}}
+              hypothesis_ranks: {type: array, maxItems: 5, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 5}}
+    InvestigationProvenance:
+      type: object
+      additionalProperties: false
+      required: [provider_profile, provider_endpoint, requested_model, response_format, store, send_authorized_at, send_completed_at, request_header_bytes, request_body_bytes, response_header_bytes, response_body_bytes, validation_outcome]
+      properties:
+        provider_profile: {type: string, const: openai_responses}
+        provider_endpoint: {type: string, const: "https://api.openai.com/v1/responses"}
+        requested_model: {type: string, const: gpt-6-astra}
+        response_format: {type: string, const: anomaly_investigation_v1}
+        store: {type: boolean, const: false}
+        send_authorized_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        send_completed_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        request_header_bytes: {type: integer, minimum: 1, maximum: 16384}
+        request_body_bytes: {type: integer, minimum: 1, maximum: 16384}
+        response_header_bytes: {type: integer, minimum: 1, maximum: 16384}
+        response_body_bytes: {type: integer, minimum: 1, maximum: 32768}
+        validation_outcome: {type: string, enum: [accepted, insufficient_evidence]}
+    InvestigationAttemptDetail:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, attempt_number, source, initiation, retry_of_attempt_id, state, created_at, started_at, send_authorized_at, send_completed_at, completed_at, terminal_reason, evidence_version, omission_codes, evidence, result, provenance]
+      properties:
+        attempt_id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        attempt_number: {type: integer, minimum: 1}
+        source: {$ref: "#/components/schemas/InvestigationSource"}
+        initiation: {type: string, enum: [automatic, manual, retry]}
+        retry_of_attempt_id:
+          oneOf: [{$ref: "#/components/schemas/PositiveDecimalId"}, {type: "null"}]
+        state: {type: string, enum: [queued, running, completed, insufficient_evidence, failed]}
+        created_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        started_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        send_authorized_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        send_completed_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        completed_at:
+          oneOf: [{$ref: "#/components/schemas/Rfc3339Timestamp"}, {type: "null"}]
+        terminal_reason: {$ref: "#/components/schemas/InvestigationTerminalReason"}
+        evidence_version: {type: integer, const: 1}
+        omission_codes:
+          type: array
+          maxItems: 9
+          items: {$ref: "#/components/schemas/OmissionCode"}
+        evidence: {$ref: "#/components/schemas/InvestigationEvidenceSummary"}
+        result:
+          oneOf: [{$ref: "#/components/schemas/InvestigationResult"}, {type: "null"}]
+        provenance:
+          oneOf: [{$ref: "#/components/schemas/InvestigationProvenance"}, {type: "null"}]
+      allOf:
+        - if:
+            properties:
+              terminal_reason: {const: evidence_unavailable}
+            required: [terminal_reason]
+          then:
+            properties:
+              state: {const: insufficient_evidence}
+              result: {const: null}
+              provenance: {const: null}
+    InvestigationHistory:
+      type: object
+      additionalProperties: false
+      required: [source, attempts, next_after_attempt_number]
+      properties:
+        source: {$ref: "#/components/schemas/InvestigationSource"}
+        attempts: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/InvestigationAttemptSummary"}}
+        next_after_attempt_number:
+          oneOf: [{$ref: "#/components/schemas/PositiveDecimalId"}, {type: "null"}]
+    InvestigationAttemptDetailResponse:
+      type: object
+      additionalProperties: false
+      required: [attempt]
+      properties:
+        attempt: {$ref: "#/components/schemas/InvestigationAttemptDetail"}
+    SessionDropSummary:
+      type: object
+      additionalProperties: false
+      required: [id, source_kind, registered_host, confirmed_at, classification, investigation_eligible, observed_total_sessions, reference_total_sessions, expected_total_sessions, absolute_loss_sessions, relative_loss, tail_probability, baseline_model_version, baseline_scope, slot_index, slot_mature_days, confirmation_window_size, confirmation_count]
+      properties:
+        id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        source_kind: {type: string, const: session_drop}
+        registered_host: {type: string}
+        confirmed_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        classification: {type: string, enum: [unexplained, drain_associated, unknown_context]}
+        investigation_eligible: {type: boolean}
+        observed_total_sessions: {type: integer, minimum: 0}
+        reference_total_sessions: {type: integer, minimum: 0}
+        expected_total_sessions: {type: number}
+        absolute_loss_sessions: {type: integer, minimum: 0}
+        relative_loss: {type: number, minimum: 0, maximum: 1}
+        tail_probability: {type: number, minimum: 0, maximum: 1}
+        baseline_model_version: {type: string, const: gamma_poisson_lower_v1}
+        baseline_scope: {type: string, enum: [slot, all_hours]}
+        slot_index:
+          oneOf: [{type: integer, minimum: 0, maximum: 95}, {type: "null"}]
+        slot_mature_days: {type: integer, minimum: 0}
+        confirmation_window_size: {type: integer, enum: [2, 3]}
+        confirmation_count: {type: integer, minimum: 2, maximum: 3}
+    SessionDropDetailSource:
+      type: object
+      additionalProperties: false
+      required: [id, source_kind, registered_host, confirmed_at, classification, investigation_eligible, observed_total_sessions, reference_total_sessions, expected_total_sessions, absolute_loss_sessions, relative_loss, tail_probability, baseline_model_version, baseline_scope, slot_index, slot_mature_days, confirmation_window_size, confirmation_count, confirmation_started_at, confirmation_ended_at, confirmation_flags, freshness_context, drain_context, confirmation_ended_report_epoch_ms]
+      properties:
+        id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        source_kind: {type: string, const: session_drop}
+        registered_host: {type: string}
+        confirmed_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        classification: {type: string, enum: [unexplained, drain_associated, unknown_context]}
+        investigation_eligible: {type: boolean}
+        observed_total_sessions: {type: integer, minimum: 0}
+        reference_total_sessions: {type: integer, minimum: 0}
+        expected_total_sessions: {type: number}
+        absolute_loss_sessions: {type: integer, minimum: 0}
+        relative_loss: {type: number, minimum: 0, maximum: 1}
+        tail_probability: {type: number, minimum: 0, maximum: 1}
+        baseline_model_version: {type: string, const: gamma_poisson_lower_v1}
+        baseline_scope: {type: string, enum: [slot, all_hours]}
+        slot_index:
+          oneOf: [{type: integer, minimum: 0, maximum: 95}, {type: "null"}]
+        slot_mature_days: {type: integer, minimum: 0}
+        confirmation_window_size: {type: integer, enum: [2, 3]}
+        confirmation_count: {type: integer, minimum: 2, maximum: 3}
+        confirmation_started_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        confirmation_ended_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        confirmation_flags:
+          type: array
+          minItems: 2
+          maxItems: 3
+          items: {type: boolean}
+        freshness_context: {type: string, const: fresh}
+        drain_context: {type: string, enum: [none, overlap, post_horizon, unknown]}
+        confirmation_ended_report_epoch_ms: {type: string, pattern: "^(0|[1-9][0-9]{0,18})$"}
+    SessionDropList:
+      type: object
+      additionalProperties: false
+      required: [items, next_before]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/SessionDropSummary"}}
+        next_before:
+          oneOf: [{$ref: "#/components/schemas/PositiveDecimalId"}, {type: "null"}]
+    SessionDropDetail:
+      type: object
+      additionalProperties: false
+      required: [source, attempts]
+      properties:
+        source: {$ref: "#/components/schemas/SessionDropDetailSource"}
+        attempts: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/InvestigationAttemptSummary"}}
+    InvestigationSSEAttempt:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, source, attempt_number, initiation, retry_of_attempt_id, state, terminal_reason, updated_at]
+      properties:
+        attempt_id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        source: {$ref: "#/components/schemas/InvestigationSource"}
+        attempt_number: {type: integer, minimum: 1}
+        initiation: {type: string, enum: [automatic, manual, retry]}
+        retry_of_attempt_id:
+          oneOf: [{$ref: "#/components/schemas/PositiveDecimalId"}, {type: "null"}]
+        state: {type: string, enum: [queued, running, completed, insufficient_evidence, failed]}
+        terminal_reason: {$ref: "#/components/schemas/InvestigationTerminalReason"}
+        updated_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+      allOf:
+        - if:
+            properties:
+              terminal_reason: {const: evidence_unavailable}
+            required: [terminal_reason]
+          then:
+            properties:
+              state: {const: insufficient_evidence}
+    InvestigationSSEData:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, attempt]
+          properties:
+            kind: {type: string, const: attempt}
+            attempt: {$ref: "#/components/schemas/InvestigationSSEAttempt"}
+        - type: object
+          additionalProperties: false
+          required: [kind, status]
+          properties:
+            kind: {type: string, const: status}
+            status:
+              type: object
+              additionalProperties: false
+              required: [operational_state, attempt_counts, latest_failure]
+              properties:
+                operational_state: {type: string, enum: [disabled, configured, ready, automatic_enabled, degraded, failing]}
+                attempt_counts: {$ref: "#/components/schemas/InvestigationAttemptCounts"}
+                latest_failure:
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      additionalProperties: false
+                      required: [reason, at]
+                      properties:
+                        reason: {$ref: "#/components/schemas/InvestigationFailureReason"}
+                        at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+    SessionDropSSEData:
+      type: object
+      additionalProperties: false
+      required: [schema_version, source_kind, source_id, confirmed_at, classification, investigation_eligible, confirmation_count]
+      properties:
+        schema_version: {type: integer, const: 1}
+        source_kind: {type: string, const: session_drop}
+        source_id: {$ref: "#/components/schemas/PositiveDecimalId"}
+        confirmed_at: {$ref: "#/components/schemas/Rfc3339Timestamp"}
+        classification: {type: string, enum: [unexplained, drain_associated, unknown_context]}
+        investigation_eligible: {type: boolean}
+        confirmation_count: {type: integer, minimum: 2, maximum: 3}
 paths:
+  /investigation/settings:
+    get:
+      tags: [investigation]
+      summary: Get safe investigation settings
+      description: Session-only safe provider and session-drop settings. Credential, acknowledgement clauses, acknowledgement audit identity, audit actor, and provider secrets are never returned.
+      operationId: getInvestigationSettings
+      security: [{session: []}]
+      responses:
+        "200": {description: Safe settings view., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationSettingsView"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+    put:
+      tags: [investigation]
+      summary: Replace safe investigation settings
+      description: Session-only full replacement. The closed acknowledgement is required to enable access or automatic investigation. Exactly one write-only credential command is required.
+      operationId: putInvestigationSettings
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          "application/json; charset=utf-8":
+            schema: {$ref: "#/components/schemas/InvestigationSettingsUpdate"}
+      responses:
+        "200": {description: Updated safe settings view., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationSettingsView"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "415": {description: Invalid content type., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "422": {description: Invalid settings., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Settings unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /investigation/status:
+    get:
+      tags: [investigation]
+      summary: Get investigation operating status
+      description: Session-only safe local status. It never calls the provider or returns provider content.
+      operationId: getInvestigationStatus
+      security: [{session: []}]
+      responses:
+        "200": {description: Current status., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationStatus"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Status unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /investigation/sources/{source_kind}/{source_id}/attempts:
+    get:
+      tags: [investigation]
+      description: Ascending attempt-number pagination. Only `limit` and `after_attempt_number` query members are accepted; `limit` is an integer and `after_attempt_number` is a positive decimal string without a leading zero. `next_after_attempt_number` is null when exhausted.
+      operationId: getInvestigationAttemptHistory
+      security: [{session: []}]
+      parameters:
+        - {name: source_kind, in: path, required: true, schema: {type: string, enum: [event_spike, session_drop]}}
+        - {name: source_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: after_attempt_number, in: query, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      responses:
+        "200": {description: Ascending retained attempt history., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationHistory"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "404": {description: Source not found., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Attempt store unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+    post:
+      tags: [investigation]
+      summary: Create a manual investigation root
+      description: Creates no provider work before bounded evidence and the attempt are durably stored. The closed empty object body accepts no prompt, evidence, endpoint, or credential.
+      operationId: createInvestigationAttempt
+      security: [{session: []}]
+      parameters:
+        - {name: source_kind, in: path, required: true, schema: {type: string, enum: [event_spike, session_drop]}}
+        - {name: source_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      requestBody:
+        required: true
+        content:
+          "application/json; charset=utf-8":
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "200": {description: Existing queued or running attempt., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationAttemptSummary"}}}}
+        "201": {description: New queued or local-insufficient attempt., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationAttemptSummary"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "404": {description: Source not found., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "409": {description: source_ineligible, provider_not_ready, source_completed, retry_required, or attempt_limit_reached., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "415": {description: Invalid content type., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "429": {description: queue_full or rate_limited., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Attempt store unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /investigation/attempts/{attempt_id}:
+    get:
+      tags: [investigation]
+      summary: Get immutable investigation detail
+      operationId: getInvestigationAttempt
+      security: [{session: []}]
+      parameters:
+        - {name: attempt_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      responses:
+        "200": {description: Immutable safe detail., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationAttemptDetailResponse"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "404": {description: Attempt not found., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Attempt store unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /investigation/attempts/{attempt_id}/retry:
+    post:
+      tags: [investigation]
+      summary: Create a linked retry
+      description: Retries only a failed or insufficient retained attempt with a fresh bounded snapshot; it never resends or reuses predecessor evidence.
+      operationId: retryInvestigationAttempt
+      security: [{session: []}]
+      parameters:
+        - {name: attempt_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      requestBody:
+        required: true
+        content:
+          "application/json; charset=utf-8":
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "201": {description: New linked retry., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationAttemptSummary"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "404": {description: attempt_not_found or source_not_found., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "409": {description: retry_not_allowed, provider_not_ready, or attempt_limit_reached., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "415": {description: Invalid content type., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "429": {description: queue_full or rate_limited., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Attempt store unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /session-drops:
+    get:
+      tags: [session-drops]
+      summary: List deterministic session-drop sources
+      description: Authorized source summaries newest-first. Summaries deliberately contain no investigation attempt lineage. Only `limit` and exclusive `before` query members are accepted; `next_before` is null when exhausted, including an empty page.
+      operationId: listSessionDrops
+      security: [{session: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: before, in: query, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      responses:
+        "200": {description: Session-drop source page., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/SessionDropList"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Session-drop list unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+  /session-drops/{id}:
+    get:
+      tags: [session-drops]
+      summary: Get session-drop source and retained lineage
+      description: Authorized deterministic detail with central acceptance-time confirmation fields and the confirmation-ending report epoch. The complete retained immutable lineage is capped at 100 attempts.
+      operationId: getSessionDrop
+      security: [{session: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveDecimalId"}}
+      responses:
+        "200": {description: Session-drop detail., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/SessionDropDetail"}}}}
+        "400": {description: Invalid request., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "401": {description: Session expired., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "403": {description: Access denied., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "404": {description: Source not found., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
+        "503": {description: Session-drop detail unavailable., content: {"application/json; charset=utf-8": {schema: {$ref: "#/components/schemas/InvestigationError"}}}}
   /health:
     get:
       tags: [health]
@@ -2122,18 +2795,25 @@ paths:
       tags: [servers]
       summary: SSE event stream
       description: |
-        Server-Sent Events stream for real-time dashboard updates. Requires a
-        valid session cookie. The browser's `EventSource` handles automatic
-        reconnection; the server re-validates the session every 5 minutes and
-        closes the stream if the session has expired.
+        Server-Sent Events stream for real-time dashboard updates. Before
+        subscription and every periodic check, the server requires an extant
+        dashboard session whose login-time group snapshot includes the
+        atomically current configured dashboard group. It performs no live
+        directory-membership lookup. A missing, expired, or invalidated session
+        returns `401 {"error":{"code":"session_expired"}}`; a stale or
+        non-group snapshot returns `403 {"error":{"code":"access_denied"}}`.
+        Changing `Dashboard.Group` invalidates sessions and closes streams;
+        clients must reauthenticate. The browser's `EventSource` handles
+        reconnection.
 
         Keepalive comments (`: keepalive`) are sent every 25 seconds to prevent
         intermediate proxies from closing idle connections.
 
-        Each `data:` line is a JSON-encoded `SSEEvent` object:
+        Each record has exactly one literal `data:` line containing the
+        existing JSON envelope. There is no named `event:` line:
 
         ```json
-        { "type": "<event-type>", "host": "<hostname>", "data": <payload>, "timestamp": "<RFC3339>" }
+        { "type": "<event-type>", "host": "<hostname when applicable>", "data": <payload>, "timestamp": "<RFC3339>" }
         ```
 
         ### Event types
@@ -2206,6 +2886,21 @@ paths:
         ```
         Note: `secret` fields inside `notifications` are always empty strings
         in this broadcast — secrets are never transmitted over the event stream.
+
+        **`investigation_update`** — host-free lifecycle/status notification.
+        Its envelope omits `host`; `data` is `InvestigationSSEData`. Attempt
+        payloads contain only source kind/ID, attempt lineage, state, canonical
+        terminal reason, and `updated_at`; they contain no evidence, report,
+        provenance, provider output, credential, diagnostic, or identity.
+        Status payloads contain only operational state, counts, and latest
+        safe failure.
+
+        **`session_drop`** — host-free notification of a newly durable
+        deterministic source. Its envelope omits `host`; `data` is
+        `SessionDropSSEData`. It contains only source ID, classification,
+        eligibility, confirmation count, and RFC3339 confirmation time. It
+        contains no registered host, report epoch, acceptance time, counts,
+        evidence, provider report, provenance, diagnostics, or free text.
       operationId: streamEvents
       security:
         - session: []
@@ -2220,7 +2915,17 @@ paths:
                   Newline-delimited SSE messages. See endpoint description for
                   event type shapes.
         "401":
-          description: Not authenticated.
+          description: Session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvestigationError"
+        "403":
+          description: Login-time group snapshot lacks the current dashboard group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvestigationError"
         "429":
           description: Too many concurrent SSE connections (limit 100).
 

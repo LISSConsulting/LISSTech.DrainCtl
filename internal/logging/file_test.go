@@ -3,6 +3,7 @@
 package logging
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -64,7 +65,7 @@ func TestFileHandler_LevelTags(t *testing.T) {
 		lv.Set(slog.LevelDebug)
 		h := NewFileHandler(&buf, lv)
 		r := slog.NewRecord(time.Now(), tc.level, "msg", 0)
-		_ = h.Handle(nil, r) //nolint:staticcheck
+		_ = h.Handle(context.Background(), r)
 		out := buf.String()
 		// Should contain the bare tag without brackets.
 		if !strings.Contains(out, " "+tc.tag+" ") && !strings.Contains(out, " "+tc.tag+"\n") {
@@ -80,7 +81,7 @@ func TestFileHandler_LocalTimestampWithOffset(t *testing.T) {
 	h := NewFileHandler(&buf, lv)
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg", 0)
-	_ = h.Handle(nil, r) //nolint:staticcheck
+	_ = h.Handle(context.Background(), r)
 
 	out := buf.String()
 
