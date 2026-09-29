@@ -14,7 +14,7 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 	ts := r.Timestamp
 	host := r.Host
 
-	out := make([]telemetry.Sample, 0, 32)
+	out := make([]telemetry.Sample, 0, 36)
 	add := func(counter string, value float64) {
 		switch counter {
 		case "sessions_total", "sessions_active", "sessions_disconnected", "sessions_max":
@@ -42,14 +42,13 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 		if p.SessionCPUP95 != 0 {
 			add("session_cpu_p95_pct", p.SessionCPUP95)
 		}
-		if p.HasP50(dc.PerfP50SessionCPU, p.SessionCPUP50) {
-			add("session_cpu_p50_pct", p.SessionCPUP50)
-		}
 		if p.SessionMemP95 != 0 {
 			add("session_mem_p95_bytes", p.SessionMemP95)
 		}
-		if p.HasP50(dc.PerfP50SessionMem, p.SessionMemP50) {
-			add("session_mem_p50_bytes", p.SessionMemP50)
+		if p.SessionCPUActivityCollected {
+			add("session_cpu_observed_count", float64(p.SessionCPUObservedCount))
+			add("session_cpu_ge_5_count", float64(p.SessionCPUAtOrAbove5Count))
+			add("session_cpu_ge_20_count", float64(p.SessionCPUAtOrAbove20Count))
 		}
 		if p.RFXAvailable {
 			// Zero FPS/quality means no active RemoteFX stream, not a poor
@@ -60,10 +59,16 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 			if p.HasP50(dc.PerfP50RFXFPSOut, p.RFXFPSOutP50) && p.RFXFPSOutP50 > 0 {
 				add("rfx_fps_out_p50", p.RFXFPSOutP50)
 			}
-			add("rfx_skip_server_sec", p.RFXSkipServer)
-			add("rfx_skip_net_sec", p.RFXSkipNet)
-			add("rfx_encode_ms", p.RFXEncodeMS)
+			if p.HasP50(dc.PerfP50RFXSkipServer, p.RFXSkipServerP50) {
+				add("rfx_skip_server_sec", p.RFXSkipServer)
+				add("rfx_skip_server_sec_p50", p.RFXSkipServerP50)
+			}
+			if p.HasP50(dc.PerfP50RFXSkipNet, p.RFXSkipNetP50) {
+				add("rfx_skip_net_sec", p.RFXSkipNet)
+				add("rfx_skip_net_sec_p50", p.RFXSkipNetP50)
+			}
 			if p.HasP50(dc.PerfP50RFXEncodeMS, p.RFXEncodeMSP50) {
+				add("rfx_encode_ms", p.RFXEncodeMS)
 				add("rfx_encode_ms_p50", p.RFXEncodeMSP50)
 			}
 			if p.RFXQuality > 0 {
@@ -72,19 +77,13 @@ func checkResultSamples(r dc.CheckResult) []telemetry.Sample {
 			if p.HasP50(dc.PerfP50RFXQuality, p.RFXQualityP50) && p.RFXQualityP50 > 0 {
 				add("rfx_quality_pct_p50", p.RFXQualityP50)
 			}
-			add("rfx_rtt_ms", p.RFXRTT)
 			if p.HasP50(dc.PerfP50RFXRTT, p.RFXRTTP50) {
+				add("rfx_rtt_ms", p.RFXRTT)
 				add("rfx_rtt_ms_p50", p.RFXRTTP50)
 			}
-			add("rfx_loss_pct", p.RFXLoss)
 			if p.HasP50(dc.PerfP50RFXLoss, p.RFXLossP50) {
+				add("rfx_loss_pct", p.RFXLoss)
 				add("rfx_loss_pct_p50", p.RFXLossP50)
-			}
-			if p.HasP50(dc.PerfP50RFXSkipServer, p.RFXSkipServerP50) {
-				add("rfx_skip_server_sec_p50", p.RFXSkipServerP50)
-			}
-			if p.HasP50(dc.PerfP50RFXSkipNet, p.RFXSkipNetP50) {
-				add("rfx_skip_net_sec_p50", p.RFXSkipNetP50)
 			}
 		}
 	}

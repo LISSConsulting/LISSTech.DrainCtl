@@ -40,23 +40,41 @@ test('Health Indicators expose accurate fleet-average, worst-host, and median-ho
     assert.equal(sample.p50DiskQueue, 1.2);
 });
 
-test('Session charts use worst-host P95 and median-host P50', () => {
+test('Session charts use peak and typical host P95 with CPU activity counts', () => {
     const [sample] = adaptFleetToSessionSamples({
         sessions_total: counter({ avg: 30 }),
         sessions_active: counter({ avg: 24 }),
         sessions_disconnected: counter({ avg: 6 }),
         sessions_max: counter({ avg: 40 }),
-        session_cpu_p95_pct: counter({ avg: 20, max: 55 }),
-        session_cpu_p50_pct: counter({ avg: 12, max: 30, p50: 10 }),
-        session_mem_p95_bytes: counter({ avg: 500, max: 900 }),
-        session_mem_p50_bytes: counter({ avg: 300, max: 600, p50: 280 }),
+        session_cpu_p95_pct: counter({ avg: 20, max: 55, p50: 18 }),
+        session_mem_p95_bytes: counter({ avg: 500, max: 900, p50: 600 }),
+        session_cpu_observed_count: counter({ avg: 24 }),
+        session_cpu_ge_5_count: counter({ avg: 5 }),
+        session_cpu_ge_20_count: counter({ avg: 2 }),
     });
     assert.equal(sample.total, 30);
     assert.equal(sample.active, 24);
     assert.equal(sample.disconnected, 6);
     assert.equal(sample.utilization, 75);
-    assert.equal(sample.sessionCpuP95, 55);
-    assert.equal(sample.sessionCpuP50, 10);
-    assert.equal(sample.sessionMemP95, 900);
-    assert.equal(sample.sessionMemP50, 280);
+    assert.equal(sample.sessionCpuPeakP95, 55);
+    assert.equal(sample.sessionCpuTypicalP95, 18);
+    assert.equal(sample.sessionMemPeakP95, 900);
+    assert.equal(sample.sessionMemTypicalP95, 600);
+    assert.equal(sample.sessionCpuObserved, 24);
+    assert.equal(sample.sessionCpuAtOrAbove5, 5);
+    assert.equal(sample.sessionCpuAtOrAbove20, 2);
+});
+
+test('Session charts leave unavailable operational metrics as gaps', () => {
+    const [sample] = adaptFleetToSessionSamples({
+        sessions_total: counter({ avg: 30 }),
+        sessions_active: counter({ avg: 24 }),
+    });
+    assert.equal(sample.sessionCpuPeakP95, undefined);
+    assert.equal(sample.sessionCpuTypicalP95, undefined);
+    assert.equal(sample.sessionMemPeakP95, undefined);
+    assert.equal(sample.sessionMemTypicalP95, undefined);
+    assert.equal(sample.sessionCpuObserved, undefined);
+    assert.equal(sample.sessionCpuAtOrAbove5, undefined);
+    assert.equal(sample.sessionCpuAtOrAbove20, undefined);
 });

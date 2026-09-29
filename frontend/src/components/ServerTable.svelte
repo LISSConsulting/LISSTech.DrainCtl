@@ -13,7 +13,7 @@
         pruneExpandedServerHosts,
     } from '../lib/state.svelte.js';
     import {
-        deleteServer,
+        permanentRemoveServer,
         fetchEvtSpikeStatus,
         fetchServers,
         permanentRemoveHosts,
@@ -262,11 +262,12 @@
         if (!host || removingHosts.has(host)) return;
         removingHosts = new Set([...removingHosts, host]);
         try {
-            await deleteServer(host);
+            await permanentRemoveServer(host);
             appState.servers = appState.servers.filter((s) => s.host !== host);
             removeServerMetrics(host);
             removeEvtSpikeState(host);
             dropExpandedServerHost(host);
+            appState.notifyRemovedServersChanged();
         } catch (e) {
             removeError = 'Remove failed: ' + (e?.message ?? String(e));
             clearTimeout(removeErrorTimer);
@@ -937,9 +938,9 @@
 
 {#if confirmRemoveHost}
     <ConfirmDialog
-        title="Remove Server"
-        message="Remove {confirmRemoveHost} from the dashboard? This cannot be undone."
-        confirmLabel="Remove"
+        title="Permanently Remove Server"
+        message="This will durable-tombstone {confirmRemoveHost} and reject future re-registration until it is restored in Configuration."
+        confirmLabel="Permanently Remove"
         cancelLabel="Cancel"
         onconfirm={doRemoveServer}
         oncancel={() => (confirmRemoveHost = null)}

@@ -62,26 +62,35 @@ export function adaptFleetToSessionSamples(series) {
     const active = tsMap(series.sessions_active);
     const disconnected = tsMap(series.sessions_disconnected);
     const capacity = tsMap(series.sessions_max);
-    const cpuP95 = tsMap(series.session_cpu_p95_pct, 'max');
-    const cpuP50 = tsMap(series.session_cpu_p50_pct, 'p50');
-    const memoryP95 = tsMap(series.session_mem_p95_bytes, 'max');
-    const memoryP50 = tsMap(series.session_mem_p50_bytes, 'p50');
+    const cpuPeakP95 = tsMap(series.session_cpu_p95_pct, 'max');
+    const cpuTypicalP95 = tsMap(series.session_cpu_p95_pct, 'p50');
+    const memoryPeakP95 = tsMap(series.session_mem_p95_bytes, 'max');
+    const memoryTypicalP95 = tsMap(series.session_mem_p95_bytes, 'p50');
+    const sessionCpuObserved = tsMap(series.session_cpu_observed_count);
+    const sessionCpuAtOrAbove5 = tsMap(series.session_cpu_ge_5_count);
+    const sessionCpuAtOrAbove20 = tsMap(series.session_cpu_ge_20_count);
 
     return totalSeries.t.map((ts) => {
         const activeCount = Math.round(active.get(ts) ?? 0);
         const disconnectedCount = Math.round(disconnected.get(ts) ?? 0);
         const totalCount = Math.round(total.get(ts) ?? 0);
         const maxCount = Math.round(capacity.get(ts) ?? 0);
+        const observedCount = sessionCpuObserved.get(ts);
+        const atOrAbove5Count = sessionCpuAtOrAbove5.get(ts);
+        const atOrAbove20Count = sessionCpuAtOrAbove20.get(ts);
         return {
             ts,
             active: activeCount,
             disconnected: disconnectedCount,
             total: totalCount,
             utilization: maxCount > 0 ? Math.min((totalCount / maxCount) * 100, 100) : 0,
-            sessionCpuP95: cpuP95.get(ts) ?? 0,
-            sessionCpuP50: cpuP50.get(ts) ?? 0,
-            sessionMemP95: memoryP95.get(ts) ?? 0,
-            sessionMemP50: memoryP50.get(ts) ?? 0,
+            sessionCpuPeakP95: cpuPeakP95.get(ts),
+            sessionCpuTypicalP95: cpuTypicalP95.get(ts),
+            sessionMemPeakP95: memoryPeakP95.get(ts),
+            sessionMemTypicalP95: memoryTypicalP95.get(ts),
+            sessionCpuObserved: observedCount == null ? undefined : Math.round(observedCount),
+            sessionCpuAtOrAbove5: atOrAbove5Count == null ? undefined : Math.round(atOrAbove5Count),
+            sessionCpuAtOrAbove20: atOrAbove20Count == null ? undefined : Math.round(atOrAbove20Count),
         };
     });
 }

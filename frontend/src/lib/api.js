@@ -28,9 +28,11 @@ const BASE = '/api/v1';
  * @property {number}  input_delay_p95_ms       - User input delay P95 (ms)
  * @property {number}  input_delay_max_ms       - User input delay max (ms)
  * @property {number}  [session_cpu_p95_pct]    - Per-session CPU P95 % (omitted when zero)
- * @property {number}  [session_cpu_p50_pct]    - Per-session CPU P50 % (omitted when zero)
- * @property {number}  [session_mem_p95_bytes]  - Per-session working set P95 in bytes (omitted when zero)
- * @property {number}  [session_mem_p50_bytes]  - Per-session working set P50 in bytes (omitted when zero)
+ * @property {number}  [session_mem_p95_bytes]  - Per-session working-set P95 in bytes (omitted when zero)
+ * @property {boolean} [session_cpu_activity_collected] - True when active-session CPU thresholds were measured
+ * @property {number}  [session_cpu_observed_count] - Active sessions with a CPU sample
+ * @property {number}  [session_cpu_ge_5_count] - Observed active sessions at or above 5% CPU
+ * @property {number}  [session_cpu_ge_20_count] - Observed active sessions at or above 20% CPU
  * @property {boolean} rfx_available            - true when RemoteFX counters are collected
  * @property {number}  [rfx_fps_out]            - RemoteFX output FPS service P95 floor (numeric P5)
  * @property {number}  [rfx_fps_out_p50]        - RemoteFX output FPS median
@@ -306,13 +308,19 @@ export async function fetchServers() {
 }
 
 /**
- * DELETE /api/v1/servers/{host}
- * Returns undefined on 204 No Content.
+ * POST /api/v1/servers/{host}/permanent-remove
+ *
+ * Removes a live server and writes its durable tombstone. The agent cannot
+ * re-register until an operator restores the tombstone from Configuration.
+ *
  * @param {string} host
- * @returns {Promise<void>}
+ * @returns {Promise<{ok:boolean, host:string, permanent:true, removed_at:string, removed_by?:string}>}
  */
-export async function deleteServer(host) {
-    await apiFetch(`/servers/${encodeURIComponent(host)}`, { method: 'DELETE' });
+export async function permanentRemoveServer(host) {
+    const res = await apiFetch(`/servers/${encodeURIComponent(host)}/permanent-remove`, {
+        method: 'POST',
+    });
+    return await res.json();
 }
 
 // ---------------------------------------------------------------------------

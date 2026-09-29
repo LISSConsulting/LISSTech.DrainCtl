@@ -10,16 +10,16 @@ import "math"
 type PerfP50Presence uint16
 
 const (
-	PerfP50InputDelay PerfP50Presence = 1 << iota
-	PerfP50SessionCPU
-	PerfP50SessionMem
-	PerfP50RFXFPSOut
-	PerfP50RFXSkipServer
-	PerfP50RFXSkipNet
-	PerfP50RFXEncodeMS
-	PerfP50RFXQuality
-	PerfP50RFXRTT
-	PerfP50RFXLoss
+	// Keep wire bit positions stable when retiring fields. Reports from older
+	// agents may still carry bits 1 and 2, which are now ignored.
+	PerfP50InputDelay    PerfP50Presence = 1 << 0
+	PerfP50RFXFPSOut     PerfP50Presence = 1 << 3
+	PerfP50RFXSkipServer PerfP50Presence = 1 << 4
+	PerfP50RFXSkipNet    PerfP50Presence = 1 << 5
+	PerfP50RFXEncodeMS   PerfP50Presence = 1 << 6
+	PerfP50RFXQuality    PerfP50Presence = 1 << 7
+	PerfP50RFXRTT        PerfP50Presence = 1 << 8
+	PerfP50RFXLoss       PerfP50Presence = 1 << 9
 )
 
 // PerfSnapshot holds one point-in-time performance sample.
@@ -39,11 +39,15 @@ type PerfSnapshot struct {
 	InputDelayP95 float64 `json:"input_delay_p95_ms"`
 	InputDelayMax float64 `json:"input_delay_max_ms"`
 
-	// Per-session aggregates (Terminal Services Session)
-	SessionCPUP95 float64 `json:"session_cpu_p95_pct,omitempty"`
-	SessionCPUP50 float64 `json:"session_cpu_p50_pct,omitempty"`
-	SessionMemP95 float64 `json:"session_mem_p95_bytes,omitempty"`
-	SessionMemP50 float64 `json:"session_mem_p50_bytes,omitempty"`
+	// Per-session terminal-services summaries. P95 records high-use-session
+	// load; activity counters describe how many active sessions cross useful
+	// CPU thresholds in the same sample.
+	SessionCPUP95               float64 `json:"session_cpu_p95_pct,omitempty"`
+	SessionMemP95               float64 `json:"session_mem_p95_bytes,omitempty"`
+	SessionCPUActivityCollected bool    `json:"session_cpu_activity_collected,omitempty"`
+	SessionCPUObservedCount     int     `json:"session_cpu_observed_count,omitempty"`
+	SessionCPUAtOrAbove5Count   int     `json:"session_cpu_ge_5_count,omitempty"`
+	SessionCPUAtOrAbove20Count  int     `json:"session_cpu_ge_20_count,omitempty"`
 
 	// P50Present marks P50 fields that were actually collected. It is omitted
 	// for old-compatible reports that have no availability metadata.
@@ -81,7 +85,7 @@ func (p PerfSnapshot) HasP50(field PerfP50Presence, value float64) bool {
 func SanitizePerfField(field string, value float64) (float64, bool) {
 	var max float64
 	switch field {
-	case "cpu_pct", "cpu_p95_pct", "session_cpu_p50_pct", "session_cpu_p95_pct", "rfx_quality_pct", "rfx_quality_pct_p50", "rfx_loss_pct", "rfx_loss_pct_p50":
+	case "cpu_pct", "cpu_p95_pct", "session_cpu_p95_pct", "rfx_quality_pct", "rfx_quality_pct_p50", "rfx_loss_pct", "rfx_loss_pct_p50":
 		max = 100
 	case "mem_avail_mb", "mem_total_mb":
 		max = 1 << 50
@@ -89,8 +93,10 @@ func SanitizePerfField(field string, value float64) (float64, bool) {
 		max = 1e6
 	case "input_delay_p50_ms", "input_delay_p95_ms", "input_delay_max_ms", "rfx_encode_ms", "rfx_encode_ms_p50", "rfx_rtt_ms", "rfx_rtt_ms_p50":
 		max = 60000
-	case "session_mem_p50_bytes", "session_mem_p95_bytes":
+	case "session_mem_p95_bytes":
 		max = 1 << 60
+	case "session_cpu_observed_count", "session_cpu_ge_5_count", "session_cpu_ge_20_count":
+		max = 1 << 20
 	case "rfx_fps_out", "rfx_fps_out_p50":
 		max = 240
 	default:
@@ -144,10 +150,17 @@ func SanitizePerfSnapshot(p PerfSnapshot) PerfSnapshot {
 	sanitizeP50("input_delay_p50_ms", PerfP50InputDelay, &p.InputDelayP50)
 	sanitize("input_delay_p95_ms", &p.InputDelayP95)
 	sanitize("input_delay_max_ms", &p.InputDelayMax)
-	sanitizeP50("session_cpu_p50_pct", PerfP50SessionCPU, &p.SessionCPUP50)
 	sanitize("session_cpu_p95_pct", &p.SessionCPUP95)
-	sanitizeP50("session_mem_p50_bytes", PerfP50SessionMem, &p.SessionMemP50)
 	sanitize("session_mem_p95_bytes", &p.SessionMemP95)
+	if !p.SessionCPUActivityCollected ||
+		p.SessionCPUObservedCount < 0 || p.SessionCPUObservedCount > 1<<20 ||
+		p.SessionCPUAtOrAbove5Count < 0 || p.SessionCPUAtOrAbove5Count > p.SessionCPUObservedCount ||
+		p.SessionCPUAtOrAbove20Count < 0 || p.SessionCPUAtOrAbove20Count > p.SessionCPUAtOrAbove5Count {
+		p.SessionCPUActivityCollected = false
+		p.SessionCPUObservedCount = 0
+		p.SessionCPUAtOrAbove5Count = 0
+		p.SessionCPUAtOrAbove20Count = 0
+	}
 
 	if !p.RFXAvailable {
 		p.RFXFPSOut = 0
