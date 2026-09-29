@@ -9,19 +9,23 @@ import (
 
 func TestPerfSnapshot_JSON_RoundTrip(t *testing.T) {
 	snap := &PerfSnapshot{
-		CPUPct:            45.2,
-		LogicalProcessors: 16,
-		MemAvailMB:        8192,
-		MemTotalMB:        16384,
-		PagesSec:          12.5,
-		DiskQueue:         0.3,
-		TCPRetrans:        1.0,
-		InputDelayP50:     10,
-		InputDelayP95:     22,
-		InputDelayMax:     48,
-		RFXAvailable:      true,
-		RFXFPSOut:         30,
-		RFXRTT:            85.5,
+		CPUPct:                      45.2,
+		LogicalProcessors:           16,
+		MemAvailMB:                  8192,
+		MemTotalMB:                  16384,
+		PagesSec:                    12.5,
+		DiskQueue:                   0.3,
+		TCPRetrans:                  1.0,
+		InputDelayP50:               10,
+		InputDelayP95:               22,
+		InputDelayMax:               48,
+		RFXAvailable:                true,
+		RFXFPSOut:                   30,
+		RFXRTT:                      85.5,
+		SessionCPUActivityCollected: true,
+		SessionCPUObservedCount:     12,
+		SessionCPUAtOrAbove5Count:   4,
+		SessionCPUAtOrAbove20Count:  1,
 	}
 
 	data, err := json.Marshal(snap)
@@ -45,6 +49,12 @@ func TestPerfSnapshot_JSON_RoundTrip(t *testing.T) {
 	}
 	if got.RFXAvailable != snap.RFXAvailable {
 		t.Errorf("RFXAvailable = %v, want %v", got.RFXAvailable, snap.RFXAvailable)
+	}
+	if got.SessionCPUObservedCount != snap.SessionCPUObservedCount ||
+		got.SessionCPUAtOrAbove5Count != snap.SessionCPUAtOrAbove5Count ||
+		got.SessionCPUAtOrAbove20Count != snap.SessionCPUAtOrAbove20Count ||
+		!got.SessionCPUActivityCollected {
+		t.Errorf("session CPU activity = %+v, want %+v", got, snap)
 	}
 }
 
@@ -96,6 +106,20 @@ func TestSanitizePerfSnapshotLogicalProcessors(t *testing.T) {
 				t.Fatalf("LogicalProcessors = %d, want %d", got.LogicalProcessors, test.want)
 			}
 		})
+	}
+}
+func TestSanitizePerfSnapshotClearsInvalidSessionCPUActivity(t *testing.T) {
+	got := SanitizePerfSnapshot(PerfSnapshot{
+		SessionCPUActivityCollected: true,
+		SessionCPUObservedCount:     2,
+		SessionCPUAtOrAbove5Count:   3,
+		SessionCPUAtOrAbove20Count:  1,
+	})
+	if got.SessionCPUActivityCollected ||
+		got.SessionCPUObservedCount != 0 ||
+		got.SessionCPUAtOrAbove5Count != 0 ||
+		got.SessionCPUAtOrAbove20Count != 0 {
+		t.Errorf("invalid session CPU activity was retained: %+v", got)
 	}
 }
 

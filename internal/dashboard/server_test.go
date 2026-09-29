@@ -817,6 +817,48 @@ func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t 
 	}
 }
 
+func TestCheckResultSamples_RemoteFXOmitsUnavailableRTT(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable: true,
+			RFXRTT:       400,
+		},
+	})
+	for _, sample := range samples {
+		if sample.Counter == "rfx_rtt_ms" || sample.Counter == "rfx_rtt_ms_p50" {
+			t.Fatalf("unmeasured RTT persisted as %+v", sample)
+		}
+	}
+}
+func TestCheckResultSamples_PersistsSessionCPUActivityCounts(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     12,
+			SessionCPUAtOrAbove5Count:   3,
+			SessionCPUAtOrAbove20Count:  1,
+		},
+	})
+
+	got := make(map[string]float64, len(samples))
+	for _, sample := range samples {
+		got[sample.Counter] = sample.Value
+	}
+	for counter, want := range map[string]float64{
+		"session_cpu_observed_count": 12,
+		"session_cpu_ge_5_count":     3,
+		"session_cpu_ge_20_count":    1,
+	} {
+		if got[counter] != want {
+			t.Errorf("%s = %v, want %v", counter, got[counter], want)
+		}
+	}
+}
+
 func TestHandleReport_UpdatesLastSeen(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")

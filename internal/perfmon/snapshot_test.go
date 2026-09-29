@@ -180,19 +180,53 @@ func TestFilterRemoteFXValues_ValidationAndDirectionalPercentiles(t *testing.T) 
 	}
 }
 
-func TestAggregate_PreservesSessionPercentiles(t *testing.T) {
+func TestActiveCounterValues_OnlyIncludesActiveWTSInstances(t *testing.T) {
+	active := map[string]struct{}{
+		sessionInstanceKey("RDP-Tcp#7"): {},
+	}
+	values := []pdhNamedValue{
+		{Name: "RDP-Tcp#3", Value: 400},
+		{Name: "RDP-Tcp 7", Value: 24},
+		{Name: "Services", Value: 400},
+	}
+	filtered := make([]float64, 0, len(values))
+	for _, value := range values {
+		if _, ok := active[sessionInstanceKey(value.Name)]; ok {
+			filtered = append(filtered, value.Value)
+		}
+	}
+	filtered = filterRemoteFXValues(filtered, 0, 60000, false)
+	if len(filtered) != 1 || filtered[0] != 24 {
+		t.Fatalf("active RTT values = %v, want [24]", filtered)
+	}
+}
+
+func TestAggregate_PreservesSessionOperationalMetrics(t *testing.T) {
 	got := aggregate([]dc.PerfSnapshot{
-		{SessionCPUP50: 2.1, SessionCPUP95: 8.4, SessionMemP50: 100, SessionMemP95: 400},
-		{SessionCPUP50: 3.2, SessionCPUP95: 7.5, SessionMemP50: 150, SessionMemP95: 350},
+		{
+			SessionCPUP95: 8.4, SessionMemP95: 400,
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     10,
+			SessionCPUAtOrAbove5Count:   3,
+			SessionCPUAtOrAbove20Count:  1,
+		},
+		{
+			SessionCPUP95: 7.5, SessionMemP95: 350,
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     12,
+			SessionCPUAtOrAbove5Count:   5,
+			SessionCPUAtOrAbove20Count:  2,
+		},
 	})
 
-	if got.SessionCPUP50 != 3.2 || got.SessionCPUP95 != 8.4 {
-		t.Errorf("session CPU percentiles = (P50 %v, P95 %v), want (P50 3.2, P95 8.4)",
-			got.SessionCPUP50, got.SessionCPUP95)
+	if got.SessionCPUP95 != 8.4 || got.SessionMemP95 != 400 {
+		t.Errorf("session P95 = (%v, %v), want (8.4, 400)", got.SessionCPUP95, got.SessionMemP95)
 	}
-	if got.SessionMemP50 != 150 || got.SessionMemP95 != 400 {
-		t.Errorf("session memory percentiles = (P50 %v, P95 %v), want (P50 150, P95 400)",
-			got.SessionMemP50, got.SessionMemP95)
+	if !got.SessionCPUActivityCollected ||
+		got.SessionCPUObservedCount != 12 ||
+		got.SessionCPUAtOrAbove5Count != 5 ||
+		got.SessionCPUAtOrAbove20Count != 2 {
+		t.Errorf("session CPU activity = %+v, want peak counts (12, 5, 2)", got)
 	}
 }
 
@@ -235,7 +269,7 @@ func TestSanitizePerfFieldRejectsInvalidValues(t *testing.T) {
 		{"cpu_pct", math.NaN()},
 		{"rfx_rtt_ms", math.Inf(1)},
 		{"rfx_quality_pct", 101},
-		{"session_mem_p50_bytes", -1},
+		{"session_cpu_ge_5_count", -1},
 	} {
 		if _, ok := dc.SanitizePerfField(test.field, test.value); ok {
 			t.Errorf("SanitizePerfField(%q, %v) accepted invalid value", test.field, test.value)

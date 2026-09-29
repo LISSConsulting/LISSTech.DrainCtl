@@ -494,8 +494,8 @@
                 "How full is the farm? Total sessions divided by the sum of every server's MaxSessions limit. Tracks how close the fleet is to turning users away.",
         },
         {
-            key: 'sessionCpuP95',
-            p50Key: 'sessionCpuP50',
+            key: 'sessionCpuPeakP95',
+            p50Key: 'sessionCpuTypicalP95',
             label: 'Session CPU',
             unit: '%',
             thresholds: { warn: 15, crit: 30 },
@@ -503,14 +503,14 @@
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}%`,
             icon: Cpu,
             timeKey: 'ts',
-            valueLabel: 'Host P95',
-            p50Label: 'Host P50',
+            valueLabel: 'Peak host P95',
+            p50Label: 'Typical host P95',
             helpText:
-                "Per-session CPU across the fleet. Host P95 is the highest participating host's session P95; Host P50 is the exact median reporting host. A widening gap means a small number of sessions are consuming most of the CPU.",
+                "High-use session CPU. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. Together they show normal high-use-session load and the busiest observed host.",
         },
         {
-            key: 'sessionMemP95',
-            p50Key: 'sessionMemP50',
+            key: 'sessionMemPeakP95',
+            p50Key: 'sessionMemTypicalP95',
             label: 'Session Memory',
             unit: '',
             thresholds: { warn: 500, crit: 800 },
@@ -520,11 +520,28 @@
                 v === 0 ? '0' : v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`,
             icon: MemoryStick,
             timeKey: 'ts',
-            valueLabel: 'Host P95',
-            p50Label: 'Host P50',
+            valueLabel: 'Peak host P95',
+            p50Label: 'Typical host P95',
             transform: /** @param {number} v */ (v) => v / (1024 * 1024),
             helpText:
-                "Per-session working-set memory across the fleet. Host P95 is the highest participating host's session P95; Host P50 is the exact median reporting host. A rising median suggests broad application growth rather than isolated heavy users.",
+                "High-use session working-set memory. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. A rising typical line indicates broadly heavier user workloads.",
+        },
+        {
+            key: 'sessionCpuAtOrAbove5',
+            p50Key: 'sessionCpuAtOrAbove20',
+            label: 'CPU-active Sessions',
+            unit: '',
+            thresholds: { warn: -1, crit: -1 },
+            color: NEUTRAL_METRIC_COLOR,
+            fmt: /** @param {number} v */ (v) => Math.round(v).toString(),
+            icon: Activity,
+            timeKey: 'ts',
+            valueLabel: '≥5% CPU',
+            p50Label: '≥20% CPU',
+            noThresholdZones: true,
+            autoScale: true,
+            helpText:
+                'Active WTS sessions whose sampled CPU reached each threshold. Compare these counts with Active Sessions in Sessions Trend to see whether workload is broad or concentrated.',
         },
     ];
 
@@ -994,7 +1011,7 @@
                 <div class="chart-card hic-section">
                     <div class="sub-label">
                         <Users size={12} strokeWidth={2.4} /> SESSION METRICS
-                        <span class="sub-label-note">· Fleet overview</span>
+                        <span class="sub-label-note">· Typical vs peak host load</span>
                         <button
                             class="help-toggle"
                             class:active={showSessionHelp}
@@ -1007,10 +1024,11 @@
                     </div>
                     {#if showSessionHelp}
                         <p class="chart-desc">
-                            Session count, utilization, and per-session CPU and memory. Primary and secondary consumers
-                            use distinct matching line, fill, legend, and tooltip colors; secondary series are violet
-                            and dotted. Zones and current-value color communicate severity. CPU and memory compare Host
-                            P95 with Host P50.
+                            Session count and utilization describe connected demand and capacity. Session CPU and memory
+                            compare the typical host’s high-use sessions with the busiest host’s high-use sessions.
+                            CPU-active Sessions counts active WTS sessions at or above 5% and 20% CPU. Primary and
+                            secondary consumers use distinct matching line, fill, legend, and tooltip colors; secondary
+                            series are violet and dotted. Zones and current-value color communicate severity.
                         </p>
                     {/if}
 

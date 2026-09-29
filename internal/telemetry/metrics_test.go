@@ -159,6 +159,66 @@ func TestQueryRangeFleet_ExcludesUnlimitedSessionCapacity(t *testing.T) {
 		})
 	}
 }
+func TestQueryRangeFleet_SumsSessionCPUActivityCounts(t *testing.T) {
+	ms, db := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02"}
+	counters := []string{
+		"session_cpu_observed_count",
+		"session_cpu_ge_5_count",
+		"session_cpu_ge_20_count",
+	}
+	values := [][]float64{
+		{10, 2, 1},
+		{8, 3, 0},
+	}
+
+	rawSamples := make([]Sample, 0, len(hosts)*len(counters))
+	for hostIndex, host := range hosts {
+		for counterIndex, counter := range counters {
+			rawSamples = append(rawSamples, Sample{
+				Ts: base, Host: host, Counter: counter, Value: values[hostIndex][counterIndex],
+			})
+		}
+	}
+	if err := ms.Append(ctx, rawSamples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	for _, table := range []string{"metrics_5min", "metrics_hourly"} {
+		for hostIndex, host := range hosts {
+			for counterIndex, counter := range counters {
+				if _, err := db.writer.Exec(
+					`INSERT INTO `+table+`(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+					 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+					base.UnixMilli(), host, counter,
+					values[hostIndex][counterIndex], values[hostIndex][counterIndex], values[hostIndex][counterIndex],
+				); err != nil {
+					t.Fatalf("insert %s %s: %v", table, counter, err)
+				}
+			}
+		}
+	}
+
+	for _, tier := range []Tier{TierRaw, TierOneMin, TierFiveMin, TierHourly} {
+		t.Run(tier.TierName(), func(t *testing.T) {
+			series, err := ms.QueryRangeFleet(ctx, hosts, base, base.Add(time.Hour), tier, counters, 60_000)
+			if err != nil {
+				t.Fatalf("QueryRangeFleet: %v", err)
+			}
+			for counter, want := range map[string]float64{
+				"session_cpu_observed_count": 18,
+				"session_cpu_ge_5_count":     5,
+				"session_cpu_ge_20_count":    1,
+			} {
+				got := series.Data[counter]
+				if got == nil || len(got.Avg) != 1 || got.Avg[0] != want {
+					t.Errorf("%s fleet total = %+v, want %v", counter, got, want)
+				}
+			}
+		})
+	}
+}
 
 func TestQueryRangeFleet_SessionsMaxDropsAllUnlimitedBuckets(t *testing.T) {
 	ms, db := newMetricsStore(t)

@@ -192,10 +192,13 @@ const persistReduceMotion = (v) => {
  * @property {number} disconnected   - Total disconnected sessions across fleet
  * @property {number} total          - active + disconnected
  * @property {number} utilization    - (total/maxTotal)*100 average utilization %
- * @property {number} sessionCpuP95  - P95 per-session CPU % across fleet
- * @property {number} sessionMemP95  - P95 per-session working set bytes across fleet
- * @property {number} [sessionCpuP50] - P50 per-session CPU % across fleet
- * @property {number} [sessionMemP50] - P50 per-session working set bytes across fleet
+ * @property {number} [sessionCpuPeakP95]      - Highest host session CPU P95 across fleet
+ * @property {number} [sessionCpuTypicalP95]   - Median host session CPU P95 across fleet
+ * @property {number} [sessionMemPeakP95]      - Highest host session memory P95 across fleet
+ * @property {number} [sessionMemTypicalP95]   - Median host session memory P95 across fleet
+ * @property {number} [sessionCpuObserved]     - Active sessions with a CPU sample across fleet
+ * @property {number} [sessionCpuAtOrAbove5]   - Active sessions at or above 5% CPU across fleet
+ * @property {number} [sessionCpuAtOrAbove20]  - Active sessions at or above 20% CPU across fleet
  */
 
 /**
