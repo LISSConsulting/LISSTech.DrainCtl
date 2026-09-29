@@ -123,43 +123,6 @@ func pdhGetDouble(counter syscall.Handle) (float64, error) {
 	return val.Value, nil
 }
 
-func pdhGetDoubleArray(counter syscall.Handle) ([]float64, error) {
-	var bufSize, itemCount uint32
-	ret, _, _ := procPdhGetFormattedCounterArray.Call(
-		uintptr(counter), pdhFmtDouble,
-		uintptr(unsafe.Pointer(&bufSize)),
-		uintptr(unsafe.Pointer(&itemCount)),
-		0,
-	)
-	if ret != pdhMoreData && ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW size: 0x%08X", ret)
-	}
-	if itemCount == 0 || bufSize == 0 {
-		return nil, nil
-	}
-
-	buf := make([]byte, bufSize)
-	ret, _, _ = procPdhGetFormattedCounterArray.Call(
-		uintptr(counter), pdhFmtDouble,
-		uintptr(unsafe.Pointer(&bufSize)),
-		uintptr(unsafe.Pointer(&itemCount)),
-		uintptr(unsafe.Pointer(&buf[0])),
-	)
-	if ret != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArrayW: 0x%08X", ret)
-	}
-
-	itemSize := unsafe.Sizeof(pdhFmtCountervalueItemDouble{})
-	values := make([]float64, 0, itemCount)
-	for i := uint32(0); i < itemCount; i++ {
-		item := (*pdhFmtCountervalueItemDouble)(unsafe.Pointer(&buf[uintptr(i)*itemSize]))
-		if item.Value.CStatus == pdhCStatusValidData || item.Value.CStatus == pdhCStatusNewData {
-			values = append(values, item.Value.Value)
-		}
-	}
-	return values, nil
-}
-
 // pdhNamedValue associates a counter value with the Windows session instance
 // that produced it. RemoteFX retains values for disconnected session instances,
 // so callers that report session experience must retain this identity long

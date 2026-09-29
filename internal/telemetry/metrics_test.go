@@ -185,16 +185,21 @@ func TestQueryRangeFleet_SumsSessionCPUActivityCounts(t *testing.T) {
 	if err := ms.Append(ctx, rawSamples); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	for _, table := range []string{"metrics_5min", "metrics_hourly"} {
+	aggregateInserts := []string{
+		`INSERT INTO metrics_5min(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+		`INSERT INTO metrics_hourly(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+	}
+	for _, query := range aggregateInserts {
 		for hostIndex, host := range hosts {
 			for counterIndex, counter := range counters {
 				if _, err := db.writer.Exec(
-					`INSERT INTO `+table+`(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
-					 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+					query,
 					base.UnixMilli(), host, counter,
 					values[hostIndex][counterIndex], values[hostIndex][counterIndex], values[hostIndex][counterIndex],
 				); err != nil {
-					t.Fatalf("insert %s %s: %v", table, counter, err)
+					t.Fatalf("insert aggregated %s: %v", counter, err)
 				}
 			}
 		}
