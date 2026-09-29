@@ -16,6 +16,7 @@ type Session struct {
 	Token      string
 	Username   string
 	Groups     []string
+	IsAdmin    bool
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }
@@ -58,8 +59,18 @@ func (s *SessionStore) reap() {
 	}
 }
 
-// Create generates a new session for the given AuthInfo and returns the token.
+// Create generates a new unprivileged session for the given AuthInfo and
+// returns its token.
 func (s *SessionStore) Create(info *AuthInfo) (string, error) {
+	return s.create(info, false)
+}
+
+// CreateWithAdmin generates a session with the server-derived admin state.
+func (s *SessionStore) CreateWithAdmin(info *AuthInfo, isAdmin bool) (string, error) {
+	return s.create(info, isAdmin)
+}
+
+func (s *SessionStore) create(info *AuthInfo, isAdmin bool) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -71,6 +82,7 @@ func (s *SessionStore) Create(info *AuthInfo) (string, error) {
 		Token:      token,
 		Username:   info.Username,
 		Groups:     info.Groups,
+		IsAdmin:    isAdmin,
 		CreatedAt:  now,
 		LastSeenAt: now,
 	}

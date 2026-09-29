@@ -1,5 +1,11 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Fleet Sessions backend foundation — 2026-09-29
+
+- Ported the current-session backend onto the stable trunk without enabling the deferred Sessions dashboard UI. Agents can collect bounded WTS metadata and strict session-ID PDH metrics, send complete machine-authenticated snapshots, and retain only each host's latest successful snapshot with explicit collection-error and freshness state.
+- SQLite schema v4 adds generation-fenced current-session storage and durable session-action outbox, audit, and agent ledger tables. Admin-only session APIs, privacy projection, bounded retention, idempotent actions, metadata-only SSE, and rolling-upgrade behavior are available for the later UI integration.
+- The stable dashboard frontend remains unchanged. Session collection and APIs use the existing configuration and authentication boundaries; future User Session History can reuse the current-session identity and reconciliation model without treating current snapshot rows as historical episodes.
+
 ## Windows control-path diagnostics — 2026-09-27
 
 - Named-pipe accept now joins its cancellation helper before closing the event handle. This prevents a delayed `SetEvent` from targeting a recycled handle, spuriously waking the next overlapped `ConnectNamedPipe`, and producing `GetOverlappedResult: Overlapped I/O event is not in a signaled state`.

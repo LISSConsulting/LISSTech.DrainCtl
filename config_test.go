@@ -1058,6 +1058,75 @@ func TestDefaultConfig_Defaults(t *testing.T) {
 	}
 }
 
+func TestSessionsConfig_DefaultsAndRoundTrip(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := DefaultConfig()
+	want := SessionsConfig{
+		Enabled:            true,
+		CollectProcesses:   true,
+		TopProcesses:       DefaultSessionsTopProcesses,
+		RetentionHours:     DefaultSessionsRetentionHours,
+		AllowActions:       false,
+		IdentityVisibility: SessionVisibilityFull,
+		ClientVisibility:   SessionVisibilityFull,
+		ProcessVisibility:  SessionVisibilityFull,
+	}
+	if !reflect.DeepEqual(cfg.Sessions, want) {
+		t.Fatalf("default sessions = %#v, want %#v", cfg.Sessions, want)
+	}
+	cfg.Sessions = SessionsConfig{
+		Enabled:            false,
+		CollectProcesses:   false,
+		TopProcesses:       5,
+		RetentionHours:     168,
+		AllowActions:       true,
+		IdentityVisibility: SessionVisibilityMasked,
+		ClientVisibility:   SessionVisibilityHidden,
+		ProcessVisibility:  SessionVisibilityMasked,
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !reflect.DeepEqual(got.Sessions, cfg.Sessions) {
+		t.Errorf("sessions round trip = %#v, want %#v", got.Sessions, cfg.Sessions)
+	}
+}
+
+func TestUpdateSessionsConfig_RejectsInvalidWithoutMutation(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := SaveConfig(DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	invalid := defaultSessionsConfig()
+	invalid.TopProcesses = MaxSessionsTopProcesses + 1
+	if err := UpdateSessionsConfig(&invalid); err == nil {
+		t.Fatal("UpdateSessionsConfig accepted invalid top_processes")
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !reflect.DeepEqual(got.Sessions, defaultSessionsConfig()) {
+		t.Errorf("sessions changed after rejected update: %#v", got.Sessions)
+	}
+}
+
+func TestValidateSessionsConfig_BoundsAndVisibility(t *testing.T) {
+	for _, sessions := range []SessionsConfig{
+		{TopProcesses: -1, RetentionHours: 24, IdentityVisibility: SessionVisibilityFull, ClientVisibility: SessionVisibilityFull, ProcessVisibility: SessionVisibilityFull},
+		{TopProcesses: 3, RetentionHours: 169, IdentityVisibility: SessionVisibilityFull, ClientVisibility: SessionVisibilityFull, ProcessVisibility: SessionVisibilityFull},
+		{TopProcesses: 3, RetentionHours: 24, IdentityVisibility: "clear", ClientVisibility: SessionVisibilityFull, ProcessVisibility: SessionVisibilityFull},
+	} {
+		if err := ValidateSessionsConfig(sessions); err == nil {
+			t.Errorf("ValidateSessionsConfig(%#v) succeeded", sessions)
+		}
+	}
+}
+
 // ── SaveConfig / LoadConfig ───────────────────────────────────────────────────
 
 // TestSaveConfig_RoundTrip verifies that SaveConfig writes config.json and

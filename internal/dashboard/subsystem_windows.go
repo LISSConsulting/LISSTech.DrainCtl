@@ -5,6 +5,7 @@ package dashboard
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -45,6 +46,9 @@ type Subsystem struct {
 	sps                       eventSpikeReader
 	removals                  removalWriter
 	outbox                    *telemetry.ForceUpdateOutboxStore
+	sessionSnapshots          sessionSnapshotWriter
+	sessionQueries            sessionQueryReader
+	sessionActions            sessionActionStore
 	freshness                 *telemetry.FreshnessStore
 	localForceUpdateSupported bool
 	rdCollections             *rdCollectionResolver
@@ -57,28 +61,41 @@ type Subsystem struct {
 	stopOnce sync.Once
 }
 
-// NewSubsystem constructs the dashboard subsystem. ms/as/mnt may be nil
-// (degraded mode); srv and sps are required since feature 009. removals
-// enforces durable server removal; outbox retains force-update commands across
-// dashboard restarts. freshness persists outage transition dedupe; callers
-// should supply the store backed by the same telemetry DB as srv.
-func NewSubsystem(cfg dc.DashboardConfig, dataDir string, ms metricsReader, as auditReader, mnt maintenanceReader, srv serverReader, sps eventSpikeReader, removals removalWriter, outbox *telemetry.ForceUpdateOutboxStore, localForceUpdateSupported bool, freshness ...*telemetry.FreshnessStore) *Subsystem {
-	var freshnessStore *telemetry.FreshnessStore
-	if len(freshness) > 0 {
-		freshnessStore = freshness[0]
-	}
+// SubsystemDependencies is the complete dashboard dependency set. Concrete
+// telemetry stores make every ownership edge explicit at construction time.
+type SubsystemDependencies struct {
+	Metrics                   *telemetry.MetricsStore
+	Audit                     *telemetry.AuditStore
+	Maintenance               *telemetry.MaintenanceStore
+	Servers                   *telemetry.ServerStore
+	EventSpikes               *telemetry.EventSpikeStore
+	Removals                  *telemetry.RemovalStore
+	ForceUpdateOutbox         *telemetry.ForceUpdateOutboxStore
+	SessionSnapshots          *telemetry.SessionSnapshotStore
+	SessionQueries            *telemetry.SessionQueryStore
+	SessionActions            *telemetry.SessionActionStore
+	Freshness                 *telemetry.FreshnessStore
+	LocalForceUpdateSupported bool
+}
+
+// NewSubsystem constructs the dashboard subsystem. Nil stores explicitly
+// select degraded endpoint behavior, which is safe during rolling upgrades.
+func NewSubsystem(cfg dc.DashboardConfig, dataDir string, dependencies SubsystemDependencies) *Subsystem {
 	return &Subsystem{
 		cfg:                       cfg,
 		dataDir:                   dataDir,
-		ms:                        ms,
-		as:                        as,
-		mnt:                       mnt,
-		srv:                       srv,
-		sps:                       sps,
-		removals:                  removals,
-		outbox:                    outbox,
-		freshness:                 freshnessStore,
-		localForceUpdateSupported: localForceUpdateSupported,
+		ms:                        dependencies.Metrics,
+		as:                        dependencies.Audit,
+		mnt:                       dependencies.Maintenance,
+		srv:                       dependencies.Servers,
+		sps:                       dependencies.EventSpikes,
+		removals:                  dependencies.Removals,
+		outbox:                    dependencies.ForceUpdateOutbox,
+		sessionSnapshots:          dependencies.SessionSnapshots,
+		sessionQueries:            dependencies.SessionQueries,
+		sessionActions:            dependencies.SessionActions,
+		freshness:                 dependencies.Freshness,
+		localForceUpdateSupported: dependencies.LocalForceUpdateSupported,
 	}
 }
 
@@ -113,6 +130,73 @@ func (s *Subsystem) UpdateHeartbeatInterval(interval time.Duration) {
 func (s *Subsystem) UpdateRDConnectionBroker(broker string) {
 	if s.ds != nil && s.ds.rdCollections != nil {
 		s.ds.rdCollections.UpdateBroker(broker)
+	}
+}
+
+// runSessionRetentionOnce removes expired current snapshot attempts using the
+// dashboard lifecycle context and telemetry database.
+func (ds *DashboardServer) runSessionRetentionOnce(ctx context.Context) error {
+	ds.sessionPolicyMu.Lock()
+	defer ds.sessionPolicyMu.Unlock()
+	return ds.runSessionRetentionOnceLocked(ctx)
+}
+
+func (ds *DashboardServer) runSessionRetentionOnceLocked(ctx context.Context) error {
+	if ds.sessionSnapshots == nil && ds.sessionActions == nil {
+		return nil
+	}
+
+	cfg, err := ds.sessionsConfig()
+	if err != nil {
+		return fmt.Errorf("session retention config: %w", err)
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, sessionStoreTimeout)
+	defer cancel()
+
+	if ds.sessionSnapshots != nil {
+		if _, err := ds.sessionSnapshots.PurgeSnapshots(opCtx, cfg.RetentionHours, ds.clock()); err != nil {
+			return err
+		}
+	}
+	if ds.sessionActions == nil {
+		return nil
+	}
+
+	now := ds.clock()
+	statuses, err := ds.sessionActions.Expire(opCtx, now)
+	if err != nil {
+		return err
+	}
+	for _, status := range statuses {
+		ds.broadcastSessionAction(status)
+	}
+	_, _, err = ds.sessionActions.Retain(opCtx, now.Add(-time.Duration(cfg.RetentionHours)*time.Hour), now.Add(-time.Duration(cfg.RetentionHours)*time.Hour), 1000)
+	return err
+}
+
+// runSessionRetention performs an immediate retention pass, then repeats it
+// hourly until the dashboard lifecycle context is cancelled.
+func (ds *DashboardServer) runSessionRetention(ctx context.Context) {
+	if ds.sessionSnapshots == nil && ds.sessionActions == nil {
+		return
+	}
+	run := func() {
+		if err := ds.runSessionRetentionOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("dashboard: session retention purge failed", "error", err)
+		}
+	}
+
+	run()
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
 	}
 }
 
@@ -159,7 +243,9 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		as:                       s.as,
 		mnt:                      s.mnt,
 		spikes:                   s.sps,
-		freshness:                s.freshness,
+		sessionSnapshots:         s.sessionSnapshots,
+		sessionQueries:           s.sessionQueries,
+		sessionActions:           s.sessionActions,
 		heartbeatIntervalChanged: make(chan struct{}, 1),
 		remoteEvtSpikeStatus:     make(map[string]evtspike.DetectorStatus),
 		forceUpdates:             forceUpdates,
@@ -215,7 +301,7 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	s.state = state
 	s.cancel = cancel
 
-	s.wg.Add(4)
+	s.wg.Add(5)
 	go func() {
 		defer s.wg.Done()
 		slog.Info("dashboard=listening", "addr", addr, "scheme", scheme)
@@ -230,6 +316,10 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		ds.runStaleHostTransitions(derived)
+	}()
+	go func() {
+		defer s.wg.Done()
+		ds.runSessionRetention(derived)
 	}()
 	go func() {
 		defer s.wg.Done()

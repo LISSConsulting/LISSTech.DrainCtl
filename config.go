@@ -246,6 +246,40 @@ type PerformanceConfig struct {
 	SampleIntervalSec       int    `json:"sample_interval_sec"`              // default: 60, range 10–300
 }
 
+// SessionVisibility controls how session fields are retained and displayed.
+// Values are deliberately strings in config.json so operators can inspect and
+// edit the policy without a separate migration.
+type SessionVisibility string
+
+const (
+	SessionVisibilityFull   SessionVisibility = "full"
+	SessionVisibilityMasked SessionVisibility = "masked"
+	SessionVisibilityHidden SessionVisibility = "hidden"
+)
+
+// SessionsConfig controls collection, retention, action availability, and
+// privacy for Fleet Sessions. It is kept as a value-only shape so reloads can
+// swap a complete validated policy without shared mutable state.
+type SessionsConfig struct {
+	Enabled            bool              `json:"enabled"`
+	CollectProcesses   bool              `json:"collect_processes"`
+	TopProcesses       int               `json:"top_processes"`
+	RetentionHours     int               `json:"retention_hours"`
+	AllowActions       bool              `json:"allow_actions"`
+	IdentityVisibility SessionVisibility `json:"identity_visibility"`
+	ClientVisibility   SessionVisibility `json:"client_visibility"`
+	ProcessVisibility  SessionVisibility `json:"process_visibility"`
+}
+
+const (
+	DefaultSessionsTopProcesses   = 3
+	MinSessionsTopProcesses       = 0
+	MaxSessionsTopProcesses       = 5
+	DefaultSessionsRetentionHours = 24
+	MinSessionsRetentionHours     = 1
+	MaxSessionsRetentionHours     = 168
+)
+
 // RetentionConfig holds per-tier retention windows for the telemetry store.
 type RetentionConfig struct {
 	MetricsDays int `json:"metrics_days"` // hourly-tier retention, 1–365 days (default 30)
@@ -299,6 +333,7 @@ type Config struct {
 	Performance PerformanceConfig `json:"performance"`
 	Retention   RetentionConfig   `json:"retention"`
 	Telemetry   TelemetryConfig   `json:"telemetry"`
+	Sessions    SessionsConfig    `json:"sessions"`
 
 	EvtSpike EvtSpikeConfig `json:"evtspike"`
 
@@ -402,6 +437,7 @@ func DefaultConfig() *Config {
 		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
 		EvtSpike:                EvtSpikeConfig{ChannelCooldownMinutes: map[string]int{}, DisabledChannels: []string{}, AddedChannels: []string{}},
 		Update:                  UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
+		Sessions:                defaultSessionsConfig(),
 	}
 }
 
@@ -443,6 +479,52 @@ func (c *Config) dashFetchInterval() time.Duration {
 		s = DefaultDashboardFetchInterval
 	}
 	return time.Duration(s) * time.Second
+}
+func defaultSessionsConfig() SessionsConfig {
+	return SessionsConfig{
+		Enabled:            true,
+		CollectProcesses:   true,
+		TopProcesses:       DefaultSessionsTopProcesses,
+		RetentionHours:     DefaultSessionsRetentionHours,
+		AllowActions:       false,
+		IdentityVisibility: SessionVisibilityFull,
+		ClientVisibility:   SessionVisibilityFull,
+		ProcessVisibility:  SessionVisibilityFull,
+	}
+}
+
+func normalizeSessionVisibility(value SessionVisibility) SessionVisibility {
+	switch value {
+	case SessionVisibilityFull, SessionVisibilityMasked, SessionVisibilityHidden:
+		return value
+	default:
+		return SessionVisibilityFull
+	}
+}
+
+// ValidateSessionsConfig rejects values which a dashboard update must never
+// silently change. Config.Validate uses the same bounds to repair manually
+// edited legacy files; callers updating live settings must validate first.
+func ValidateSessionsConfig(cfg SessionsConfig) error {
+	if cfg.TopProcesses < MinSessionsTopProcesses || cfg.TopProcesses > MaxSessionsTopProcesses {
+		return fmt.Errorf("sessions.top_processes must be %d-%d", MinSessionsTopProcesses, MaxSessionsTopProcesses)
+	}
+	if cfg.RetentionHours < MinSessionsRetentionHours || cfg.RetentionHours > MaxSessionsRetentionHours {
+		return fmt.Errorf("sessions.retention_hours must be %d-%d", MinSessionsRetentionHours, MaxSessionsRetentionHours)
+	}
+	for _, field := range []struct {
+		name  string
+		value SessionVisibility
+	}{
+		{"identity_visibility", cfg.IdentityVisibility},
+		{"client_visibility", cfg.ClientVisibility},
+		{"process_visibility", cfg.ProcessVisibility},
+	} {
+		if field.value != SessionVisibilityFull && field.value != SessionVisibilityMasked && field.value != SessionVisibilityHidden {
+			return fmt.Errorf("sessions.%s must be %q, %q, or %q", field.name, SessionVisibilityFull, SessionVisibilityMasked, SessionVisibilityHidden)
+		}
+	}
+	return nil
 }
 
 // HasTargets returns true if at least one notification target is configured.
@@ -496,6 +578,15 @@ func (c *Config) Validate() {
 	if c.Telemetry.RetentionIntervalMinutes < 1 || c.Telemetry.RetentionIntervalMinutes > 1440 {
 		c.Telemetry.RetentionIntervalMinutes = DefaultRetentionIntervalMinutes
 	}
+	if c.Sessions.TopProcesses < MinSessionsTopProcesses || c.Sessions.TopProcesses > MaxSessionsTopProcesses {
+		c.Sessions.TopProcesses = DefaultSessionsTopProcesses
+	}
+	if c.Sessions.RetentionHours < MinSessionsRetentionHours || c.Sessions.RetentionHours > MaxSessionsRetentionHours {
+		c.Sessions.RetentionHours = DefaultSessionsRetentionHours
+	}
+	c.Sessions.IdentityVisibility = normalizeSessionVisibility(c.Sessions.IdentityVisibility)
+	c.Sessions.ClientVisibility = normalizeSessionVisibility(c.Sessions.ClientVisibility)
+	c.Sessions.ProcessVisibility = normalizeSessionVisibility(c.Sessions.ProcessVisibility)
 
 	c.LogFileLevel = validateLogLevel(c.LogFileLevel, "log_file_level", "info")
 	c.LogEventLevel = validateLogLevel(c.LogEventLevel, "log_event_level", "info")
@@ -1246,6 +1337,7 @@ func UpdateNotifySettings(notifications *[]NotificationTarget, sessionThreshold 
 // UpdateUpdateConfig atomically replaces the self-update settings. A nil
 // argument is a no-op so dashboard PATCH-like requests can omit the block.
 func UpdateUpdateConfig(update *UpdateConfig) error {
+
 	if update == nil {
 		return nil
 	}
@@ -1257,6 +1349,23 @@ func UpdateUpdateConfig(update *UpdateConfig) error {
 	}
 	return readModifyWrite(func(cfg *Config) error {
 		cfg.Update = *update
+		return nil
+	})
+}
+
+// UpdateSessionsConfig atomically replaces the Fleet Sessions policy. It
+// validates before acquiring the config lock, so rejected dashboard input
+// cannot alter either the persisted or reload-visible configuration.
+func UpdateSessionsConfig(sessions *SessionsConfig) error {
+	if sessions == nil {
+		return nil
+	}
+	if err := ValidateSessionsConfig(*sessions); err != nil {
+		return err
+	}
+	next := *sessions
+	return readModifyWrite(func(cfg *Config) error {
+		cfg.Sessions = next
 		return nil
 	})
 }

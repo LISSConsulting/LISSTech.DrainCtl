@@ -12,6 +12,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
+	"github.com/alexbrainman/sspi/negotiate"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,9 +23,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
-	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
-	"github.com/alexbrainman/sspi/negotiate"
 )
 
 // newDashClient creates an HTTP client that pins the dashboard TLS certificate.
@@ -69,6 +69,10 @@ func newDashClient(fingerprint string) *http.Client {
 // dashClientPtr holds the current HTTP client atomically. Replaced at service
 // start when the config has a tls_fingerprint.
 var dashClientPtr atomic.Pointer[http.Client]
+
+// dashboardReportRequest is replaceable in package tests; production always
+// uses the SSPI/TLS negotiateRequest implementation.
+var dashboardReportRequest = negotiateRequest
 
 func init() {
 	dashClientPtr.Store(newDashClient(""))
@@ -159,6 +163,44 @@ func ReportSpike(ctx context.Context, dashboardURL string, spike *dc.SpikePayloa
 		"observed", spike.Observed, "expected", spike.Expected)
 }
 
+// ReportSessionSnapshot reports Fleet Sessions data independently of the
+// heartbeat endpoint. Rollout-era endpoint incompatibility is intentionally
+// isolated here so it cannot affect health reporting.
+func ReportSessionSnapshot(ctx context.Context, dashboardURL string, snapshot sessiondata.SessionSnapshot) {
+	payload, err := marshalSessionSnapshotPayload(snapshot)
+	if err != nil {
+		slog.Warn("dashboard: session snapshot marshal failed", "error", err)
+		return
+	}
+	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/session-snapshot", payload)
+	if err != nil {
+		slog.Warn("dashboard: session snapshot report failed", "error", err, "host", snapshot.Host)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		slog.Debug("dashboard=session_snapshot_reported", "host", snapshot.Host, "sequence", snapshot.Sequence)
+		return
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusRequestEntityTooLarge {
+		slog.Debug("dashboard: session snapshot unsupported", "status", resp.StatusCode, "host", snapshot.Host)
+		return
+	}
+	slog.Warn("dashboard: session snapshot rejected", "status", resp.StatusCode, "host", snapshot.Host)
+}
+
+func marshalSessionSnapshotPayload(snapshot sessiondata.SessionSnapshot) ([]byte, error) {
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > sessiondata.MaxSnapshotBytes {
+		return nil, fmt.Errorf("snapshot payload is %d bytes; limit is %d", len(payload), sessiondata.MaxSnapshotBytes)
+	}
+	return payload, nil
+}
+
 // ForceUpdatePendingCommand is the per-host command the dashboard
 // attaches to a /api/v1/report response when an operator has
 // requested a force-update. The agent is expected to invoke the updater
@@ -198,54 +240,138 @@ const (
 	ForceUpdateOutcomeRefused   = "refused"
 )
 
-// ReportResult is the parsed shape of a successful /api/v1/report
-// response. PendingCommand is non-nil only when the dashboard has
-// queued a force-update command for this host that has not yet been
-// delivered.
+// ReportSessionActionEnvelope contains the bounded terminal action outcomes
+// appended to a normal report. It intentionally carries no message text,
+// diagnostics, or target details.
+type ReportSessionActionEnvelope struct {
+	CompletedSessionActions []sessiondata.CompletedSessionAction `json:"completed_session_actions,omitempty"`
+}
+
+// ReportSessionActionResult is the action-specific additive portion of a
+// report response. Older dashboards omit both fields, leaving their zero
+// values without affecting the normal report result.
+type ReportSessionActionResult struct {
+	PendingSessionActions        []sessiondata.PendingSessionAction `json:"pending_session_actions"`
+	AcknowledgedSessionActionIDs []string                           `json:"acknowledged_session_action_ids"`
+}
+
+// ReportResult is the parsed shape of a successful /api/v1/report response.
+// PendingCommand is non-nil only when the dashboard has queued a force-update
+// command for this host that has not yet been delivered.
 type ReportResult struct {
 	PendingCommand *ForceUpdatePendingCommand
 }
 
+// ReportWithSessionActionsResult combines the regular report response with its
+// additive session-action response fields.
+type ReportWithSessionActionsResult struct {
+	ReportResult
+	ReportSessionActionResult
+}
+
+// maxReportResponseBytes caps successful report responses. It accommodates 20
+// bounded 256-rune UTF-8 action messages plus the response's legacy fields,
+// while preventing an unbounded response-body allocation.
+const maxReportResponseBytes = 128 * 1024
+
 // ReportState sends the latest CheckResult to the dashboard server.
 // Errors are logged but never crash the service.
 //
-// On a 2xx response the body is parsed for a `pending_command` block;
-// the returned ReportResult carries the pending command (nil if absent)
-// so the caller can immediately invoke the updater. Errors from the
-// dashboard (non-2xx, transport failure) yield a nil ReportResult and
-// are logged but never crash the service.
+// It remains the compatibility wrapper for callers that do not send or consume
+// session actions.
 func ReportState(ctx context.Context, dashboardURL string, result *dc.CheckResult) *ReportResult {
-	payload, err := json.Marshal(result)
+	report := ReportStateWithSessionActions(ctx, dashboardURL, result, nil)
+	if report == nil {
+		return nil
+	}
+	return &report.ReportResult
+}
+
+// ReportStateWithSessionActions sends a normal report with at most 20
+// privacy-safe action completions appended at the top level. On success it
+// returns the normal report result plus pending actions and the completion IDs
+// acknowledged by the dashboard. Errors are logged but never crash the
+// service.
+func ReportStateWithSessionActions(ctx context.Context, dashboardURL string, result *dc.CheckResult, completed []sessiondata.CompletedSessionAction) *ReportWithSessionActionsResult {
+	payload, err := reportSessionActionPayload(result, completed)
 	if err != nil {
-		slog.Warn("dashboard: marshal failed", "error", err)
+		slog.Warn("dashboard: invalid session action report", "error", err)
 		return nil
 	}
 
-	resp, err := negotiateRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/report", payload)
+	resp, err := dashboardReportRequest(ctx, http.MethodPost, dashboardURL+"/api/v1/report", payload)
 	if err != nil {
 		slog.Warn("dashboard: report failed", "error", err)
 		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slog.Warn("dashboard: report rejected", "status", resp.StatusCode, "host", result.Host)
 		return nil
 	}
+	body, err := readReportResponse(resp.Body)
+	if err != nil {
+		slog.Warn("dashboard: invalid session action report response", "error", err)
+		return &ReportWithSessionActionsResult{}
+	}
 	slog.Info("dashboard=reported", "host", result.Host, "status", result.Status)
+	report, err := decodeReportSessionActionResponse(body)
+	if err != nil {
+		slog.Warn("dashboard: invalid session action report response", "error", err)
+		return &ReportWithSessionActionsResult{}
+	}
+	return report
+}
+
+func readReportResponse(body io.Reader) ([]byte, error) {
+	response, err := io.ReadAll(io.LimitReader(body, maxReportResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(response) > maxReportResponseBytes {
+		return nil, fmt.Errorf("report response exceeds %d byte limit", maxReportResponseBytes)
+	}
+	return response, nil
+}
+
+func reportSessionActionPayload(result *dc.CheckResult, completed []sessiondata.CompletedSessionAction) ([]byte, error) {
+	if err := sessiondata.ValidateCompletedSessionActions(completed); err != nil {
+		return nil, err
+	}
+	return json.Marshal(struct {
+		*dc.CheckResult
+		ReportSessionActionEnvelope
+	}{
+		CheckResult: result,
+		ReportSessionActionEnvelope: ReportSessionActionEnvelope{
+			CompletedSessionActions: completed,
+		},
+	})
+}
+
+func decodeReportSessionActionResponse(body []byte) (*ReportWithSessionActionsResult, error) {
+	report := &ReportWithSessionActionsResult{}
 	if len(body) == 0 {
-		return &ReportResult{}
+		return report, nil
 	}
 	var parsed struct {
 		OK             bool                       `json:"ok"`
 		PendingCommand *ForceUpdatePendingCommand `json:"pending_command"`
+		ReportSessionActionResult
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		slog.Debug("dashboard: report body unparsable", "error", err)
-		return &ReportResult{}
+		return nil, err
 	}
-	return &ReportResult{PendingCommand: parsed.PendingCommand}
+	if err := sessiondata.ValidatePendingSessionActions(parsed.PendingSessionActions); err != nil {
+		return nil, err
+	}
+	if err := sessiondata.ValidateAcknowledgedSessionActionIDs(parsed.AcknowledgedSessionActionIDs); err != nil {
+		return nil, err
+	}
+	report.PendingCommand = parsed.PendingCommand
+	report.ReportSessionActionResult = parsed.ReportSessionActionResult
+	return report, nil
 }
 
 // ReportForceUpdateCompletion posts the terminal updater decision back to the
@@ -460,6 +586,28 @@ func remoteEvtSpikeFromView(view evtspikeView) RemoteEvtSpike {
 	}
 }
 
+// RemoteSessionsConfig is the collector-safe projection of SessionsConfig.
+// Retention and action authorization stay exclusively on the dashboard.
+type RemoteSessionsConfig struct {
+	Enabled            bool                 `json:"enabled"`
+	CollectProcesses   bool                 `json:"collect_processes"`
+	TopProcesses       int                  `json:"top_processes"`
+	IdentityVisibility dc.SessionVisibility `json:"identity_visibility"`
+	ClientVisibility   dc.SessionVisibility `json:"client_visibility"`
+	ProcessVisibility  dc.SessionVisibility `json:"process_visibility"`
+}
+
+func remoteSessionsConfig(cfg dc.SessionsConfig) RemoteSessionsConfig {
+	return RemoteSessionsConfig{
+		Enabled:            cfg.Enabled,
+		CollectProcesses:   cfg.CollectProcesses,
+		TopProcesses:       cfg.TopProcesses,
+		IdentityVisibility: cfg.IdentityVisibility,
+		ClientVisibility:   cfg.ClientVisibility,
+		ProcessVisibility:  cfg.ProcessVisibility,
+	}
+}
+
 // RemoteSettings holds dashboard settings fetched by the service agent. Every
 // field that the dashboard's ConfigModal edits must be represented here so
 // connected agents pick the change up on the next fetch cycle; otherwise the
@@ -477,6 +625,7 @@ type RemoteSettings struct {
 	Performance             *dc.PerformanceConfig   `json:"performance,omitempty"`
 	EvtSpike                *RemoteEvtSpike         `json:"evtspike,omitempty"`
 	Update                  *dc.UpdateConfig        `json:"update,omitempty"`
+	Sessions                *RemoteSessionsConfig   `json:"sessions,omitempty"`
 }
 
 // FetchSettings retrieves dashboard settings via the agent config endpoint.

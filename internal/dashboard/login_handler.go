@@ -119,6 +119,15 @@ func sessionCookie(token string, secure bool) *http.Cookie {
 	}
 }
 
+// writeAuthResponse emits the shared successful login and Negotiate response.
+func writeAuthResponse(w http.ResponseWriter, username string, isAdmin bool) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Username string `json:"username"`
+		IsAdmin  bool   `json:"is_admin"`
+	}{Username: username, IsAdmin: isAdmin})
+}
+
 // isMemberOf reports whether groups contains group (case-insensitive,
 // with and without DOMAIN\ prefix).
 func isMemberOf(groups []string, group string) bool {
@@ -135,7 +144,8 @@ func isMemberOf(groups []string, group string) bool {
 }
 
 // handleNegotiate is called after NegotiateMiddleware succeeds. Checks group
-// membership, creates a session, sets cookie, and returns 200 {"username":"…"}.
+// membership, creates a session, sets cookie, and returns the server-derived
+// admin state.
 func handleNegotiate(store *SessionStore, group string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := GetAuthInfo(r)
@@ -151,7 +161,8 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 			_, _ = w.Write([]byte(`{"error":"Access denied — your account is not authorized."}`))
 			return
 		}
-		token, err := store.Create(info)
+		isAdmin := isDashboardAdmin(info, group)
+		token, err := store.CreateWithAdmin(info, isAdmin)
 		if err != nil {
 			slog.Error("negotiate: create session failed", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -160,8 +171,7 @@ func handleNegotiate(store *SessionStore, group string) http.Handler {
 		slog.Info("negotiate: session created", slog.Int("event_id", etwids.EvtDashboardAccess),
 			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"username": info.Username})
+		writeAuthResponse(w, info.Username, isAdmin)
 	})
 }
 
@@ -206,7 +216,8 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 			return
 		}
 
-		token, err := store.Create(info)
+		isAdmin := isDashboardAdmin(info, group)
+		token, err := store.CreateWithAdmin(info, isAdmin)
 		if err != nil {
 			slog.Error("login: create session failed", "error", err)
 			w.Header().Set("Content-Type", "application/json")
@@ -218,8 +229,7 @@ func handleLogin(store *SessionStore, group string) http.HandlerFunc {
 		slog.Info("login: session created", slog.Int("event_id", etwids.EvtDashboardAccess),
 			"user", info.Username)
 		http.SetCookie(w, sessionCookie(token, r.TLS != nil))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"username": info.Username})
+		writeAuthResponse(w, info.Username, isAdmin)
 	}
 }
 

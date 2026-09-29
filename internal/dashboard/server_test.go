@@ -3264,6 +3264,16 @@ func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
 		AddedChannels:            []string{"Custom"},
 		SecurityChannelEnabled:   true,
 	}
+	cfg.Sessions = dc.SessionsConfig{
+		Enabled:            false,
+		CollectProcesses:   false,
+		TopProcesses:       5,
+		RetentionHours:     48,
+		AllowActions:       true,
+		IdentityVisibility: dc.SessionVisibilityMasked,
+		ClientVisibility:   dc.SessionVisibilityHidden,
+		ProcessVisibility:  dc.SessionVisibilityMasked,
+	}
 	ds.testLoadConfigFunc = func() (*dc.Config, error) { return cfg, nil }
 
 	_, ch, done, err := ds.broker.Subscribe()
@@ -3308,6 +3318,18 @@ func TestBroadcastSettingsUpdate_MatchesGetSettingsContract(t *testing.T) {
 	}
 	if got := sseSnapshot["notification_exclusions"]; !reflect.DeepEqual(got, []any{"rds-a.example.test", "rds-b.example.test"}) {
 		t.Errorf("notification_exclusions = %#v, want both exclusions", got)
+	}
+	if got := sseSnapshot["sessions"]; !reflect.DeepEqual(got, map[string]any{
+		"enabled":             false,
+		"collect_processes":   false,
+		"top_processes":       float64(5),
+		"retention_hours":     float64(48),
+		"allow_actions":       true,
+		"identity_visibility": "masked",
+		"client_visibility":   "hidden",
+		"process_visibility":  "masked",
+	}) {
+		t.Errorf("sessions = %#v, want full configured session policy", got)
 	}
 	if got := sseSnapshot["rd_connection_broker"]; got != "rdc-broker.example.test" {
 		t.Errorf("rd_connection_broker = %#v, want rdc-broker.example.test", got)

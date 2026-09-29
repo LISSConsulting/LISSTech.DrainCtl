@@ -3,6 +3,7 @@
 package dashboard
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,6 +11,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
+	"io"
 	"math/big"
 	"net/http"
 	"strings"
@@ -247,5 +253,178 @@ func TestInitDashClient_UpdatesGlobalClient(t *testing.T) {
 	// Confirm it works correctly.
 	if err := verify([][]byte{certDER}, nil); err != nil {
 		t.Errorf("expected nil for matching fingerprint after InitDashClient, got %v", err)
+	}
+}
+
+func TestReportSessionActionPayload_ExactTopLevelCompletionEnvelope(t *testing.T) {
+	payload, err := reportSessionActionPayload(
+		&dc.CheckResult{Host: "host-a", Status: "Healthy"},
+		[]sessiondata.CompletedSessionAction{{
+			ActionID: "0195a584-5b25-7a00-91a5-7cbb4dac92d9",
+			Outcome:  sessiondata.SessionActionOutcomeCompleted,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("reportSessionActionPayload() error = %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode request payload: %v", err)
+	}
+	completions, ok := decoded["completed_session_actions"]
+	if !ok {
+		t.Fatalf("request JSON missing completed_session_actions: %s", payload)
+	}
+	const wantCompletion = `[{"action_id":"0195a584-5b25-7a00-91a5-7cbb4dac92d9","outcome":"completed"}]`
+	if string(completions) != wantCompletion {
+		t.Errorf("completed_session_actions = %s, want %s", completions, wantCompletion)
+	}
+	if strings.Contains(string(completions), "message") || strings.Contains(string(completions), "reason") {
+		t.Errorf("completion payload contains sensitive field: %s", completions)
+	}
+}
+
+func TestDecodeReportSessionActionResponse_AdditiveAndCompatible(t *testing.T) {
+	t.Run("pending and acknowledged", func(t *testing.T) {
+		report, err := decodeReportSessionActionResponse([]byte(`{
+			"ok":true,
+			"pending_session_actions":[{
+				"action_id":"0195a584-5b25-7a00-91a5-7cbb4dac92d9",
+				"type":"message",
+				"session_id":5,
+				"expected_logon_at_ms":1,
+				"expires_at_ms":2,
+				"message":"Save work"
+			}],
+			"acknowledged_session_action_ids":["0195a584-5b25-7a00-91a5-7cbb4dac92d8"]
+		}`))
+		if err != nil {
+			t.Fatalf("decodeReportSessionActionResponse() error = %v", err)
+		}
+		if len(report.PendingSessionActions) != 1 || report.PendingSessionActions[0].Message == nil || *report.PendingSessionActions[0].Message != "Save work" {
+			t.Fatalf("pending actions = %#v", report.PendingSessionActions)
+		}
+		if got := report.AcknowledgedSessionActionIDs; len(got) != 1 || got[0] != "0195a584-5b25-7a00-91a5-7cbb4dac92d8" {
+			t.Fatalf("acknowledged IDs = %#v", got)
+		}
+	})
+	t.Run("old dashboard omits additive fields", func(t *testing.T) {
+		report, err := decodeReportSessionActionResponse([]byte(`{"ok":true}`))
+		if err != nil {
+			t.Fatalf("decodeReportSessionActionResponse() error = %v", err)
+		}
+		if len(report.PendingSessionActions) != 0 || len(report.AcknowledgedSessionActionIDs) != 0 {
+			t.Fatalf("unexpected action response = %#v", report.ReportSessionActionResult)
+		}
+	})
+}
+
+func TestReportSessionActionPayloadAndResponse_RejectBounds(t *testing.T) {
+	completions := make([]sessiondata.CompletedSessionAction, sessiondata.MaxSessionActionCommands+1)
+	for i := range completions {
+		completions[i] = sessiondata.CompletedSessionAction{
+			ActionID: "0195a584-5b25-7a00-91a5-7cbb4dac92d9",
+			Outcome:  sessiondata.SessionActionOutcomeCompleted,
+		}
+	}
+	if _, err := reportSessionActionPayload(&dc.CheckResult{Host: "host-a"}, completions); err == nil {
+		t.Fatal("reportSessionActionPayload accepted 21 completions")
+	}
+	acknowledged := make([]string, sessiondata.MaxSessionActionCommands+1)
+	for i := range acknowledged {
+		acknowledged[i] = "0195a584-5b25-7a00-91a5-7cbb4dac92d9"
+	}
+	body, err := json.Marshal(map[string]any{"acknowledged_session_action_ids": acknowledged})
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if _, err := decodeReportSessionActionResponse(body); err == nil {
+		t.Fatal("decodeReportSessionActionResponse accepted 21 acknowledged IDs")
+	}
+}
+
+func TestReportStateWithSessionActions_ReportsHTTPFailure(t *testing.T) {
+	original := dashboardReportRequest
+	t.Cleanup(func() { dashboardReportRequest = original })
+	dashboardReportRequest = func(context.Context, string, string, []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader("server error")),
+		}, nil
+	}
+	if report := ReportStateWithSessionActions(context.Background(), "https://dashboard.example", &dc.CheckResult{Host: "host-a"}, nil); report != nil {
+		t.Fatalf("ReportStateWithSessionActions() = %#v, want nil on HTTP error", report)
+	}
+	dashboardReportRequest = func(context.Context, string, string, []byte) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	}
+	if report := ReportStateWithSessionActions(context.Background(), "https://dashboard.example", &dc.CheckResult{Host: "host-a"}, nil); report != nil {
+		t.Fatalf("ReportStateWithSessionActions() = %#v, want nil on transport error", report)
+	}
+}
+
+func TestReportStateWithSessionActions_DecodesMaximumBoundedUnicodeActions(t *testing.T) {
+	original := dashboardReportRequest
+	t.Cleanup(func() { dashboardReportRequest = original })
+
+	message := strings.Repeat("🧪", 256)
+	actions := make([]sessiondata.PendingSessionAction, sessiondata.MaxSessionActionCommands)
+	for i := range actions {
+		actions[i] = sessiondata.PendingSessionAction{
+			ActionID:          "0195a584-5b25-7a00-91a5-7cbb4dac92d9",
+			Type:              sessiondata.SessionActionMessage,
+			SessionID:         uint32(i + 1),
+			ExpectedLogonAtMS: 1,
+			ExpiresAtMS:       2,
+			Message:           &message,
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"ok":                      true,
+		"pending_session_actions": actions,
+	})
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if len(body) > maxReportResponseBytes {
+		t.Fatalf("bounded response size = %d, limit = %d", len(body), maxReportResponseBytes)
+	}
+	dashboardReportRequest = func(context.Context, string, string, []byte) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	}
+
+	report := ReportStateWithSessionActions(context.Background(), "https://dashboard.example", &dc.CheckResult{Host: "host-a"}, nil)
+	if report == nil || len(report.PendingSessionActions) != sessiondata.MaxSessionActionCommands {
+		t.Fatalf("pending actions = %#v", report)
+	}
+	if got := *report.PendingSessionActions[0].Message; got != message {
+		t.Errorf("first pending message = %q, want %q", got, message)
+	}
+}
+
+func TestReportStateWithSessionActions_RejectsOversizedResponse(t *testing.T) {
+	original := dashboardReportRequest
+	t.Cleanup(func() { dashboardReportRequest = original })
+
+	body := `{"ok":true}` + strings.Repeat(" ", maxReportResponseBytes)
+	dashboardReportRequest = func(context.Context, string, string, []byte) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}
+
+	report := ReportStateWithSessionActions(context.Background(), "https://dashboard.example", &dc.CheckResult{Host: "host-a"}, nil)
+	if report == nil {
+		t.Fatal("ReportStateWithSessionActions() = nil, want safe empty result")
+	}
+	if len(report.PendingSessionActions) != 0 || len(report.AcknowledgedSessionActionIDs) != 0 || report.PendingCommand != nil {
+		t.Fatalf("oversized response was decoded: %#v", report)
+	}
+}
+
+func TestMarshalSessionSnapshotPayload_RejectsOversizePayload(t *testing.T) {
+	snapshot := sessiondata.SessionSnapshot{
+		CollectorVersion: strings.Repeat("x", sessiondata.MaxSnapshotBytes),
+	}
+	if _, err := marshalSessionSnapshotPayload(snapshot); err == nil {
+		t.Fatal("marshalSessionSnapshotPayload accepted an oversized snapshot")
 	}
 }
