@@ -636,7 +636,10 @@ func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
 		t.Fatalf("db.Close: %v", err)
 	}
 
-	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	updated, err := s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	if updated || err == nil {
+		t.Fatalf("Update after DB close = (%v, %v), want failure", updated, err)
+	}
 
 	if got := s.GetCached("SRV01"); got != nil {
 		t.Fatalf("GetCached after failed Update = %+v, want nil (cache must not be poisoned)", got)
