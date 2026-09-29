@@ -393,6 +393,23 @@ func (s *InvestigationAttemptStore) ClaimNext(ctx context.Context, cutoff, now t
 	return attempt, err == nil, err
 }
 
+// Requeue returns an unsent running attempt to the queue when the process-local
+// rate limiter is exhausted. A send authorization is never eligible.
+func (s *InvestigationAttemptStore) Requeue(ctx context.Context, id int64) error {
+	res, err := s.db.writer.ExecContext(ctx, `UPDATE investigation_attempts SET state='queued',started_at_ms=NULL WHERE id=? AND state='running' AND send_authorized_at_ms IS NULL`, id)
+	if err != nil {
+		return fmt.Errorf("telemetry: investigation requeue: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
 // PruneExpiredQueued removes work that must never be claimed or sent after the
 // independent AuditDays retention boundary.
 func (s *InvestigationAttemptStore) PruneExpiredQueued(ctx context.Context, cutoff time.Time) (int64, error) {

@@ -152,6 +152,15 @@ func TestUpdate_SetsLastResult(t *testing.T) {
 	}
 }
 
+func TestReportLocal_PersistenceFailureReturnsFalse(t *testing.T) {
+	s := newTestServerState(t)
+	s.Register("SRV01")
+	s.store = failingReportStore{s.store}
+	if s.ReportLocal("SRV01", &dc.CheckResult{Host: "SRV01"}, nil) {
+		t.Fatal("ReportLocal acknowledged an unpersisted result")
+	}
+}
+
 func TestUpdate_SetsLastSeen(t *testing.T) {
 	s := newTestServerState(t)
 	s.Register("SRV01")

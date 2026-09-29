@@ -19,6 +19,10 @@ import (
 // Production code only increments/decrements; the value is read by tests.
 var helperGoroutineCount atomic.Int64
 
+// setAcceptCancelEvent is a test seam for proving acceptPipeConn does not
+// release or reuse an event handle while its cancellation helper can signal it.
+var setAcceptCancelEvent = windows.SetEvent
+
 // pipeConn wraps a Windows named pipe handle as a net.Conn.
 type pipeConn struct {
 	file     *os.File
@@ -99,19 +103,23 @@ func acceptPipeConn(ctx context.Context) (net.Conn, error) {
 		_ = windows.CloseHandle(h)
 		return nil, fmt.Errorf("CreateEvent cancel: %w", err)
 	}
-	defer func() { _ = windows.CloseHandle(cancelEvent) }()
-	// LIFO defer ordering: cancelAccept must be declared AFTER the
-	// CloseHandle defer above so it runs FIRST on return — that wakes the
-	// helper goroutine via acceptCtx.Done() before CloseHandle invalidates
-	// cancelEvent. Do not reorder these two defers.
 	acceptCtx, cancelAccept := context.WithCancel(ctx)
-	defer cancelAccept()
-
+	helperDone := make(chan struct{})
 	go func() {
 		helperGoroutineCount.Add(1)
+		defer close(helperDone)
 		defer helperGoroutineCount.Add(-1)
 		<-acceptCtx.Done()
-		_ = windows.SetEvent(cancelEvent)
+		_ = setAcceptCancelEvent(cancelEvent)
+	}()
+	// Successful accepts immediately start the next pipe instance. Join the
+	// helper before closing cancelEvent so a delayed SetEvent cannot hit a
+	// recycled handle belonging to that next accept and spuriously wake its
+	// overlapped ConnectNamedPipe.
+	defer func() {
+		cancelAccept()
+		<-helperDone
+		_ = windows.CloseHandle(cancelEvent)
 	}()
 
 	handles := []windows.Handle{ol.HEvent, cancelEvent}

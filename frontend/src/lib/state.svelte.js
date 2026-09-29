@@ -192,10 +192,13 @@ const persistReduceMotion = (v) => {
  * @property {number} disconnected   - Total disconnected sessions across fleet
  * @property {number} total          - active + disconnected
  * @property {number} utilization    - (total/maxTotal)*100 average utilization %
- * @property {number} sessionCpuP95  - P95 per-session CPU % across fleet
- * @property {number} sessionMemP95  - P95 per-session working set bytes across fleet
- * @property {number} [sessionCpuP50] - P50 per-session CPU % across fleet
- * @property {number} [sessionMemP50] - P50 per-session working set bytes across fleet
+ * @property {number} [sessionCpuPeakP95]      - Highest host session CPU P95 across fleet
+ * @property {number} [sessionCpuTypicalP95]   - Median host session CPU P95 across fleet
+ * @property {number} [sessionMemPeakP95]      - Highest host session memory P95 across fleet
+ * @property {number} [sessionMemTypicalP95]   - Median host session memory P95 across fleet
+ * @property {number} [sessionCpuObserved]     - Active sessions with a CPU sample across fleet
+ * @property {number} [sessionCpuAtOrAbove5]   - Active sessions at or above 5% CPU across fleet
+ * @property {number} [sessionCpuAtOrAbove20]  - Active sessions at or above 20% CPU across fleet
  */
 
 /**
@@ -290,6 +293,14 @@ let recentSpikes = $state(new Map());
  * @type {Set<string>}
  */
 let selectedHosts = $state(/** @type {Set<string>} */ (new Set()));
+
+/**
+ * Hosts whose Server-table detail rows are expanded. This is session UI state:
+ * it survives view unmount/remount while navigating between dashboard tabs,
+ * but is deliberately not persisted across a browser reload.
+ * @type {Set<string>}
+ */
+let expandedServerHosts = $state(/** @type {Set<string>} */ (new Set()));
 
 /**
  * Hosts scoped into the Overview metrics query. An empty set deliberately means
@@ -608,6 +619,14 @@ export const appState = {
     get selectedHosts() {
         return selectedHosts;
     },
+    /**
+     * Expanded Server-table rows. Mutate with the expanded-host helpers so
+     * every change assigns a fresh Set and remains reactive.
+     * @type {Set<string>}
+     */
+    get expandedServerHosts() {
+        return expandedServerHosts;
+    },
 
     // Feature 013 transient, source-ID-only state. No setter feeds persistent state.
     get investigationSettings() {
@@ -920,6 +939,40 @@ export function dropSelection(host) {
 export function clearSelection() {
     if (selectedHosts.size === 0) return;
     selectedHosts = new Set();
+}
+
+// ---------------------------------------------------------------------------
+// Servers-table expanded-row helpers
+// ---------------------------------------------------------------------------
+
+/** @param {string} host */
+export function toggleExpandedServerHost(host) {
+    const next = new Set(expandedServerHosts);
+    if (next.has(host)) next.delete(host);
+    else next.add(host);
+    expandedServerHosts = next;
+}
+
+/** @param {string} host */
+export function dropExpandedServerHost(host) {
+    if (!expandedServerHosts.has(host)) return;
+    const next = new Set(expandedServerHosts);
+    next.delete(host);
+    expandedServerHosts = next;
+}
+
+/**
+ * Remove expanded rows whose hosts no longer exist in the live roster.
+ * @param {Iterable<string>} liveHosts
+ * @returns {boolean}
+ */
+export function pruneExpandedServerHosts(liveHosts) {
+    if (expandedServerHosts.size === 0) return false;
+    const live = liveHosts instanceof Set ? liveHosts : new Set(liveHosts);
+    const next = new Set([...expandedServerHosts].filter((host) => live.has(host)));
+    if (next.size === expandedServerHosts.size) return false;
+    expandedServerHosts = next;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

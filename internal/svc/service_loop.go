@@ -617,7 +617,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				Host:      spike.Host,
 				Spike:     &spike,
 			}
-			dc.SendNotificationWithExclusions(notifyTargets, notifyExclusions, notifyState, spikeResult, dc.TriggerEventSpike, "")
+			sendAsyncNotification(notifyTargets, notifyExclusions, notifyState, spikeResult, dc.TriggerEventSpike, "")
 			// Propagate to a remote central dashboard. The local-dashboard path
 			// (dashState != nil) already appended via OnEvtSpikeIngest when the
 			// subsystem fired OnSpike; reporting again would double-insert.

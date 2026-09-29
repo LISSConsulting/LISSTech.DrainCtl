@@ -5,6 +5,7 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -19,7 +20,7 @@ type productionFeatureRuntime struct {
 	db                   *telemetry.DB
 	investigation        *investigation.Worker
 	controller           *investigation.Controller
-	attempts             investigation.Storage
+	attempts             *investigation.TelemetryStorage
 	attemptStore         *telemetry.InvestigationAttemptStore
 	detector             *sessiondrop.Detector
 	inbox                *sessiondrop.TelemetryStore
@@ -206,8 +207,11 @@ func (r *productionFeatureRuntime) StartWorker(ctx context.Context) error {
 		for {
 			// Recovery runs between, never during, RunOne calls. It only
 			// terminalizes rows after their durable no-resend lease expires.
-			if err := r.runWorkerPass(ctx); err != nil && ctx.Err() != nil {
-				return
+			if err := r.runWorkerPass(ctx); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Warn("dashboard: investigation worker pass failed", "error", err)
 			}
 			select {
 			case <-ctx.Done():

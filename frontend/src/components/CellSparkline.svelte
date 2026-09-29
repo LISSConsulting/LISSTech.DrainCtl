@@ -1,4 +1,5 @@
 <script>
+    import { Minus, TrendingDown, TrendingUp } from '@lucide/svelte';
     /**
      * CellSparkline — a tiny SVG area-fill sparkline rendered as a background
      * visual inside a table cell.
@@ -65,14 +66,8 @@
         return 'flat';
     });
 
-    let trendPath = $derived(
-        trend === 'up'
-            ? 'M84,22 L92,12 L100,22 M92,12 L92,32'
-            : trend === 'down'
-              ? 'M84,18 L92,28 L100,18 M92,8 L92,28'
-              : trend === 'flat'
-                ? 'M82,20 L100,20 M94,14 L100,20 L94,26'
-                : '',
+    let TrendIcon = $derived(
+        trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : trend === 'flat' ? Minus : null,
     );
 </script>
 
@@ -87,10 +82,12 @@
         style="color:{color}"
     >
         <path d={path} fill="currentColor" />
-        {#if trendPath}
-            <path d={trendPath} class="trend-arrow" />
-        {/if}
     </svg>
+    {#if TrendIcon}
+        <span class="trend-indicator" aria-hidden="true">
+            <TrendIcon size={12} strokeWidth={1.8} />
+        </span>
+    {/if}
 {/if}
 
 <style>
@@ -102,13 +99,14 @@
         opacity: 0.18;
         pointer-events: none;
     }
-    .trend-arrow {
-        fill: none;
-        stroke: var(--color-fg);
-        stroke-width: 2.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        vector-effect: non-scaling-stroke;
-        opacity: 0.78;
+    .trend-indicator {
+        position: absolute;
+        top: 4px;
+        right: 5px;
+        z-index: 1;
+        display: inline-flex;
+        color: var(--color-fg);
+        opacity: 0.58;
+        pointer-events: none;
     }
 </style>

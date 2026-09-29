@@ -613,6 +613,30 @@ func TestHandleReport_RegisteredHostAccepted(t *testing.T) {
 	}
 }
 
+type failingReportStore struct{ serverReader }
+
+func (f failingReportStore) Update(context.Context, string, string) (bool, error) {
+	return false, fmt.Errorf("simulated SQLite write failure")
+}
+
+func TestHandleReport_PersistenceFailureDoesNotAcknowledge(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("SRV01")
+	ds.state.store = failingReportStore{ds.state.store}
+	body, err := json.Marshal(dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	ds.handleReport(w, httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body)))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+	if strings.Contains(w.Body.String(), `"ok":true`) {
+		t.Fatalf("failed report acknowledged: %s", w.Body.String())
+	}
+}
+
 func TestHandleReport_EmptyHostRejected(t *testing.T) {
 	ds := newTestServer(t)
 	result := dc.CheckResult{Status: "Healthy"} // Host is zero value
@@ -811,6 +835,48 @@ func TestCheckResultSamples_RemoteFXOmitsInactiveFloorsAndPersistsPercentiles(t 
 		"rfx_skip_server_sec_p50": 1.5,
 		"rfx_skip_net_sec":        0,
 		"rfx_skip_net_sec_p50":    2.5,
+	} {
+		if got[counter] != want {
+			t.Errorf("%s = %v, want %v", counter, got[counter], want)
+		}
+	}
+}
+
+func TestCheckResultSamples_RemoteFXOmitsUnavailableRTT(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			RFXAvailable: true,
+			RFXRTT:       400,
+		},
+	})
+	for _, sample := range samples {
+		if sample.Counter == "rfx_rtt_ms" || sample.Counter == "rfx_rtt_ms_p50" {
+			t.Fatalf("unmeasured RTT persisted as %+v", sample)
+		}
+	}
+}
+func TestCheckResultSamples_PersistsSessionCPUActivityCounts(t *testing.T) {
+	samples := checkResultSamples(dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now(),
+		Performance: &dc.PerfSnapshot{
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     12,
+			SessionCPUAtOrAbove5Count:   3,
+			SessionCPUAtOrAbove20Count:  1,
+		},
+	})
+
+	got := make(map[string]float64, len(samples))
+	for _, sample := range samples {
+		got[sample.Counter] = sample.Value
+	}
+	for counter, want := range map[string]float64{
+		"session_cpu_observed_count": 12,
+		"session_cpu_ge_5_count":     3,
+		"session_cpu_ge_20_count":    1,
 	} {
 		if got[counter] != want {
 			t.Errorf("%s = %v, want %v", counter, got[counter], want)

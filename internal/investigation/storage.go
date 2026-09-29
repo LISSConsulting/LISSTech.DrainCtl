@@ -13,11 +13,25 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
-// Storage is the investigation-owned persistence boundary. Workers and handlers
-// use only the canonical investigation models through this interface.
-type Storage interface {
+// AttemptReader exposes the queries used by the controller and dashboard.
+type AttemptReader interface {
+	Counts(context.Context) (AttemptCounts, error)
+	History(context.Context, SourceRef) ([]Attempt, error)
+	SourceExists(context.Context, SourceRef) (bool, error)
+	LatestFailure(context.Context) (*LatestFailure, error)
+	Get(context.Context, int64) (Attempt, error)
+	LoadResult(context.Context, int64) (*Report, *Provenance, error)
+}
+
+// AttemptCreator admits a new immutable attempt.
+type AttemptCreator interface {
 	Create(context.Context, CreateAttempt) (Attempt, error)
+}
+
+// WorkerStorage owns the claim and finalization lifecycle.
+type WorkerStorage interface {
 	ClaimNext(context.Context, int64, int64) (Attempt, bool, error)
+	Requeue(context.Context, int64) error
 	LoadEvidence(context.Context, int64) (EvidenceSnapshot, error)
 	FinalizeResult(context.Context, int64, Report, Provenance, int64) error
 	AuthorizeSend(context.Context, int64, int64) error
@@ -25,12 +39,14 @@ type Storage interface {
 	FinalizeFailure(context.Context, int64, TerminalReason, int64) error
 	FinalizeUnavailable(context.Context, int64, int64) error
 	RecoverRunning(context.Context, int64) (int64, error)
-	Counts(context.Context) (AttemptCounts, error)
-	History(context.Context, SourceRef) ([]Attempt, error)
-	SourceExists(context.Context, SourceRef) (bool, error)
-	LatestFailure(context.Context) (*LatestFailure, error)
 	Get(context.Context, int64) (Attempt, error)
-	LoadResult(context.Context, int64) (*Report, *Provenance, error)
+}
+
+// ControllerStorage is the handler-facing admission and query contract.
+type ControllerStorage interface {
+	AttemptReader
+	AttemptCreator
+	LoadEvidence(context.Context, int64) (EvidenceSnapshot, error)
 }
 
 // CreateAttempt contains the canonical inputs required to create an attempt.
@@ -42,7 +58,7 @@ type CreateAttempt struct {
 	Evidence         EvidenceSnapshot
 }
 
-// TelemetryStorage adapts the telemetry persistence implementation to Storage.
+// TelemetryStorage adapts telemetry persistence to the controller and worker roles.
 type TelemetryStorage struct {
 	store *telemetry.InvestigationAttemptStore
 }
@@ -73,6 +89,10 @@ func (s *TelemetryStorage) Create(ctx context.Context, input CreateAttempt) (Att
 func (s *TelemetryStorage) ClaimNext(ctx context.Context, cutoffMS, nowMS int64) (Attempt, bool, error) {
 	attempt, found, err := s.store.ClaimNext(ctx, millisecondsToTime(cutoffMS), millisecondsToTime(nowMS))
 	return AttemptFromTelemetry(attempt), found, err
+}
+
+func (s *TelemetryStorage) Requeue(ctx context.Context, id int64) error {
+	return s.store.Requeue(ctx, id)
 }
 
 func (s *TelemetryStorage) LoadEvidence(ctx context.Context, id int64) (EvidenceSnapshot, error) {

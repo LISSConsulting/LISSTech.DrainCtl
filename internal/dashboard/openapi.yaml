@@ -317,18 +317,25 @@ components:
           type: number
           format: double
           description: "Per-session CPU P95 % (omitted when zero)."
-        session_cpu_p50_pct:
-          type: number
-          format: double
-          description: "Per-session CPU P50 % (omitted when zero)."
         session_mem_p95_bytes:
           type: number
           format: double
           description: "Per-session working set P95 in bytes (omitted when zero)."
-        session_mem_p50_bytes:
-          type: number
-          format: double
-          description: "Per-session working set P50 in bytes (omitted when zero)."
+        session_cpu_activity_collected:
+          type: boolean
+          description: "True when active-session CPU threshold counts were collected."
+        session_cpu_observed_count:
+          type: integer
+          minimum: 0
+          description: "Active WTS sessions with a CPU sample."
+        session_cpu_ge_5_count:
+          type: integer
+          minimum: 0
+          description: "Active WTS sessions at or above 5% CPU."
+        session_cpu_ge_20_count:
+          type: integer
+          minimum: 0
+          description: "Active WTS sessions at or above 20% CPU."
         rfx_available:
           type: boolean
           description: "True when RemoteFX counters were collected this poll cycle."

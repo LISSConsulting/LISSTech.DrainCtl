@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -346,66 +347,66 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 		snap.TCPRetrans = RoundTo(v, 1)
 	}
 
+	// Keep session-derived counters scoped to currently active WTS sessions.
+	// PDH retains disconnected RemoteFX instances (notably an unchanged 400 ms
+	// RTT) and also includes non-user session instances. Those values are not
+	// an active user's experience.
+	var activeSessions map[string]struct{}
+	if sessionCollectOK && (c.collectPerSession || c.collectRemoteFX) {
+		activeSessions = activeSessionInstances()
+	}
+
 	// Per-session (V2).
 	if c.collectPerSession && sessionCollectOK {
-		if c.inputDelayAvail && c.inputDelayH != 0 {
-			if vals, err := pdhGetDoubleArray(c.inputDelayH); err == nil {
-				vals = filterRemoteFXValues(vals, 0, 60000, false)
-				if len(vals) > 0 {
-					snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
-					snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
-					snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
-					snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
-					snap.P50Present |= dc.PerfP50InputDelay
+		if vals := activeCounterValues(c.inputDelayH, activeSessions, 0, 60000, false); len(vals) > 0 {
+			snap.InputDelayP50, snap.InputDelayP95, snap.InputDelayMax = AggregateValues(vals)
+			snap.InputDelayP50 = RoundTo(snap.InputDelayP50, 1)
+			snap.InputDelayP95 = RoundTo(snap.InputDelayP95, 1)
+			snap.InputDelayMax = RoundTo(snap.InputDelayMax, 1)
+			snap.P50Present |= dc.PerfP50InputDelay
+		}
+		if vals := activeCounterValues(c.sessCPUH, activeSessions, 0, 100, false); len(vals) > 0 {
+			_, p95, _ := AggregateValues(vals)
+			snap.SessionCPUP95 = RoundTo(p95, 1)
+			snap.SessionCPUActivityCollected = true
+			snap.SessionCPUObservedCount = len(vals)
+			for _, value := range vals {
+				if value >= 5 {
+					snap.SessionCPUAtOrAbove5Count++
+				}
+				if value >= 20 {
+					snap.SessionCPUAtOrAbove20Count++
 				}
 			}
 		}
-		if c.sessCPUH != 0 {
-			if vals, err := pdhGetDoubleArray(c.sessCPUH); err == nil {
-				vals = filterRemoteFXValues(vals, 0, 100, false)
-				if len(vals) > 0 {
-					p50, p95, _ := AggregateValues(vals)
-					snap.SessionCPUP50 = RoundTo(p50, 1)
-					snap.SessionCPUP95 = RoundTo(p95, 1)
-					snap.P50Present |= dc.PerfP50SessionCPU
-				}
-			}
-		}
-		if c.sessMemH != 0 {
-			if vals, err := pdhGetDoubleArray(c.sessMemH); err == nil {
-				vals = filterRemoteFXValues(vals, 0, 1<<60, false)
-				if len(vals) > 0 {
-					p50, p95, _ := AggregateValues(vals)
-					snap.SessionMemP50 = RoundTo(p50, 0)
-					snap.SessionMemP95 = RoundTo(p95, 0)
-					snap.P50Present |= dc.PerfP50SessionMem
-				}
-			}
+		if vals := activeCounterValues(c.sessMemH, activeSessions, 0, 1<<60, false); len(vals) > 0 {
+			_, p95, _ := AggregateValues(vals)
+			snap.SessionMemP95 = RoundTo(p95, 0)
 		}
 	}
 
 	// RemoteFX (V2).
 	if c.collectRemoteFX && c.rfxAvailable && sessionCollectOK {
 		snap.RFXAvailable = true
-		if c.rfxPercentiles(c.rfxFPSH, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, 0, 240, true) {
+		if c.rfxPercentiles(c.rfxFPSH, activeSessions, &snap.RFXFPSOut, &snap.RFXFPSOutP50, 1, 0, 240, true) {
 			snap.P50Present |= dc.PerfP50RFXFPSOut
 		}
-		if c.rfxPercentiles(c.rfxSkipSrvH, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, 0, 1000000, false) {
+		if c.rfxPercentiles(c.rfxSkipSrvH, activeSessions, &snap.RFXSkipServer, &snap.RFXSkipServerP50, 1, 0, 1000000, false) {
 			snap.P50Present |= dc.PerfP50RFXSkipServer
 		}
-		if c.rfxPercentiles(c.rfxSkipNetH, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, 0, 1000000, false) {
+		if c.rfxPercentiles(c.rfxSkipNetH, activeSessions, &snap.RFXSkipNet, &snap.RFXSkipNetP50, 1, 0, 1000000, false) {
 			snap.P50Present |= dc.PerfP50RFXSkipNet
 		}
-		if c.rfxPercentiles(c.rfxEncH, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, 0, 60000, false) {
+		if c.rfxPercentiles(c.rfxEncH, activeSessions, &snap.RFXEncodeMS, &snap.RFXEncodeMSP50, 1, 0, 60000, false) {
 			snap.P50Present |= dc.PerfP50RFXEncodeMS
 		}
-		if c.rfxPercentiles(c.rfxQualH, &snap.RFXQuality, &snap.RFXQualityP50, 1, 0, 100, true) {
+		if c.rfxPercentiles(c.rfxQualH, activeSessions, &snap.RFXQuality, &snap.RFXQualityP50, 1, 0, 100, true) {
 			snap.P50Present |= dc.PerfP50RFXQuality
 		}
-		if c.rfxPercentiles(c.rfxRTTH, &snap.RFXRTT, &snap.RFXRTTP50, 1, 0, 60000, false) {
+		if c.rfxPercentiles(c.rfxRTTH, activeSessions, &snap.RFXRTT, &snap.RFXRTTP50, 1, 0, 60000, false) {
 			snap.P50Present |= dc.PerfP50RFXRTT
 		}
-		if c.rfxPercentiles(c.rfxLossH, &snap.RFXLoss, &snap.RFXLossP50, 2, 0, 100, false) {
+		if c.rfxPercentiles(c.rfxLossH, activeSessions, &snap.RFXLoss, &snap.RFXLossP50, 2, 0, 100, false) {
 			snap.P50Present |= dc.PerfP50RFXLoss
 		}
 	}
@@ -447,11 +448,17 @@ func aggregate(samples []dc.PerfSnapshot) dc.PerfSnapshot {
 		if s.SessionMemP95 > agg.SessionMemP95 {
 			agg.SessionMemP95 = s.SessionMemP95
 		}
-		if s.SessionCPUP50 > agg.SessionCPUP50 {
-			agg.SessionCPUP50 = s.SessionCPUP50
-		}
-		if s.SessionMemP50 > agg.SessionMemP50 {
-			agg.SessionMemP50 = s.SessionMemP50
+		if s.SessionCPUActivityCollected {
+			agg.SessionCPUActivityCollected = true
+			if s.SessionCPUObservedCount > agg.SessionCPUObservedCount {
+				agg.SessionCPUObservedCount = s.SessionCPUObservedCount
+			}
+			if s.SessionCPUAtOrAbove5Count > agg.SessionCPUAtOrAbove5Count {
+				agg.SessionCPUAtOrAbove5Count = s.SessionCPUAtOrAbove5Count
+			}
+			if s.SessionCPUAtOrAbove20Count > agg.SessionCPUAtOrAbove20Count {
+				agg.SessionCPUAtOrAbove20Count = s.SessionCPUAtOrAbove20Count
+			}
 		}
 		if s.RFXAvailable {
 			if !agg.RFXAvailable {
@@ -542,15 +549,63 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	return 0, false
 }
 
-func (c *Collector) rfxPercentiles(h syscall.Handle, p95, p50 *float64, places int, min, max float64, higherIsBetter bool) bool {
-	if h == 0 {
-		return false
-	}
-	values, err := pdhGetDoubleArray(h)
+// activeSessionInstances returns normalized WTS station names for currently
+// active sessions. A nil result means WTS enumeration failed, which must not
+// fall back to potentially stale PDH instances.
+func activeSessionInstances() map[string]struct{} {
+	sessions, err := dc.EnumerateSessions()
 	if err != nil {
-		return false
+		return nil
 	}
-	values = filterRemoteFXValues(values, min, max, higherIsBetter)
+	active := make(map[string]struct{}, len(sessions))
+	for _, session := range sessions {
+		if session.State != "Active" || session.Station == "" {
+			continue
+		}
+		active[sessionInstanceKey(session.Station)] = struct{}{}
+	}
+	return active
+}
+
+func sessionInstanceKey(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.ReplaceAll(name, "#", "")
+	return strings.ReplaceAll(name, " ", "")
+}
+
+// activeCounterValues removes values from inactive or non-user PDH instances,
+// then applies the existing numeric validation and inactive-stream rules.
+func activeCounterValues(
+	h syscall.Handle,
+	active map[string]struct{},
+	min, max float64,
+	higherIsBetter bool,
+) []float64 {
+	if h == 0 || active == nil {
+		return nil
+	}
+	named, err := pdhGetNamedDoubleArray(h)
+	if err != nil {
+		return nil
+	}
+	values := make([]float64, 0, len(named))
+	for _, sample := range named {
+		if _, ok := active[sessionInstanceKey(sample.Name)]; ok {
+			values = append(values, sample.Value)
+		}
+	}
+	return filterRemoteFXValues(values, min, max, higherIsBetter)
+}
+
+func (c *Collector) rfxPercentiles(
+	h syscall.Handle,
+	active map[string]struct{},
+	p95, p50 *float64,
+	places int,
+	min, max float64,
+	higherIsBetter bool,
+) bool {
+	values := activeCounterValues(h, active, min, max, higherIsBetter)
 	if len(values) == 0 {
 		return false
 	}

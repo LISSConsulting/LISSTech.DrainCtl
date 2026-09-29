@@ -8,8 +8,17 @@
         setOverviewSelection,
         toggleOverviewSelection,
     } from '../lib/state.svelte.js';
-    import { resolveThresholds } from '../lib/thresholds.js';
+    import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
     import { fetchFleetMetrics } from '../lib/api.js';
+    import { adaptFleetToRfxSamples, processRfxHistory } from '../lib/remotefx.js';
+    import { adaptFleetToMetricsSamples, adaptFleetToSessionSamples } from '../lib/chart-data.js';
+    import {
+        LOAD_SERIES_META,
+        NEUTRAL_METRIC_COLOR,
+        OVERVIEW_LOAD_VISIBILITY_KEY,
+        readLoadVisibility,
+        writeLoadVisibility,
+    } from '../lib/chart-contracts.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
     import {
@@ -34,60 +43,29 @@
     let showSessionHelp = $state(false);
     let showRfxHelp = $state(false);
 
-    // ── Upper chart (LOAD): CPU %, CPU P95, Memory %, Sessions ────────────────
-    let showCpu = $state(true);
-    let showCpuP95 = $state(true);
-    let showMem = $state(true);
-    let showSessions = $state(true);
+    // ── Upper chart (LOAD): persisted CPU, CPU P95, Memory, Sessions ─────────
+    let loadVisibility = $state(readLoadVisibility(localStorage, OVERVIEW_LOAD_VISIBILITY_KEY));
+    let showCpu = $derived(loadVisibility.cpu);
+    let showCpuP95 = $derived(loadVisibility.cpuP95);
+    let showMem = $derived(loadVisibility.mem);
+    let showSessions = $derived(loadVisibility.sessions);
+    $effect(() => {
+        writeLoadVisibility(localStorage, OVERVIEW_LOAD_VISIBILITY_KEY, {
+            cpu: loadVisibility.cpu,
+            cpuP95: loadVisibility.cpuP95,
+            mem: loadVisibility.mem,
+            sessions: loadVisibility.sessions,
+        });
+    });
 
-    const LOAD_SERIES = [
-        {
-            key: 'cpu',
-            label: 'CPU %',
-            color: 'var(--color-accent)',
-            axis: 'left',
-            lineOnly: false,
-            show: () => showCpu,
-            toggle: () => {
-                showCpu = !showCpu;
-            },
+    const LOAD_SERIES = LOAD_SERIES_META.map((series) => ({
+        ...series,
+        show: () => loadVisibility[series.key],
+        toggle: () => {
+            loadVisibility[series.key] = !loadVisibility[series.key];
         },
-        {
-            key: 'cpuP95',
-            label: 'CPU P95',
-            color: 'var(--color-amber)',
-            axis: 'left',
-            lineOnly: false,
-            fillOpacity: 0.92,
-            hideStroke: true,
-            show: () => showCpuP95,
-            toggle: () => {
-                showCpuP95 = !showCpuP95;
-            },
-        },
-        {
-            key: 'mem',
-            label: 'Memory %',
-            color: 'var(--color-green)',
-            axis: 'left',
-            lineOnly: false,
-            show: () => showMem,
-            toggle: () => {
-                showMem = !showMem;
-            },
-        },
-        {
-            key: 'sessions',
-            label: 'Sessions',
-            color: 'var(--color-blue)',
-            axis: 'right',
-            lineOnly: true,
-            show: () => showSessions,
-            toggle: () => {
-                showSessions = !showSessions;
-            },
-        },
-    ];
+    }));
+    const LOAD_META = Object.fromEntries(LOAD_SERIES_META.map((series) => [series.key, series]));
 
     // ── Health Indicators: 4 full-size charts ────────────────────────────────
     // inputDelay thresholds come from the alert sensitivity config.
@@ -98,26 +76,26 @@
         {
             key: 'inputDelay',
             p50Key: 'p50InputDelay',
-            valueLabel: 'Avg host P95',
-            p50Label: 'Avg host P50',
+            valueLabel: 'Host P95',
+            p50Label: 'Host P50',
             label: 'Input Delay',
             unit: 'ms',
-            thresholds: { warn: 50, crit: 100 },
-            color: 'var(--color-amber)',
+            thresholds: DEFAULTS.inputDelay,
+            color: NEUTRAL_METRIC_COLOR,
             fmt: (v) => `${Math.round(v)}ms`,
             icon: Timer,
             helpText:
-                "Delay between user input and screen response. The filled series averages each host's per-session P95; the nested series averages each host's per-session P50. Higher values are worse.",
+                "Delay between user input and screen response. The filled series is the highest participating host's per-session P95; P50 is the exact median reporting host. Higher values are worse.",
         },
         {
             key: 'pagesPerSec',
             p50Key: 'p50PagesPerSec',
-            valueLabel: 'Fleet avg',
+            valueLabel: 'Fleet AVG',
             p50Label: 'Host P50',
             label: 'Pages/sec',
             unit: '/sec',
             thresholds: { warn: 80, crit: 150 },
-            color: 'var(--color-accent)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: (v) => `${Math.round(v)}/s`,
             icon: FileText,
             helpText:
@@ -126,12 +104,12 @@
         {
             key: 'tcpRetrans',
             p50Key: 'p50TcpRetrans',
-            valueLabel: 'Fleet avg',
+            valueLabel: 'Fleet AVG',
             p50Label: 'Host P50',
             label: 'TCP Retrans',
             unit: '/sec',
-            thresholds: { warn: 10, crit: 25 },
-            color: 'var(--color-red)',
+            thresholds: DEFAULTS.tcpRetransmits,
+            color: NEUTRAL_METRIC_COLOR,
             fmt: (v) => `${v.toFixed(1)}/s`,
             icon: Network,
             helpText:
@@ -140,12 +118,12 @@
         {
             key: 'diskQueue',
             p50Key: 'p50DiskQueue',
-            valueLabel: 'Fleet avg',
+            valueLabel: 'Fleet AVG',
             p50Label: 'Host P50',
             label: 'Avg Disk Queue',
             unit: '',
-            thresholds: { warn: 2, crit: 5 },
-            color: 'var(--color-green)',
+            thresholds: DEFAULTS.diskQueue,
+            color: NEUTRAL_METRIC_COLOR,
             fmt: (v) => v.toFixed(2),
             icon: HardDrive,
             helpText:
@@ -386,71 +364,6 @@
         return () => el.removeEventListener('click', handler, { capture: true });
     });
 
-    /**
-     * Build a Map<ts, value> from a counter series so adapters can join
-     * sibling counters by timestamp rather than array index. Different
-     * counters can have different T arrays when individual samples are
-     * missing, so positional indexing mispairs them.
-     * @param {{t: number[], avg: number[], min: number[], max: number[], p50: number[]}|undefined} s
-     * @param {'avg'|'min'|'max'|'p50'} [field]
-     * @returns {Map<number, number>}
-     */
-    function tsMap(s, field = 'avg') {
-        const m = new Map();
-        if (!s) return m;
-        const t = s.t || [];
-        const v = s[field] || [];
-        for (let i = 0; i < t.length; i++) m.set(t[i], v[i]);
-        return m;
-    }
-
-    /**
-     * Adapt fleet series parallel arrays to MetricsSample[] for LOAD and HIC consumption.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[], p50: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').MetricsSample[]}
-     */
-    function adaptFleetToMetricsSamples(series) {
-        const cpu = series['cpu_pct'];
-        if (!cpu || cpu.t.length === 0) return [];
-        const cpuAvg = tsMap(cpu, 'avg');
-        const cpuMax = tsMap(cpu, 'max');
-        // mem_used_pct is a server-computed virtual counter: per-host
-        // (1-avail/total)*100 first, then averaged across hosts. Replaces the
-        // older avg(avail)/avg(total) ratio that was total-weighted and
-        // diluted small-RAM hosts' near-OOM into the noise.
-        const memPctMap = tsMap(series['mem_used_pct']);
-        const sessMap = tsMap(series['sessions_total']);
-        const idMap = tsMap(series['input_delay_p95_ms']);
-        const idP50Map = tsMap(series['input_delay_p50_ms']);
-        const psMap = tsMap(series['pages_sec']);
-        const psP50Map = tsMap(series['pages_sec'], 'p50');
-        const trMap = tsMap(series['tcp_retrans_sec']);
-        const trP50Map = tsMap(series['tcp_retrans_sec'], 'p50');
-        const dqMap = tsMap(series['disk_queue']);
-        const dqP50Map = tsMap(series['disk_queue'], 'p50');
-        return cpu.t.map((ts) => {
-            const cpuV = cpuAvg.get(ts) ?? 0;
-            const cpuP95V = cpuMax.get(ts);
-            const memV = memPctMap.get(ts);
-            const sV = sessMap.get(ts);
-            return {
-                time: ts,
-                cpu: cpuV,
-                cpuP95: cpuP95V != null && cpuP95V > 0 ? cpuP95V : cpuV,
-                mem: memV ?? 0,
-                sessions: sV != null ? Math.round(sV) : 0,
-                inputDelay: idMap.get(ts) ?? 0,
-                pagesPerSec: psMap.get(ts) ?? 0,
-                tcpRetrans: trMap.get(ts) ?? 0,
-                diskQueue: dqMap.get(ts) ?? 0,
-                p50InputDelay: idP50Map.get(ts),
-                p50PagesPerSec: psP50Map.get(ts),
-                p50TcpRetrans: trP50Map.get(ts),
-                p50DiskQueue: dqP50Map.get(ts),
-            };
-        });
-    }
-
     let history = $derived(adaptFleetToMetricsSamples(fleetResponse?.series ?? {}));
     let sessionMax = $derived(Math.max(...history.map((h) => h.sessions ?? 0), 1));
     let hasRight = $derived(showSessions);
@@ -497,30 +410,30 @@
     );
     let loadCurrents = $derived([
         {
-            label: 'CPU',
+            label: LOAD_META.cpu.shortLabel,
             value: displayPoint ? `${(+displayPoint.cpu).toFixed(1)}%` : '—',
-            color: 'var(--color-accent)',
+            color: LOAD_META.cpu.color,
             icon: Cpu,
             show: () => showCpu,
         },
         {
-            label: 'CPU P95',
+            label: LOAD_META.cpuP95.shortLabel,
             value: displayPoint ? `${(+(displayPoint.cpuP95 ?? displayPoint.cpu)).toFixed(1)}%` : '—',
-            color: 'var(--color-amber)',
+            color: LOAD_META.cpuP95.color,
             icon: Cpu,
             show: () => showCpuP95,
         },
         {
-            label: 'MEM',
+            label: LOAD_META.mem.shortLabel,
             value: displayPoint ? `${(+displayPoint.mem).toFixed(1)}%` : '—',
-            color: 'var(--color-green)',
+            color: LOAD_META.mem.color,
             icon: MemoryStick,
             show: () => showMem,
         },
         {
-            label: 'SESS',
+            label: LOAD_META.sessions.shortLabel,
             value: displayPoint ? `${displayPoint.sessions ?? 0}` : '—',
-            color: 'var(--color-blue)',
+            color: LOAD_META.sessions.color,
             icon: Users,
             show: () => showSessions,
         },
@@ -528,89 +441,7 @@
 
     // ── Session Metrics charts ────────────────────────────────────────────────
 
-    /**
-     * Adapt fleet series to SessionSample[] for the SESSIONS sub-tab.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').SessionSample[]}
-     */
-    function adaptFleetToSessionSamples(series) {
-        const tot = series['sessions_total'];
-        if (!tot || tot.t.length === 0) return [];
-        const totAvg = tsMap(tot, 'avg');
-        const activeMap = tsMap(series['sessions_active']);
-        const discMap = tsMap(series['sessions_disconnected']);
-        const maxMap = tsMap(series['sessions_max']);
-        const scpuMap = tsMap(series['session_cpu_p95_pct'], 'max');
-        const scpuP50Map = tsMap(series['session_cpu_p50_pct'], 'max');
-        const smemMap = tsMap(series['session_mem_p95_bytes'], 'max');
-        const smemP50Map = tsMap(series['session_mem_p50_bytes'], 'max');
-        return tot.t.map((ts) => {
-            const a = Math.round(activeMap.get(ts) ?? 0);
-            const d = Math.round(discMap.get(ts) ?? 0);
-            const t = Math.round(totAvg.get(ts) ?? 0);
-            const mx = Math.round(maxMap.get(ts) ?? 0);
-            return {
-                ts,
-                active: a,
-                disconnected: d,
-                total: t,
-                utilization: mx > 0 ? Math.min((t / mx) * 100, 100) : 0,
-                sessionCpuP95: scpuMap.get(ts) ?? 0,
-                sessionMemP95: smemMap.get(ts) ?? 0,
-                sessionCpuP50: scpuP50Map.get(ts) ?? 0,
-                sessionMemP50: smemP50Map.get(ts) ?? 0,
-            };
-        });
-    }
-
     let sessionHistory = $derived(adaptFleetToSessionSamples(fleetResponse?.series ?? {}));
-
-    /**
-     * Adapt fleet series to RfxSample[] for the REMOTEFX sub-tab.
-     * @param {Record<string, {t: number[], avg: number[], min: number[], max: number[]}>} series
-     * @returns {import('../lib/state.svelte.js').RfxSample[]}
-     */
-    function adaptFleetToRfxSamples(series) {
-        const fps = series['rfx_fps_out'];
-        if (!fps || fps.t.length === 0) return [];
-        const fpsAvg = tsMap(fps, 'avg');
-        const fpsP50Map = tsMap(series['rfx_fps_out_p50']);
-        const encMap = tsMap(series['rfx_encode_ms']);
-        const encP50Map = tsMap(series['rfx_encode_ms_p50']);
-        const qualMap = tsMap(series['rfx_quality_pct']);
-        const qualP50Map = tsMap(series['rfx_quality_pct_p50']);
-        const skipSrvMap = tsMap(series['rfx_skip_server_sec']);
-        const skipSrvP50Map = tsMap(series['rfx_skip_server_sec_p50']);
-        const skipNetMap = tsMap(series['rfx_skip_net_sec']);
-        const skipNetP50Map = tsMap(series['rfx_skip_net_sec_p50']);
-        const rttMap = tsMap(series['rfx_rtt_ms']);
-        const rttP50Map = tsMap(series['rfx_rtt_ms_p50']);
-        const lossMap = tsMap(series['rfx_loss_pct']);
-        const lossP50Map = tsMap(series['rfx_loss_pct_p50']);
-        return fps.t.map((ts) => {
-            const fpsP50 = fpsP50Map.get(ts);
-            const qualityP50 = qualP50Map.get(ts);
-            return {
-                ts,
-                fpsOut: fpsAvg.get(ts),
-                // Historical zeroes predate P50 presence metadata and mean
-                // "not collected" for these high-is-better active-stream metrics.
-                fpsOutP50: fpsP50 != null && fpsP50 > 0 ? fpsP50 : undefined,
-                encodeMs: encMap.get(ts),
-                encodeMsP50: encP50Map.get(ts),
-                quality: qualMap.get(ts),
-                qualityP50: qualityP50 != null && qualityP50 > 0 ? qualityP50 : undefined,
-                skipServer: skipSrvMap.get(ts),
-                skipServerP50: skipSrvP50Map.get(ts),
-                skipNet: skipNetMap.get(ts),
-                skipNetP50: skipNetP50Map.get(ts),
-                rtt: rttMap.get(ts),
-                rttP50: rttP50Map.get(ts),
-                loss: lossMap.get(ts),
-                lossP50: lossP50Map.get(ts),
-            };
-        });
-    }
 
     // ── RemoteFX charts ───────────────────────────────────────────────────────
     let rfxHistory = $derived(adaptFleetToRfxSamples(fleetResponse?.series ?? {}));
@@ -654,7 +485,7 @@
             label: 'Utilization',
             unit: '%',
             thresholds: { warn: 80, crit: 90 },
-            color: 'var(--color-red)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}%`,
             icon: Gauge,
             timeKey: 'ts',
@@ -663,44 +494,58 @@
                 "How full is the farm? Total sessions divided by the sum of every server's MaxSessions limit. Tracks how close the fleet is to turning users away.",
         },
         {
-            key: 'sessionCpuP95',
-            p50Key: 'sessionCpuP50',
+            key: 'sessionCpuPeakP95',
+            p50Key: 'sessionCpuTypicalP95',
             label: 'Session CPU',
             unit: '%',
             thresholds: { warn: 15, crit: 30 },
-            color: 'var(--color-accent)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}%`,
             icon: Cpu,
             timeKey: 'ts',
+            valueLabel: 'Peak host P95',
+            p50Label: 'Typical host P95',
             helpText:
-                'Per-session CPU across the fleet. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. A widening gap means a small number of sessions are consuming most of the CPU.',
+                "High-use session CPU. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. Together they show normal high-use-session load and the busiest observed host.",
         },
         {
-            key: 'sessionMemP95',
-            p50Key: 'sessionMemP50',
+            key: 'sessionMemPeakP95',
+            p50Key: 'sessionMemTypicalP95',
             label: 'Session Memory',
             unit: '',
             thresholds: { warn: 500, crit: 800 },
-            color: 'var(--color-amber)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => (v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${Math.round(v)} MB`),
             fmtYTick: /** @param {number} v */ (v) =>
                 v === 0 ? '0' : v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`,
             icon: MemoryStick,
             timeKey: 'ts',
+            valueLabel: 'Peak host P95',
+            p50Label: 'Typical host P95',
             transform: /** @param {number} v */ (v) => v / (1024 * 1024),
             helpText:
-                'Per-session working-set memory across the fleet. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. A rising median suggests broad application growth rather than isolated heavy users.',
+                "High-use session working-set memory. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. A rising typical line indicates broadly heavier user workloads.",
+        },
+        {
+            key: 'sessionCpuAtOrAbove5',
+            p50Key: 'sessionCpuAtOrAbove20',
+            label: 'CPU-active Sessions',
+            unit: '',
+            thresholds: { warn: -1, crit: -1 },
+            color: NEUTRAL_METRIC_COLOR,
+            fmt: /** @param {number} v */ (v) => Math.round(v).toString(),
+            icon: Activity,
+            timeKey: 'ts',
+            valueLabel: '≥5% CPU',
+            p50Label: '≥20% CPU',
+            noThresholdZones: true,
+            autoScale: true,
+            helpText:
+                'Active WTS sessions whose sampled CPU reached each threshold. Compare these counts with Active Sessions in Sessions Trend to see whether workload is broad or concentrated.',
         },
     ];
 
-    // Combine server + network frame skips into a single field (both P95 and P50).
-    let rfxHistoryProcessed = $derived(
-        rfxHistory.map((h) => ({
-            ...h,
-            skipTotal: (h.skipServer ?? 0) + (h.skipNet ?? 0),
-            skipTotalP50: (h.skipServerP50 ?? 0) + (h.skipNetP50 ?? 0),
-        })),
-    );
+    let rfxHistoryProcessed = $derived(processRfxHistory(rfxHistory));
 
     const RFX_CHARTS = [
         {
@@ -709,13 +554,15 @@
             label: 'FPS Output',
             unit: 'fps',
             thresholds: { warn: 20, crit: 10 },
-            color: 'var(--color-green)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${Math.round(v)}fps`,
             icon: Monitor,
             timeKey: 'ts',
+            valueLabel: '95% Service Floor',
+            p50Label: 'Host P50',
             invertThresholds: true,
             helpText:
-                'Frames delivered to clients each second. The filled P95 service floor is numeric P5: 95% of active sessions are at or above it. The dotted P50 line is the typical active session. Lower values are worse; inactive zeroes are gaps.',
+                'Frames delivered to clients each second. The 95% Service Floor is the lowest participating-host service floor: 95% of that host’s active sessions are at or above it (numeric P5). Host P50 is the exact median reporting host. Lower values are worse; inactive zeroes are gaps.',
         },
         {
             key: 'encodeMs',
@@ -723,12 +570,14 @@
             label: 'Encode Time',
             unit: 'ms',
             thresholds: { warn: 30, crit: 50 },
-            color: 'var(--color-amber)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}ms`,
             icon: Timer,
             timeKey: 'ts',
+            valueLabel: 'Host P95',
+            p50Label: 'Host P50',
             helpText:
-                'Time spent encoding each frame. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Above 33ms can cap output below 30fps. Higher values are worse.',
+                'Time spent encoding each frame. Host P95 is the highest participating-host tail; Host P50 is the exact median reporting host. Reversed or incomplete pairs become gaps. Above 33ms can cap output below 30fps. Higher values are worse.',
         },
         {
             key: 'quality',
@@ -736,13 +585,15 @@
             label: 'Frame Quality',
             unit: '%',
             thresholds: { warn: 70, crit: 50 },
-            color: 'var(--color-accent)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${Math.round(v)}%`,
             icon: Activity,
             timeKey: 'ts',
+            valueLabel: '95% Service Floor',
+            p50Label: 'Host P50',
             invertThresholds: true,
             helpText:
-                'Compression fidelity; 100% is pixel-perfect. The filled P95 service floor is numeric P5: 95% of active sessions are at or above it. The dotted P50 line is the typical active session. Lower values are worse; inactive zeroes are gaps.',
+                'Compression fidelity; 100% is pixel-perfect. The 95% Service Floor is the lowest participating-host service floor: 95% of that host’s active sessions are at or above it (numeric P5). Host P50 is the exact median reporting host. Lower values are worse; inactive zeroes are gaps.',
         },
         {
             key: 'skipTotal',
@@ -750,12 +601,14 @@
             label: 'Frames Skipped',
             unit: '/sec',
             thresholds: { warn: 5, crit: 15 },
-            color: 'var(--color-amber)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}/s`,
             icon: Activity,
             timeKey: 'ts',
+            valueLabel: 'Host P95',
+            p50Label: 'Host P50',
             helpText:
-                'Server-resource plus network frames skipped per second; client-decoding skips are not included. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Higher values are worse.',
+                'Server-resource plus network frames skipped per second; client-decoding skips are not included. Host P95 is the highest participating-host tail; Host P50 is the exact median reporting host and is omitted when either paired component is unavailable. Higher values are worse.',
         },
         {
             key: 'rtt',
@@ -763,12 +616,14 @@
             label: 'TCP RTT',
             unit: 'ms',
             thresholds: { warn: 50, crit: 100 },
-            color: 'var(--color-red)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${Math.round(v)}ms`,
             icon: Network,
             timeKey: 'ts',
+            valueLabel: 'Host P95',
+            p50Label: 'Host P50',
             helpText:
-                'TCP-channel round-trip time between server and client; it may not represent an active UDP transport. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. Higher values are worse.',
+                'TCP-channel round-trip time between server and client; it may not represent an active UDP transport. Host P95 is the highest participating-host tail and Host P50 is the exact median reporting host. Reversed or incomplete pairs become gaps. Higher values are worse.',
         },
         {
             key: 'loss',
@@ -776,12 +631,14 @@
             label: 'Loss Rate',
             unit: '%',
             thresholds: { warn: 2, crit: 5 },
-            color: 'var(--color-accent)',
+            color: NEUTRAL_METRIC_COLOR,
             fmt: /** @param {number} v */ (v) => `${v.toFixed(2)}%`,
             icon: Network,
             timeKey: 'ts',
+            valueLabel: 'Host P95',
+            p50Label: 'Host P50',
             helpText:
-                'Packet loss on the active RDP transport. P95 is the filled envelope; P50 nests inside while ordered and switches to a dotted line if retained cohorts cross. UDP can recover losses with forward error correction; TCP responds with retransmission and congestion control.',
+                'Packet loss on the active RDP transport. Host P95 is the highest participating-host tail; Host P50 is the exact median reporting host. Reversed or incomplete pairs become gaps. UDP can recover losses with forward error correction; TCP responds with retransmission and congestion control.',
         },
     ];
 
@@ -957,9 +814,10 @@
                         </div>
                         {#if showLoadHelp}
                             <p class="chart-desc">
-                                Fleet-average CPU and memory utilization with total sessions. CPU P95 is the background
-                                envelope preserving short sampling-window spikes; Sessions is the dashed right-axis
-                                line. Drag right to reveal older history and left to return toward live.
+                                From foreground to background: CPU average rose, Memory green, Sessions blue, and CPU
+                                P95 amber. Every series has a translucent area fill; its line, fill, legend, and tooltip
+                                use the same color. Toggle state persists in this browser. Drag right for older history
+                                and left toward live.
                             </p>
                         {/if}
                     </div>
@@ -973,12 +831,11 @@
                                 onclick={s.toggle}
                             >
                                 {#if s.lineOnly}
-                                    <span class="t-dash" aria-hidden="true"></span>
+                                    <span class={s.dash ? 't-dash' : 't-line'} aria-hidden="true"></span>
                                 {:else}
                                     <span class="t-dot" aria-hidden="true"></span>
                                 {/if}
                                 {s.label}
-                                {#if s.axis === 'right'}<span class="t-axis">R</span>{/if}
                             </button>
                         {/each}
                     </div>
@@ -1017,25 +874,25 @@
                                                     pct: cpuThresh.warn,
                                                     opacity: 0.25,
                                                     label: 'CPU WARN',
-                                                    show: () => showCpu,
+                                                    show: () => showCpu && cpuThresh.warn >= 0,
                                                 },
                                                 {
                                                     pct: cpuThresh.crit,
                                                     opacity: 0.35,
                                                     label: 'CPU CRIT',
-                                                    show: () => showCpu,
+                                                    show: () => showCpu && cpuThresh.crit >= 0,
                                                 },
                                                 {
                                                     pct: memThresh.warn,
                                                     opacity: 0.25,
                                                     label: 'MEM WARN',
-                                                    show: () => showMem,
+                                                    show: () => showMem && memThresh.warn >= 0,
                                                 },
                                                 {
                                                     pct: memThresh.crit,
                                                     opacity: 0.35,
                                                     label: 'MEM CRIT',
-                                                    show: () => showMem,
+                                                    show: () => showMem && memThresh.crit >= 0,
                                                 },
                                             ]}
                                             {history}
@@ -1079,7 +936,7 @@
                 <div class="chart-card hic-section">
                     <div class="sub-label">
                         <Gauge size={12} strokeWidth={2.4} /> HEALTH INDICATORS
-                        <span class="sub-label-note">· P95 across fleet</span>
+                        <span class="sub-label-note">· fleet average / worst-host tail / median host</span>
                         <button
                             class="help-toggle"
                             class:active={showHicHelp}
@@ -1092,9 +949,10 @@
                     </div>
                     {#if showHicHelp}
                         <p class="chart-desc">
-                            Input responsiveness, memory pressure, network reliability, and storage I/O. P95 or fleet
-                            average remains filled. P50 or median nests inside only while ordered; if retained cohorts
-                            cross, it switches to a dotted line so it cannot conceal the primary series.
+                            Input Delay compares Host P95 (the highest participating host) with Host P50 (the exact
+                            median reporting host). Pages, TCP Retrans, and Disk Queue compare Fleet AVG with Host P50.
+                            The solid primary line/fill is blue; the dotted secondary line/fill is violet.
+                            Green/amber/red zones and current-value color communicate severity.
                         </p>
                     {/if}
 
@@ -1153,7 +1011,7 @@
                 <div class="chart-card hic-section">
                     <div class="sub-label">
                         <Users size={12} strokeWidth={2.4} /> SESSION METRICS
-                        <span class="sub-label-note">· Fleet overview</span>
+                        <span class="sub-label-note">· Typical vs peak host load</span>
                         <button
                             class="help-toggle"
                             class:active={showSessionHelp}
@@ -1166,9 +1024,11 @@
                     </div>
                     {#if showSessionHelp}
                         <p class="chart-desc">
-                            Session count, capacity utilization, and per-session CPU and memory. P95 remains filled.
-                            P50 nests inside only while ordered and switches to a dotted line if retained cohorts cross,
-                            keeping both series visible.
+                            Session count and utilization describe connected demand and capacity. Session CPU and memory
+                            compare the typical host’s high-use sessions with the busiest host’s high-use sessions.
+                            CPU-active Sessions counts active WTS sessions at or above 5% and 20% CPU. Primary and
+                            secondary consumers use distinct matching line, fill, legend, and tooltip colors; secondary
+                            series are violet and dotted. Zones and current-value color communicate severity.
                         </p>
                     {/if}
 
@@ -1227,7 +1087,7 @@
                 <div class="chart-card hic-section">
                     <div class="sub-label">
                         <Monitor size={12} strokeWidth={2.4} /> REMOTEFX
-                        <span class="sub-label-note">· Graphics & Network P95 / P50</span>
+                        <span class="sub-label-note">· Fleet tails / median host</span>
                         <button
                             class="help-toggle"
                             class:active={showRfxHelp}
@@ -1240,11 +1100,10 @@
                     </div>
                     {#if showRfxHelp}
                         <p class="chart-desc">
-                            Frame delivery, encoding, visual quality, and network conditions. FPS and Frame Quality
-                            use a filled P95 service floor with a dotted P50 median because higher is better. Other
-                            charts nest P50 only while it stays inside P95; crossed retained cohorts automatically use
-                            a dotted P50 line so P95 remains visible. P50 appears only where the source report supplied
-                            it; older retained buckets remain P95-only instead of being presented as zero.
+                            FPS and Frame Quality show the lowest participating-host service floor; conventional metrics
+                            show the highest participating-host P95. P50 is the exact median reporting host. The solid
+                            primary line/fill is blue; the dotted P50 line/fill is violet. Zones and current-value color
+                            communicate severity. Reversed, incomplete, or incompatible P50 pairs are gaps.
                         </p>
                     {/if}
 
@@ -1255,6 +1114,8 @@
                                     history={rfxHistoryProcessed}
                                     valueKey={mc.key}
                                     p50Key={mc.p50Key}
+                                    valueLabel={mc.valueLabel ?? 'Host P95'}
+                                    p50Label={mc.p50Label ?? 'Host P50'}
                                     label={mc.label}
                                     unit={mc.unit}
                                     thresholds={mc.thresholds}
@@ -1538,6 +1399,18 @@
         border-color: rgba(255, 255, 255, 0.4);
     }
 
+    .t-line {
+        width: 18px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--sc);
+        flex-shrink: 0;
+    }
+
+    .chart-toggle.active .t-line {
+        background: rgba(255, 255, 255, 0.9);
+    }
+
     /* Dashed line indicator (Sessions — right-axis series) */
     .t-dash {
         width: 18px;
@@ -1561,12 +1434,6 @@
             transparent 7px,
             transparent 11px
         );
-    }
-
-    .t-axis {
-        font-size: 0.52rem;
-        opacity: 0.55;
-        margin-left: -2px;
     }
 
     /* ── Load chart area ── */

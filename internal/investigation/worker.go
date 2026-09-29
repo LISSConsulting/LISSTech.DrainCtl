@@ -24,7 +24,7 @@ type finalizationCandidate struct {
 // Worker serializes durable claims and provider egress. A candidate is retained
 // only after a local HTTP return, solely to retry its SQLite finalization.
 type Worker struct {
-	Store          Storage
+	Store          WorkerStorage
 	Client         SendClient
 	Configuration  SendConfiguration
 	CanaryProvider func() []string
@@ -56,6 +56,11 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	if handled, err := w.finalizeCandidate(ctx); handled {
 		return true, err
 	}
+	// Leave admitted work queued until a send token is available. A local
+	// throttle is not a provider failure and must not consume an attempt.
+	if !w.canSend() {
+		return false, nil
+	}
 
 	cutoff := int64(0)
 	if w.CutoffMS != nil {
@@ -78,7 +83,7 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 		return true, w.fail(ctx, attempt.ID, TerminalReasonConfigurationDisabled)
 	}
 	if err := w.allowSend(); err != nil {
-		return true, w.fail(ctx, attempt.ID, TerminalReasonProviderRateLimited)
+		return true, w.Store.Requeue(ctx, attempt.ID)
 	}
 
 	authorized := false
@@ -231,6 +236,19 @@ func (w *Worker) allowSend() error {
 	}
 	w.sent = append(w.sent, now)
 	return nil
+}
+
+func (w *Worker) canSend() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	now := w.now()
+	count := 0
+	for _, at := range w.sent {
+		if at.After(now.Add(-time.Minute)) {
+			count++
+		}
+	}
+	return count < 10 && (count < 2 || now.Sub(w.sent[len(w.sent)-1]) >= 6*time.Second)
 }
 
 // releaseSendReservation undoes a rate reservation when durable authorization

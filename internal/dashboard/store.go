@@ -316,7 +316,7 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 //
 // On store.Update error the cache is left untouched: a failed write must not
 // poison the cache with an unpersisted snapshot.
-func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
+func (s *ServerState) Update(hostname string, result *dc.CheckResult) (bool, error) {
 	hostname = telemetry.CanonicalHostname(hostname)
 	// Exclusion gate: refuse to write new metric data for tombstoned hosts.
 	// The /report HTTP handler is expected to call IsRegistered first, but
@@ -325,14 +325,14 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	// excluded hosts cannot ingest reports until restored.
 	if s.IsExcluded(hostname) {
 		slog.Info("dashboard: update refused — host is permanently removed", "host", hostname) //nolint:gosec
-		return
+		return false, nil
 	}
 	lastJSON := ""
 	if result != nil {
 		data, err := json.Marshal(result)
 		if err != nil {
 			slog.Error("dashboard: update marshal failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
-			return
+			return false, err
 		}
 		lastJSON = string(data)
 	}
@@ -348,10 +348,10 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		// of truth; caching unpersisted data would let GetCached return a
 		// view that diverges from what Get/All/the SQLite row would yield.
 		slog.Error("dashboard: update failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
-		return
+		return false, err
 	}
 	if !updated {
-		return
+		return false, nil
 	}
 	if _, ok := s.store.(acceptedResultWriter); ok && result != nil && !result.Timestamp.IsZero() && s.sessionDropInboxWaker != nil {
 		s.sessionDropInboxWaker.WakeSessionDropInbox()
@@ -384,7 +384,7 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		if s.OnMetrics != nil && result != nil {
 			s.OnMetrics(*result)
 		}
-		return
+		return true, nil
 	}
 	info := &ServerInfo{
 		Hostname:     hostname,
@@ -411,6 +411,7 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if s.OnMetrics != nil && result != nil {
 		s.OnMetrics(*result)
 	}
+	return true, nil
 }
 
 // updateAccepted persists a heartbeat through the feature-aware transactional
@@ -629,7 +630,10 @@ func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult, force
 		slog.Info("dashboard: report refused — host is permanently removed", "host", hostname) //nolint:gosec
 		return false
 	}
-	s.Update(hostname, result)
+	updated, err := s.Update(hostname, result)
+	if err != nil || !updated {
+		return false
+	}
 	if forceUpdate != nil && s.OnLocalForceUpdateCompletion != nil {
 		s.OnLocalForceUpdateCompletion(*forceUpdate)
 	}

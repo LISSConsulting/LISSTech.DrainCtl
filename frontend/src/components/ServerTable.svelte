@@ -1,5 +1,4 @@
 <script>
-    import { untrack } from 'svelte';
     import {
         appState,
         removeServerMetrics,
@@ -9,9 +8,12 @@
         toggleSelection,
         pruneSelectionFor,
         clearSelection,
+        toggleExpandedServerHost,
+        dropExpandedServerHost,
+        pruneExpandedServerHosts,
     } from '../lib/state.svelte.js';
     import {
-        deleteServer,
+        permanentRemoveServer,
         fetchEvtSpikeStatus,
         fetchServers,
         permanentRemoveHosts,
@@ -35,8 +37,51 @@
     /** @type {string[]|null} */
     let confirmBatchRemoveHosts = $state(null);
 
-    /** @type {Set<string>} */
-    let expandedHosts = $state(new Set());
+    /** Expanded rows live in appState so tab navigation does not collapse them. */
+    let expandedHosts = $derived(appState.expandedServerHosts);
+    /** @type {HTMLTableElement|null} */
+    let tableElement = $state(null);
+    /** Only the detail group crossing the sticky nav boundary may pin its row. */
+    let stickyHost = $state(/** @type {string|null} */ (null));
+    /** @type {number|null} */
+    let stickyFrame = null;
+
+    function refreshStickyHost() {
+        stickyFrame = null;
+        if (!tableElement) {
+            stickyHost = null;
+            return;
+        }
+        const stickyTop =
+            Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-height')) || 52;
+        let next = /** @type {string|null} */ (null);
+        for (const group of tableElement.querySelectorAll('tbody.expanded-row-group')) {
+            const bounds = group.getBoundingClientRect();
+            if (bounds.top <= stickyTop && bounds.bottom > stickyTop) {
+                next = group.getAttribute('data-host-group');
+            }
+        }
+        stickyHost = next;
+    }
+
+    function scheduleStickyHostRefresh() {
+        if (stickyFrame !== null) return;
+        stickyFrame = requestAnimationFrame(refreshStickyHost);
+    }
+
+    $effect(() => {
+        expandedHosts.size;
+        tableElement;
+        scheduleStickyHostRefresh();
+        window.addEventListener('scroll', scheduleStickyHostRefresh, { passive: true });
+        window.addEventListener('resize', scheduleStickyHostRefresh);
+        return () => {
+            window.removeEventListener('scroll', scheduleStickyHostRefresh);
+            window.removeEventListener('resize', scheduleStickyHostRefresh);
+            if (stickyFrame !== null) cancelAnimationFrame(stickyFrame);
+            stickyFrame = null;
+        };
+    });
     let sortCol = $state(localStorage.getItem('drainctl-sort-col') || 'host');
     let sortDir = $state(parseInt(localStorage.getItem('drainctl-sort-dir') ?? '1', 10) || 1);
     let search = $state(localStorage.getItem('drainctl-search') || '');
@@ -54,22 +99,10 @@
     /** @type {Set<string>} */
     let removingHosts = $state(new Set());
 
-    // Prune expandedHosts when servers are removed via SSE (external deletion).
-    // When the local UI deletes a server via doRemoveServer(), expandedHosts is
-    // cleaned up there. But an SSE server_deleted event from another browser only
-    // removes the host from appState.servers — expandedHosts retains the stale
-    // entry. This effect tracks appState.servers reactively and removes any host
-    // from expandedHosts that is no longer in the server list, so that if the
-    // same hostname re-registers later it does not appear pre-expanded.
+    // Expanded rows survive view remounts, but never survive deletion from the
+    // authoritative live roster.
     $effect(() => {
-        const liveHosts = new Set(appState.servers.map((s) => s.host));
-        const current = untrack(() => expandedHosts);
-        const stale = [...current].filter((h) => !liveHosts.has(h));
-        if (stale.length > 0) {
-            const next = new Set(current);
-            for (const h of stale) next.delete(h);
-            expandedHosts = next;
-        }
+        pruneExpandedServerHosts(new Set(appState.servers.map((server) => server.host)));
     });
     // The SSE broker suppresses only identical detector-status snapshots.
     // Cold pages still seed through REST before the next readiness, warm-up,
@@ -90,7 +123,6 @@
                 });
         }
     });
-
 
     // Reactive clock — ticks every 10 s so that relative timestamps and the
     // grace-period countdown badge stay fresh between 30-second server refreshes.
@@ -217,10 +249,7 @@
     }
 
     function toggleRow(host) {
-        const next = new Set(expandedHosts);
-        if (next.has(host)) next.delete(host);
-        else next.add(host);
-        expandedHosts = next;
+        toggleExpandedServerHost(host);
     }
 
     function requestRemoveServer(host) {
@@ -233,15 +262,12 @@
         if (!host || removingHosts.has(host)) return;
         removingHosts = new Set([...removingHosts, host]);
         try {
-            await deleteServer(host);
+            await permanentRemoveServer(host);
             appState.servers = appState.servers.filter((s) => s.host !== host);
             removeServerMetrics(host);
             removeEvtSpikeState(host);
-            if (expandedHosts.has(host)) {
-                const next = new Set(expandedHosts);
-                next.delete(host);
-                expandedHosts = next;
-            }
+            dropExpandedServerHost(host);
+            appState.notifyRemovedServersChanged();
         } catch (e) {
             removeError = 'Remove failed: ' + (e?.message ?? String(e));
             clearTimeout(removeErrorTimer);
@@ -503,8 +529,6 @@
         return 'var(--color-muted)';
     }
 
-
-
     // Persist search
     $effect(() => {
         localStorage.setItem('drainctl-search', search);
@@ -613,7 +637,7 @@
         </div>
     {:else if sorted.length}
         <div class="card">
-            <table class="srv-tbl">
+            <table class="srv-tbl" bind:this={tableElement}>
                 <thead>
                     <tr>
                         <th class="sel-col">
@@ -734,8 +758,8 @@
                         <th></th>
                     </tr>
                 </thead>
-                <tbody>
-                    {#each pagedGroups as group (group.collection)}
+                {#each pagedGroups as group (group.collection)}
+                    <tbody class="collection-row-group">
                         <tr class="collection-group-header">
                             <th colspan="12" scope="rowgroup">
                                 <span>RD SESSION COLLECTION</span>
@@ -745,26 +769,32 @@
                                 >
                             </th>
                         </tr>
-                        {#each group.servers as srv (srv.host)}
-                            {@const memPct =
-                                srv.perf?.mem_total_mb > 0
-                                    ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100
-                                    : null}
-                            {@const cpuColor = srv.perf
-                                ? getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)
-                                : 'neutral'}
-                            {@const memColor =
-                                memPct != null ? getThresholdColor(memPct, memThresh.warn, memThresh.crit) : 'neutral'}
-                            {@const delayColor = srv.perf
-                                ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit)
-                                : 'neutral'}
-                            {@const sessPct =
-                                srv.max_sessions > 0 ? ((srv.sessions ?? 0) / srv.max_sessions) * 100 : null}
-                            {@const sessColor = getThresholdColor(sessPct, sessionWarnThresh, 100)}
-                            {@const cpuStyle = thresholdStyle(cpuColor)}
-                            {@const memStyle = thresholdStyle(memColor)}
-                            {@const delayStyle = thresholdStyle(delayColor)}
-                            {@const srvHistory = appState.serverMetrics.get(srv.host)}
+                    </tbody>
+                    {#each group.servers as srv (srv.host)}
+                        {@const memPct =
+                            srv.perf?.mem_total_mb > 0
+                                ? (1 - srv.perf.mem_avail_mb / srv.perf.mem_total_mb) * 100
+                                : null}
+                        {@const cpuColor = srv.perf
+                            ? getThresholdColor(srv.perf.cpu_pct, cpuThresh.warn, cpuThresh.crit)
+                            : 'neutral'}
+                        {@const memColor =
+                            memPct != null ? getThresholdColor(memPct, memThresh.warn, memThresh.crit) : 'neutral'}
+                        {@const delayColor = srv.perf
+                            ? getThresholdColor(srv.perf.input_delay_p95_ms, delayThresh.warn, delayThresh.crit)
+                            : 'neutral'}
+                        {@const sessPct = srv.max_sessions > 0 ? ((srv.sessions ?? 0) / srv.max_sessions) * 100 : null}
+                        {@const sessColor = getThresholdColor(sessPct, sessionWarnThresh, 100)}
+                        {@const cpuStyle = thresholdStyle(cpuColor)}
+                        {@const memStyle = thresholdStyle(memColor)}
+                        {@const delayStyle = thresholdStyle(delayColor)}
+                        {@const srvHistory = appState.serverMetrics.get(srv.host)}
+                        <tbody
+                            class="server-row-group"
+                            class:expanded-row-group={expandedHosts.has(srv.host)}
+                            class:sticky-row-group={stickyHost === srv.host}
+                            data-host-group={srv.host}
+                        >
                             <tr
                                 class="clickable {expandedHosts.has(srv.host) ? 'sel' : ''} {appState.selectedHosts.has(
                                     srv.host,
@@ -876,9 +906,9 @@
                                     </td>
                                 </tr>
                             {/if}
-                        {/each}
+                        </tbody>
                     {/each}
-                </tbody>
+                {/each}
             </table>
         </div>
 
@@ -908,9 +938,9 @@
 
 {#if confirmRemoveHost}
     <ConfirmDialog
-        title="Remove Server"
-        message="Remove {confirmRemoveHost} from the dashboard? This cannot be undone."
-        confirmLabel="Remove"
+        title="Permanently Remove Server"
+        message="This will durable-tombstone {confirmRemoveHost} and reject future re-registration until it is restored in Configuration."
+        confirmLabel="Permanently Remove"
         cancelLabel="Cancel"
         onconfirm={doRemoveServer}
         oncancel={() => (confirmRemoveHost = null)}
@@ -937,8 +967,9 @@
         min-width: 0;
     }
     .grid > .card {
-        overflow-x: auto;
-        overflow-y: hidden;
+        /* A scroll-container ancestor prevents the expanded host row from
+           sticking to the viewport. Let the document own overflow instead. */
+        overflow: visible;
     }
     .filter-bar {
         display: flex;
@@ -1124,6 +1155,17 @@
     .sel td {
         background: color-mix(in srgb, var(--color-accent) 8%, var(--color-card)) !important;
     }
+
+    /* Exactly one expanded host may stick at the navbar boundary. The scroll
+       observer transfers ownership as the next detail group reaches the top,
+       so multi-expanded rows never overlap. */
+    .sticky-row-group > .clickable > td {
+        position: sticky;
+        top: var(--nav-height);
+        z-index: 30;
+        background: color-mix(in srgb, var(--color-accent) 8%, var(--color-card)) !important;
+        box-shadow: 0 2px 0 var(--color-border);
+    }
     .dot {
         display: inline-block;
         width: 8px;
@@ -1131,6 +1173,19 @@
         border-radius: 50%;
         margin-right: 6px;
         vertical-align: middle;
+    }
+    @media (max-width: 1399px) {
+        .grid > .card {
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        /* Preserve table-local horizontal scrolling on narrow viewports. Its
+           scroll container cannot also support viewport-relative sticky cells. */
+        .sticky-row-group > .clickable > td {
+            position: static;
+            box-shadow: none;
+        }
     }
     .dot.ok {
         background: var(--color-green);

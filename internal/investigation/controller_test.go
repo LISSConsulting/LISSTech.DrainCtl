@@ -45,6 +45,7 @@ func (s *controllerTestStorage) Create(context.Context, CreateAttempt) (Attempt,
 func (*controllerTestStorage) ClaimNext(context.Context, int64, int64) (Attempt, bool, error) {
 	return Attempt{}, false, nil
 }
+func (*controllerTestStorage) Requeue(context.Context, int64) error { return nil }
 func (*controllerTestStorage) LoadEvidence(context.Context, int64) (EvidenceSnapshot, error) {
 	return EvidenceSnapshot{}, nil
 }

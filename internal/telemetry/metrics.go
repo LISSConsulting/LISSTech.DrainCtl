@@ -462,6 +462,9 @@ var summableFleetCounters = []string{
 	"sessions_total",
 	"sessions_active",
 	"sessions_disconnected",
+	"session_cpu_observed_count",
+	"session_cpu_ge_5_count",
+	"session_cpu_ge_20_count",
 }
 
 // MemUsedPctCounter is the synthetic fleet-only counter name for memory

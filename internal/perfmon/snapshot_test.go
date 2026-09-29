@@ -180,19 +180,53 @@ func TestFilterRemoteFXValues_ValidationAndDirectionalPercentiles(t *testing.T) 
 	}
 }
 
-func TestAggregate_PreservesSessionPercentiles(t *testing.T) {
+func TestActiveCounterValues_OnlyIncludesActiveWTSInstances(t *testing.T) {
+	active := map[string]struct{}{
+		sessionInstanceKey("RDP-Tcp#7"): {},
+	}
+	values := []pdhNamedValue{
+		{Name: "RDP-Tcp#3", Value: 400},
+		{Name: "RDP-Tcp 7", Value: 24},
+		{Name: "Services", Value: 400},
+	}
+	filtered := make([]float64, 0, len(values))
+	for _, value := range values {
+		if _, ok := active[sessionInstanceKey(value.Name)]; ok {
+			filtered = append(filtered, value.Value)
+		}
+	}
+	filtered = filterRemoteFXValues(filtered, 0, 60000, false)
+	if len(filtered) != 1 || filtered[0] != 24 {
+		t.Fatalf("active RTT values = %v, want [24]", filtered)
+	}
+}
+
+func TestAggregate_PreservesSessionOperationalMetrics(t *testing.T) {
 	got := aggregate([]dc.PerfSnapshot{
-		{SessionCPUP50: 2.1, SessionCPUP95: 8.4, SessionMemP50: 100, SessionMemP95: 400},
-		{SessionCPUP50: 3.2, SessionCPUP95: 7.5, SessionMemP50: 150, SessionMemP95: 350},
+		{
+			SessionCPUP95: 8.4, SessionMemP95: 400,
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     10,
+			SessionCPUAtOrAbove5Count:   3,
+			SessionCPUAtOrAbove20Count:  1,
+		},
+		{
+			SessionCPUP95: 7.5, SessionMemP95: 350,
+			SessionCPUActivityCollected: true,
+			SessionCPUObservedCount:     12,
+			SessionCPUAtOrAbove5Count:   5,
+			SessionCPUAtOrAbove20Count:  2,
+		},
 	})
 
-	if got.SessionCPUP50 != 3.2 || got.SessionCPUP95 != 8.4 {
-		t.Errorf("session CPU percentiles = (P50 %v, P95 %v), want (P50 3.2, P95 8.4)",
-			got.SessionCPUP50, got.SessionCPUP95)
+	if got.SessionCPUP95 != 8.4 || got.SessionMemP95 != 400 {
+		t.Errorf("session P95 = (%v, %v), want (8.4, 400)", got.SessionCPUP95, got.SessionMemP95)
 	}
-	if got.SessionMemP50 != 150 || got.SessionMemP95 != 400 {
-		t.Errorf("session memory percentiles = (P50 %v, P95 %v), want (P50 150, P95 400)",
-			got.SessionMemP50, got.SessionMemP95)
+	if !got.SessionCPUActivityCollected ||
+		got.SessionCPUObservedCount != 12 ||
+		got.SessionCPUAtOrAbove5Count != 5 ||
+		got.SessionCPUAtOrAbove20Count != 2 {
+		t.Errorf("session CPU activity = %+v, want peak counts (12, 5, 2)", got)
 	}
 }
 
@@ -235,7 +269,7 @@ func TestSanitizePerfFieldRejectsInvalidValues(t *testing.T) {
 		{"cpu_pct", math.NaN()},
 		{"rfx_rtt_ms", math.Inf(1)},
 		{"rfx_quality_pct", 101},
-		{"session_mem_p50_bytes", -1},
+		{"session_cpu_ge_5_count", -1},
 	} {
 		if _, ok := dc.SanitizePerfField(test.field, test.value); ok {
 			t.Errorf("SanitizePerfField(%q, %v) accepted invalid value", test.field, test.value)
@@ -349,6 +383,43 @@ func TestSanitizePerfSnapshotRemoteFXSemantics(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			test.check(t, dc.SanitizePerfSnapshot(test.input))
 		})
+	}
+}
+
+func TestSanitizePerfSnapshotRejectsReversedRemotePercentiles(t *testing.T) {
+	got := dc.SanitizePerfSnapshot(dc.PerfSnapshot{
+		InputDelayP95: 10,
+		InputDelayP50: 20,
+		RFXAvailable:  true,
+		RFXFPSOut:     30, RFXFPSOutP50: 20,
+		RFXEncodeMS: 5, RFXEncodeMSP50: 87,
+		RFXQuality: 90, RFXQualityP50: 80,
+		RFXRTT: 5, RFXRTTP50: 87,
+		P50Present: dc.PerfP50InputDelay |
+			dc.PerfP50RFXFPSOut |
+			dc.PerfP50RFXEncodeMS |
+			dc.PerfP50RFXQuality |
+			dc.PerfP50RFXRTT,
+	})
+
+	if got.InputDelayP95 != 10 || got.InputDelayP50 != 20 {
+		t.Fatalf("non-RemoteFX percentiles changed: P95=%v P50=%v", got.InputDelayP95, got.InputDelayP50)
+	}
+	for name, test := range map[string]struct {
+		primary  float64
+		median   float64
+		presence dc.PerfP50Presence
+		want     float64
+	}{
+		"fps":     {got.RFXFPSOut, got.RFXFPSOutP50, dc.PerfP50RFXFPSOut, 30},
+		"encode":  {got.RFXEncodeMS, got.RFXEncodeMSP50, dc.PerfP50RFXEncodeMS, 5},
+		"quality": {got.RFXQuality, got.RFXQualityP50, dc.PerfP50RFXQuality, 90},
+		"rtt":     {got.RFXRTT, got.RFXRTTP50, dc.PerfP50RFXRTT, 5},
+	} {
+		if test.primary != test.want || test.median != 0 || got.HasP50(test.presence, test.median) {
+			t.Errorf("%s = (primary=%v, P50=%v, present=%v), want (%v, 0, false)",
+				name, test.primary, test.median, got.HasP50(test.presence, test.median), test.want)
+		}
 	}
 }
 

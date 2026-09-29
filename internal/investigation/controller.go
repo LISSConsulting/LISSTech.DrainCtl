@@ -39,7 +39,7 @@ type ProviderReadiness interface {
 // the authoritative transactional source-eligibility, dedupe, and cap checks;
 // Wake only signals durable queued work and is never a correctness handoff.
 type Controller struct {
-	Store     Storage
+	Store     ControllerStorage
 	Evidence  EvidenceBuilder
 	Readiness ProviderReadiness
 	Wake      func()

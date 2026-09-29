@@ -58,15 +58,13 @@ export function getThresholdColor(value, warn, crit, direction = 'higher-worse')
     if (value == null || !Number.isFinite(value)) return 'neutral';
 
     if (direction === 'lower-worse') {
-        // Low values are bad (e.g. available capacity score)
-        if (value <= crit) return 'red';
-        if (value <= warn) return 'amber';
+        if (crit >= 0 && value <= crit) return 'red';
+        if (warn >= 0 && value <= warn) return 'amber';
         return 'green';
     }
 
-    // Higher-worse (default): high values are bad
-    if (value >= crit) return 'red';
-    if (value >= warn) return 'amber';
+    if (crit >= 0 && value >= crit) return 'red';
+    if (warn >= 0 && value >= warn) return 'amber';
     return 'green';
 }
 
@@ -80,19 +78,20 @@ export function getThresholdColor(value, warn, crit, direction = 'higher-worse')
  * @property {number} crit
  */
 
+/** @param {number|null|undefined} value @param {number} fallback */
+function resolveConfiguredThreshold(value, fallback) {
+    if (value === -1) return -1;
+    return value > 0 ? value : fallback;
+}
+
 /**
  * Resolve thresholds for a metric, preferring values from the server's
  * perf_monitoring config over the built-in DEFAULTS.
  *
  * Recognised config overrides:
  *   cpu         → cpu_warn_pct / cpu_crit_pct           (% used, 0 = use default)
- *   mem         → mem_warn_pct / mem_crit_pct           (% FREE in Go config, converted
- *                                                         to % used here; 0 = use default)
+ *   mem         → mem_warn_pct / mem_crit_pct           (% used, normalized by the API layer)
  *   inputDelay  → input_delay_warn_ms / input_delay_crit_ms (ms, 0 = use default)
- *
- * Go stores memory thresholds as "% free" (e.g. mem_warn_pct=20 means warn when
- * <20% free). The ring gauge and color helpers use "% used" (0–100), so this
- * function inverts them: threshold_pct_used = 100 - threshold_pct_free.
  *
  * A value of 0 in perfConfig means "use the default" — this matches Go's
  * resolveThreshold(0, defVal) = defVal semantics. Use -1 to disable a threshold.
@@ -111,19 +110,19 @@ export function resolveThresholds(metricKey, perfConfig) {
     switch (metricKey) {
         case 'cpu':
             return {
-                warn: perfConfig.cpu_warn_pct > 0 ? perfConfig.cpu_warn_pct : defaults.warn,
-                crit: perfConfig.cpu_crit_pct > 0 ? perfConfig.cpu_crit_pct : defaults.crit,
+                warn: resolveConfiguredThreshold(perfConfig.cpu_warn_pct, defaults.warn),
+                crit: resolveConfiguredThreshold(perfConfig.cpu_crit_pct, defaults.crit),
             };
         case 'mem':
-            // API layer already converts Go's % free to % used on load.
+            // API layer already converts Go's % free to % used.
             return {
-                warn: perfConfig.mem_warn_pct > 0 ? perfConfig.mem_warn_pct : defaults.warn,
-                crit: perfConfig.mem_crit_pct > 0 ? perfConfig.mem_crit_pct : defaults.crit,
+                warn: resolveConfiguredThreshold(perfConfig.mem_warn_pct, defaults.warn),
+                crit: resolveConfiguredThreshold(perfConfig.mem_crit_pct, defaults.crit),
             };
         case 'inputDelay':
             return {
-                warn: perfConfig.input_delay_warn_ms > 0 ? perfConfig.input_delay_warn_ms : defaults.warn,
-                crit: perfConfig.input_delay_crit_ms > 0 ? perfConfig.input_delay_crit_ms : defaults.crit,
+                warn: resolveConfiguredThreshold(perfConfig.input_delay_warn_ms, defaults.warn),
+                crit: resolveConfiguredThreshold(perfConfig.input_delay_crit_ms, defaults.crit),
             };
         default:
             return { ...defaults };

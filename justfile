@@ -104,7 +104,7 @@ resource:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "   drainctl.syso — v$ver" -ForegroundColor DarkGray
 
-# Build the Svelte dashboard (runs pnpm build in frontend/)
+# Test and build the Svelte dashboard
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 frontend:
@@ -112,6 +112,8 @@ frontend:
     Write-Host "`n🎨 Building frontend  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     Push-Location "{{justfile_directory()}}/frontend"
     try {
+        & pnpm test
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         & pnpm build
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {

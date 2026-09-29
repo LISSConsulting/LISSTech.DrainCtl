@@ -159,6 +159,71 @@ func TestQueryRangeFleet_ExcludesUnlimitedSessionCapacity(t *testing.T) {
 		})
 	}
 }
+func TestQueryRangeFleet_SumsSessionCPUActivityCounts(t *testing.T) {
+	ms, db := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02"}
+	counters := []string{
+		"session_cpu_observed_count",
+		"session_cpu_ge_5_count",
+		"session_cpu_ge_20_count",
+	}
+	values := [][]float64{
+		{10, 2, 1},
+		{8, 3, 0},
+	}
+
+	rawSamples := make([]Sample, 0, len(hosts)*len(counters))
+	for hostIndex, host := range hosts {
+		for counterIndex, counter := range counters {
+			rawSamples = append(rawSamples, Sample{
+				Ts: base, Host: host, Counter: counter, Value: values[hostIndex][counterIndex],
+			})
+		}
+	}
+	if err := ms.Append(ctx, rawSamples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	aggregateInserts := []string{
+		`INSERT INTO metrics_5min(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+		`INSERT INTO metrics_hourly(bucket_ts, host, counter, avg_value, min_value, max_value, sample_count)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+	}
+	for _, query := range aggregateInserts {
+		for hostIndex, host := range hosts {
+			for counterIndex, counter := range counters {
+				if _, err := db.writer.Exec(
+					query,
+					base.UnixMilli(), host, counter,
+					values[hostIndex][counterIndex], values[hostIndex][counterIndex], values[hostIndex][counterIndex],
+				); err != nil {
+					t.Fatalf("insert aggregated %s: %v", counter, err)
+				}
+			}
+		}
+	}
+
+	for _, tier := range []Tier{TierRaw, TierOneMin, TierFiveMin, TierHourly} {
+		t.Run(tier.TierName(), func(t *testing.T) {
+			series, err := ms.QueryRangeFleet(ctx, hosts, base, base.Add(time.Hour), tier, counters, 60_000)
+			if err != nil {
+				t.Fatalf("QueryRangeFleet: %v", err)
+			}
+			for counter, want := range map[string]float64{
+				"session_cpu_observed_count": 18,
+				"session_cpu_ge_5_count":     5,
+				"session_cpu_ge_20_count":    1,
+			} {
+				got := series.Data[counter]
+				if got == nil || len(got.Avg) != 1 || got.Avg[0] != want {
+					t.Errorf("%s fleet total = %+v, want %v", counter, got, want)
+				}
+			}
+		})
+	}
+}
 
 func TestQueryRangeFleet_SessionsMaxDropsAllUnlimitedBuckets(t *testing.T) {
 	ms, db := newMetricsStore(t)
@@ -264,6 +329,64 @@ func TestQueryRangeFleet_ExactP50HandlesOddEvenAndMissingHosts(t *testing.T) {
 	}
 	if len(mem.P50) != 2 || math.Abs(mem.P50[0]-30) > 1e-9 || math.Abs(mem.P50[1]-40) > 1e-9 {
 		t.Errorf("mem_used_pct P50 = %v, want [30 40]", mem.P50)
+	}
+}
+
+func TestQueryRangeFleetRemoteFXTailInputsHandleMissingP50Host(t *testing.T) {
+	ms, _ := newMetricsStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
+	hosts := []string{"SRV01", "SRV02", "SRV03"}
+
+	samples := []Sample{
+		{Ts: base, Host: "SRV01", Counter: "rfx_encode_ms", Value: 100},
+		{Ts: base, Host: "SRV01", Counter: "rfx_encode_ms_p50", Value: 50},
+		{Ts: base, Host: "SRV02", Counter: "rfx_encode_ms", Value: 80},
+		{Ts: base, Host: "SRV02", Counter: "rfx_encode_ms_p50", Value: 40},
+		{Ts: base, Host: "SRV03", Counter: "rfx_encode_ms", Value: 120},
+		{Ts: base, Host: "SRV01", Counter: "rfx_fps_out", Value: 20},
+		{Ts: base, Host: "SRV01", Counter: "rfx_fps_out_p50", Value: 30},
+		{Ts: base, Host: "SRV02", Counter: "rfx_fps_out", Value: 15},
+		{Ts: base, Host: "SRV02", Counter: "rfx_fps_out_p50", Value: 25},
+		{Ts: base, Host: "SRV03", Counter: "rfx_fps_out", Value: 10},
+		// Historical bucket with primary tail data but no paired P50 data.
+		{Ts: base.Add(time.Minute), Host: "SRV01", Counter: "rfx_encode_ms", Value: 130},
+		{Ts: base.Add(time.Minute), Host: "SRV02", Counter: "rfx_encode_ms", Value: 90},
+	}
+	if err := ms.Append(ctx, samples); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	series, err := ms.QueryRangeFleet(ctx, hosts, base, base.Add(2*time.Minute), TierRaw, nil, 60_000)
+	if err != nil {
+		t.Fatalf("QueryRangeFleet: %v", err)
+	}
+
+	encodeP95 := series.Data["rfx_encode_ms"]
+	encodeP50 := series.Data["rfx_encode_ms_p50"]
+	if encodeP95 == nil || encodeP50 == nil {
+		t.Fatalf("encode series missing: P95=%+v P50=%+v", encodeP95, encodeP50)
+	}
+	if got, want := encodeP95.Max, []float64{120, 130}; !slices.Equal(got, want) {
+		t.Fatalf("encode max = %v, want %v", got, want)
+	}
+	if got, want := encodeP50.P50, []float64{45}; !slices.Equal(got, want) {
+		t.Fatalf("encode median-host P50 = %v, want %v", got, want)
+	}
+	if encodeP95.Max[0] < encodeP50.P50[0] {
+		t.Fatalf("encode worst-host P95 %v < median-host P50 %v", encodeP95.Max[0], encodeP50.P50[0])
+	}
+	if len(encodeP50.T) != 1 || encodeP50.T[0] != encodeP95.T[0] {
+		t.Fatalf("unpaired historical bucket must have no P50 point: P95.T=%v P50.T=%v", encodeP95.T, encodeP50.T)
+	}
+
+	fpsFloor := series.Data["rfx_fps_out"]
+	fpsP50 := series.Data["rfx_fps_out_p50"]
+	if fpsFloor == nil || fpsP50 == nil {
+		t.Fatalf("FPS series missing: floor=%+v P50=%+v", fpsFloor, fpsP50)
+	}
+	if fpsFloor.Min[0] != 10 || fpsP50.P50[0] != 27.5 {
+		t.Fatalf("FPS floor/P50 = (%v, %v), want (10, 27.5)", fpsFloor.Min[0], fpsP50.P50[0])
 	}
 }
 

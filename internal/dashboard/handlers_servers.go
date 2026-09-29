@@ -306,7 +306,15 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	// replace the host's last good heartbeat with that sparse envelope.
 	completion, hasCompletion := extractForceUpdateCompletion(body)
 	if !hasCompletion || result.Version != "" {
-		ds.state.Update(result.Host, &result)
+		updated, err := ds.state.Update(result.Host, &result)
+		if err != nil {
+			http.Error(w, "report persistence unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !updated {
+			http.Error(w, "host no longer registered", http.StatusGone)
+			return
+		}
 
 		// Propagate the remote agent's evtspike detector status. The broker dedups
 		// by (host, state) so calling unconditionally every heartbeat is safe and

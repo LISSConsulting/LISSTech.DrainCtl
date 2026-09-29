@@ -17,6 +17,13 @@
 
     import { appState } from '../../lib/state.svelte.js';
     import { formatTime12, formatTs } from '../../lib/utils.js';
+    import { getThresholdColor } from '../../lib/thresholds.js';
+    import {
+        PRIMARY_METRIC_FILL_OPACITY,
+        SECONDARY_METRIC_COLOR,
+        SECONDARY_METRIC_FILL_OPACITY,
+        SINGLE_METRIC_FILL_OPACITY,
+    } from '../../lib/chart-contracts.js';
 
     /**
      * @type {{
@@ -27,6 +34,7 @@
      *   unit: string,
      *   thresholds: {warn:number, crit:number},
      *   color: string,
+     *   secondaryColor?: string,
      *   fmt: (v:number)=>string,
      *   icon?: import('svelte').Component,
      *   axisRight?: boolean,
@@ -47,6 +55,7 @@
         unit,
         thresholds,
         color,
+        secondaryColor = SECONDARY_METRIC_COLOR,
         fmt,
         icon,
         axisRight = false,
@@ -72,11 +81,12 @@
 
     let containerW = $state(400);
     let cw = $derived(Math.max(containerW - PL - PR, 10));
+    let warnEnabled = $derived(Number.isFinite(thresholds.warn) && thresholds.warn >= 0);
+    let critEnabled = $derived(Number.isFinite(thresholds.crit) && thresholds.crit >= 0);
+    let hasThresholds = $derived(warnEnabled || critEnabled);
 
-    // ── Dynamic Y-axis scale ───────────────────────────────────────────────────
-    // For normal metrics: 125% of peak, floored at 110% of crit.
-    // For inverted metrics: 125% of peak, floored at 150% of warn.
-    // For autoScale (no natural threshold): 125% of peak only.
+    // Scale includes the data and every enabled threshold. Disabled (-1)
+    // thresholds never create phantom zones or force the axis to zero.
     let scaleMax = $derived(
         (() => {
             const values = [];
@@ -87,15 +97,10 @@
                     values.push(transform(Number(raw)));
                 }
             }
-            if (values.length === 0) {
-                if (autoScale) return 1;
-                if (invertThresholds) return Math.max(thresholds.warn * 2, 1);
-                return Math.max(thresholds.crit * 2, 1);
-            }
-            const dataMax = Math.max(...values, 0.01);
-            if (autoScale) return Math.max(dataMax * 1.25, 1);
-            if (invertThresholds) return Math.max(dataMax * 1.25, thresholds.warn * 1.5);
-            return Math.max(dataMax * 1.25, thresholds.crit * 1.1);
+            const dataMax = values.length > 0 ? Math.max(...values, 0.01) : 0;
+            const thresholdMax = Math.max(warnEnabled ? thresholds.warn : 0, critEnabled ? thresholds.crit : 0);
+            if (autoScale || !hasThresholds) return Math.max(dataMax * 1.25, 1);
+            return Math.max(dataMax * 1.25, thresholdMax * 1.25, 1);
         })(),
     );
 
@@ -176,30 +181,6 @@
     let paths = $derived(buildPaths(valueKey));
     let p50Paths = $derived(buildPaths(p50Key));
 
-    // A nested P50 fill is safe only while every comparable P50 point stays
-    // inside its primary envelope. Mixed-version/missing cohorts can cross,
-    // so fall back to a dotted P50 line for the whole chart instead of
-    // allowing its area to conceal P95.
-    let p50CanNest = $derived.by(() => {
-        if (!p50Key || invertThresholds) return false;
-        let comparable = 0;
-        for (const point of history) {
-            const primaryRaw = /** @type {any} */ (point)[valueKey];
-            const p50Raw = /** @type {any} */ (point)[p50Key];
-            if (
-                primaryRaw == null ||
-                p50Raw == null ||
-                !Number.isFinite(Number(primaryRaw)) ||
-                !Number.isFinite(Number(p50Raw))
-            ) {
-                continue;
-            }
-            comparable++;
-            if (transform(Number(p50Raw)) > transform(Number(primaryRaw))) return false;
-        }
-        return comparable > 0;
-    });
-
     /** Short datetime format based on the visible span; matches the shared
      * formatter used by DualAxisChart and InteractiveTimeChart so every
      * Overview chart's x-axis reads the same. */
@@ -245,23 +226,23 @@
         })(),
     );
 
-    let valueColor = $derived(
-        currentValue === null
-            ? 'var(--color-muted)'
-            : noThresholdZones
-              ? color
-              : invertThresholds
-                ? currentValue <= thresholds.crit
-                    ? 'var(--color-red)'
-                    : currentValue <= thresholds.warn
-                      ? 'var(--color-amber)'
-                      : 'var(--color-green)'
-                : currentValue >= thresholds.crit
-                  ? 'var(--color-red)'
-                  : currentValue >= thresholds.warn
-                    ? 'var(--color-amber)'
-                    : 'var(--color-green)',
-    );
+    let valueColor = $derived.by(() => {
+        if (currentValue === null) return 'var(--color-muted)';
+        if (noThresholdZones || !hasThresholds) return color;
+        const token = getThresholdColor(
+            currentValue,
+            warnEnabled ? thresholds.warn : -1,
+            critEnabled ? thresholds.crit : -1,
+            invertThresholds ? 'lower-worse' : 'higher-worse',
+        );
+        return token === 'red'
+            ? 'var(--color-red)'
+            : token === 'amber'
+              ? 'var(--color-amber)'
+              : token === 'green'
+                ? 'var(--color-green)'
+                : 'var(--color-muted)';
+    });
 
     // ── Synchronized hover ─────────────────────────────────────────────────────
     let localHovering = $state(false);
@@ -325,7 +306,7 @@
     );
 
     // Tooltip layout constants.
-    const TIP_W = 170;
+    const TIP_W = 184;
     const TIP_H = 66;
     const TIP_PAD = 8;
 </script>
@@ -342,6 +323,12 @@
             {currentValue === null ? '—' : fmt(currentValue)}
         </div>
     </div>
+    {#if p50Key}
+        <div class="hic-series-key" style="padding-right: {PR}px">
+            <span><i class="key-line solid" style="--series-color:{color}"></i>{valueLabel}</span>
+            <span><i class="key-line dotted" style="--series-color:{secondaryColor}"></i>{p50Label}</span>
+        </div>
+    {/if}
 
     <!-- ── Per-chart help text ── -->
     {#if helpText && showHelp}
@@ -365,7 +352,7 @@
                 style="cursor: crosshair"
             >
                 <!-- ── Threshold zone backgrounds ── -->
-                {#if !noThresholdZones}
+                {#if !noThresholdZones && warnEnabled && critEnabled}
                     {#if invertThresholds}
                         <!-- Inverted: green on top (high = good), red on bottom (low = bad) -->
                         <rect
@@ -466,17 +453,19 @@
                     opacity="0.7"
                 />
 
-                <!-- P95 is always filled. P50 nests only when it never crosses P95. -->
+                <!-- Primary and secondary areas use distinct neutral hues. Each
+                     area is independently filled from the x-axis so crossings
+                     and inverted service-floor percentiles remain explicit. -->
                 {#if paths.area}
                     <path
                         d={paths.area}
                         fill={color}
-                        fill-opacity={p50CanNest ? 0.4 : p50Paths.line ? 0.72 : 1}
+                        fill-opacity={p50Paths.area ? PRIMARY_METRIC_FILL_OPACITY : SINGLE_METRIC_FILL_OPACITY}
                     />
                 {/if}
 
-                {#if p50Paths.area && p50CanNest}
-                    <path d={p50Paths.area} fill={color} fill-opacity="1" />
+                {#if p50Paths.area}
+                    <path d={p50Paths.area} fill={secondaryColor} fill-opacity={SECONDARY_METRIC_FILL_OPACITY} />
                 {/if}
 
                 <!-- ── Primary stroke line ── -->
@@ -486,11 +475,11 @@
                         fill="none"
                         stroke-linejoin="round"
                         stroke-linecap="round"
-                        style="stroke: color-mix(in srgb, {color} 95%, black); stroke-width: 3.5"
+                        style="stroke: {color}; stroke-width: 3.5"
                     />
                 {/if}
 
-                <!-- ── P50 stroke: dotted so it remains distinct from the solid P95 line ── -->
+                <!-- ── Secondary stroke: dotted so it remains distinct from the solid primary line ── -->
                 {#if p50Paths.line}
                     <path
                         d={p50Paths.line}
@@ -498,34 +487,38 @@
                         stroke-linejoin="round"
                         stroke-linecap="round"
                         stroke-dasharray="2,6"
-                        style="stroke: color-mix(in srgb, {color} 85%, black); stroke-width: 3"
+                        style="stroke: {secondaryColor}; stroke-width: 3"
                     />
                 {/if}
 
                 <!-- ── Threshold marker lines with inline labels ── -->
                 {#if !noThresholdZones}
-                    <line
-                        x1={PL}
-                        y1={yCrit.toFixed(1)}
-                        x2={PL + cw}
-                        y2={yCrit.toFixed(1)}
-                        stroke="var(--color-fg)"
-                        stroke-width="1.5"
-                        stroke-dasharray="6,4"
-                        opacity="0.35"
-                    />
-                    <text x={PL + cw / 2} y={(yCrit - 3).toFixed(1)} class="thresh-label" opacity="0.3">CRIT</text>
-                    <line
-                        x1={PL}
-                        y1={yWarn.toFixed(1)}
-                        x2={PL + cw}
-                        y2={yWarn.toFixed(1)}
-                        stroke="var(--color-fg)"
-                        stroke-width="1.5"
-                        stroke-dasharray="6,4"
-                        opacity="0.25"
-                    />
-                    <text x={PL + cw / 2} y={(yWarn - 3).toFixed(1)} class="thresh-label" opacity="0.2">WARN</text>
+                    {#if critEnabled}
+                        <line
+                            x1={PL}
+                            y1={yCrit.toFixed(1)}
+                            x2={PL + cw}
+                            y2={yCrit.toFixed(1)}
+                            stroke="var(--color-fg)"
+                            stroke-width="1.5"
+                            stroke-dasharray="6,4"
+                            opacity="0.35"
+                        />
+                        <text x={PL + cw / 2} y={(yCrit - 3).toFixed(1)} class="thresh-label" opacity="0.3">CRIT</text>
+                    {/if}
+                    {#if warnEnabled}
+                        <line
+                            x1={PL}
+                            y1={yWarn.toFixed(1)}
+                            x2={PL + cw}
+                            y2={yWarn.toFixed(1)}
+                            stroke="var(--color-fg)"
+                            stroke-width="1.5"
+                            stroke-dasharray="6,4"
+                            opacity="0.25"
+                        />
+                        <text x={PL + cw / 2} y={(yWarn - 3).toFixed(1)} class="thresh-label" opacity="0.2">WARN</text>
+                    {/if}
                 {/if}
 
                 <!-- ── Synchronized crosshair ── -->
@@ -559,8 +552,8 @@
                             cx={crosshairX.toFixed(1)}
                             cy={dotY.toFixed(1)}
                             r="4"
-                            fill="var(--color-card)"
-                            stroke={color}
+                            fill={secondaryColor}
+                            stroke="var(--color-bg)"
                             stroke-width="2.5"
                         />
                     {/if}
@@ -603,13 +596,15 @@
                             opacity="0.25"
                         />
                         <text x={tipX + TIP_PAD} y={tipY + 13} class="tip-time">{timeStr}</text>
-                        <text x={tipX + TIP_PAD} y={tipY + 35} class="tip-val">
+                        <rect x={tipX + TIP_PAD} y={tipY + 28} width="7" height="7" fill={color} />
+                        <text x={tipX + TIP_PAD + 12} y={tipY + 35} class="tip-val">
                             {valueLabel}: <tspan font-weight="700" fill={color}>{fmt(hoverValue)}</tspan>
                         </text>
                         {#if hoverP50Value !== null}
-                            <text x={tipX + TIP_PAD} y={tipY + 51} class="tip-val">
+                            <rect x={tipX + TIP_PAD} y={tipY + 44} width="7" height="7" fill={secondaryColor} />
+                            <text x={tipX + TIP_PAD + 12} y={tipY + 51} class="tip-val">
                                 {p50Label}:
-                                <tspan font-weight="700" fill={color} opacity="0.6">{fmt(hoverP50Value)}</tspan>
+                                <tspan font-weight="700" fill={secondaryColor}>{fmt(hoverP50Value)}</tspan>
                             </text>
                         {/if}
                     {/if}
@@ -684,6 +679,34 @@
         line-height: 1;
         transition: color 0.12s linear;
         white-space: nowrap;
+    }
+
+    .hic-series-key {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        margin: -5px 0 7px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.5rem;
+        letter-spacing: 0.05em;
+        color: var(--color-muted);
+        text-transform: uppercase;
+    }
+
+    .hic-series-key span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .key-line {
+        width: 16px;
+        height: 2px;
+        background: var(--series-color);
+    }
+
+    .key-line.dotted {
+        background: repeating-linear-gradient(to right, var(--series-color) 0 3px, transparent 3px 6px);
     }
 
     .hic-help {

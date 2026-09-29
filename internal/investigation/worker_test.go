@@ -30,6 +30,7 @@ func (s *workerTestStorage) ClaimNext(context.Context, int64, int64) (Attempt, b
 	s.claimed = true
 	return s.attempt, true, nil
 }
+func (*workerTestStorage) Requeue(context.Context, int64) error { return nil }
 func (s *workerTestStorage) LoadEvidence(context.Context, int64) (EvidenceSnapshot, error) {
 	return s.evidence, nil
 }
@@ -140,6 +141,27 @@ func TestWorkerCompletesAuthorizedSendAndDoesNotResend(t *testing.T) {
 	}
 	if client.calls != 1 || store.authorizes != 1 || store.completes != 1 || len(store.failures) != 1 || store.failures[0] != TerminalReasonNetworkError {
 		t.Fatalf("authorized send lifecycle: calls=%d authorizes=%d completes=%d failures=%v", client.calls, store.authorizes, store.completes, store.failures)
+	}
+}
+
+func TestWorkerLocalThrottleLeavesAttemptQueued(t *testing.T) {
+	store := &workerTestStorage{attempt: workerTestAttempt(), evidence: workerTestEvidence()}
+	client := &workerTestClient{invokeAuth: true, err: errors.New("network unavailable")}
+	now := time.UnixMilli(20_000).UTC()
+	worker := &Worker{Store: store, Client: client, Configuration: &workerTestConfiguration{}, Now: func() time.Time { return now }}
+	worker.sent = []time.Time{now.Add(-time.Second), now}
+	if handled, err := worker.RunOne(context.Background()); err != nil || handled {
+		t.Fatalf("throttled RunOne = (%v, %v)", handled, err)
+	}
+	if store.claimed || len(store.failures) != 0 || client.calls != 0 {
+		t.Fatalf("local throttle consumed work: claimed=%v failures=%v calls=%d", store.claimed, store.failures, client.calls)
+	}
+	now = now.Add(6 * time.Second)
+	if handled, err := worker.RunOne(context.Background()); err != nil || !handled {
+		t.Fatalf("eligible RunOne = (%v, %v)", handled, err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", client.calls)
 	}
 }
 
