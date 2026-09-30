@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
@@ -17,6 +18,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/logging"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/pipe"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/selfmetrics"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/spikereport"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -31,6 +33,58 @@ type dashboardStopper interface {
 func disableDashboardRuntime(sub dashboardStopper, handler *serviceHandler, cfg dc.ServiceConfig) {
 	sub.Stop()
 	handler.publish(cfg, nil)
+}
+
+// dashboardSubsystemDependencies are the central stores shared by every
+// dashboard lifetime. Keeping construction in one place ensures a listener
+// re-enable receives the same durable owners and callbacks as initial startup.
+type dashboardSubsystemDependencies struct {
+	telemetry             *telemetry.DB
+	metrics               *telemetry.MetricsStore
+	audit                 *telemetry.AuditStore
+	maintenance           *telemetry.MaintenanceStore
+	servers               *telemetry.ServerStore
+	spikes                *telemetry.EventSpikeStore
+	removals              *telemetry.RemovalStore
+	outbox                *telemetry.ForceUpdateOutboxStore
+	sessionSnapshots      *telemetry.SessionSnapshotStore
+	sessionQueries        *telemetry.SessionQueryStore
+	sessionActions        *telemetry.SessionActionStore
+	freshness             *telemetry.FreshnessStore
+	sessionDrop           dc.SessionDropConfig
+	featureRuntimeFactory func() dashboard.FeatureRuntime
+}
+
+func (d dashboardSubsystemDependencies) newFeatureRuntime() dashboard.FeatureRuntime {
+	if d.featureRuntimeFactory != nil {
+		return d.featureRuntimeFactory()
+	}
+	settings := d.sessionDrop
+	return dashboard.NewFeatureRuntime(d.telemetry, sessiondrop.Settings{
+		LowerTailThreshold:    settings.LowerTailThreshold,
+		MinimumDropSessions:   settings.MinimumDropSessions,
+		MinimumDropPercent:    settings.MinimumDropPercent,
+		BaselineHalfLifeHours: settings.BaselineHalfLifeHours,
+		CooldownMinutes:       settings.CooldownMinutes,
+	})
+}
+
+func newDashboardSubsystem(cfg dc.DashboardConfig, serviceCfg dc.ServiceConfig, deps dashboardSubsystemDependencies) *dashboard.Subsystem {
+	return dashboard.NewSubsystem(cfg, dc.DefaultDataDir(), dashboard.SubsystemDependencies{
+		Metrics:                   deps.metrics,
+		Audit:                     deps.audit,
+		Maintenance:               deps.maintenance,
+		Servers:                   deps.servers,
+		EventSpikes:               deps.spikes,
+		Removals:                  deps.removals,
+		ForceUpdateOutbox:         deps.outbox,
+		SessionSnapshots:          deps.sessionSnapshots,
+		SessionQueries:            deps.sessionQueries,
+		SessionActions:            deps.sessionActions,
+		Freshness:                 deps.freshness,
+		LocalForceUpdateSupported: !serviceCfg.DashboardOnly,
+		FeatureRuntime:            deps.newFeatureRuntime(),
+	})
 }
 
 // Execute is the Windows service main loop.
@@ -68,6 +122,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	dashCfg := fullCfg.ToDashboardConfig()
 	prevEvtSpikeCfg := fullCfg.EvtSpike
 	localUpdateCfg := fullCfg.Update
+	sessionsCfg := fullCfg.Sessions
 
 	// Apply Go runtime soft memory limit. Makes the GC more aggressive about
 	// returning pages to the OS, which matters on memory-constrained RDS hosts.
@@ -156,12 +211,39 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	eventSpikeStore := telemetry.NewEventSpikeStore(telDB)
 	forceUpdateOutboxStore := telemetry.NewForceUpdateOutboxStore(telDB)
 	freshnessStore := telemetry.NewFreshnessStore(telDB)
+	sessionActionStore := telemetry.NewSessionActionStore(telDB)
+	sessionSnapshots, err := telemetry.NewSessionSnapshotStore(telDB)
+	if err != nil {
+		slog.Error("service=failed", "error", err)
+		return false, 1
+	}
+	sessionQueries, err := telemetry.NewSessionQueryStore(telDB)
+	if err != nil {
+		slog.Error("service=failed", "error", err)
+		return false, 1
+	}
 	auditStore, err := telemetry.NewAuditStore(ctx, telDB)
 	if err != nil {
 		slog.Error("service=failed", "error", err)
 		return false, 1
 	}
 	defer func() { _ = auditStore.Close() }()
+
+	dashboardDeps := dashboardSubsystemDependencies{
+		telemetry:        telDB,
+		metrics:          metricsStore,
+		audit:            auditStore,
+		maintenance:      maintenanceStore,
+		servers:          serverStore,
+		spikes:           eventSpikeStore,
+		removals:         removalStore,
+		outbox:           forceUpdateOutboxStore,
+		sessionSnapshots: sessionSnapshots,
+		sessionQueries:   sessionQueries,
+		sessionActions:   sessionActionStore,
+		freshness:        freshnessStore,
+		sessionDrop:      fullCfg.SessionDrop,
+	}
 
 	// A dashboard-only host is a management server, not an RDSH. Do not
 	// inspect its local drain registry value or create a synthetic audit row.
@@ -209,6 +291,12 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		slog.Error("service=failed", "error", fmt.Errorf("telemetry subsystem start: %w", err))
 		return false, 1
 	}
+
+	// Fleet session snapshots are short-lived privacy data, so retention runs
+	// independently of the broader telemetry retention policy.
+	sessionRetention := newSessionRetentionSubsystem(sessionSnapshots, fullCfg.Sessions.RetentionHours)
+	sessionRetention.Start(ctx)
+	defer sessionRetention.Stop()
 
 	// The following resources are strictly agent-only. A dashboard-only host
 	// creates none of them; each dashboard_only transition gets a fresh,
@@ -265,6 +353,14 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Start pipe server.
 	handler := &serviceHandler{audit: auditStore, metrics: metricsStore}
+	var sessionRuntime *sessionRuntime
+	if !cfg.DashboardOnly {
+		var sessionErr error
+		sessionRuntime, sessionErr = newReservedSessionRuntime(ctx, telDB, fullCfg.Sessions)
+		if sessionErr != nil {
+			slog.Warn("sessions runtime disabled", "error", sessionErr)
+		}
+	}
 	handler.publish(cfg, nil)
 
 	// Performance monitoring is an agent responsibility. Do not construct it
@@ -314,7 +410,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 	var dashState *dashboard.ServerState
 	var dashSub *dashboard.Subsystem
 	if dashCfg.Enabled {
-		sub := dashboard.NewSubsystem(dashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
+		sub := newDashboardSubsystem(dashCfg, cfg, dashboardDeps)
 		if err := sub.Start(ctx); err != nil {
 			slog.Warn("dashboard failed to start", "error", err)
 		} else {
@@ -425,7 +521,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// Run initial check (skip in dashboard-only mode).
 	if !cfg.DashboardOnly {
-		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub, updaterSub)
+		svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), sessionRuntime, evtSpikeSub, updaterSub)
 	}
 	slog.Info("service=running",
 		slog.Int("event_id", EvtServiceStarted),
@@ -477,6 +573,26 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		oldPollInterval := cfg.PollInterval
 		effectiveEvtSpike := prevEvtSpikeCfg
 		applyRemoteConfig(cfgRemote, &cfg, &notifyTargets, &effectiveEvtSpike, &notifyExclusions)
+		if cfgRemote.Sessions != nil {
+			previousSessionsCfg := applyRemoteSessionsConfig(&sessionsCfg, *cfgRemote.Sessions)
+			visibilityChanged := sessionPrivacyChanged(previousSessionsCfg, sessionsCfg)
+			actionsDisabled := (previousSessionsCfg.Enabled && !sessionsCfg.Enabled) ||
+				(previousSessionsCfg.AllowActions && !sessionsCfg.AllowActions)
+			if dashSub != nil {
+				var policyErr error
+				if visibilityChanged {
+					policyErr = dashSub.Server().PurgeSessionSnapshotsForPrivacy(ctx)
+				} else if actionsDisabled {
+					policyErr = dashSub.Server().CancelSessionActionsForPolicy(ctx)
+				}
+				if policyErr != nil {
+					slog.Warn("sessions policy transition failed", "error", policyErr)
+				}
+			}
+			if sessionRuntime != nil {
+				sessionRuntime.UpdateConfig(sessionsCfg)
+			}
+		}
 		if updaterSub != nil {
 			updaterSub.UpdateConfig(effectiveUpdateConfig(localUpdateCfg, cfgRemote))
 		}
@@ -545,7 +661,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 		case <-regCh:
 			if !cfg.DashboardOnly {
 				slog.Info("trigger=registry_change")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub, updaterSub)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), sessionRuntime, evtSpikeSub, updaterSub)
 			}
 
 		case spike := <-spikeCh:
@@ -555,7 +671,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				Host:      spike.Host,
 				Spike:     &spike,
 			}
-			dc.SendNotificationWithExclusions(notifyTargets, notifyExclusions, notifyState, spikeResult, dc.TriggerEventSpike, "")
+			sendAsyncNotification(notifyTargets, notifyExclusions, notifyState, spikeResult, dc.TriggerEventSpike, "")
 			// Propagate to a remote central dashboard. The local-dashboard path
 			// (dashState != nil) already appended via OnEvtSpikeIngest when the
 			// subsystem fired OnSpike; reporting again would double-insert.
@@ -597,7 +713,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			fetchRemoteConfig()
 			if !cfg.DashboardOnly {
 				slog.Debug("diag: step=svc_run_check")
-				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub, updaterSub)
+				svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), sessionRuntime, evtSpikeSub, updaterSub)
 			}
 
 		case <-configCh:
@@ -619,6 +735,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				slog.Info("memory limit updated", "mb", memLimitMB)
 			}
 			newCfg := newFullCfg.ToServiceConfig()
+			newSessionsCfg := newFullCfg.Sessions
 			wasDashboardOnly := cfg.DashboardOnly
 			effectiveEvtSpike := newFullCfg.EvtSpike
 			localUpdateCfg = newFullCfg.Update
@@ -657,12 +774,34 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// window; no worse than the previous behavior).
 			if useRemoteConfig && lastRemote != nil && newFullCfg.Dashboard.URL != "" {
 				applyRemoteConfig(lastRemote, &newCfg, &notifyTargets, &effectiveEvtSpike, &notifyExclusions)
+				if lastRemote.Sessions != nil {
+					applyRemoteSessionsConfig(&newSessionsCfg, *lastRemote.Sessions)
+				}
 				effectiveUpdateCfg = effectiveUpdateConfig(localUpdateCfg, lastRemote)
 			}
 			if newCfg.PollInterval != cfg.PollInterval {
 				pollTicker.Reset(newCfg.PollInterval)
 			}
 			cfg = newCfg
+			visibilityChanged := sessionPrivacyChanged(sessionsCfg, newSessionsCfg)
+			actionsDisabled := (sessionsCfg.Enabled && !newSessionsCfg.Enabled) ||
+				(sessionsCfg.AllowActions && !newSessionsCfg.AllowActions)
+			if dashSub != nil {
+				var policyErr error
+				if visibilityChanged {
+					policyErr = dashSub.Server().PurgeSessionSnapshotsForPrivacy(ctx)
+				} else if actionsDisabled {
+					policyErr = dashSub.Server().CancelSessionActionsForPolicy(ctx)
+				}
+				if policyErr != nil {
+					slog.Warn("sessions policy transition failed", "error", policyErr)
+				}
+			}
+			sessionsCfg = newSessionsCfg
+			if sessionRuntime != nil {
+				sessionRuntime.UpdateConfig(sessionsCfg)
+			}
+			sessionRetention.SetRetentionHours(sessionsCfg.RetentionHours)
 			handler.publish(cfg, dashState)
 			// Reconcile the updater lifecycle with dashboard-only mode. A
 			// dashboard-only host must never retain a sleeping updater goroutine;
@@ -698,7 +837,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			}
 
 			if dashSub != nil {
+				dashSub.WakeFeatureRuntime()
 				dashSub.UpdateHeartbeatInterval(newDashCfg.HeartbeatInterval)
+				if server := dashSub.Server(); server != nil && newDashCfg.Group != dashCfg.Group {
+					server.SetDashboardGroup(newDashCfg.Group)
+				}
 				dashSub.SetLocalForceUpdateSupported(!cfg.DashboardOnly)
 				if newDashCfg.RDConnectionBroker != dashCfg.RDConnectionBroker {
 					dashSub.UpdateRDConnectionBroker(newDashCfg.RDConnectionBroker)
@@ -715,7 +858,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				dashRegistered = false
 				slog.Info("dashboard=stopped", "reason", "config reload")
 			} else if newDashCfg.Enabled && dashState == nil {
-				sub := dashboard.NewSubsystem(newDashCfg, dc.DefaultDataDir(), metricsStore, auditStore, maintenanceStore, serverStore, eventSpikeStore, removalStore, forceUpdateOutboxStore, !cfg.DashboardOnly, freshnessStore)
+				sub := newDashboardSubsystem(newDashCfg, cfg, dashboardDeps)
 				if err := sub.Start(ctx); err != nil {
 					slog.Warn("dashboard failed to start on config reload", "error", err)
 				} else {
@@ -782,6 +925,7 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				evtSub = nil
 				regCh = nil
 				spikeCh = nil
+				sessionRuntime = nil
 			} else if wasDashboardOnly && !cfg.DashboardOnly {
 				agentCtx, agentCancel = context.WithCancel(ctx)
 				spikeSub = spikereport.New(dashboard.ReportSpike)
@@ -808,6 +952,11 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 				perfSub = newPerformanceSubsystem(cfg.Performance, &handler.lastPerf)
 				if err := perfSub.Start(agentCtx); err != nil {
 					slog.Warn("performance monitoring failed to start after dashboard-only reload", "error", err)
+				}
+				if runtime, err := newReservedSessionRuntime(ctx, telDB, sessionsCfg); err != nil {
+					slog.Warn("sessions runtime disabled after dashboard-only reload", "error", err)
+				} else {
+					sessionRuntime = runtime
 				}
 			}
 
@@ -866,10 +1015,53 @@ func (s *drainService) Execute(args []string, r <-chan svc.ChangeRequest, status
 			// settings changed.
 			if !cfg.DashboardOnly && perfSub != nil {
 				if perfSub.Reload(cfg.Performance) || wasDashboardOnly {
-					svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), evtSpikeSub, updaterSub)
+					svcRunCheck(ctx, handler, &cfg, notifyTargets, notifyExclusions, notifyState, &dashCfg, dashState, evtSub, perfSub.Collector(), perfSub.TriggerState(), sessionRuntime, evtSpikeSub, updaterSub)
 				}
 			}
 			slog.Info("config=reloaded-etw", slog.Int("event_id", EvtConfigReloaded))
 		}
+	}
+}
+
+type sessionRetentionSubsystem struct {
+	store     *telemetry.SessionSnapshotStore
+	retention atomic.Int64
+	cancel    context.CancelFunc
+	done      chan struct{}
+}
+
+func newSessionRetentionSubsystem(store *telemetry.SessionSnapshotStore, hours int) *sessionRetentionSubsystem {
+	sub := &sessionRetentionSubsystem{store: store, done: make(chan struct{})}
+	sub.retention.Store(int64(hours))
+	return sub
+}
+
+func (s *sessionRetentionSubsystem) Start(ctx context.Context) {
+	ctx, s.cancel = context.WithCancel(ctx)
+	go func() {
+		defer close(s.done)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := s.store.PurgeSnapshots(ctx, int(s.retention.Load()), time.Now()); err != nil {
+					slog.Warn("sessions retention purge failed", "error", err)
+				}
+			}
+		}
+	}()
+}
+
+func (s *sessionRetentionSubsystem) SetRetentionHours(hours int) {
+	s.retention.Store(int64(hours))
+}
+
+func (s *sessionRetentionSubsystem) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+		<-s.done
 	}
 }

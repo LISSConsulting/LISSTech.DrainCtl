@@ -4,19 +4,10 @@ package drainctl
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessionlimit"
 
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
-)
-
-var (
-	modWtsapi32                     = windows.NewLazySystemDLL("wtsapi32.dll")
-	procWTSEnumerateSessionsW       = modWtsapi32.NewProc("WTSEnumerateSessionsW")
-	procWTSQuerySessionInformationW = modWtsapi32.NewProc("WTSQuerySessionInformationW")
-	procWTSFreeMemory               = modWtsapi32.NewProc("WTSFreeMemory")
 )
 
 // WTS session states.
@@ -32,18 +23,6 @@ const (
 	wtsDown         = 8
 	wtsInit         = 9
 )
-
-// WTS query classes.
-const (
-	wtsUserName = 5 // WTSInfoClass: WTSUserName
-)
-
-// wtsSessionInfoW matches the WTS_SESSION_INFOW structure layout.
-type wtsSessionInfoW struct {
-	SessionID      uint32
-	WinStationName *uint16
-	State          uint32
-}
 
 // SessionInfo describes a single RDS session.
 type SessionInfo struct {
@@ -92,75 +71,30 @@ func wtsStateName(state uint32) string {
 
 // EnumerateSessions returns the current RDS sessions on this server.
 // Filters out the Services session (ID 0) and listener sessions.
+//
+// This compatibility view intentionally retains the fields used by the CLI and
+// summary callers. New collectors should use EnumerateSessionRecords.
 func EnumerateSessions() ([]SessionInfo, error) {
-	var pSessionInfo unsafe.Pointer
-	var count uint32
-
-	ret, _, err := procWTSEnumerateSessionsW.Call(
-		0, // WTS_CURRENT_SERVER_HANDLE
-		0, // Reserved
-		1, // Version (must be 1)
-		uintptr(unsafe.Pointer(&pSessionInfo)),
-		uintptr(unsafe.Pointer(&count)),
-	)
-	if ret == 0 {
-		return nil, fmt.Errorf("WTSEnumerateSessionsW: %w", err)
-	}
-	defer func() { _, _, _ = procWTSFreeMemory.Call(uintptr(pSessionInfo)) }()
-
-	entrySize := unsafe.Sizeof(wtsSessionInfoW{})
-	var sessions []SessionInfo
-
-	for i := range count {
-		entry := (*wtsSessionInfoW)(unsafe.Add(pSessionInfo, uintptr(i)*entrySize))
-
-		// Skip Services session and listener sessions.
-		if entry.SessionID == 0 {
-			continue
-		}
-		if entry.State == wtsListen {
-			continue
-		}
-
-		station := ""
-		if entry.WinStationName != nil {
-			station = windows.UTF16PtrToString(entry.WinStationName)
-		}
-
-		si := SessionInfo{
-			SessionID:  entry.SessionID,
-			Station:    station,
-			State:      wtsStateName(entry.State),
-			StateValue: entry.State,
-		}
-
-		// Query username.
-		si.UserName = querySessionString(entry.SessionID, wtsUserName)
-
-		sessions = append(sessions, si)
+	records, err := EnumerateSessionRecords()
+	if err != nil {
+		return nil, err
 	}
 
+	sessions := make([]SessionInfo, 0, len(records))
+	for _, record := range records {
+		userName := ""
+		if record.User != nil {
+			userName = *record.User
+		}
+		sessions = append(sessions, SessionInfo{
+			SessionID:  record.SessionID,
+			UserName:   userName,
+			Station:    stringValue(record.Station),
+			State:      wtsStateNameFromSessionState(string(record.State)),
+			StateValue: wtsStateValue(string(record.State)),
+		})
+	}
 	return sessions, nil
-}
-
-// querySessionString queries a string property for the given session.
-func querySessionString(sessionID uint32, infoClass uint32) string {
-	var buf *uint16
-	var bytesReturned uint32
-
-	ret, _, _ := procWTSQuerySessionInformationW.Call(
-		0, // WTS_CURRENT_SERVER_HANDLE
-		uintptr(sessionID),
-		uintptr(infoClass),
-		uintptr(unsafe.Pointer(&buf)),
-		uintptr(unsafe.Pointer(&bytesReturned)),
-	)
-	if ret == 0 || buf == nil {
-		return ""
-	}
-	defer func() { _, _, _ = procWTSFreeMemory.Call(uintptr(unsafe.Pointer(buf))) }()
-
-	return windows.UTF16PtrToString(buf)
 }
 
 var sessionLimitLocations = [...]struct {

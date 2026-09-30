@@ -3,7 +3,9 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/etwids"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessionlimit"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
@@ -253,6 +256,12 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	completedActions, hasCompletedActions, err := extractCompletedSessionActions(body)
+	if err != nil {
+		http.Error(w, "invalid session action completions", http.StatusBadRequest)
+		return
+	}
+
 	result.Host = telemetry.CanonicalHostname(result.Host)
 	if result.Host == "" {
 		http.Error(w, "host field required", http.StatusBadRequest)
@@ -305,8 +314,16 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 	// Completion-only reports deliberately omit CheckResult fields. Do not
 	// replace the host's last good heartbeat with that sparse envelope.
 	completion, hasCompletion := extractForceUpdateCompletion(body)
-	if !hasCompletion || result.Version != "" {
-		ds.state.Update(result.Host, &result)
+	if (!hasCompletion && !hasCompletedActions) || result.Version != "" {
+		updated, err := ds.state.Update(result.Host, &result)
+		if err != nil {
+			http.Error(w, "report persistence unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !updated {
+			http.Error(w, "host no longer registered", http.StatusGone)
+			return
+		}
 
 		// Propagate the remote agent's evtspike detector status. The broker dedups
 		// by (host, state) so calling unconditionally every heartbeat is safe and
@@ -314,9 +331,9 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 		// registered for non-local hosts in internal/svc/handler.go.
 		if result.EvtSpikeStatus != nil {
 			status := *result.EvtSpikeStatus
-			status.Host = result.Host
+			status.Host = telemetry.CanonicalHostname(result.Host)
 			ds.remoteEvtSpikeStatusMu.Lock()
-			ds.remoteEvtSpikeStatus[result.Host] = status
+			ds.remoteEvtSpikeStatus[status.Host] = status
 			ds.remoteEvtSpikeStatusMu.Unlock()
 			ds.broker.PublishDetectorStatus(status)
 		}
@@ -339,17 +356,178 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 		ds.broadcastForceUpdateCompletion(result.Host, completion)
 	}
 
-	type reportResponse struct {
-		OK             bool                `json:"ok"`
-		PendingCommand *forceUpdateCommand `json:"pending_command,omitempty"`
+	acknowledgedActionIDs, err := ds.completeSessionActions(r.Context(), strings.ToLower(result.Host), completedActions)
+	if err != nil {
+		http.Error(w, "session action completion unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	resp := reportResponse{OK: true}
+
+	type reportResponse struct {
+		OK                           bool                               `json:"ok"`
+		PendingCommand               *forceUpdateCommand                `json:"pending_command,omitempty"`
+		PendingSessionActions        []sessiondata.PendingSessionAction `json:"pending_session_actions"`
+		AcknowledgedSessionActionIDs []string                           `json:"acknowledged_session_action_ids"`
+	}
+	resp := reportResponse{
+		OK:                           true,
+		PendingSessionActions:        []sessiondata.PendingSessionAction{},
+		AcknowledgedSessionActionIDs: acknowledgedActionIDs,
+	}
 	if cmd := ds.consumePendingCommand(strings.ToLower(result.Host)); cmd != nil {
 		resp.PendingCommand = cmd
 	}
+	pendingActions, err := ds.deliverSessionActions(r.Context(), strings.ToLower(result.Host))
+	if err != nil {
+		http.Error(w, "session action delivery unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	resp.PendingSessionActions = pendingActions
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// extractCompletedSessionActions parses the optional report-side completion
+// envelope without changing CheckResult. Absence keeps pre-action agents fully
+// compatible; a present value must be a bounded, valid JSON array.
+func extractCompletedSessionActions(body []byte) ([]sessiondata.CompletedSessionAction, bool, error) {
+	var envelope struct {
+		Completed json.RawMessage `json:"completed_session_actions"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, err
+	}
+	if envelope.Completed == nil {
+		return nil, false, nil
+	}
+	var actions []sessiondata.CompletedSessionAction
+	if err := json.Unmarshal(envelope.Completed, &actions); err != nil || actions == nil {
+		return nil, true, errors.New("invalid completed session actions")
+	}
+	if err := sessiondata.ValidateCompletedSessionActions(actions); err != nil {
+		return nil, true, err
+	}
+	return actions, true, nil
+}
+
+// deliverSessionActions exposes only current protected actions for one
+// authenticated host. DPAPI plaintext exists solely while encoding this report
+// response and is never persisted, logged, audited, or sent to SSE.
+func (ds *DashboardServer) deliverSessionActions(parent context.Context, host string) ([]sessiondata.PendingSessionAction, error) {
+	// Hold the policy lock from the current persisted-policy check through
+	// selection. This makes delivery mutually exclusive with disable/privacy
+	// transitions, including after a restart where a previously active command
+	// may still be retained in the action store.
+	ds.sessionPolicyMu.Lock()
+	defer ds.sessionPolicyMu.Unlock()
+
+	if ds.sessionActions == nil {
+		return []sessiondata.PendingSessionAction{}, nil
+	}
+	cfg, err := ds.sessionsConfig()
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled || !cfg.AllowActions {
+		return []sessiondata.PendingSessionAction{}, nil
+	}
+	ctx, cancel := context.WithTimeout(parent, sessionStoreTimeout)
+	defer cancel()
+	now := ds.clock()
+	expired, err := ds.sessionActions.Expire(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, status := range expired {
+		ds.broadcastSessionAction(status)
+	}
+	deliveries, err := ds.sessionActions.Deliver(ctx, host, now)
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]sessiondata.PendingSessionAction, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		action := delivery.Action
+		if action.Type == sessiondata.SessionActionMessage {
+			if delivery.MessageProtection != "dpapi" || len(delivery.MessageCiphertext) == 0 {
+				status, completeErr := ds.sessionActions.Complete(ctx, host, action.ActionID, sessiondata.SessionActionOutcomeFailed, now)
+				if completeErr != nil {
+					return nil, completeErr
+				}
+				ds.broadcastSessionAction(status)
+				continue
+			}
+			plaintext, decryptErr := dc.DPAPIDecrypt(delivery.MessageCiphertext)
+			if decryptErr != nil {
+				status, completeErr := ds.sessionActions.Complete(ctx, host, action.ActionID, sessiondata.SessionActionOutcomeFailed, now)
+				if completeErr != nil {
+					return nil, completeErr
+				}
+				ds.broadcastSessionAction(status)
+				continue
+			}
+			message := string(plaintext)
+			command := sessiondata.PendingSessionAction{ActionID: action.ActionID, Type: action.Type, SessionID: action.SessionID, ExpectedLogonAtMS: action.ExpectedLogonAtMS, ExpiresAtMS: action.ExpiresAtMS, Message: &message}
+			if err := command.Validate(); err != nil {
+				status, completeErr := ds.sessionActions.Complete(ctx, host, action.ActionID, sessiondata.SessionActionOutcomeFailed, now)
+				if completeErr != nil {
+					return nil, completeErr
+				}
+				ds.broadcastSessionAction(status)
+				continue
+			}
+			pending = append(pending, command)
+		} else {
+			command := sessiondata.PendingSessionAction{ActionID: action.ActionID, Type: action.Type, SessionID: action.SessionID, ExpectedLogonAtMS: action.ExpectedLogonAtMS, ExpiresAtMS: action.ExpiresAtMS}
+			if err := command.Validate(); err != nil {
+				status, completeErr := ds.sessionActions.Complete(ctx, host, action.ActionID, sessiondata.SessionActionOutcomeFailed, now)
+				if completeErr != nil {
+					return nil, completeErr
+				}
+				ds.broadcastSessionAction(status)
+				continue
+			}
+			pending = append(pending, command)
+		}
+		ds.broadcastSessionAction(sessiondata.SessionActionStatus{ActionID: action.ActionID, Type: action.Type, CanonicalHost: action.CanonicalHost, SessionID: action.SessionID, ExpectedLogonAtMS: action.ExpectedLogonAtMS, State: action.State, CreatedAtMS: action.CreatedAtMS, ExpiresAtMS: action.ExpiresAtMS})
+	}
+	return pending, nil
+}
+
+// completeSessionActions records valid agent outcomes and returns only IDs the
+// store accepted. Protocol-invalid and wrong-host completions are deliberately
+// not acknowledged.
+func (ds *DashboardServer) completeSessionActions(parent context.Context, host string, actions []sessiondata.CompletedSessionAction) ([]string, error) {
+	if len(actions) == 0 || ds.sessionActions == nil {
+		return []string{}, nil
+	}
+	if err := sessiondata.ValidateCompletedSessionActions(actions); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(parent, sessionStoreTimeout)
+	defer cancel()
+	expired, err := ds.sessionActions.Expire(ctx, ds.clock())
+	if err != nil {
+		return nil, err
+	}
+	for _, status := range expired {
+		ds.broadcastSessionAction(status)
+	}
+	acknowledged := make([]string, 0, len(actions))
+	for _, action := range actions {
+		status, err := ds.sessionActions.Complete(ctx, host, action.ActionID, action.Outcome, ds.clock())
+		if errors.Is(err, telemetry.ErrSessionActionProtocolInvalid) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		acknowledged = append(acknowledged, action.ActionID)
+		if action.Outcome != sessiondata.SessionActionOutcomeDuplicate {
+			ds.broadcastSessionAction(status)
+		}
+	}
+	return acknowledged, nil
 }
 
 // extractForceUpdateCompletion parses the report body for an optional
@@ -400,12 +578,13 @@ func extractForceUpdateCompletion(body []byte) (ForceUpdateCompletionPayload, bo
 }
 
 // RemoteEvtSpikeStatus returns the DetectorStatus most recently reported for
-// the given host via /api/v1/report. Zero value (State="") for unknown hosts;
-// callers translate that into the disabled state. Safe for concurrent use.
+// the given host via /api/v1/report. Host lookup is canonicalized because the
+// roster, heartbeat, and query may use different case. Zero value (State="")
+// means the host has never reported status.
 func (ds *DashboardServer) RemoteEvtSpikeStatus(host string) evtspike.DetectorStatus {
 	ds.remoteEvtSpikeStatusMu.RLock()
 	defer ds.remoteEvtSpikeStatusMu.RUnlock()
-	return ds.remoteEvtSpikeStatus[host]
+	return ds.remoteEvtSpikeStatus[telemetry.CanonicalHostname(host)]
 }
 
 // handleServers returns GET /api/v1/servers as a JSON array of ServerView.

@@ -117,6 +117,13 @@ func (a *Aggregator) roll5Min(ctx context.Context, now time.Time) {
 		slog.Info("telemetry: 5min aggregator ran",
 			"rows_affected", rowsAffected, "max_bucket_ms", maxBucketMs)
 	}
+	if workloadErr := a.rollSessionWorkload(ctx, "session_workload_raw", "session_workload_5min", 5*time.Minute, maxBucketMs); workloadErr != nil {
+		outcome = "failure"
+		if reason == "" {
+			reason = workloadErr.Error()
+		}
+		slog.Warn("telemetry: session workload 5min aggregator failed", "error", workloadErr)
+	}
 
 	if err := a.maintenance.UpsertJob(ctx, "aggregator_5min", Result{
 		Started:      started,
@@ -180,6 +187,13 @@ func (a *Aggregator) rollHourly(ctx context.Context, now time.Time) {
 		rowsAffected, _ = res.RowsAffected()
 		slog.Info("telemetry: hourly aggregator ran",
 			"rows_affected", rowsAffected, "max_bucket_ms", maxBucketMs)
+	}
+	if workloadErr := a.rollSessionWorkload(ctx, "session_workload_5min", "session_workload_hourly", time.Hour, maxBucketMs); workloadErr != nil {
+		outcome = "failure"
+		if reason == "" {
+			reason = workloadErr.Error()
+		}
+		slog.Warn("telemetry: session workload hourly aggregator failed", "error", workloadErr)
 	}
 
 	if err := a.maintenance.UpsertJob(ctx, "aggregator_hourly", Result{

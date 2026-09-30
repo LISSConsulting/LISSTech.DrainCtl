@@ -70,6 +70,7 @@ const registerDeadline = 30 * time.Second
 const brokerSetupDeadline = 45 * time.Second
 
 const pipeMessageCap = 1024 * 1024
+const maxPipeHandlers = 16
 
 var callerIsPrivilegedFunc = callerIsPrivileged
 
@@ -81,10 +82,10 @@ var callerIsPrivilegedFunc = callerIsPrivileged
 // duplicate the operation or hide the real failure).
 var ErrPipeUnavailable = errors.New("pipe unavailable")
 
-// ServePipe runs the named pipe server using a simple goroutine-per-connection
-// model with the Windows named pipe API.
+// ServePipe bounds concurrent pipe handlers, including privileged commands.
 func ServePipe(ctx context.Context, handler PipeHandler) {
 	slog.Info("pipe_server=starting", "pipe", PipeName)
+	handlers := make(chan struct{}, maxPipeHandlers)
 
 	for {
 		// Check for cancellation before creating a new pipe instance.
@@ -108,7 +109,16 @@ func ServePipe(ctx context.Context, handler PipeHandler) {
 			continue
 		}
 
-		go handlePipeConn(conn, handler)
+		select {
+		case handlers <- struct{}{}:
+			go func() {
+				defer func() { <-handlers }()
+				handlePipeConn(conn, handler)
+			}()
+		default:
+			_ = conn.Close()
+			slog.Warn("pipe connection rejected: handler capacity reached")
+		}
 	}
 }
 

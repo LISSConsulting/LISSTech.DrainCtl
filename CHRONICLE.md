@@ -1,5 +1,21 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Remote EVT detector status — 2026-09-30
+
+- Dashboard-only management servers now resolve each remote host's EVT detector state from the latest heartbeat cache even though no local detector provider is installed. Previously the status endpoint synthesized `disabled` while the independent spike-ingestion path continued to detect, retain, and notify on spikes. Host keys are canonicalized so report and query casing cannot split the status cache.
+
+## Fleet session operator metrics — 2026-09-29
+
+- Overview Session CPU and Memory now report pooled, session-weighted `Fleet Session P95` and `Fleet Session AVG`. CPU is normalized by logical processor count before thresholds or aggregation; valid zeroes remain observations and missing values remain gaps.
+- SQLite schema v5 retains one anonymous, replaceable per-host workload aggregate per minute and mergeable 5-minute/hourly histogram rollups. Host filtering recomputes pooled distributions; old host-summary history is never relabeled. CPU percentile error is bounded to 0.5 percentage point and memory to 2% relative.
+- CPU-active Sessions now exposes average/max concurrent `≥5%` and `≥20%` counts, rates, CPU-observed denominators, and contributing/expected host coverage. Fatal collection replaces same-minute success so a stale snapshot cannot silently contribute. No username, session ID, client, process, or history episode identity enters the retained aggregates.
+
+## Fleet Sessions backend foundation — 2026-09-29
+
+- Ported the current-session backend onto the stable trunk without enabling the deferred Sessions dashboard UI. Agents can collect bounded WTS metadata and strict session-ID PDH metrics, send complete machine-authenticated snapshots, and retain only each host's latest successful snapshot with explicit collection-error and freshness state.
+- SQLite schema v4 adds generation-fenced current-session storage and durable session-action outbox, audit, and agent ledger tables. Admin-only session APIs, privacy projection, bounded retention, idempotent actions, metadata-only SSE, and rolling-upgrade behavior are available for the later UI integration.
+- The stable dashboard frontend remains unchanged. Session collection and APIs use the existing configuration and authentication boundaries; future User Session History can reuse the current-session identity and reconciliation model without treating current snapshot rows as historical episodes.
+
 ## Windows control-path diagnostics — 2026-09-27
 
 - Named-pipe accept now joins its cancellation helper before closing the event handle. This prevents a delayed `SetEvent` from targeting a recycled handle, spuriously waking the next overlapped `ConnectNamedPipe`, and producing `GetOverlappedResult: Overlapped I/O event is not in a signaled state`.

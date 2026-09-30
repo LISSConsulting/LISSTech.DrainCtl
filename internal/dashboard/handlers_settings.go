@@ -238,7 +238,7 @@ func validatePerformanceConfig(p dc.PerformanceConfig) error {
 }
 
 // handleGetSettings returns the current dashboard settings as JSON.
-func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
+func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	var cfg *dc.Config
 	var err error
 	if ds.testLoadConfigFunc != nil {
@@ -258,6 +258,31 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 	// "Customize settings manually" panel. baseline_path stays admin-only
 	// (lives in config.json) so it never round-trips through this endpoint.
 	evtspike := buildEvtSpikeView(cfg.EvtSpike)
+	if r.URL.Path == "/api/v1/config" {
+		remoteEvtSpike := remoteEvtSpikeFromView(evtspike)
+		remoteSessions := remoteSessionsConfig(cfg.Sessions)
+		remote := RemoteSettings{
+			Notifications:           cfg.Notifications,
+			NotificationExclusions:  cfg.NotificationExclusions,
+			SessionWarningThreshold: cfg.SessionWarningThreshold,
+			GracePeriod:             cfg.GracePeriod,
+			PollInterval:            cfg.PollInterval,
+			Performance:             &cfg.Performance,
+			EvtSpike:                &remoteEvtSpike,
+			Update:                  &cfg.Update,
+			Sessions:                &remoteSessions,
+		}
+		if remote.Notifications == nil {
+			remote.Notifications = []dc.NotificationTarget{}
+		}
+		if remote.NotificationExclusions == nil {
+			remote.NotificationExclusions = []string{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(remote)
+		return
+	}
+
 	out := struct {
 		Notifications           []notifyTargetView   `json:"notifications"`
 		NotificationExclusions  []string             `json:"notification_exclusions"`
@@ -268,6 +293,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		Performance             dc.PerformanceConfig `json:"performance"`
 		EvtSpike                evtspikeView         `json:"evtspike"`
 		Update                  dc.UpdateConfig      `json:"update"`
+		Sessions                dc.SessionsConfig    `json:"sessions"`
 	}{
 		Notifications:           views,
 		NotificationExclusions:  cfg.NotificationExclusions,
@@ -278,6 +304,7 @@ func (ds *DashboardServer) handleGetSettings(w http.ResponseWriter, _ *http.Requ
 		Performance:             cfg.Performance,
 		EvtSpike:                evtspike,
 		Update:                  cfg.Update,
+		Sessions:                cfg.Sessions,
 	}
 	if out.NotificationExclusions == nil {
 		out.NotificationExclusions = []string{}
@@ -379,6 +406,7 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 		Performance             *dc.PerformanceConfig `json:"performance,omitempty"`
 		EvtSpike                *evtspikeInput        `json:"evtspike,omitempty"`
 		Update                  *dc.UpdateConfig      `json:"update,omitempty"`
+		Sessions                *dc.SessionsConfig    `json:"sessions,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -460,6 +488,30 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	if in.Sessions != nil {
+		if !isDashboardAdmin(GetAuthInfo(r), ds.cfg.Group) {
+			http.Error(w, "admin required", http.StatusForbidden)
+			return
+		}
+		if err := dc.ValidateSessionsConfig(*in.Sessions); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Keep a complete pre-request configuration for compensating rollback if a
+	// sessions telemetry transition fails after another settings block was
+	// persisted. The configuration file has no multi-resource transaction with
+	// SQLite, so this is the durable side of that coordination.
+	var settingsBefore *dc.Config
+	if in.Sessions != nil {
+		settingsBefore, err = dc.LoadConfig()
+		if err != nil {
+			slog.Error("load current sessions settings failed", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Validate evtspike fields up-front so an out-of-range knob returns a
 	// 400 with a clear field-level message instead of being silently clamped
@@ -536,6 +588,49 @@ func (ds *DashboardServer) handlePutSettings(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+	if in.Sessions != nil {
+		// Keep the persisted policy and telemetry state coordinated with action
+		// enqueue. Persist first so a failed config write cannot destroy current
+		// data; any subsequent telemetry failure is compensated before releasing
+		// the same policy mutex that guards enqueue.
+		ds.sessionPolicyMu.Lock()
+		previous := settingsBefore.Sessions
+		visibilityChanged := previous.IdentityVisibility != in.Sessions.IdentityVisibility ||
+			previous.ClientVisibility != in.Sessions.ClientVisibility ||
+			previous.ProcessVisibility != in.Sessions.ProcessVisibility
+		actionsDisabled := (previous.Enabled && !in.Sessions.Enabled) ||
+			(previous.AllowActions && !in.Sessions.AllowActions)
+		retentionReduced := in.Sessions.RetentionHours < previous.RetentionHours
+
+		if err := dc.UpdateSessionsConfig(in.Sessions); err != nil {
+			ds.sessionPolicyMu.Unlock()
+			slog.Error("update sessions settings failed", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var policyErr error
+		if visibilityChanged {
+			policyErr = ds.purgeSessionSnapshotsForPrivacyLocked(r.Context())
+		} else if actionsDisabled {
+			policyErr = ds.cancelSessionActionsForPolicyLocked(r.Context())
+		}
+		if policyErr == nil && retentionReduced {
+			policyErr = ds.runSessionRetentionOnceLocked(r.Context())
+		}
+		if policyErr != nil {
+			rollbackErr := dc.SaveConfig(settingsBefore)
+			ds.sessionPolicyMu.Unlock()
+			if rollbackErr != nil {
+				slog.Error("rollback sessions settings failed", "policy_error", policyErr, "rollback_error", rollbackErr)
+				http.Error(w, rollbackErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			slog.Error("apply sessions policy transition failed", "error", policyErr)
+			http.Error(w, policyErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		ds.sessionPolicyMu.Unlock()
 	}
 
 	auth := GetAuthInfo(r)

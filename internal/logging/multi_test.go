@@ -3,6 +3,7 @@
 package logging
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -69,7 +70,7 @@ func TestMultiHandler_EnabledReturnsTrueIfAnyEnabled(t *testing.T) {
 	)
 
 	// Info level — the first handler is enabled.
-	if !mh.Enabled(nil, slog.LevelInfo) { //nolint:staticcheck
+	if !mh.Enabled(context.Background(), slog.LevelInfo) {
 		t.Error("Enabled(Info) should be true when at least one handler accepts Info")
 	}
 }
@@ -82,7 +83,7 @@ func TestMultiHandler_EnabledReturnsFalseIfNoneEnabled(t *testing.T) {
 		NewCLIHandler(nil, errorLv),
 	)
 
-	if mh.Enabled(nil, slog.LevelDebug) { //nolint:staticcheck
+	if mh.Enabled(context.Background(), slog.LevelDebug) {
 		t.Error("Enabled(Debug) should be false when all handlers require Error+")
 	}
 }
@@ -100,7 +101,7 @@ func TestMultiHandler_HandleClonesRecord(t *testing.T) {
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "shared message", 0)
 	r.AddAttrs(slog.String("key", "value"))
-	_ = mh.Handle(nil, r) //nolint:staticcheck
+	_ = mh.Handle(context.Background(), r)
 
 	if !strings.Contains(a.String(), "key=value") {
 		t.Errorf("handler A missing attr: %q", a.String())

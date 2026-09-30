@@ -52,45 +52,46 @@ export function adaptFleetToMetricsSamples(series) {
 }
 
 /**
- * Adapt fleet series for Session Metrics.
+ * Adapt fleet series and anonymous session workload points for Session Metrics.
  * @param {Record<string,{t:number[],avg:number[],min:number[],max:number[],p50:number[]}>} series
+ * @param {Array<any>} [workloadPoints]
  */
-export function adaptFleetToSessionSamples(series) {
+export function adaptFleetToSessionSamples(series, workloadPoints = []) {
     const totalSeries = series.sessions_total;
     if (!totalSeries || totalSeries.t.length === 0) return [];
     const total = tsMap(totalSeries);
     const active = tsMap(series.sessions_active);
     const disconnected = tsMap(series.sessions_disconnected);
     const capacity = tsMap(series.sessions_max);
-    const cpuPeakP95 = tsMap(series.session_cpu_p95_pct, 'max');
-    const cpuTypicalP95 = tsMap(series.session_cpu_p95_pct, 'p50');
-    const memoryPeakP95 = tsMap(series.session_mem_p95_bytes, 'max');
-    const memoryTypicalP95 = tsMap(series.session_mem_p95_bytes, 'p50');
-    const sessionCpuObserved = tsMap(series.session_cpu_observed_count);
-    const sessionCpuAtOrAbove5 = tsMap(series.session_cpu_ge_5_count);
-    const sessionCpuAtOrAbove20 = tsMap(series.session_cpu_ge_20_count);
+    const workload = new Map(workloadPoints.map((point) => [point.t, point]));
 
     return totalSeries.t.map((ts) => {
         const activeCount = Math.round(active.get(ts) ?? 0);
         const disconnectedCount = Math.round(disconnected.get(ts) ?? 0);
         const totalCount = Math.round(total.get(ts) ?? 0);
         const maxCount = Math.round(capacity.get(ts) ?? 0);
-        const observedCount = sessionCpuObserved.get(ts);
-        const atOrAbove5Count = sessionCpuAtOrAbove5.get(ts);
-        const atOrAbove20Count = sessionCpuAtOrAbove20.get(ts);
+        const workloadPoint = workload.get(ts);
+        const cpu = workloadPoint?.cpu;
+        const memory = workloadPoint?.memory;
         return {
             ts,
             active: activeCount,
             disconnected: disconnectedCount,
             total: totalCount,
             utilization: maxCount > 0 ? Math.min((totalCount / maxCount) * 100, 100) : 0,
-            sessionCpuPeakP95: cpuPeakP95.get(ts),
-            sessionCpuTypicalP95: cpuTypicalP95.get(ts),
-            sessionMemPeakP95: memoryPeakP95.get(ts),
-            sessionMemTypicalP95: memoryTypicalP95.get(ts),
-            sessionCpuObserved: observedCount == null ? undefined : Math.round(observedCount),
-            sessionCpuAtOrAbove5: atOrAbove5Count == null ? undefined : Math.round(atOrAbove5Count),
-            sessionCpuAtOrAbove20: atOrAbove20Count == null ? undefined : Math.round(atOrAbove20Count),
+            sessionCpuP95: cpu?.p95_pct,
+            sessionCpuAvg: cpu?.avg_pct,
+            sessionMemP95: memory?.p95_bytes,
+            sessionMemAvg: memory?.avg_bytes,
+            sessionCpuObserved: cpu?.observed_sessions,
+            sessionMemObserved: memory?.observed_sessions,
+            sessionCpuAtOrAbove5: cpu?.ge_5_avg,
+            sessionCpuAtOrAbove20: cpu?.ge_20_avg,
+            sessionCpuAtOrAbove5Max: cpu?.ge_5_max,
+            sessionCpuAtOrAbove20Max: cpu?.ge_20_max,
+            sessionCpuAtOrAbove5Rate: cpu?.ge_5_rate_pct,
+            sessionCpuAtOrAbove20Rate: cpu?.ge_20_rate_pct,
+            sessionCoverage: workloadPoint?.coverage,
         };
     });
 }

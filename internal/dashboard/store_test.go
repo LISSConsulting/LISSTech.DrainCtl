@@ -3,11 +3,19 @@
 package dashboard
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -15,12 +23,91 @@ import (
 // telemetry DB rooted at t.TempDir(). The DB is closed on test cleanup.
 func newTestServerState(t *testing.T) *ServerState {
 	t.Helper()
+	state, _ := newTestServerStateWithDB(t)
+	return state
+}
+
+func newTestServerStateWithDB(t *testing.T) (*ServerState, *telemetry.DB) {
+	t.Helper()
 	db, err := telemetry.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("telemetry.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return NewServerState(telemetry.NewServerStore(db))
+	return NewServerState(telemetry.NewServerStore(db)), db
+}
+
+// mustUpdate keeps fixture writes explicit about persistence errors while
+// allowing tests to inspect both accepted and unregistered-host behavior.
+func mustUpdate(t *testing.T, state *ServerState, host string, result *dc.CheckResult) {
+	t.Helper()
+	if _, err := state.Update(host, result); err != nil {
+		t.Errorf("Update(%q): %v", host, err)
+	}
+}
+
+func TestGetSettings_ProjectsCollectorSafeSessionsLikeRemoteConfig(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	cfg := dc.DefaultConfig()
+	cfg.Sessions = dc.SessionsConfig{
+		Enabled:            true,
+		CollectProcesses:   true,
+		TopProcesses:       5,
+		RetentionHours:     72,
+		AllowActions:       true,
+		IdentityVisibility: dc.SessionVisibilityMasked,
+		ClientVisibility:   dc.SessionVisibilityHidden,
+		ProcessVisibility:  dc.SessionVisibilityFull,
+	}
+	if err := dc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	local, err := GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if local.Sessions == nil {
+		t.Fatal("in-process settings omitted sessions")
+	}
+	want := remoteSessionsConfig(cfg.Sessions)
+	if *local.Sessions != want {
+		t.Errorf("in-process sessions = %#v, want %#v", *local.Sessions, want)
+	}
+
+	ds := newTestServer(t)
+	response := httptest.NewRecorder()
+	ds.handleGetSettings(response, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/config status = %d: %s", response.Code, response.Body.String())
+	}
+	var remote RemoteSettings
+	if err := json.NewDecoder(response.Body).Decode(&remote); err != nil {
+		t.Fatalf("decode remote settings: %v", err)
+	}
+	if remote.Sessions == nil {
+		t.Fatal("remote settings omitted sessions")
+	}
+	if *local.Sessions != *remote.Sessions {
+		t.Errorf("in-process sessions = %#v, remote sessions = %#v", *local.Sessions, *remote.Sessions)
+	}
+
+	raw, err := json.Marshal(local)
+	if err != nil {
+		t.Fatalf("marshal in-process settings: %v", err)
+	}
+	var fields struct {
+		Sessions map[string]json.RawMessage `json:"sessions"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decode in-process settings JSON: %v", err)
+	}
+	if _, ok := fields.Sessions["allow_actions"]; ok {
+		t.Error("in-process sessions disclosed allow_actions")
+	}
+	if _, ok := fields.Sessions["retention_hours"]; ok {
+		t.Error("in-process sessions disclosed retention_hours")
+	}
 }
 
 // ── Construction ──────────────────────────────────────────────────────────────
@@ -29,6 +116,67 @@ func TestServerState_FreshIsEmpty(t *testing.T) {
 	s := newTestServerState(t)
 	if got := s.All(); len(got) != 0 {
 		t.Errorf("All() = %d servers, want 0 for fresh store", len(got))
+	}
+}
+
+// ── Local session snapshots ───────────────────────────────────────────────────
+
+func TestReportSessionSnapshot_DeliversCallbackWithoutMutatingHostState(t *testing.T) {
+	s := newTestServerState(t)
+	s.Register("SRV01")
+	before := s.All()
+	snapshot := sessiondata.SessionSnapshot{
+		Schema:           sessiondata.SnapshotSchema,
+		Host:             "srv01.example.test",
+		AgentInstanceID:  "00000000-0000-0000-0000-000000000001",
+		Sequence:         7,
+		ObservedAtMS:     123,
+		CollectorVersion: "test",
+		LogicalCPUCount:  1,
+		Sessions:         []sessiondata.SessionRecord{},
+	}
+	var received sessiondata.SessionSnapshot
+	s.OnSessionSnapshot = func(got sessiondata.SessionSnapshot) error {
+		received = got
+		return nil
+	}
+
+	handled, err := s.ReportSessionSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("ReportSessionSnapshot() error = %v", err)
+	}
+	if !handled {
+		t.Fatal("ReportSessionSnapshot() handled = false, want true")
+	}
+	if !reflect.DeepEqual(received, snapshot) {
+		t.Errorf("callback snapshot = %#v, want %#v", received, snapshot)
+	}
+	if after := s.All(); !reflect.DeepEqual(after, before) {
+		t.Errorf("host state changed: before %#v, after %#v", before, after)
+	}
+}
+
+func TestReportSessionSnapshot_NilCallbackIsUnsupported(t *testing.T) {
+	handled, err := newTestServerState(t).ReportSessionSnapshot(sessiondata.SessionSnapshot{})
+	if err != nil {
+		t.Fatalf("ReportSessionSnapshot() error = %v, want nil", err)
+	}
+	if handled {
+		t.Fatal("ReportSessionSnapshot() handled = true, want false without callback")
+	}
+}
+
+func TestReportSessionSnapshot_PropagatesCallbackError(t *testing.T) {
+	want := errors.New("session store unavailable")
+	s := newTestServerState(t)
+	s.OnSessionSnapshot = func(sessiondata.SessionSnapshot) error { return want }
+
+	handled, err := s.ReportSessionSnapshot(sessiondata.SessionSnapshot{})
+	if !handled {
+		t.Fatal("ReportSessionSnapshot() handled = false, want true")
+	}
+	if !errors.Is(err, want) {
+		t.Errorf("ReportSessionSnapshot() error = %v, want %v", err, want)
 	}
 }
 
@@ -133,7 +281,7 @@ func TestUpdate_SetsLastResult(t *testing.T) {
 	s.Register("SRV01")
 
 	result := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
-	s.Update("SRV01", result)
+	mustUpdate(t, s, "SRV01", result)
 
 	all := s.All()
 	if all[0].LastResult == nil {
@@ -144,12 +292,21 @@ func TestUpdate_SetsLastResult(t *testing.T) {
 	}
 }
 
+func TestReportLocal_PersistenceFailureReturnsFalse(t *testing.T) {
+	s := newTestServerState(t)
+	s.Register("SRV01")
+	s.store = failingReportStore{s.store}
+	if s.ReportLocal("SRV01", &dc.CheckResult{Host: "SRV01"}, nil) {
+		t.Fatal("ReportLocal acknowledged an unpersisted result")
+	}
+}
+
 func TestUpdate_SetsLastSeen(t *testing.T) {
 	s := newTestServerState(t)
 	s.Register("SRV01")
 	before := time.Now()
 
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	all := s.All()
 	if all[0].LastSeen.Before(before.Add(-time.Second)) {
@@ -159,7 +316,7 @@ func TestUpdate_SetsLastSeen(t *testing.T) {
 
 func TestUpdate_UnregisteredHostNoSideEffect(t *testing.T) {
 	s := newTestServerState(t)
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST", Status: "Healthy"})
 
 	if len(s.All()) != 0 {
 		t.Error("Update() on unregistered host should not create a ServerInfo entry")
@@ -171,13 +328,13 @@ func TestUpdate_FiresOnUpdateOnlyForRegisteredHost(t *testing.T) {
 	var fired []string
 	s.OnUpdate = func(h string) { fired = append(fired, h) }
 
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST"})
 	if len(fired) != 0 {
 		t.Errorf("OnUpdate fired for unregistered host: %v", fired)
 	}
 
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01"})
 	if len(fired) != 1 || fired[0] != "SRV01" {
 		t.Errorf("OnUpdate fired = %v, want [SRV01]", fired)
 	}
@@ -188,15 +345,235 @@ func TestUpdate_FiresOnMetricsOnlyForRegisteredHost(t *testing.T) {
 	var count int
 	s.OnMetrics = func(r dc.CheckResult) { count++ }
 
-	s.Update("GHOST", &dc.CheckResult{Host: "GHOST"})
+	mustUpdate(t, s, "GHOST", &dc.CheckResult{Host: "GHOST"})
 	if count != 0 {
 		t.Errorf("OnMetrics fired for unregistered host: count=%d", count)
 	}
 
 	s.Register("SRV01")
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01"})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01"})
 	if count != 1 {
 		t.Errorf("OnMetrics count=%d, want 1", count)
+	}
+}
+
+type countingSessionDropInboxWaker struct {
+	count int
+	state *ServerState
+	db    *telemetry.DB
+}
+
+func (w *countingSessionDropInboxWaker) WakeSessionDropInbox() {
+	w.count++
+	if got := w.state.Get("SRV01"); got == nil || got.LastResult == nil {
+		panic("session-drop wake occurred before accepted result persisted")
+	}
+	pending, err := telemetry.NewSessionDropStore(w.db).PendingObservation(context.Background())
+	if err != nil || pending == nil {
+		panic("session-drop wake occurred before durable inbox insert")
+	}
+}
+
+func TestUpdate_WakesSessionDropInboxOnlyAfterAcceptedResultCommit(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	waker := &countingSessionDropInboxWaker{state: s, db: db}
+	s.SetSessionDropInboxWaker(waker)
+
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now().UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	})
+	pending, err := telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation: %v", err)
+	}
+	if pending == nil {
+		t.Fatal("accepted report did not persist a durable session-drop observation")
+	}
+	if pending.CanonicalHost != "SRV01" || pending.ReportEpochMs <= 0 {
+		t.Fatalf("pending observation = %#v, want SRV01 with report epoch", pending)
+	}
+	acceptedSequence := pending.AcceptedSequence
+
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.UnixMilli(pending.ReportEpochMs).UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	})
+	pending, err = telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation after duplicate: %v", err)
+	}
+	if pending == nil || pending.AcceptedSequence != acceptedSequence {
+		t.Fatalf("duplicate report replaced durable observation: %#v, want sequence %d", pending, acceptedSequence)
+	}
+
+	if waker.count != 2 {
+		t.Fatalf("inbox wake count = %d, want 2 for two accepted reports; durable inbox remains idempotent", waker.count)
+	}
+}
+
+func TestUpdate_DurableInboxSurvivesMissedWakeAndConsumesOnce(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{
+		Host:      "SRV01",
+		Timestamp: time.Now().UTC(),
+		Status:    "Healthy",
+		Sessions:  &dc.SessionSummary{ActiveSessions: 4, DisconnectedSessions: 2},
+	})
+
+	if got := s.Get("SRV01"); got == nil || got.LastResult == nil {
+		t.Fatal("accepted result was not durable before missed wake simulation")
+	}
+	inbox := telemetry.NewSessionDropStore(db)
+	if pending, err := inbox.PendingObservation(context.Background()); err != nil || pending == nil {
+		t.Fatalf("pending observation after missed wake = (%#v, %v), want durable row", pending, err)
+	}
+
+	consumed := 0
+	drained, err := inbox.ConsumeNext(context.Background(), func(_ context.Context, _ *sql.Tx, observation telemetry.SessionDropObservation) error {
+		consumed++
+		if observation.CanonicalHost != "SRV01" {
+			t.Fatalf("consumed host = %q, want SRV01", observation.CanonicalHost)
+		}
+		return nil
+	})
+	if err != nil || !drained {
+		t.Fatalf("startup drain = (%v, %v), want (true, nil)", drained, err)
+	}
+	drained, err = inbox.ConsumeNext(context.Background(), func(context.Context, *sql.Tx, telemetry.SessionDropObservation) error {
+		t.Fatal("consumed the same durable observation twice")
+		return nil
+	})
+	if err != nil || drained {
+		t.Fatalf("second startup drain = (%v, %v), want (false, nil)", drained, err)
+	}
+	if consumed != 1 {
+		t.Fatalf("consumed observations = %d, want exactly once", consumed)
+	}
+}
+
+func TestUpdate_InboxDrainUsesAcceptanceSequenceNotReportEpoch(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	s.Register("SRV02")
+	reportEpoch := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+
+	// Deliberately accept the newer report epoch first. Detector drain order
+	// must preserve acceptance order, not reorder it by the report timestamp.
+	mustUpdate(t, s, "SRV02", &dc.CheckResult{Host: "SRV02", Timestamp: reportEpoch.Add(time.Minute)})
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Timestamp: reportEpoch})
+
+	inbox := telemetry.NewSessionDropStore(db)
+	var drainedHosts []string
+	for range 2 {
+		drained, err := inbox.ConsumeNext(context.Background(), func(_ context.Context, _ *sql.Tx, observation telemetry.SessionDropObservation) error {
+			drainedHosts = append(drainedHosts, observation.CanonicalHost)
+			return nil
+		})
+		if err != nil || !drained {
+			t.Fatalf("ConsumeNext = (%v, %v), want (true, nil)", drained, err)
+		}
+	}
+	if len(drainedHosts) != 2 || drainedHosts[0] != "SRV02" || drainedHosts[1] != "SRV01" {
+		t.Fatalf("drain order = %v, want acceptance order [SRV02 SRV01]", drainedHosts)
+	}
+}
+
+func TestUpdate_WithoutReportEpochPersistsResultWithoutInboxObservation(t *testing.T) {
+	s, db := newTestServerStateWithDB(t)
+	s.Register("SRV01")
+	mustUpdate(t, s, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+
+	if got := s.Get("SRV01"); got == nil || got.LastResult == nil {
+		t.Fatal("report without an observation identity did not persist last result")
+	}
+	pending, err := telemetry.NewSessionDropStore(db).PendingObservation(context.Background())
+	if err != nil {
+		t.Fatalf("PendingObservation: %v", err)
+	}
+	if pending != nil {
+		t.Fatalf("report without epoch created inbox observation %#v", pending)
+	}
+}
+
+func TestSessionDropObservationPreservesNilAndSuccessfulZeroSessions(t *testing.T) {
+	acceptedAt := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+	reportedAt := acceptedAt.Add(-time.Minute)
+
+	nilSessions := sessionDropObservation("SRV01", &dc.CheckResult{Timestamp: reportedAt}, acceptedAt)
+	if nilSessions.SessionPresence != "nil" || nilSessions.ActiveSessions != nil || nilSessions.DisconnectedSessions != nil {
+		t.Fatalf("nil session observation = %#v, want typed nil enumeration", nilSessions)
+	}
+
+	zeroSessions := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp: reportedAt,
+		Sessions:  &dc.SessionSummary{ActiveSessions: 0, DisconnectedSessions: 0},
+	}, acceptedAt)
+	if zeroSessions.SessionPresence != "present" || zeroSessions.ActiveSessions == nil || zeroSessions.DisconnectedSessions == nil {
+		t.Fatalf("zero session observation = %#v, want present typed zero counts", zeroSessions)
+	}
+	if *zeroSessions.ActiveSessions != 0 || *zeroSessions.DisconnectedSessions != 0 {
+		t.Fatalf("zero session counts = (%d, %d), want (0, 0)", *zeroSessions.ActiveSessions, *zeroSessions.DisconnectedSessions)
+	}
+}
+
+func TestSessionDropObservationUsesSourceLocalReportTime(t *testing.T) {
+	sourceLocal := time.Date(2026, time.September, 27, 0, 15, 0, 0, time.FixedZone("UTC-7", -7*60*60))
+	observation := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      sourceLocal,
+		DrainModeValue: uint32(dc.DrainPersistent),
+	}, sourceLocal.UTC().Add(time.Second))
+
+	if observation.ReportEpochMs != sourceLocal.UTC().UnixMilli() {
+		t.Fatalf("report epoch = %d, want %d", observation.ReportEpochMs, sourceLocal.UTC().UnixMilli())
+	}
+	if observation.LocalOffsetMinutes != -420 || observation.LocalDate != "2026-09-27" {
+		t.Fatalf("source-local context = (%d, %q), want (-420, 2026-09-27)", observation.LocalOffsetMinutes, observation.LocalDate)
+	}
+	if observation.DrainContext != "overlap" {
+		t.Fatalf("drain context = %q, want overlap", observation.DrainContext)
+	}
+}
+
+func TestSessionDropObservationClassifiesProductionReportContexts(t *testing.T) {
+	acceptedAt := time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC)
+	reportedAt := acceptedAt.Add(-time.Minute)
+
+	normal := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp: reportedAt,
+		Sessions:  &dc.SessionSummary{ActiveSessions: 2, DisconnectedSessions: 1},
+	}, acceptedAt)
+	if normal.SessionPresence != "present" || normal.FreshnessContext != "fresh" || normal.DrainContext != "none" || normal.ClassificationContext != "unexplained" {
+		t.Fatalf("normal observation = %#v, want fresh unexplained typed session report", normal)
+	}
+
+	unavailable := sessionDropObservation("SRV01", &dc.CheckResult{Timestamp: reportedAt}, acceptedAt)
+	if unavailable.SessionPresence != "nil" || unavailable.ClassificationContext != "not_scored" {
+		t.Fatalf("unavailable observation = %#v, want not_scored", unavailable)
+	}
+
+	invalid := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      reportedAt,
+		DrainModeValue: uint32(dc.DrainPersistent),
+		Sessions:       &dc.SessionSummary{ActiveSessions: -1, DisconnectedSessions: 0},
+	}, acceptedAt)
+	if invalid.SessionPresence != "invalid" || invalid.DrainContext != "overlap" || invalid.ClassificationContext != "not_scored" {
+		t.Fatalf("invalid observation = %#v, want not_scored drain context", invalid)
+	}
+
+	draining := sessionDropObservation("SRV01", &dc.CheckResult{
+		Timestamp:      reportedAt,
+		DrainModeValue: uint32(dc.DrainPersistent),
+		Sessions:       &dc.SessionSummary{ActiveSessions: 2, DisconnectedSessions: 1},
+	}, acceptedAt)
+	if draining.SessionPresence != "present" || draining.DrainContext != "overlap" || draining.ClassificationContext != "drain_associated" {
+		t.Fatalf("draining observation = %#v, want drain-associated typed session report", draining)
 	}
 }
 
@@ -266,7 +643,7 @@ func TestPersistence_LastResultSurvivesReload(t *testing.T) {
 	}
 	s1 := NewServerState(telemetry.NewServerStore(db1))
 	s1.Register("SRV01")
-	s1.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	mustUpdate(t, s1, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
 	_ = db1.Close()
 
 	db2, err := telemetry.Open(dir)
@@ -306,7 +683,7 @@ func TestServerState_ConcurrentAccess(t *testing.T) {
 			case 0:
 				s.Register(host)
 			case 1:
-				s.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"})
+				mustUpdate(t, s, host, &dc.CheckResult{Host: host, Status: "Healthy"})
 			case 2:
 				s.IsRegistered(host)
 			case 3:
@@ -335,7 +712,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 	ds.state.Register("SRV01")
 
 	baseline := ds.state.storeGetCalls.Load()
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	afterFirst := ds.state.storeGetCalls.Load()
 
 	if afterFirst != baseline+1 {
@@ -343,7 +720,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+		mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 	}
 	afterSteadyState := ds.state.storeGetCalls.Load()
 
@@ -359,7 +736,7 @@ func TestUpdateLazilyLoadsRegisteredAt(t *testing.T) {
 func TestBroadcastServerUpdateUsesCache(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	before := ds.state.storeGetCalls.Load()
 	ds.broadcastServerUpdate("SRV01")
@@ -390,7 +767,10 @@ func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
 		t.Fatalf("db.Close: %v", err)
 	}
 
-	s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	updated, err := s.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Alert"})
+	if updated || err == nil {
+		t.Fatalf("Update after DB close = (%v, %v), want failure", updated, err)
+	}
 
 	if got := s.GetCached("SRV01"); got != nil {
 		t.Fatalf("GetCached after failed Update = %+v, want nil (cache must not be poisoned)", got)
@@ -402,7 +782,7 @@ func TestUpdateDoesNotPoisonCacheOnDBError(t *testing.T) {
 func TestRemoveClearsCache(t *testing.T) {
 	ds := newTestServer(t)
 	ds.state.Register("SRV01")
-	ds.state.Update("SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
+	mustUpdate(t, ds.state, "SRV01", &dc.CheckResult{Host: "SRV01", Status: "Healthy"})
 
 	if ds.state.GetCached("SRV01") == nil {
 		t.Fatal("precondition: cache should be populated after Update")
@@ -433,7 +813,7 @@ func TestCachedServerInfoIsImmutable(t *testing.T) {
 	s.Register("SRV01")
 
 	first := &dc.CheckResult{Host: "SRV01", Status: "Healthy"}
-	s.Update("SRV01", first)
+	mustUpdate(t, s, "SRV01", first)
 
 	captured := s.GetCached("SRV01")
 	if captured == nil || captured.LastResult == nil {
@@ -445,7 +825,7 @@ func TestCachedServerInfoIsImmutable(t *testing.T) {
 
 	// Second Update with a DIFFERENT result.
 	second := &dc.CheckResult{Host: "SRV01", Status: "Alert"}
-	s.Update("SRV01", second)
+	mustUpdate(t, s, "SRV01", second)
 
 	if captured.LastResult.Status != "Healthy" {
 		t.Errorf("first cached snapshot mutated by second Update: status=%q, want Healthy", captured.LastResult.Status)

@@ -4,8 +4,11 @@ package svc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/perfmon"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/updater"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/watcher"
@@ -39,6 +43,7 @@ func svcRunCheck(
 	evtSub *watcher.EventSubscriber,
 	perfCollector *perfmon.Collector,
 	perfTriggerState *perfmon.PerfTriggerState,
+	sessionRuntime *sessionRuntime,
 	evtSpikeSub *evtspike.Subsystem,
 	updaterSub *updater.Subsystem,
 ) {
@@ -116,13 +121,21 @@ func svcRunCheck(
 		statusChanged = previousStatus != status
 	}
 
-	// Session tracking.
+	// Session tracking uses the detailed enumeration for both the legacy
+	// heartbeat summary and Fleet Sessions. This deliberately avoids a second
+	// WTS pass each tick.
 	slog.Debug("diag: check=get_sessions")
-	sess := dc.GetSessionSummary()
-	if sess == nil {
-		slog.Warn("session enumeration failed", "hint", "verify service runs as LocalSystem")
+	sessionRecords, sessionErr := dc.EnumerateSessionRecords()
+	var sess *dc.SessionSummary
+	if sessionErr != nil {
+		slog.Warn("session enumeration failed", "hint", "verify service runs as LocalSystem", "error", sessionErr)
+	} else {
+		sess = sessionSummaryFromRecords(sessionRecords, dc.ReadMaxSessions())
 	}
 	h.lastSessions.Store(sess)
+	if sessionRuntime != nil {
+		sessionRuntime.Report(ctx, sessionRecords, sessionErr, perfCollector, dashCfg, dashState)
+	}
 
 	// Performance counters (service-mode only).
 	slog.Debug("diag: check=perfmon", "collector_nil", perfCollector == nil)
@@ -319,7 +332,7 @@ func svcRunCheck(
 			} else {
 				result.Message = savedMessage
 			}
-			dc.SendNotificationWithExclusions(targets, exclusions, notifyState, result, trigger, changedBy)
+			sendAsyncNotification(targets, exclusions, notifyState, result, trigger, changedBy)
 		}
 		result.Message = savedMessage
 	}
@@ -341,17 +354,15 @@ func svcRunCheck(
 
 	// Report to dashboard if configured.
 	if dashCfg != nil && dashCfg.URL != "" {
+		if sessionRuntime != nil {
+			sessionRuntime.cleanupActions(ctx)
+		}
 		slog.Debug("diag: check=dashboard_report", "url", dashCfg.URL)
 		if dashState != nil {
-			// Local path: dashboard runs in the same process. We still
-			// need to surface any pending force-update command to the
-			// agent, but we don't have an HTTP response to read it from
-			// — instead we ask the dashboard's ServerState directly via
-			// the consumePendingCommand helper exposed through the
-			// dashboard package. The helper is exported for this exact
-			// use case (the integration test for the force-update
-			// registry exercises the same call from a remote path so
-			// both stay in lock-step).
+			// The in-process heartbeat still carries force-update state. Session
+			// action completion and delivery use the equivalent ServerState
+			// callbacks immediately afterward, in the same acknowledgement-
+			// before-delivery order as the remote report response.
 			pending := consumeForceUpdatePending(dashState, result.Host)
 			var localCompletion *dashboard.ForceUpdateCompletion
 			if pending != nil && updaterSub != nil {
@@ -370,34 +381,51 @@ func svcRunCheck(
 			}
 			if dashState.ReportLocal(result.Host, result, toDashboardCompletion(localCompletion, result.Host)) {
 				slog.Debug("dashboard heartbeat (local)", "host", result.Host)
+				if sessionRuntime != nil {
+					sessionRuntime.applyLocalSessionActions(ctx, dashState)
+				}
 			} else {
-				slog.Warn("dashboard heartbeat (local): host not registered", "host", result.Host)
+				slog.Warn("dashboard heartbeat (local): report not accepted", "host", result.Host)
 			}
 		} else {
 			slog.Debug("dashboard heartbeat sending", "url", dashCfg.URL)
-			repResult := dashboard.ReportState(ctx, dashCfg.URL, result)
-			// Process any pending force-update command the dashboard
-			// attached to the report response. The agent runs the
-			// updater immediately; the completion is posted back on the
-			// NEXT heartbeat (or this same round if the updater
-			// completes synchronously below the deadline) via
-			// ReportForceUpdateCompletion. The completion path is gated
-			// on updaterSub != nil — pre-26.9.24 builds drop the
-			// pending command silently because they can't act on it.
-			if repResult != nil && repResult.PendingCommand != nil && updaterSub != nil {
-				pending := repResult.PendingCommand
-				slog.Info("force_update=received",
-					"host", pending.Host,
-					"command_id", pending.CommandID,
-					"reason", pending.Reason)
-				outcome, decision, oldVer, newVer := triggerUpdateAndWait(ctx, updaterSub, pending)
-				dashboard.ReportForceUpdateCompletion(ctx, dashCfg.URL, pending.Host, dashboard.ForceUpdateCompletion{
-					CommandID:  pending.CommandID,
-					Outcome:    outcome,
-					Reason:     decision,
-					OldVersion: oldVer,
-					NewVersion: newVer,
-				})
+			if sessionRuntime != nil {
+				repResult := dashboard.ReportStateWithSessionActions(ctx, dashCfg.URL, result, sessionRuntime.pendingCompletions())
+				if repResult != nil {
+					sessionRuntime.applyRemoteSessionActions(ctx, repResult)
+				}
+				if repResult != nil && repResult.PendingCommand != nil && updaterSub != nil {
+					pending := repResult.PendingCommand
+					slog.Info("force_update=received",
+						"host", pending.Host,
+						"command_id", pending.CommandID,
+						"reason", pending.Reason)
+					outcome, decision, oldVer, newVer := triggerUpdateAndWait(ctx, updaterSub, pending)
+					dashboard.ReportForceUpdateCompletion(ctx, dashCfg.URL, pending.Host, dashboard.ForceUpdateCompletion{
+						CommandID:  pending.CommandID,
+						Outcome:    outcome,
+						Reason:     decision,
+						OldVersion: oldVer,
+						NewVersion: newVer,
+					})
+				}
+			} else {
+				repResult := dashboard.ReportState(ctx, dashCfg.URL, result)
+				if repResult != nil && repResult.PendingCommand != nil && updaterSub != nil {
+					pending := repResult.PendingCommand
+					slog.Info("force_update=received",
+						"host", pending.Host,
+						"command_id", pending.CommandID,
+						"reason", pending.Reason)
+					outcome, decision, oldVer, newVer := triggerUpdateAndWait(ctx, updaterSub, pending)
+					dashboard.ReportForceUpdateCompletion(ctx, dashCfg.URL, pending.Host, dashboard.ForceUpdateCompletion{
+						CommandID:  pending.CommandID,
+						Outcome:    outcome,
+						Reason:     decision,
+						OldVersion: oldVer,
+						NewVersion: newVer,
+					})
+				}
 			}
 		}
 	}
@@ -405,10 +433,367 @@ func svcRunCheck(
 	slog.Debug("poll tick", "mode", state.Mode, "status", status, "elapsed", time.Since(checkStart).Truncate(time.Microsecond))
 }
 
+// sessionRuntime owns a service instance's Fleet Sessions reporting state. The
+// service loop invokes it synchronously, so sequence assignment and reporting
+// are naturally one-at-a-time.
+type sessionRuntime struct {
+	agentInstanceID  string
+	host             string
+	logicalCPUs      uint16
+	sequence         uint64
+	config           dc.SessionsConfig
+	processes        *dc.ProcessCollector
+	collectPDH       func([]uint32) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities)
+	collectProcesses func([]uint32, uint8) (map[uint32][]sessiondata.SessionProcess, bool)
+	reportRemote     func(context.Context, string, sessiondata.SessionSnapshot)
+	actionLedger     sessionActionRuntimeLedger
+	actionExecutor   *dc.SessionActionExecutor
+	executeAction    func(context.Context, sessiondata.PendingSessionAction) (sessiondata.CompletedSessionAction, error)
+	completions      []sessiondata.CompletedSessionAction
+}
+
+// sessionActionRuntimeLedger is deliberately narrower than the telemetry
+// store: execution only needs terminal acknowledgement and bounded retention.
+type sessionActionRuntimeLedger interface {
+	Acknowledge(context.Context, string) error
+	Cleanup(context.Context, time.Time, time.Duration, int) (int, error)
+}
+
+var (
+	sessionRuntimeHostname          = os.Hostname
+	reserveSessionRuntimeInstanceID = telemetry.ReserveSessionInstanceID
+)
+
+func canonicalSessionRuntimeHost() (string, error) {
+	host, err := sessionRuntimeHostname()
+	if err != nil {
+		return "", fmt.Errorf("session runtime hostname: %w", err)
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if err := sessiondata.ValidateCanonicalHost(host); err != nil {
+		return "", fmt.Errorf("session runtime hostname %q is invalid: %w", host, err)
+	}
+	return host, nil
+}
+
+func newReservedSessionRuntime(ctx context.Context, db *telemetry.DB, config dc.SessionsConfig) (*sessionRuntime, error) {
+	host, err := canonicalSessionRuntimeHost()
+	if err != nil {
+		return nil, err
+	}
+	instanceID, err := reserveSessionRuntimeInstanceID(ctx, db, host, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("session runtime reserve generation: %w", err)
+	}
+	runtime, err := newSessionRuntime(config, host, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	ledger := telemetry.NewSessionActionLedgerStore(db)
+	runtime.actionLedger = ledger
+	runtime.actionExecutor = dc.NewSessionActionExecutor(ledger)
+	return runtime, nil
+}
+
+func newSessionRuntime(config dc.SessionsConfig, host, agentInstanceID string) (*sessionRuntime, error) {
+	if err := sessiondata.ValidateCanonicalHost(host); err != nil {
+		return nil, fmt.Errorf("session runtime hostname %q is invalid: %w", host, err)
+	}
+	if _, err := sessiondata.ParseUUIDv7(agentInstanceID); err != nil {
+		return nil, fmt.Errorf("session runtime instance ID: %w", err)
+	}
+	logicalCPUs := runtime.NumCPU()
+	if logicalCPUs < 1 {
+		logicalCPUs = 1
+	}
+	if logicalCPUs > 1024 {
+		logicalCPUs = 1024
+	}
+	return &sessionRuntime{
+		agentInstanceID: agentInstanceID,
+		host:            host,
+		logicalCPUs:     uint16(logicalCPUs),
+		config:          config,
+		processes:       dc.NewProcessCollector(uint16(logicalCPUs)),
+		reportRemote:    dashboard.ReportSessionSnapshot,
+	}, nil
+}
+
+func (r *sessionRuntime) UpdateConfig(config dc.SessionsConfig) { r.config = config }
+
+// pendingCompletions returns a bounded copy suitable for one report. Entries
+// stay in memory until the dashboard explicitly acknowledges their IDs.
+func (r *sessionRuntime) pendingCompletions() []sessiondata.CompletedSessionAction {
+	return slices.Clone(r.completions)
+}
+
+// acknowledgeCompletions removes only dashboard-acknowledged terminal entries.
+// A failed local delete leaves the completion queued for retry.
+func (r *sessionRuntime) acknowledgeCompletions(ctx context.Context, actionIDs []string) {
+	for _, actionID := range actionIDs {
+		if r.actionLedger != nil {
+			if err := r.actionLedger.Acknowledge(ctx, actionID); err != nil {
+				slog.Warn("session action acknowledgement failed", "action_id", actionID, "error", err)
+				continue
+			}
+		}
+		for i := range r.completions {
+			if r.completions[i].ActionID == actionID {
+				r.completions = append(r.completions[:i], r.completions[i+1:]...)
+				break
+			}
+		}
+	}
+}
+
+// executePendingActions claims and executes no more than the available
+// completion capacity. Redelivered terminal actions are handled by the durable
+// executor and therefore never repeat WTS work.
+func (r *sessionRuntime) executePendingActions(ctx context.Context, actions []sessiondata.PendingSessionAction) {
+	if r.actionExecutor == nil && r.executeAction == nil {
+		return
+	}
+	available := sessiondata.MaxSessionActionCommands - len(r.completions)
+	for _, action := range actions {
+		if available == 0 {
+			break
+		}
+		var completion sessiondata.CompletedSessionAction
+		var err error
+		if r.executeAction != nil {
+			completion, err = r.executeAction(ctx, action)
+		} else {
+			completion, err = r.actionExecutor.Execute(ctx, action)
+		}
+		if err != nil {
+			slog.Warn("session action execution failed", "action_id", action.ActionID, "error", err)
+			continue
+		}
+		if completion.ActionID == "" {
+			continue
+		}
+		duplicate := false
+		for _, queued := range r.completions {
+			if queued.ActionID == completion.ActionID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			r.completions = append(r.completions, completion)
+			available--
+		}
+	}
+}
+
+func (r *sessionRuntime) cleanupActions(ctx context.Context) {
+	if r.actionLedger == nil || r.config.RetentionHours <= 0 {
+		return
+	}
+	if _, err := r.actionLedger.Cleanup(ctx, time.Now(), time.Duration(r.config.RetentionHours)*time.Hour, sessiondata.MaxSessionActionCommands); err != nil {
+		slog.Warn("session action ledger cleanup failed", "error", err)
+	}
+}
+
+func (r *sessionRuntime) applyRemoteSessionActions(ctx context.Context, report *dashboard.ReportWithSessionActionsResult) {
+	if report == nil {
+		return
+	}
+	r.acknowledgeCompletions(ctx, report.AcknowledgedSessionActionIDs)
+	r.executePendingActions(ctx, report.PendingSessionActions)
+}
+
+func (r *sessionRuntime) applyLocalSessionActions(ctx context.Context, dashState *dashboard.ServerState) {
+	defer r.cleanupActions(ctx)
+	if dashState == nil {
+		return
+	}
+	if handled, acknowledged, err := dashState.CompletePendingSessionActions(r.host, r.pendingCompletions()); handled {
+		if err != nil {
+			slog.Warn("dashboard: local session action completion failed", "error", err)
+			return
+		}
+		r.acknowledgeCompletions(ctx, acknowledged)
+	}
+	if handled, actions, err := dashState.DeliverPendingSessionActions(r.host); handled {
+		if err != nil {
+			slog.Warn("dashboard: local session action delivery failed", "error", err)
+			return
+		}
+		r.executePendingActions(ctx, actions)
+	}
+}
+
+func (r *sessionRuntime) Report(ctx context.Context, records []sessiondata.SessionRecord, collectionErr error, perf *perfmon.Collector, dashCfg *dc.DashboardConfig, dashState *dashboard.ServerState) {
+	if !r.config.Enabled {
+		return
+	}
+
+	r.sequence++
+	snapshot := sessiondata.SessionSnapshot{
+		Schema:           sessiondata.SnapshotSchema,
+		Host:             r.host,
+		AgentInstanceID:  r.agentInstanceID,
+		Sequence:         sessiondata.DecimalUint64(r.sequence),
+		ObservedAtMS:     time.Now().UnixMilli(),
+		CollectorVersion: dc.Version,
+		LogicalCPUCount:  r.logicalCPUs,
+		Sessions:         records,
+	}
+	if collectionErr != nil {
+		snapshot.CollectionError = &sessiondata.CollectionError{Code: collectionErrorCode(collectionErr)}
+		snapshot.Sessions = nil
+	} else if len(snapshot.Sessions) > sessiondata.MaxSessions {
+		slog.Warn("session collector returned too many reportable sessions", "host", snapshot.Host, "sequence", snapshot.Sequence, "session_count", len(snapshot.Sessions))
+		snapshot.CollectionError = &sessiondata.CollectionError{Code: sessiondata.CollectionErrorTimeout}
+		snapshot.Sessions = nil
+	} else {
+		snapshot.Capabilities.SessionActions = true
+		ids := make([]uint32, len(snapshot.Sessions))
+		for i := range snapshot.Sessions {
+			ids[i] = snapshot.Sessions[i].SessionID
+		}
+		if r.collectPDH != nil || perf != nil {
+			var metrics map[uint32]perfmon.SessionPDHMetrics
+			var capabilities perfmon.SessionPDHCapabilities
+			if r.collectPDH != nil {
+				metrics, capabilities = r.collectPDH(ids)
+			} else {
+				metrics, capabilities = perf.CollectSessionPDH(ids)
+			}
+			snapshot.Capabilities.InputDelay = capabilities.InputDelay
+			snapshot.Capabilities.RemoteFX = capabilities.RemoteFX
+			for i := range snapshot.Sessions {
+				if metric, ok := metrics[snapshot.Sessions[i].SessionID]; ok {
+					snapshot.Sessions[i].CPUPercent = metric.CPUPercent
+					snapshot.Sessions[i].WorkingSetBytes = metric.WorkingSetBytes
+					snapshot.Sessions[i].InputDelayMS = metric.InputDelayMS
+					snapshot.Sessions[i].RemoteFX = metric.RemoteFX
+				}
+			}
+		}
+		if r.config.CollectProcesses {
+			var processes map[uint32][]sessiondata.SessionProcess
+			var available bool
+			if r.collectProcesses != nil {
+				processes, available = r.collectProcesses(ids, uint8(r.config.TopProcesses))
+			} else {
+				processes, available = r.processes.CollectTopProcesses(ids, uint8(r.config.TopProcesses))
+			}
+			snapshot.Capabilities.Processes = available
+			if available {
+				for i := range snapshot.Sessions {
+					snapshot.Sessions[i].Processes = processes[snapshot.Sessions[i].SessionID]
+				}
+			}
+		}
+	}
+	snapshot = sessiondata.ProjectSnapshot(snapshot, sessionPrivacyPolicy(r.config))
+	if snapshot.CollectionError == nil {
+		compacted, compactErr := sessiondata.CompactSnapshotForWire(snapshot)
+		if compactErr != nil {
+			slog.Warn("session snapshot exceeds wire limit after compaction", "error", compactErr, "host", snapshot.Host, "sequence", snapshot.Sequence, "session_count", len(records))
+			snapshot.CollectionError = &sessiondata.CollectionError{Code: sessiondata.CollectionErrorTimeout}
+			snapshot.Capabilities = sessiondata.SessionCapabilities{}
+			snapshot.Sessions = nil
+		} else {
+			snapshot = compacted
+		}
+	}
+
+	normalizeSessionSnapshotArrays(&snapshot)
+
+	if dashState != nil {
+		handled, err := dashState.ReportSessionSnapshot(snapshot)
+		if handled {
+			if err != nil {
+				slog.Warn("dashboard: local session snapshot ingest failed", "error", err, "host", snapshot.Host, "sequence", snapshot.Sequence)
+			}
+			return
+		}
+	}
+	if dashCfg != nil && dashCfg.URL != "" {
+		r.reportRemote(ctx, dashCfg.URL, snapshot)
+	}
+}
+
+// normalizeSessionSnapshotArrays preserves the snapshot contract for required
+// arrays on every reporting path, including fatal fallbacks.
+func normalizeSessionSnapshotArrays(snapshot *sessiondata.SessionSnapshot) {
+	if snapshot.Sessions == nil {
+		snapshot.Sessions = []sessiondata.SessionRecord{}
+	}
+	for i := range snapshot.Sessions {
+		if snapshot.Sessions[i].Processes == nil {
+			snapshot.Sessions[i].Processes = []sessiondata.SessionProcess{}
+		}
+	}
+}
+
+func collectionErrorCode(err error) string {
+	if errors.Is(err, dc.ErrWTSMetadata) {
+		return sessiondata.CollectionErrorWTSMetadataFailed
+	}
+	return sessiondata.CollectionErrorWTSEnumerationFailed
+}
+
+func sessionPrivacyPolicy(config dc.SessionsConfig) sessiondata.PrivacyPolicy {
+	return sessiondata.PrivacyPolicy{
+		Identity: sessiondata.Visibility(config.IdentityVisibility),
+		Client:   sessiondata.Visibility(config.ClientVisibility),
+		Process:  sessiondata.Visibility(config.ProcessVisibility),
+	}
+}
+
+func sessionSummaryFromRecords(records []sessiondata.SessionRecord, maxSessions int) *dc.SessionSummary {
+	summary := &dc.SessionSummary{MaxSessions: maxSessions}
+	for _, record := range records {
+		switch record.State {
+		case sessiondata.SessionActive:
+			summary.ActiveSessions++
+			summary.TotalSessions++
+		case sessiondata.SessionDisconnected:
+			summary.DisconnectedSessions++
+			summary.TotalSessions++
+		}
+	}
+	if summary.MaxSessions > 0 && summary.TotalSessions > 0 {
+		summary.UtilizationPct = min(100, summary.TotalSessions*100/summary.MaxSessions)
+	}
+	return summary
+}
+
+// applyRemoteSessionsConfig overlays the collector-safe dashboard settings and
+// returns the pre-update policy so callers can detect a privacy transition.
+func applyRemoteSessionsConfig(config *dc.SessionsConfig, remote dashboard.RemoteSessionsConfig) dc.SessionsConfig {
+	previous := *config
+	candidate := previous
+	candidate.Enabled = remote.Enabled
+	candidate.CollectProcesses = remote.CollectProcesses
+	candidate.TopProcesses = remote.TopProcesses
+	candidate.IdentityVisibility = remote.IdentityVisibility
+	candidate.ClientVisibility = remote.ClientVisibility
+	candidate.ProcessVisibility = remote.ProcessVisibility
+	if err := dc.ValidateSessionsConfig(candidate); err != nil {
+		slog.Warn("dashboard: invalid sessions config ignored", "error", err)
+		return previous
+	}
+	*config = candidate
+	return previous
+}
+
+func sessionPrivacyChanged(a, b dc.SessionsConfig) bool {
+	return a.IdentityVisibility != b.IdentityVisibility ||
+		a.ClientVisibility != b.ClientVisibility ||
+		a.ProcessVisibility != b.ProcessVisibility
+}
+
 // pruneNotifyState removes per-URL entries from state that no longer correspond
 // to any active notification target, preventing stale rate-limit state from
 // affecting new or renamed targets.
 func pruneNotifyState(state *dc.NotifyState, targets []dc.NotificationTarget) {
+	state.DispatchMu.Lock()
+	defer state.DispatchMu.Unlock()
 	active := make(map[string]bool, len(targets))
 	for _, t := range targets {
 		if t.URL != "" {

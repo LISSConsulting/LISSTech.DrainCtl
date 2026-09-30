@@ -53,14 +53,17 @@ const randInt = (lo, hi) => Math.floor(rand(lo, hi + 1));
 /** Pick a random element. */
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-/** ISO-8601 timestamp string. */
-const isoNow = () => new Date().toISOString();
+/** Strict UTC RFC3339 timestamp with exactly millisecond precision. */
+const utcMillis = (epochMs = Date.now()) => new Date(Math.trunc(epochMs)).toISOString();
 
-/** ISO-8601 timestamp N minutes ago. */
-const isoAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+/** UTC RFC3339 timestamp. */
+const isoNow = () => utcMillis();
 
-/** ISO-8601 timestamp N minutes from now. */
-const isoFuture = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
+/** UTC RFC3339 timestamp N minutes ago. */
+const isoAgo = (minutes) => utcMillis(Date.now() - minutes * 60_000);
+
+/** UTC RFC3339 timestamp N minutes from now. */
+const isoFuture = (minutes) => utcMillis(Date.now() + minutes * 60_000);
 
 // ---------------------------------------------------------------------------
 // Server definitions — realistic RDS farm (50-node fleet)
@@ -632,6 +635,224 @@ let mockSettings = {
     },
 };
 
+// ---------------------------------------------------------------------------
+// Feature 013 — no-network investigation fixture
+// ---------------------------------------------------------------------------
+
+const investigationRoles = new Set(['dashboard', 'stale', 'machine', 'non_dashboard']);
+let dashboardGroupGeneration = 1;
+let nextInvestigationAttemptID = 1000;
+const investigationAttempts = new Map();
+
+const investigationProvider = {
+    profile: 'openai_responses',
+    endpoint: 'https://api.openai.com/v1/responses',
+    model: 'gpt-6-astra',
+    access_enabled: true,
+    acknowledged: true,
+    privacy_acknowledgement_version: 'openai_responses_privacy_v1',
+    automatic_enabled: false,
+    has_credential: true,
+};
+
+const investigationSessionDropSettings = {
+    lower_tail_threshold: 0.0001,
+    minimum_drop_sessions: 3,
+    minimum_drop_percent: 30,
+    baseline_half_life_hours: 168,
+    cooldown_minutes: 60,
+    detector: { slots_per_day: 96, confirmation_required: 2, confirmation_window: 3, slot_maturity_eligible_days: 7, fallback_minimum_observations: 20, fallback_minimum_span_hours: 24 },
+};
+
+const mockConsent = {
+    version: 'openai_responses_privacy_v1',
+    third_party_subprocessors: true,
+    no_training_without_opt_in: true,
+    default_abuse_monitoring_up_to_30_days: true,
+    store_false_application_state_only: true,
+    temporary_prompt_cache_possible: true,
+    zdr_mam_separate_approval: true,
+    audit_days_local_only: true,
+    global_endpoint_no_regional_guarantee: true,
+};
+
+const attemptTimes = (minutes, terminal = true) => ({
+    created_at: isoAgo(minutes + 4),
+    started_at: terminal ? isoAgo(minutes + 3) : null,
+    send_authorized_at: terminal ? isoAgo(minutes + 2) : null,
+    send_completed_at: terminal ? isoAgo(minutes + 1) : null,
+    completed_at: terminal ? isoAgo(minutes) : null,
+});
+
+function sourceLink(sourceKind, sourceID) {
+    return { source_kind: sourceKind, source_id: String(sourceID) };
+}
+
+function attemptView(attempt) {
+    return {
+        attempt_id: String(attempt.id),
+        attempt_number: attempt.number,
+        initiation: attempt.initiation,
+        retry_of_attempt_id: attempt.retryOf ?? null,
+        state: attempt.state,
+        ...attempt.times,
+        terminal_reason: attempt.terminalReason,
+        evidence_version: 1,
+        omission_codes: attempt.omissionCodes ?? [],
+    };
+}
+
+function attemptUpdateView(attempt) {
+    return {
+        attempt_id: String(attempt.id),
+        source: sourceLink(attempt.sourceKind, attempt.sourceID),
+        attempt_number: attempt.number,
+        initiation: attempt.initiation,
+        retry_of_attempt_id: attempt.retryOf ?? null,
+        state: attempt.state,
+        terminal_reason: attempt.terminalReason,
+        updated_at: utcMillis(),
+    };
+}
+
+function safeReport(insufficient = false) {
+    return {
+        result_version: 1,
+        summary: { text_kind: 'untrusted_summary', text: insufficient ? 'Available aggregate facts are not conclusive.' : 'Observed aggregate metrics need operator review.', fact_ids: ['F001', 'F002'] },
+        overall_assessment: insufficient ? 'insufficient_evidence' : 'likely_localized_operational_issue',
+        evidence_sufficiency: insufficient ? 'insufficient' : 'partial',
+        human_review_required: true,
+        hypotheses: insufficient ? [] : [{ rank: 1, confidence: 'low', text_kind: 'untrusted_hypothesis', text: 'quoted "text" & ampersand', supporting_fact_ids: ['F001'], contradicting_fact_ids: ['F002'] }],
+        missing_evidence: [{ category: 'additional_time_series', text_kind: 'untrusted_missing_evidence', text: 'Additional aggregate observations are needed.', related_fact_ids: ['F002'] }],
+        recommended_diagnostic_checks: [{ rank: 1, check_type: 'inspect_retained_metrics', text_kind: 'untrusted_diagnostic_check', text: 'Review retained aggregate metric trends.', fact_ids: ['F001'], hypothesis_ranks: insufficient ? [] : [1] }],
+    };
+}
+
+function attemptDetail(attempt) {
+    const view = attemptView(attempt);
+    const unavailable = attempt.terminalReason === 'evidence_unavailable';
+    const result = ['completed', 'insufficient_evidence'].includes(attempt.state) && !unavailable ? safeReport(attempt.state === 'insufficient_evidence') : null;
+    return {
+        attempt: {
+            ...view,
+            source: sourceLink(attempt.sourceKind, attempt.sourceID),
+            evidence: {
+                version: 1,
+                snapshot_kind: unavailable ? 'unavailable' : 'available',
+                snapshot_at: attempt.times.created_at,
+                window_start: isoAgo(34),
+                window_end: attempt.times.created_at,
+                fact_ids: unavailable ? [] : ['F001', 'F002', 'F003'],
+                omission_codes: attempt.omissionCodes ?? [],
+            },
+            result,
+            provenance: result ? {
+                provider_profile: 'openai_responses',
+                provider_endpoint: 'https://api.openai.com/v1/responses',
+                requested_model: 'gpt-6-astra',
+                response_format: 'anomaly_investigation_v1',
+                store: false,
+                send_authorized_at: attempt.times.send_authorized_at,
+                send_completed_at: attempt.times.send_completed_at,
+                request_header_bytes: 286,
+                request_body_bytes: 912,
+                response_header_bytes: 164,
+                response_body_bytes: 1024,
+                validation_outcome: attempt.state === 'insufficient_evidence' ? 'insufficient_evidence' : 'accepted',
+            } : null,
+        },
+    };
+}
+
+const seededAttempts = [
+    { id: 901, sourceKind: 'event_spike', sourceID: 101, number: 1, initiation: 'manual', state: 'completed', terminalReason: '', times: attemptTimes(12) },
+    { id: 902, sourceKind: 'event_spike', sourceID: 102, number: 1, initiation: 'manual', state: 'insufficient_evidence', terminalReason: 'evidence_unavailable', times: attemptTimes(20, false) },
+    { id: 903, sourceKind: 'session_drop', sourceID: 201, number: 1, initiation: 'automatic', state: 'failed', terminalReason: 'response_invalid', times: attemptTimes(28) },
+    { id: 904, sourceKind: 'event_spike', sourceID: 103, number: 1, initiation: 'manual', state: 'insufficient_evidence', terminalReason: '', times: attemptTimes(36) },
+];
+for (const attempt of seededAttempts) investigationAttempts.set(attempt.id, attempt);
+
+function cookies(headers) {
+    return Object.fromEntries(String(headers.cookie || '').split(';').map((pair) => {
+        const index = pair.indexOf('=');
+        return index < 0 ? [] : [pair.slice(0, index).trim(), decodeURIComponent(pair.slice(index + 1).trim())];
+    }).filter((pair) => pair.length === 2));
+}
+
+function normalizeMockIdentity(value) {
+    const raw = String(value ?? '').trim().toLowerCase();
+    const match = raw.match(/^(?:mock\\)?(dashboard|stale|machine|non_dashboard)$/) ?? raw.match(/^(dashboard|stale|machine|non_dashboard)@mock\.invalid$/);
+    return match?.[1] ?? 'non_dashboard';
+}
+
+function mockIdentity(query, headers) {
+    const cookie = cookies(headers);
+    const requested = query.mock_identity || headers['x-mock-identity'] || cookie.mock_identity || 'dashboard';
+    const identity = normalizeMockIdentity(requested);
+    return { identity, generation: Number(cookie.mock_generation || dashboardGroupGeneration) };
+}
+
+function investigationAuthorization(query, headers) {
+    const session = mockIdentity(query, headers);
+    if (session.identity === 'machine' || session.identity === 'non_dashboard') return { status: 403, body: { error: { code: 'access_denied' } } };
+    if (session.identity === 'stale' || session.generation !== dashboardGroupGeneration) return { status: 401, body: { error: { code: 'session_expired' } } };
+    return null;
+}
+
+function closeInvestigationStreams() {
+    for (const client of sseClients) {
+        client.res.end();
+        sseClients.delete(client);
+    }
+}
+
+function investigationSettingsView() {
+    return { provider: { ...investigationProvider }, session_drop: { ...investigationSessionDropSettings, detector: { ...investigationSessionDropSettings.detector } } };
+}
+
+function investigationStatusView() {
+    const counts = { queued: 0, running: 0, completed: 0, insufficient_evidence: 0, failed: 0 };
+    for (const attempt of investigationAttempts.values()) counts[attempt.state]++;
+    return {
+        operational_state: investigationProvider.automatic_enabled ? 'automatic_enabled' : 'ready',
+        provider: { ...investigationProvider },
+        attempt_counts: counts,
+        worker: { workers: 1, max_nonterminal_attempts: 100, requests_per_minute: 10, burst: 2, request_timeout_seconds: 30 },
+        latest_failure: { reason: 'response_invalid', at: isoAgo(28) },
+    };
+}
+
+const sessionDropSources = [{
+    id: '201', source_kind: 'session_drop', registered_host: 'synthetic-session-drop-a', confirmed_at: isoAgo(45), classification: 'unexplained', investigation_eligible: true,
+    observed_total_sessions: 12, reference_total_sessions: 48, expected_total_sessions: 46.5, absolute_loss_sessions: 36, relative_loss: .75, tail_probability: .00002,
+    baseline_model_version: 'gamma_poisson_lower_v1', baseline_scope: 'slot', slot_index: 65, slot_mature_days: 7, confirmation_window_size: 3, confirmation_count: 2,
+}, {
+    id: '202', source_kind: 'session_drop', registered_host: 'synthetic-session-drop-b', confirmed_at: isoAgo(75), classification: 'drain_associated', investigation_eligible: false,
+    observed_total_sessions: 4, reference_total_sessions: 36, expected_total_sessions: 34.5, absolute_loss_sessions: 32, relative_loss: .888, tail_probability: .00001,
+    baseline_model_version: 'gamma_poisson_lower_v1', baseline_scope: 'all_hours', slot_index: null, slot_mature_days: 0, confirmation_window_size: 2, confirmation_count: 2,
+}];
+
+function sessionDropDetail(id) {
+    const source = sessionDropSources.find((candidate) => candidate.id === String(id));
+    if (!source) return null;
+    const attempts = [...investigationAttempts.values()]
+        .filter((attempt) => attempt.sourceKind === 'session_drop' && String(attempt.sourceID) === source.id)
+        .sort((left, right) => left.number - right.number)
+        .map(attemptView);
+    return {
+        source: {
+            ...source,
+            confirmation_started_at: isoAgo(80),
+            confirmation_ended_at: source.confirmed_at,
+            confirmation_flags: source.confirmation_window_size === 3 ? [true, false, true] : [true, true],
+            freshness_context: 'fresh',
+            drain_context: source.classification === 'drain_associated' ? 'overlap' : 'none',
+            confirmation_ended_report_epoch_ms: String(Date.parse(source.confirmed_at)),
+        },
+        attempts,
+    };
+}
+
 /**
  * Seed a perf-metrics ring buffer with MAX_PERF_HISTORY plausible past samples.
  * Each sample is generated independently with genPerf so the sparkline shows
@@ -672,8 +893,8 @@ function seedPerfHistory(host, status, initSessions, now) {
             sessionsActive: jitterSessions,
             sessionsDisconnected: sessDisc,
             maxSessions,
-            sessionCpuPeakP95: p.session_cpu_p95_pct,
-            sessionMemPeakP95: p.session_mem_p95_bytes,
+            sessionCpuHostP95: p.session_cpu_p95_pct,
+            sessionMemHostP95: p.session_mem_p95_bytes,
             sessionCpuObserved: p.session_cpu_observed_count,
             sessionCpuAtOrAbove5: p.session_cpu_ge_5_count,
             sessionCpuAtOrAbove20: p.session_cpu_ge_20_count,
@@ -953,24 +1174,26 @@ function seedHistory(host, currentStatus) {
 // SSE — broadcast real-time events to connected dev browsers
 // ---------------------------------------------------------------------------
 
-/** Active SSE response objects — each is a Node.js ServerResponse. */
+/** Active SSE responses with their session authorization context. */
 const sseClients = new Set();
 
 /**
- * Broadcast a DrainCtl SSE event to all connected clients.
- * Silently ignores clients whose connections have already closed.
- * @param {'server_update'|'server_deleted'|'settings_update'} type
- * @param {object|null} data
- * @param {string} [host]
+ * Broadcast one literal envelope. Investigation and session-drop data never
+ * includes a host; ordinary dashboard events preserve the existing host field.
  */
 function broadcastSSE(type, data, host) {
-    const payload = JSON.stringify({ type, host, data, timestamp: new Date().toISOString() });
+    const payload = JSON.stringify({ type, ...(host ? { host } : {}), data, timestamp: utcMillis() });
     const frame = `data: ${payload}\n\n`;
-    for (const res of sseClients) {
+    for (const client of sseClients) {
+        if (client.feature && investigationAuthorization(client.query, client.headers)) {
+            client.res.end();
+            sseClients.delete(client);
+            continue;
+        }
         try {
-            res.write(frame);
+            client.res.write(frame);
         } catch {
-            sseClients.delete(res);
+            sseClients.delete(client);
         }
     }
 }
@@ -1025,8 +1248,8 @@ function startEvolution() {
                     sessionsActive: s.sessions,
                     sessionsDisconnected: s.sessionsDisconnected ?? 0,
                     maxSessions: def?.maxSessions ?? 100,
-                    sessionCpuPeakP95: s.perf.session_cpu_p95_pct,
-                    sessionMemPeakP95: s.perf.session_mem_p95_bytes,
+                    sessionCpuHostP95: s.perf.session_cpu_p95_pct,
+                    sessionMemHostP95: s.perf.session_mem_p95_bytes,
                     sessionCpuObserved: s.perf.session_cpu_observed_count,
                     sessionCpuAtOrAbove5: s.perf.session_cpu_ge_5_count,
                     sessionCpuAtOrAbove20: s.perf.session_cpu_ge_20_count,
@@ -1183,8 +1406,125 @@ function matchRoute(pattern, pathname) {
     return params;
 }
 
-function handleRequest(method, pathname, body, query = {}) {
+function handleRequest(method, pathname, body, query = {}, headers = {}) {
     ensureState();
+
+    // Feature 013 routes are deliberately isolated from the ordinary mock.
+    // A dashboard session is the only authority; roles can be selected through
+    // the login fixture or `X-Mock-Identity` for direct protocol exercises.
+    const featureRoute = pathname.startsWith('/api/v1/investigation/') || pathname.startsWith('/api/v1/session-drops');
+    if (featureRoute) {
+        const denied = investigationAuthorization(query, headers);
+        if (denied) return denied;
+
+        if (method === 'GET' && pathname === '/api/v1/investigation/settings') {
+            return { status: 200, body: investigationSettingsView() };
+        }
+        if (method === 'PUT' && pathname === '/api/v1/investigation/settings') {
+            const provider = body?.provider;
+            const sessionDrop = body?.session_drop;
+            const consent = provider?.privacy_acknowledgement;
+            const validConsent = consent && Object.keys(mockConsent).length === Object.keys(consent).length &&
+                Object.entries(mockConsent).every(([key, value]) => consent[key] === value);
+            if (!provider || !sessionDrop || (consent && !validConsent) || !['preserve', 'replace', 'clear'].includes(provider.credential?.operation)) {
+                return { status: 422, body: { error: { code: 'invalid_settings' } } };
+            }
+            if (provider.credential.operation === 'clear') investigationProvider.has_credential = false;
+            if (provider.credential.operation === 'replace') investigationProvider.has_credential = true;
+            investigationProvider.access_enabled = provider.access_enabled;
+            investigationProvider.automatic_enabled = provider.automatic_enabled;
+            for (const key of ['lower_tail_threshold', 'minimum_drop_sessions', 'minimum_drop_percent', 'baseline_half_life_hours', 'cooldown_minutes']) investigationSessionDropSettings[key] = sessionDrop[key];
+            return { status: 200, body: investigationSettingsView() };
+        }
+        if (method === 'GET' && pathname === '/api/v1/investigation/status') {
+            return { status: 200, body: investigationStatusView() };
+        }
+
+        const historyMatch = pathname.match(/^\/api\/v1\/investigation\/sources\/(event_spike|session_drop)\/([1-9][0-9]*)\/attempts$/);
+        if (historyMatch && method === 'GET') {
+            const [sourceKind, sourceID] = historyMatch.slice(1);
+            const attempts = [...investigationAttempts.values()]
+                .filter((attempt) => attempt.sourceKind === sourceKind && String(attempt.sourceID) === sourceID)
+                .sort((left, right) => left.number - right.number)
+                .map(attemptView);
+            return { status: 200, body: { source: sourceLink(sourceKind, sourceID), attempts, next_after_attempt_number: null } };
+        }
+        if (historyMatch && method === 'POST') {
+            const [sourceKind, sourceID] = historyMatch.slice(1);
+            if (sourceID === '998') return { status: 429, body: { error: { code: 'queue_full' } } };
+            if (sourceID === '999') return { status: 409, body: { error: { code: 'attempt_limit_reached' } } };
+            const existing = [...investigationAttempts.values()].find((attempt) =>
+                attempt.sourceKind === sourceKind && String(attempt.sourceID) === sourceID && ['queued', 'running'].includes(attempt.state));
+            if (existing) return { status: 200, body: attemptView(existing) };
+            const number = 1 + Math.max(0, ...[...investigationAttempts.values()]
+                .filter((attempt) => attempt.sourceKind === sourceKind && String(attempt.sourceID) === sourceID)
+                .map((attempt) => attempt.number));
+            const attempt = {
+                id: nextInvestigationAttemptID++,
+                sourceKind,
+                sourceID,
+                number,
+                initiation: 'manual',
+                state: 'queued',
+                terminalReason: '',
+                times: attemptTimes(0, false),
+            };
+            investigationAttempts.set(attempt.id, attempt);
+            broadcastSSE('investigation_update', { kind: 'attempt', attempt: attemptUpdateView(attempt) });
+            setTimeout(() => {
+                attempt.state = 'completed';
+                attempt.times = attemptTimes(0);
+                broadcastSSE('investigation_update', { kind: 'attempt', attempt: attemptUpdateView(attempt) });
+                broadcastSSE('fixture_unknown_additive_event', { version: 1 });
+            }, 250);
+            return { status: 201, body: attemptView(attempt) };
+        }
+
+        const retryMatch = pathname.match(/^\/api\/v1\/investigation\/attempts\/([1-9][0-9]*)\/retry$/);
+        if (retryMatch && method === 'POST') {
+            const previous = investigationAttempts.get(Number(retryMatch[1]));
+            if (!previous) return { status: 404, body: { error: { code: 'attempt_not_found' } } };
+            if (!['failed', 'insufficient_evidence'].includes(previous.state)) {
+                return { status: 409, body: { error: { code: 'retry_not_allowed' } } };
+            }
+            if ([...investigationAttempts.values()].some((attempt) => attempt.retryOf === previous.id)) {
+                return { status: 409, body: { error: { code: 'retry_not_allowed' } } };
+            }
+            const retry = {
+                id: nextInvestigationAttemptID++,
+                sourceKind: previous.sourceKind,
+                sourceID: previous.sourceID,
+                number: 1 + Math.max(...[...investigationAttempts.values()]
+                    .filter((attempt) => attempt.sourceKind === previous.sourceKind && String(attempt.sourceID) === String(previous.sourceID))
+                    .map((attempt) => attempt.number)),
+                initiation: 'retry',
+                retryOf: previous.id,
+                state: 'completed',
+                terminalReason: '',
+                times: attemptTimes(0),
+            };
+            investigationAttempts.set(retry.id, retry);
+            broadcastSSE('investigation_update', { kind: 'attempt', attempt: attemptUpdateView(retry) });
+            return { status: 201, body: attemptView(retry) };
+        }
+
+        const detailMatch = pathname.match(/^\/api\/v1\/investigation\/attempts\/([1-9][0-9]*)$/);
+        if (detailMatch && method === 'GET') {
+            const attempt = investigationAttempts.get(Number(detailMatch[1]));
+            return attempt
+                ? { status: 200, body: attemptDetail(attempt) }
+                : { status: 404, body: { error: { code: 'attempt_not_found' } } };
+        }
+
+        if (method === 'GET' && pathname === '/api/v1/session-drops') {
+            return { status: 200, body: { items: sessionDropSources, next_before: null } };
+        }
+        const sessionDropMatch = pathname.match(/^\/api\/v1\/session-drops\/([1-9][0-9]*)$/);
+        if (sessionDropMatch && method === 'GET') {
+            const detail = sessionDropDetail(sessionDropMatch[1]);
+            return detail ? { status: 200, body: detail } : { status: 404, body: { error: { code: 'source_not_found' } } };
+        }
+    }
 
     // GET /api/v1/health
     if (method === 'GET' && pathname === '/api/v1/health') {
@@ -1395,8 +1735,8 @@ function handleRequest(method, pathname, body, query = {}) {
             sessions_total: (s) => s.sessions,
             sessions_disconnected: (s) => s.sessionsDisconnected,
             sessions_max: (s) => s.maxSessions,
-            session_cpu_p95_pct: (s) => s.sessionCpuPeakP95,
-            session_mem_p95_bytes: (s) => s.sessionMemPeakP95,
+            session_cpu_p95_pct: (s) => s.sessionCpuHostP95,
+            session_mem_p95_bytes: (s) => s.sessionMemHostP95,
             session_cpu_observed_count: (s) => s.sessionCpuObserved,
             session_cpu_ge_5_count: (s) => s.sessionCpuAtOrAbove5,
             session_cpu_ge_20_count: (s) => s.sessionCpuAtOrAbove20,
@@ -1430,10 +1770,12 @@ function handleRequest(method, pathname, body, query = {}) {
         let windowed; // Array<{ time: number, samples: Sample[] }>
         let oldestTime = null;
         let newestTime = null;
+        let expectedHostCount = 1;
         if (isFleet) {
             /** @type {Map<number, any[]>} */
             const byTime = new Map();
             const metricHosts = requestedHosts.length > 0 ? requestedHosts : [...state.keys()];
+            expectedHostCount = metricHosts.length;
             const histories = metricHosts.map((requestedHost) => perfHistory.get(requestedHost) ?? []);
             for (const hist of histories) {
                 for (const s of hist) {
@@ -1505,6 +1847,50 @@ function handleRequest(method, pathname, body, query = {}) {
         const oldest = oldestTime !== null ? new Date(oldestTime).toISOString() : null;
         const newest = newestTime !== null ? new Date(newestTime).toISOString() : null;
         const tier = reqRes === 'auto' ? 'raw' : reqRes;
+        const sessionWorkload = isFleet
+            ? {
+                  points: windowed.map(({ time, samples }) => {
+                      const contributing = samples.filter((s) => Number.isFinite(s.sessionCpuObserved)).length;
+                      const observed = samples.reduce((sum, s) => sum + (s.sessionCpuObserved ?? 0), 0);
+                      const ge5 = samples.reduce((sum, s) => sum + (s.sessionCpuAtOrAbove5 ?? 0), 0);
+                      const ge20 = samples.reduce((sum, s) => sum + (s.sessionCpuAtOrAbove20 ?? 0), 0);
+                      const cpuP95 = Math.max(...samples.map((s) => s.sessionCpuHostP95 ?? 0));
+                      const memoryP95 = Math.max(...samples.map((s) => s.sessionMemHostP95 ?? 0));
+                      return {
+                          t: time,
+                          bucket_ms: 60_000,
+                          cpu: observed
+                              ? {
+                                    p95_pct: cpuP95,
+                                    avg_pct: cpuP95 * 0.38,
+                                    observed_sessions: observed,
+                                    ge_5_avg: ge5,
+                                    ge_5_max: ge5,
+                                    ge_5_rate_pct: (ge5 / observed) * 100,
+                                    ge_20_avg: ge20,
+                                    ge_20_max: ge20,
+                                    ge_20_rate_pct: (ge20 / observed) * 100,
+                                }
+                              : null,
+                          memory: {
+                              p95_bytes: memoryP95,
+                              avg_bytes: memoryP95 * 0.62,
+                              observed_sessions: observed,
+                          },
+                          coverage: {
+                              expected_hosts: expectedHostCount,
+                              contributing_hosts: contributing,
+                              successful_empty_hosts: 0,
+                              error_hosts: 0,
+                              stale_hosts: 0,
+                              offline_hosts: 0,
+                              unsupported_hosts: Math.max(0, expectedHostCount - contributing),
+                              partial: contributing < expectedHostCount,
+                          },
+                      };
+                  }),
+              }
+            : undefined;
         return {
             status: 200,
             body: {
@@ -1515,6 +1901,7 @@ function handleRequest(method, pathname, body, query = {}) {
                 oldest_available: Object.keys(series).length === 0 ? null : oldest,
                 newest_available: Object.keys(series).length === 0 ? null : newest,
                 series,
+                session_workload: sessionWorkload,
             },
         };
     }
@@ -1773,6 +2160,13 @@ function handleRequest(method, pathname, body, query = {}) {
     // PUT /api/v1/settings
     if (method === 'PUT' && pathname === '/api/v1/settings') {
         if (body) {
+            // A dashboard-group edit invalidates every established mock session
+            // and stream. It is fixture-only control data, never returned by the
+            // safe investigation views.
+            if (typeof body.dashboard_group === 'string' && body.dashboard_group.trim()) {
+                dashboardGroupGeneration++;
+                closeInvestigationStreams();
+            }
             // Real backend treats absent `notifications` as "no change". The frontend
             // strips notifications from this payload now (they're saved via the
             // per-target endpoints), but be defensive here for older clients.
@@ -1785,7 +2179,7 @@ function handleRequest(method, pathname, body, query = {}) {
                     },
                 };
             }
-            const { rd_connection_broker: _broker, ...settingsPatch } = body;
+            const { rd_connection_broker: _broker, dashboard_group: _dashboardGroup, ...settingsPatch } = body;
             mockSettings = {
                 ...mockSettings,
                 ...settingsPatch,
@@ -1857,15 +2251,37 @@ function handleRequest(method, pathname, body, query = {}) {
         return { status: 200, body: { ok: true, message: 'Test notification sent (mock)' } };
     }
 
-    // POST /api/v1/auth/negotiate — always succeeds in dev mode
-    if (method === 'POST' && pathname === '/api/v1/auth/negotiate') {
-        return { status: 200, body: { username: 'DEV\\mockuser' } };
+    // GET /api/v1/me — maps the cookie-backed fixture role to a harmless
+    // display name. The role itself is never returned by investigation APIs.
+    if (method === 'GET' && pathname === '/api/v1/me') {
+        const session = mockIdentity(query, headers);
+        if (session.generation !== dashboardGroupGeneration) {
+            return { status: 401, body: { error: 'session_expired' } };
+        }
+        return { status: 200, body: { username: `DEV\\${session.identity}` } };
     }
 
-    // POST /api/v1/auth/login — succeeds for any non-empty credentials
+    // POST /api/v1/auth/negotiate — dashboard role for normal dev browsing.
+    if (method === 'POST' && pathname === '/api/v1/auth/negotiate') {
+        return {
+            status: 200,
+            headers: { 'Set-Cookie': [`mock_identity=dashboard; Path=/; SameSite=Lax`, `mock_generation=${dashboardGroupGeneration}; Path=/; SameSite=Lax`] },
+            body: { username: 'DEV\\dashboard' },
+        };
+    }
+
+    // POST /api/v1/auth/login — domain-qualified fixture identities select
+    // dashboard, stale, machine, or non_dashboard without weakening the UI's
+    // production-format validation.
     if (method === 'POST' && pathname === '/api/v1/auth/login') {
         if (body && body.username && body.password) {
-            return { status: 200, body: { username: body.username } };
+            const identity = normalizeMockIdentity(body.username);
+            const generation = identity === 'stale' ? dashboardGroupGeneration - 1 : dashboardGroupGeneration;
+            return {
+                status: 200,
+                headers: { 'Set-Cookie': [`mock_identity=${identity}; Path=/; SameSite=Lax`, `mock_generation=${generation}; Path=/; SameSite=Lax`] },
+                body: { username: `DEV\\${identity}` },
+            };
         }
         return { status: 401, body: { error: 'invalid credentials' } };
     }
@@ -1899,31 +2315,44 @@ export default function mockApi() {
                 const hosts = searchParams.getAll('host');
                 if (hosts.length > 1) query.host = hosts;
 
-                // SSE endpoint — long-lived streaming response.
+                // Shared SSE has the same login-snapshot/current-group guard as
+                // production. A rejected subscription registers no consumer.
                 if (method === 'GET' && pathname === '/api/v1/events') {
+                    const denied = investigationAuthorization(query, req.headers);
+                    if (denied) {
+                        sendResult(res, denied, next);
+                        return;
+                    }
                     res.writeHead(200, {
                         'Content-Type': 'text/event-stream',
                         'Cache-Control': 'no-cache',
                         Connection: 'keep-alive',
                         'Access-Control-Allow-Origin': '*',
                     });
-                    // Flush headers immediately so the browser establishes the stream.
                     res.flushHeaders?.();
 
-                    sseClients.add(res);
-
-                    // Periodic keepalive comment to prevent proxy/browser connection timeouts.
+                    const client = { res, query, headers: req.headers, feature: true };
+                    sseClients.add(client);
+                    // Exercise host-free feature and unknown-additive events
+                    // without needing a provider or an identity-bearing source.
+                    res.write(`data: ${JSON.stringify({ type: 'session_drop', data: { schema_version: 1, source_kind: 'session_drop', source_id: '201', confirmed_at: sessionDropSources[0].confirmed_at, classification: 'unexplained', investigation_eligible: true, confirmation_count: 2 }, timestamp: utcMillis() })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: 'fixture_unknown_additive_event', data: { version: 1 }, timestamp: utcMillis() })}\n\n`);
                     const heartbeat = setInterval(() => {
+                        if (investigationAuthorization(query, req.headers)) {
+                            res.end();
+                            sseClients.delete(client);
+                            return;
+                        }
                         try {
                             res.write(': keepalive\n\n');
                         } catch {
-                            /* ignore */
+                            sseClients.delete(client);
                         }
-                    }, 25_000);
+                    }, 1_000);
 
                     req.on('close', () => {
                         clearInterval(heartbeat);
-                        sseClients.delete(res);
+                        sseClients.delete(client);
                     });
                     return; // do NOT call next()
                 }
@@ -1939,11 +2368,11 @@ export default function mockApi() {
                         try {
                             body = JSON.parse(bodyStr);
                         } catch {}
-                        const result = handleRequest(method, pathname, body, query);
+                        const result = handleRequest(method, pathname, body, query, req.headers);
                         sendResult(res, result, next);
                     });
                 } else {
-                    const result = handleRequest(method, pathname, null, query);
+                    const result = handleRequest(method, pathname, null, query, req.headers);
                     sendResult(res, result, next);
                 }
             });
@@ -1956,6 +2385,7 @@ function sendResult(res, result, next) {
     res.writeHead(result.status, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
+        ...(result.headers || {}),
     });
     res.end(result.body != null ? JSON.stringify(result.body) : '');
 }

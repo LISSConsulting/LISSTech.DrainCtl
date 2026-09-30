@@ -315,6 +315,10 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		canonical := telemetry.CanonicalHostname(info.Hostname)
 		roster[canonical] = canonical
 	}
+	infoByHost := make(map[string]ServerInfo, len(infos))
+	for _, info := range infos {
+		infoByHost[telemetry.CanonicalHostname(info.Hostname)] = info
+	}
 
 	requestedHosts, hasHostFilter := q["host"]
 	hosts := make([]string, 0, len(roster))
@@ -371,6 +375,36 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		writeJSONError(w, "storage_error", http.StatusInternalServerError)
 		return
 	}
+	workload := &telemetry.SessionWorkloadSeries{Points: []telemetry.SessionWorkloadPoint{}}
+	if reader, ok := ds.ms.(interface {
+		QuerySessionWorkload(context.Context, []string, time.Time, time.Time, telemetry.Tier) (*telemetry.SessionWorkloadSeries, error)
+	}); ok {
+		workload, err = reader.QuerySessionWorkload(ctx, hosts, from, to, tier)
+		if err != nil {
+			slog.Error("fleet session workload: query failed", "error", err)
+			writeJSONError(w, "storage_error", http.StatusInternalServerError)
+			return
+		}
+		now := ds.clock()
+		for i := range workload.Points {
+			point := &workload.Points[i]
+			for _, host := range hosts {
+				if _, reported := point.ReportedHosts[host]; reported {
+					continue
+				}
+				info := infoByHost[host]
+				switch {
+				case info.LastResult != nil && strings.EqualFold(info.LastResult.Status, "offline"):
+					point.Coverage.OfflineHosts++
+					point.Coverage.UnsupportedHosts--
+				case !info.LastSeen.IsZero() && now.Sub(info.LastSeen) >= ds.staleAfter():
+					point.Coverage.StaleHosts++
+					point.Coverage.UnsupportedHosts--
+				}
+			}
+			point.Coverage.UnsupportedHosts = max(0, point.Coverage.UnsupportedHosts)
+		}
+	}
 
 	type counterJSON struct {
 		T   []int64   `json:"t"`
@@ -380,20 +414,22 @@ func (ds *DashboardServer) handleFleetMetrics(w http.ResponseWriter, r *http.Req
 		P50 []float64 `json:"p50"`
 	}
 	type metricsResp struct {
-		Host            string                  `json:"host"`
-		Tier            string                  `json:"tier"`
-		From            string                  `json:"from"`
-		To              string                  `json:"to"`
-		OldestAvailable *string                 `json:"oldest_available"`
-		NewestAvailable *string                 `json:"newest_available"`
-		Series          map[string]*counterJSON `json:"series"`
+		Host            string                           `json:"host"`
+		Tier            string                           `json:"tier"`
+		From            string                           `json:"from"`
+		To              string                           `json:"to"`
+		OldestAvailable *string                          `json:"oldest_available"`
+		NewestAvailable *string                          `json:"newest_available"`
+		Series          map[string]*counterJSON          `json:"series"`
+		SessionWorkload *telemetry.SessionWorkloadSeries `json:"session_workload"`
 	}
 	resp := metricsResp{
-		Host:   "_fleet",
-		Tier:   sr.Tier.TierName(),
-		From:   from.UTC().Format(time.RFC3339),
-		To:     to.UTC().Format(time.RFC3339),
-		Series: make(map[string]*counterJSON, len(sr.Data)),
+		Host:            "_fleet",
+		Tier:            sr.Tier.TierName(),
+		From:            from.UTC().Format(time.RFC3339),
+		To:              to.UTC().Format(time.RFC3339),
+		Series:          make(map[string]*counterJSON, len(sr.Data)),
+		SessionWorkload: workload,
 	}
 	if sr.OldestAvailable != nil {
 		s := sr.OldestAvailable.UTC().Format(time.RFC3339)

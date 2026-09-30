@@ -441,7 +441,9 @@
 
     // ── Session Metrics charts ────────────────────────────────────────────────
 
-    let sessionHistory = $derived(adaptFleetToSessionSamples(fleetResponse?.series ?? {}));
+    let sessionHistory = $derived(
+        adaptFleetToSessionSamples(fleetResponse?.series ?? {}, fleetResponse?.session_workload?.points ?? []),
+    );
 
     // ── RemoteFX charts ───────────────────────────────────────────────────────
     let rfxHistory = $derived(adaptFleetToRfxSamples(fleetResponse?.series ?? {}));
@@ -460,6 +462,36 @@
 
     /** Stable identity transform — avoids allocating a new function on every render. */
     const IDENTITY = (/** @type {number} */ v) => v;
+
+    function coverageText(point) {
+        const coverage = point?.sessionCoverage;
+        if (!coverage) return [];
+        const lines = [
+            `Hosts: ${coverage.contributing_hosts}/${coverage.expected_hosts}${coverage.partial ? ' (partial)' : ''}`,
+        ];
+        const omitted = [
+            coverage.error_hosts ? `${coverage.error_hosts} error` : '',
+            coverage.stale_hosts ? `${coverage.stale_hosts} stale` : '',
+            coverage.offline_hosts ? `${coverage.offline_hosts} offline` : '',
+            coverage.unsupported_hosts ? `${coverage.unsupported_hosts} unsupported` : '',
+        ].filter(Boolean);
+        if (omitted.length) lines.push(`Omitted: ${omitted.join(', ')}`);
+        return lines;
+    }
+
+    function workloadDetails(metric, point) {
+        const observed = metric === 'cpu' ? point?.sessionCpuObserved : point?.sessionMemObserved;
+        return [`Observed sessions: ${observed ?? 0}`, ...coverageText(point)];
+    }
+
+    function cpuBreadthDetails(point) {
+        return [
+            `≥5%: ${point?.sessionCpuAtOrAbove5?.toFixed?.(1) ?? '—'} avg (${point?.sessionCpuAtOrAbove5Rate?.toFixed?.(1) ?? '—'}%), max ${point?.sessionCpuAtOrAbove5Max ?? '—'}`,
+            `≥20%: ${point?.sessionCpuAtOrAbove20?.toFixed?.(1) ?? '—'} avg (${point?.sessionCpuAtOrAbove20Rate?.toFixed?.(1) ?? '—'}%), max ${point?.sessionCpuAtOrAbove20Max ?? '—'}`,
+            `CPU-observed sessions: ${point?.sessionCpuObserved ?? 0}`,
+            ...coverageText(point),
+        ];
+    }
 
     // Order: Sessions Trend → Utilization → CPU → Memory
     const SESSION_CHARTS = [
@@ -494,8 +526,8 @@
                 "How full is the farm? Total sessions divided by the sum of every server's MaxSessions limit. Tracks how close the fleet is to turning users away.",
         },
         {
-            key: 'sessionCpuPeakP95',
-            p50Key: 'sessionCpuTypicalP95',
+            key: 'sessionCpuP95',
+            p50Key: 'sessionCpuAvg',
             label: 'Session CPU',
             unit: '%',
             thresholds: { warn: 15, crit: 30 },
@@ -503,14 +535,15 @@
             fmt: /** @param {number} v */ (v) => `${v.toFixed(1)}%`,
             icon: Cpu,
             timeKey: 'ts',
-            valueLabel: 'Peak host P95',
-            p50Label: 'Typical host P95',
+            valueLabel: 'Fleet Session P95',
+            p50Label: 'Fleet Session AVG',
+            detailLines: (point) => workloadDetails('cpu', point),
             helpText:
-                "High-use session CPU. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. Together they show normal high-use-session load and the busiest observed host.",
+                'CPU across measured real user sessions, normalized to each host’s total CPU capacity. Fleet Session P95 shows the high-use tail; Fleet Session AVG shows overall session workload. Disconnected sessions are included when they have valid measurements. Hover for measured-session and host coverage.',
         },
         {
-            key: 'sessionMemPeakP95',
-            p50Key: 'sessionMemTypicalP95',
+            key: 'sessionMemP95',
+            p50Key: 'sessionMemAvg',
             label: 'Session Memory',
             unit: '',
             thresholds: { warn: 500, crit: 800 },
@@ -520,11 +553,12 @@
                 v === 0 ? '0' : v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`,
             icon: MemoryStick,
             timeKey: 'ts',
-            valueLabel: 'Peak host P95',
-            p50Label: 'Typical host P95',
+            valueLabel: 'Fleet Session P95',
+            p50Label: 'Fleet Session AVG',
             transform: /** @param {number} v */ (v) => v / (1024 * 1024),
+            detailLines: (point) => workloadDetails('memory', point),
             helpText:
-                "High-use session working-set memory. Peak host P95 is the highest participating host's session P95; Typical host P95 is the median participating host's session P95. A rising typical line indicates broadly heavier user workloads.",
+                'Working-set memory across measured real user sessions. Fleet Session P95 shows the high-memory tail; Fleet Session AVG shows the session-weighted fleet average. Disconnected sessions retaining memory are included. Hover for measured-session and host coverage.',
         },
         {
             key: 'sessionCpuAtOrAbove5',
@@ -540,8 +574,9 @@
             p50Label: '≥20% CPU',
             noThresholdZones: true,
             autoScale: true,
+            detailLines: cpuBreadthDetails,
             helpText:
-                'Active WTS sessions whose sampled CPU reached each threshold. Compare these counts with Active Sessions in Sessions Trend to see whether workload is broad or concentrated.',
+                'Real user sessions consuming at least each share of total host CPU capacity. Counts show workload breadth; tooltips also show percentages of CPU-observed sessions and host coverage. Disconnected sessions with valid CPU measurements are included.',
         },
     ];
 
@@ -1025,10 +1060,15 @@
                     {#if showSessionHelp}
                         <p class="chart-desc">
                             Session count and utilization describe connected demand and capacity. Session CPU and memory
-                            compare the typical host’s high-use sessions with the busiest host’s high-use sessions.
-                            CPU-active Sessions counts active WTS sessions at or above 5% and 20% CPU. Primary and
-                            secondary consumers use distinct matching line, fill, legend, and tooltip colors; secondary
-                            series are violet and dotted. Zones and current-value color communicate severity.
+                            show session-weighted Fleet Session P95 and Fleet Session AVG. CPU-active Sessions shows
+                            workload breadth at 5% and 20% of host CPU capacity. Hover any workload point for measured
+                            session and host coverage; partial coverage is identified explicitly.
+                        </p>
+                    {/if}
+                    {#if fleetResponse && (fleetResponse.session_workload?.points?.length ?? 0) === 0}
+                        <p class="chart-desc">
+                            Anonymous session workload is unavailable for this window. Pre-upgrade and unsupported-host
+                            intervals remain gaps rather than zeroes.
                         </p>
                     {/if}
 
@@ -1056,6 +1096,7 @@
                                     invertThresholds={mc.invertThresholds ?? false}
                                     helpText={mc.helpText ?? ''}
                                     showHelp={showSessionHelp}
+                                    detailLines={mc.detailLines}
                                 />
                             {/each}
                         </div>

@@ -16,6 +16,7 @@ type Session struct {
 	Token      string
 	Username   string
 	Groups     []string
+	IsAdmin    bool
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }
@@ -58,8 +59,18 @@ func (s *SessionStore) reap() {
 	}
 }
 
-// Create generates a new session for the given AuthInfo and returns the token.
+// Create generates a new unprivileged session for the given AuthInfo and
+// returns its token.
 func (s *SessionStore) Create(info *AuthInfo) (string, error) {
+	return s.create(info, false)
+}
+
+// CreateWithAdmin generates a session with the server-derived admin state.
+func (s *SessionStore) CreateWithAdmin(info *AuthInfo, isAdmin bool) (string, error) {
+	return s.create(info, isAdmin)
+}
+
+func (s *SessionStore) create(info *AuthInfo, isAdmin bool) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -70,7 +81,8 @@ func (s *SessionStore) Create(info *AuthInfo) (string, error) {
 	s.sessions[token] = &Session{
 		Token:      token,
 		Username:   info.Username,
-		Groups:     info.Groups,
+		Groups:     append([]string(nil), info.Groups...),
+		IsAdmin:    isAdmin,
 		CreatedAt:  now,
 		LastSeenAt: now,
 	}
@@ -103,5 +115,14 @@ func (s *SessionStore) Get(token string) *Session {
 func (s *SessionStore) Delete(token string) {
 	s.mu.Lock()
 	delete(s.sessions, token)
+	s.mu.Unlock()
+}
+
+// InvalidateAll removes every active dashboard session. Dashboard-group
+// changes use this rather than attempting to reinterpret sessions created
+// under the previous authorization boundary.
+func (s *SessionStore) InvalidateAll() {
+	s.mu.Lock()
+	clear(s.sessions)
 	s.mu.Unlock()
 }

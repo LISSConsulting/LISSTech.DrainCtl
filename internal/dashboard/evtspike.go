@@ -43,11 +43,10 @@ type eventSpikeRangeResponse struct {
 	AsOfID    int64                       `json:"as_of_id"`
 }
 
-// EvtSpikeStatusFunc returns the detector status for a registered host. The
-// subsystem installs this hook at Start; when the feature is off (or the
-// subsystem has not wired itself yet) the field on DashboardServer is nil and
-// the handler presents a synthetic state="disabled" response per
-// contracts/dashboard-sse-events.md.
+// EvtSpikeStatusFunc returns the local detector status or a remote status when
+// the service has installed the full provider. Dashboard-only deployments do
+// not run a local detector, so handleEvtSpikeStatus also falls back directly
+// to the remote heartbeat cache before reporting a synthetic disabled state.
 type EvtSpikeStatusFunc func(host string) evtspike.DetectorStatus
 
 // handleEvtSpikeStatus serves GET /api/evtspike/status?host=<hostname>.
@@ -64,6 +63,9 @@ func (ds *DashboardServer) handleEvtSpikeStatus(w http.ResponseWriter, r *http.R
 	var status evtspike.DetectorStatus
 	if ds.evtspikeStatus != nil {
 		status = ds.evtspikeStatus(host)
+	}
+	if status.State == "" {
+		status = ds.RemoteEvtSpikeStatus(host)
 	}
 	status.Host = host
 	if status.State == "" {
