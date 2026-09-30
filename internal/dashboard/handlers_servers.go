@@ -323,9 +323,9 @@ func (ds *DashboardServer) handleReport(w http.ResponseWriter, r *http.Request) 
 		// registered for non-local hosts in internal/svc/handler.go.
 		if result.EvtSpikeStatus != nil {
 			status := *result.EvtSpikeStatus
-			status.Host = result.Host
+			status.Host = telemetry.CanonicalHostname(result.Host)
 			ds.remoteEvtSpikeStatusMu.Lock()
-			ds.remoteEvtSpikeStatus[result.Host] = status
+			ds.remoteEvtSpikeStatus[status.Host] = status
 			ds.remoteEvtSpikeStatusMu.Unlock()
 			ds.broker.PublishDetectorStatus(status)
 		}
@@ -570,12 +570,13 @@ func extractForceUpdateCompletion(body []byte) (ForceUpdateCompletionPayload, bo
 }
 
 // RemoteEvtSpikeStatus returns the DetectorStatus most recently reported for
-// the given host via /api/v1/report. Zero value (State="") for unknown hosts;
-// callers translate that into the disabled state. Safe for concurrent use.
+// the given host via /api/v1/report. Host lookup is canonicalized because the
+// roster, heartbeat, and query may use different case. Zero value (State="")
+// means the host has never reported status.
 func (ds *DashboardServer) RemoteEvtSpikeStatus(host string) evtspike.DetectorStatus {
 	ds.remoteEvtSpikeStatusMu.RLock()
 	defer ds.remoteEvtSpikeStatusMu.RUnlock()
-	return ds.remoteEvtSpikeStatus[host]
+	return ds.remoteEvtSpikeStatus[telemetry.CanonicalHostname(host)]
 }
 
 // handleServers returns GET /api/v1/servers as a JSON array of ServerView.

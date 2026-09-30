@@ -1,5 +1,9 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Remote EVT detector status — 2026-09-30
+
+- Dashboard-only management servers now resolve each remote host's EVT detector state from the latest heartbeat cache even though no local detector provider is installed. Previously the status endpoint synthesized `disabled` while the independent spike-ingestion path continued to detect, retain, and notify on spikes. Host keys are canonicalized so report and query casing cannot split the status cache.
+
 ## Fleet session operator metrics — 2026-09-29
 
 - Overview Session CPU and Memory now report pooled, session-weighted `Fleet Session P95` and `Fleet Session AVG`. CPU is normalized by logical processor count before thresholds or aggregation; valid zeroes remain observations and missing values remain gaps.

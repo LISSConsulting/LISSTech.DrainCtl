@@ -4716,6 +4716,42 @@ func TestHandleReport_CachesRemoteEvtSpikeStatus(t *testing.T) {
 	}
 }
 
+// TestHandleReport_DashboardOnlyStatusUsesRemoteCache covers a central
+// dashboard that intentionally has no local evtspike subsystem/provider. The
+// status endpoint must still expose detector state carried by remote agent
+// heartbeats rather than synthesizing DISABLED.
+func TestHandleReport_DashboardOnlyStatusUsesRemoteCache(t *testing.T) {
+	ds := newTestServer(t)
+	ds.state.Register("GW01")
+
+	status := evtspike.DetectorStatus{
+		State:           evtspike.StateHealthy,
+		EnabledChannels: 54,
+		MatureChannels:  31,
+	}
+	body, _ := json.Marshal(dc.CheckResult{Host: "gw01", Status: "Healthy", EvtSpikeStatus: &status})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewReader(body))
+	ds.handleReport(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("report status = %d, want 200", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/api/evtspike/status?host=GW01", nil)
+	ds.handleEvtSpikeStatus(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status endpoint = %d, want 200", w.Code)
+	}
+	var got evtspike.DetectorStatus
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.State != evtspike.StateHealthy || got.EnabledChannels != 54 || got.MatureChannels != 31 {
+		t.Fatalf("status = %+v, want healthy remote detector from heartbeat cache", got)
+	}
+}
+
 // TestHandleReport_EmitsSSEOnRemoteStatusChange verifies that when a remote
 // agent's DetectorStatus transitions between reports (training → healthy),
 // the central dashboard emits exactly one detector_status SSE event so
