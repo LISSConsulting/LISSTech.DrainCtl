@@ -5,6 +5,9 @@ import mockApi from './dev/mock-api.js';
 const useMock = process.env.DRAINCTL_MOCK !== '0';
 
 export default defineConfig({
+  define: {
+    __DRAINCTL_MOCK__: JSON.stringify(useMock),
+  },
   plugins: [
     svelte(),
     ...(useMock ? [mockApi()] : []),

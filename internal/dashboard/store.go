@@ -161,6 +161,16 @@ type ServerState struct {
 	// snapshot from the in-process local service runtime. It is wired by
 	// DashboardServer after its session stores are ready.
 	OnSessionSnapshot func(snapshot sessiondata.SessionSnapshot) error
+
+	// sessionDropInboxWaker is invoked only after the accepted-result
+	// transaction commits. It is intentionally payload-free because the
+	// durable inbox, rather than this callback, owns detector correctness.
+	sessionDropInboxWaker sessionDropInboxWaker
+}
+
+// SetSessionDropInboxWaker wires the post-commit detector wake-up callback.
+func (s *ServerState) SetSessionDropInboxWaker(waker sessionDropInboxWaker) {
+	s.sessionDropInboxWaker = waker
 }
 
 // GetConsumeForceUpdate returns the wired ConsumeForceUpdate closure.
@@ -360,7 +370,7 @@ func (s *ServerState) IsRegistered(hostname string) bool {
 //
 // On store.Update error the cache is left untouched: a failed write must not
 // poison the cache with an unpersisted snapshot.
-func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
+func (s *ServerState) Update(hostname string, result *dc.CheckResult) (bool, error) {
 	hostname = telemetry.CanonicalHostname(hostname)
 	// Exclusion gate: refuse to write new metric data for tombstoned hosts.
 	// The /report HTTP handler is expected to call IsRegistered first, but
@@ -369,14 +379,14 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	// excluded hosts cannot ingest reports until restored.
 	if s.IsExcluded(hostname) {
 		slog.Info("dashboard: update refused — host is permanently removed", "host", hostname) //nolint:gosec
-		return
+		return false, nil
 	}
 	lastJSON := ""
 	if result != nil {
 		data, err := json.Marshal(result)
 		if err != nil {
 			slog.Error("dashboard: update marshal failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
-			return
+			return false, err
 		}
 		lastJSON = string(data)
 	}
@@ -386,16 +396,19 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	// Capture before ServerStore writes so this accepted epoch cannot exceed
 	// the persisted Unix-millisecond last_seen used by a later stale sweep.
 	acceptedAt := time.UnixMilli(time.Now().UTC().UnixMilli()).UTC()
-	updated, err := s.store.Update(ctx, hostname, lastJSON)
+	updated, err := s.updateAccepted(ctx, hostname, lastJSON, result, acceptedAt)
 	if err != nil {
 		// DB write failed — do NOT populate the cache. The DB is the source
 		// of truth; caching unpersisted data would let GetCached return a
 		// view that diverges from what Get/All/the SQLite row would yield.
 		slog.Error("dashboard: update failed", "host", hostname, "error", err) //nolint:gosec // host is an internal identifier, not attacker-controlled log injection
-		return
+		return false, err
 	}
 	if !updated {
-		return
+		return false, nil
+	}
+	if _, ok := s.store.(acceptedResultWriter); ok && result != nil && !result.Timestamp.IsZero() && s.sessionDropInboxWaker != nil {
+		s.sessionDropInboxWaker.WakeSessionDropInbox()
 	}
 	recovered := false
 	if s.freshness != nil {
@@ -425,7 +438,7 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 		if s.OnMetrics != nil && result != nil {
 			s.OnMetrics(*result)
 		}
-		return
+		return true, nil
 	}
 	info := &ServerInfo{
 		Hostname:     hostname,
@@ -452,6 +465,68 @@ func (s *ServerState) Update(hostname string, result *dc.CheckResult) {
 	if s.OnMetrics != nil && result != nil {
 		s.OnMetrics(*result)
 	}
+	return true, nil
+}
+
+// updateAccepted persists a heartbeat through the feature-aware transactional
+// store when available. The pre-feature fallback keeps legacy reader fixtures
+// usable; production ServerStore implements acceptedResultWriter, so its
+// accepted result and detector input have one durable commit boundary.
+func (s *ServerState) updateAccepted(ctx context.Context, hostname, lastResultJSON string, result *dc.CheckResult, acceptedAt time.Time) (bool, error) {
+	writer, ok := s.store.(acceptedResultWriter)
+	if !ok || result == nil || result.Timestamp.IsZero() {
+		return s.store.Update(ctx, hostname, lastResultJSON)
+	}
+	return writer.UpdateAccepted(ctx, hostname, lastResultJSON, sessionDropObservation(hostname, result, acceptedAt))
+}
+
+// sessionDropObservation extracts only the fixed session-drop input fields
+// from an existing CheckResult. It never changes the agent wire result and it
+// deliberately carries neither result JSON nor a callback-owned identifier.
+func sessionDropObservation(hostname string, result *dc.CheckResult, acceptedAt time.Time) telemetry.SessionDropObservation {
+	observation := telemetry.SessionDropObservation{
+		CanonicalHost:         hostname,
+		AcceptedAtMs:          acceptedAt.UTC().UnixMilli(),
+		SessionPresence:       "nil",
+		FreshnessContext:      "fresh",
+		DrainContext:          "none",
+		ClassificationContext: "not_scored",
+	}
+	if result == nil || result.Timestamp.IsZero() {
+		return observation
+	}
+
+	reportTime := result.Timestamp
+	_, offsetSeconds := reportTime.Zone()
+	observation.ReportEpochMs = reportTime.UTC().UnixMilli()
+	observation.LocalOffsetMinutes = offsetSeconds / 60
+	observation.LocalDate = reportTime.Format("2006-01-02")
+	if result.DrainModeValue != uint32(dc.AllowAll) {
+		observation.DrainContext = "overlap"
+	}
+	if result.Sessions == nil {
+		return observation
+	}
+	if result.Sessions.ActiveSessions < 0 || result.Sessions.DisconnectedSessions < 0 {
+		observation.SessionPresence = "invalid"
+		return observation
+	}
+	active := int64(result.Sessions.ActiveSessions)
+	disconnected := int64(result.Sessions.DisconnectedSessions)
+	const maxSessionCount = int64(1<<31 - 1)
+	if active > maxSessionCount-disconnected {
+		observation.SessionPresence = "invalid"
+		return observation
+	}
+	observation.SessionPresence = "present"
+	observation.ActiveSessions = &active
+	observation.DisconnectedSessions = &disconnected
+	if observation.DrainContext == "overlap" {
+		observation.ClassificationContext = "drain_associated"
+	} else {
+		observation.ClassificationContext = "unexplained"
+	}
+	return observation
 }
 
 // lookupRegisteredAt returns the cached registered_at for hostname or, on a
@@ -609,7 +684,10 @@ func (s *ServerState) ReportLocal(hostname string, result *dc.CheckResult, force
 		slog.Info("dashboard: report refused — host is permanently removed", "host", hostname) //nolint:gosec
 		return false
 	}
-	s.Update(hostname, result)
+	updated, err := s.Update(hostname, result)
+	if err != nil || !updated {
+		return false
+	}
 	if forceUpdate != nil && s.OnLocalForceUpdateCompletion != nil {
 		s.OnLocalForceUpdateCompletion(*forceUpdate)
 	}

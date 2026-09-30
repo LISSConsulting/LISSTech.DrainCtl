@@ -384,6 +384,35 @@ Blank succeeds only when that local DrainCtl service host is the Connection Brok
 
 The supported installer service identity is currently `LocalSystem`; it accesses a remote broker as `DOMAIN\DASHBOARDHOST$`. RDSH agents also remain `LocalSystem`. gMSA support is future work and requires installer, ACL, and privilege support; Microsoft's [Manage Group Managed Service Accounts guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/manage-group-managed-service-accounts) is a future-planning reference only.
 
+### AI anomaly investigation: deployment and operating contract
+
+The optional investigator is owned only by the central dashboard/service, which runs as `LocalSystem`. Its credential is write-only and is protected by the existing atomic **machine-scope DPAPI** flow; it is not a user-profile secret and is never returned by configuration, status, logs, SQLite, SSE, browser state, agents, or machine routes. The only supported credential operations in the dedicated dashboard-session settings surface are **preserve**, **replace** (provision or rotate), and **clear**. Every settings update explicitly chooses one of them. Clearing a credential disables future sends; completed history remains readable.
+
+Provider access and automatic investigation are independently disabled by default. Dashboard-group sessions are the only administrators and operators. Authorization uses the existing session's **login-time stored group snapshot** and compares it with the atomically current `Dashboard.Group`; it does not query live directory membership. This same predicate is checked before subscribing to shared SSE and periodically while the stream is open. Changing `Dashboard.Group` invalidates every session and closes every stream, so operators must authenticate again. Directory-membership changes take effect only at logout, session expiry, or reauthentication.
+
+Enabling provider access requires the exact closed acknowledgement, `openai_responses_privacy_v1`, with all and only these clauses set to `true`:
+
+1. `third_party_subprocessors`
+2. `no_training_without_opt_in`
+3. `default_abuse_monitoring_up_to_30_days`
+4. `store_false_application_state_only`
+5. `temporary_prompt_cache_possible`
+6. `zdr_mam_separate_approval`
+7. `audit_days_local_only`
+8. `global_endpoint_no_regional_guarantee`
+
+Missing, extra, false, non-boolean, or obsolete-version clauses reject enablement. Acceptance is recorded first in the append-only local `investigation_privacy_acknowledgements` audit with the fixed version, authenticated actor, acceptance time, and complete-clause marker/hash. The atomic configuration write then stores the exact current version and immutable audit reference. A missing, mismatched, cleared, or rewritten reference fails closed; an audit row left unreferenced by a failed configuration write remains harmless immutable history. The consent audit is the sole investigation record permitted to retain the actor, remains ACL- and `AuditDays`-governed, and never egresses. Safe reads expose only the acknowledgement version and whether it is acknowledged—not clauses, actor, audit ID, or audit timestamps.
+
+The provider boundary is fixed: one direct TLS request to `https://api.openai.com/v1/responses` using the fixed `openai_responses` profile and model. Allow outbound firewall TLS only to `https://api.openai.com`; do not configure a proxy, alternate endpoint, model, redirect, local relay, or fallback. The client does not inherit environment proxies.
+
+An attempt is evidence-persisted before work and sends at most once. `send_authorized_at` is durably committed immediately before `Client.Do`: transmission may have begun, but provider receipt is not proven. `send_completed_at` means only that the local HTTP exchange returned. Queue claim records `started_at` without a lease; authorization creates the **30-second send lease**; local return clears it and creates the mutually exclusive **two-minute finalization lease**. An active applicable send or finalization lease protects a running row across restart; recovery terminalizes it only after no applicable lease remains active. A same-process finalization retry is SQLite-only and never resends. An unauthorized running attempt then becomes `failed/interrupted`; an authorized unterminated one becomes `failed/storage_unavailable`, with no result/provenance reconstruction or resend.
+
+Admission has two independent limits, both enforced before evidence insertion: at most 100 queued or running attempts globally (`429 queue_full` for an interactive request; automatic work creates nothing), and at most 100 retained attempts for one source, including retries and local insufficiency (`409 attempt_limit_reached`). Public lifecycle fields are RFC3339 `created_at`, `started_at`, `send_authorized_at`, `send_completed_at`, and `completed_at`; provenance uses only canonical `send_authorized_at` and `send_completed_at`. Internal persistence uses the corresponding `_ms` fields.
+
+Session-drop detection remains deterministic and authoritative. Accepted reports atomically persist the host result and idempotent inbox row; private `accepted_sequence`, not `accepted_at_ms`, is the only global drain order. Startup drains pending rows in sequence before newer reports affect the detector, and each row is consumed atomically with its watermark, baseline, and source update. Public RFC3339 `confirmation_started_at` and `confirmation_ended_at` are central acceptance times, distinct from report epochs. All-hours readiness spans `first_trained_at` through eligible-normal-only `last_normal_trained_at`; candidates, confirmations, drains, gaps, scores, and decay do not advance readiness. State is per host and restart-safe; only permanent host removal clears that host's detector state and pending inbox rows.
+
+Investigation evidence, attempts, results, provenance, diagnostics, SSE, and browser durable state exclude host/customer/user/session identity and arbitrary or nonfixed URLs. The only local exceptions are the consent-audit actor and the fixed endpoint literal in closed provenance; neither egresses. Authorized deterministic source/list/detail views alone resolve a host; investigation SSE is source-ID-only. Provider prose is escaped, bounded **untrusted guidance**, never Markdown/HTML or an action: it cannot execute commands, invoke tools, alter configuration, or initiate remediation, drains, restarts, notifications, or credential/file access. Safe terminal reasons are canonical only: `authentication_failed`, `configuration_disabled`, `configuration_invalid`, `evidence_unavailable`, `interrupted`, `network_error`, `provider_rate_limited`, `provider_request_rejected`, `provider_refused`, `redirect_refused`, `request_limit`, `response_incomplete`, `response_invalid`, `response_limit`, `storage_unavailable`, `timeout`, and `upstream_error`. Provider-valid insufficiency has an empty terminal reason and remains non-conclusive.
+
 ---
 
 <h2 id="notifications">▎ Notifications</h2>

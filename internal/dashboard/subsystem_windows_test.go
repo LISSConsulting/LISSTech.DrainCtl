@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -179,5 +180,88 @@ func TestSubsystem_StopDrainsStaleHostTransitionWorker(t *testing.T) {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("Stop did not drain stale-host transition worker")
+	}
+}
+
+type recordingFeatureRuntime struct {
+	startErr error
+	events   []string
+	ctx      context.Context
+}
+
+func (r *recordingFeatureRuntime) Recover(ctx context.Context) error {
+	r.ctx = ctx
+	r.events = append(r.events, "recover")
+	return r.startErr
+}
+
+func (r *recordingFeatureRuntime) DrainInbox(context.Context) error {
+	r.events = append(r.events, "drain")
+	return nil
+}
+
+func (r *recordingFeatureRuntime) PruneExpiredQueued(context.Context) error {
+	r.events = append(r.events, "prune")
+	return nil
+}
+
+func (r *recordingFeatureRuntime) StartWorker(context.Context) error {
+	r.events = append(r.events, "worker")
+	return nil
+}
+
+func (r *recordingFeatureRuntime) Stop() {
+	select {
+	case <-r.ctx.Done():
+		r.events = append(r.events, "stop_after_cancel")
+	default:
+		r.events = append(r.events, "stop_before_cancel")
+	}
+}
+
+func (r *recordingFeatureRuntime) WakeSessionDropInbox() {
+	r.events = append(r.events, "wake")
+}
+
+func TestSubsystem_FeatureRuntimeLifecycle(t *testing.T) {
+	certPath, keyPath := writeSubsystemTestTLS(t)
+	runtime := &recordingFeatureRuntime{}
+	s := NewSubsystem(dc.DashboardConfig{
+		Port:    0,
+		TLSCert: certPath,
+		TLSKey:  keyPath,
+	}, t.TempDir(), SubsystemDependencies{FeatureRuntime: runtime})
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got, want := runtime.events, []string{"recover", "drain", "prune", "worker"}; !slices.Equal(got, want) {
+		t.Fatalf("runtime events after Start = %v, want %v", got, want)
+	}
+	if s.State().sessionDropInboxWaker == nil {
+		t.Fatal("feature runtime was not wired as the inbox waker")
+	}
+	s.State().sessionDropInboxWaker.WakeSessionDropInbox()
+	if got, want := runtime.events, []string{"recover", "drain", "prune", "worker", "wake"}; !slices.Equal(got, want) {
+		t.Fatalf("runtime events after wake = %v, want %v", got, want)
+	}
+
+	s.Stop()
+	if got, want := runtime.events, []string{"recover", "drain", "prune", "worker", "wake", "stop_after_cancel"}; !slices.Equal(got, want) {
+		t.Errorf("runtime events after Stop = %v, want %v", got, want)
+	}
+}
+
+func TestSubsystem_FeatureRuntimeStartFailurePreventsDashboardStartup(t *testing.T) {
+	runtime := &recordingFeatureRuntime{startErr: context.DeadlineExceeded}
+	s := NewSubsystem(dc.DashboardConfig{}, t.TempDir(), SubsystemDependencies{FeatureRuntime: runtime})
+
+	if err := s.Start(context.Background()); err == nil {
+		t.Fatal("Start succeeded with failed feature runtime")
+	}
+	if s.Server() != nil || s.State() != nil {
+		t.Error("dashboard state was constructed after feature runtime startup failure")
+	}
+	if got, want := runtime.events, []string{"recover", "stop_after_cancel"}; !slices.Equal(got, want) {
+		t.Errorf("runtime events = %v, want %v", got, want)
 	}
 }

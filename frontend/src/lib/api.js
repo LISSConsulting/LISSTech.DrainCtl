@@ -250,7 +250,7 @@ async function apiFetch(path, options = {}) {
         let detail = '';
         try {
             const body = await response.json();
-            detail = body.error ?? body.message ?? JSON.stringify(body);
+            detail = body.error ?? body.message ?? '';
         } catch {
             detail = await response.text().catch(() => '');
         }
@@ -270,13 +270,21 @@ export class ApiError extends Error {
      * @param {string} detail
      * @param {string} path
      */
+    /**
+     * @param {number} status
+     * @param {string} statusText
+     * @param {string|{code?: string}} detail
+     * @param {string} path
+     */
     constructor(status, statusText, detail, path) {
-        const message = `API ${status} ${statusText} — ${path}${detail ? ': ' + detail : ''}`;
+        const safeDetail = typeof detail === 'object' ? detail.code ?? '' : detail;
+        const message = `API ${status} ${statusText} — ${path}${safeDetail ? ': ' + safeDetail : ''}`;
         super(message);
         this.name = 'ApiError';
         this.status = status;
         this.statusText = statusText;
-        this.detail = detail;
+        this.detail = safeDetail;
+        this.code = typeof detail === 'object' ? detail.code ?? '' : '';
         this.path = path;
     }
 }
@@ -1057,6 +1065,7 @@ export async function fetchRecentSpikes(host, limit = 20, signal) {
  * @returns {Promise<SpikeRangeResponse>}
  */
 export async function fetchSpikeRange(host, from, to, signal) {
+
     const params = new URLSearchParams({
         host,
         from: from.toISOString(),
@@ -1064,4 +1073,211 @@ export async function fetchSpikeRange(host, from, to, signal) {
     });
     const res = await apiFetch(`/api/evtspike/spikes?${params}`, { signal });
     return /** @type {SpikeRangeResponse} */ (await res.json());
+}
+// ---------------------------------------------------------------------------
+// Investigation and deterministic session-drop APIs
+// ---------------------------------------------------------------------------
+
+const ATTEMPT_STATES = new Set(['queued', 'running', 'completed', 'insufficient_evidence', 'failed']);
+const TERMINAL_REASONS = new Set([
+    '', 'authentication_failed', 'configuration_disabled', 'configuration_invalid',
+    'evidence_unavailable', 'interrupted', 'network_error', 'provider_rate_limited',
+    'provider_request_rejected', 'provider_refused', 'redirect_refused', 'request_limit',
+    'response_incomplete', 'response_invalid', 'response_limit', 'storage_unavailable',
+    'timeout', 'upstream_error',
+]);
+const DECIMAL_ID = /^[1-9][0-9]{0,18}$/;
+const RFC3339_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const OMITTION_CODES = new Set(['pre_upgrade_context', 'retention_expired', 'freshness_unavailable', 'drain_unavailable', 'detector_unavailable', 'local_points', 'fleet_points', 'local_aggregate', 'fleet_aggregate']);
+const REPORT_CATEGORIES = new Set(['additional_time_series', 'host_health_detail', 'service_state', 'authentication_detail', 'network_dependency_detail', 'change_or_maintenance_context', 'fleet_comparison', 'other']);
+const CHECK_TYPES = new Set(['inspect_retained_metrics', 'verify_service_state', 'verify_authentication_state', 'verify_network_or_dependency', 'verify_change_or_maintenance_context', 'compare_fleet', 'collect_additional_observation']);
+
+function dto(condition, message) {
+    if (!condition) throw new Error(`Invalid investigation response: ${message}`);
+}
+
+function closed(value, keys, message) {
+    dto(value && typeof value === 'object' && !Array.isArray(value), message);
+    const actual = Object.keys(value).sort();
+    const expected = [...keys].sort();
+    dto(actual.length === expected.length && actual.every((key, index) => key === expected[index]), `${message} members`);
+}
+
+function rfc3339(value, nullable = false) {
+    if (nullable && value === null) return value;
+    dto(typeof value === 'string' && RFC3339_MILLISECONDS.test(value) && new Date(value).toISOString() === value, 'UTC millisecond timestamp');
+    return value;
+}
+
+function sourceLink(value) {
+    closed(value, ['source_kind', 'source_id'], 'source');
+    dto(['event_spike', 'session_drop'].includes(value.source_kind) && DECIMAL_ID.test(value.source_id), 'source');
+    return value;
+}
+
+export function validateInvestigationAttempt(value) {
+    closed(value, ['attempt_id', 'attempt_number', 'initiation', 'retry_of_attempt_id', 'state', 'created_at', 'started_at', 'send_authorized_at', 'send_completed_at', 'completed_at', 'terminal_reason', 'evidence_version', 'omission_codes'], 'attempt');
+    dto(DECIMAL_ID.test(value.attempt_id) && Number.isInteger(value.attempt_number) && value.attempt_number > 0, 'attempt identity');
+    dto(['automatic', 'manual', 'retry'].includes(value.initiation) && (value.retry_of_attempt_id === null || DECIMAL_ID.test(value.retry_of_attempt_id)), 'attempt lineage');
+    dto(ATTEMPT_STATES.has(value.state) && TERMINAL_REASONS.has(value.terminal_reason), 'attempt state');
+    for (const key of ['created_at', 'started_at', 'send_authorized_at', 'send_completed_at', 'completed_at']) rfc3339(value[key], key !== 'created_at');
+    dto(value.evidence_version === 1 && Array.isArray(value.omission_codes) && value.omission_codes.length <= 9 && value.omission_codes.every((code) => OMITTION_CODES.has(code)), 'attempt evidence');
+    return value;
+}
+
+function validateProvider(value) {
+    closed(value, ['profile', 'endpoint', 'model', 'access_enabled', 'acknowledged', 'privacy_acknowledgement_version', 'automatic_enabled', 'has_credential'], 'provider');
+    dto(value.profile === 'openai_responses' && value.endpoint === 'https://api.openai.com/v1/responses' && value.model === 'gpt-6-astra', 'provider profile');
+    dto(typeof value.access_enabled === 'boolean' && typeof value.acknowledged === 'boolean' && typeof value.automatic_enabled === 'boolean' && typeof value.has_credential === 'boolean' && typeof value.privacy_acknowledgement_version === 'string', 'provider flags');
+}
+
+function validateSessionDropSettings(value, includeDetector) {
+    const fields = ['lower_tail_threshold', 'minimum_drop_sessions', 'minimum_drop_percent', 'baseline_half_life_hours', 'cooldown_minutes'];
+    closed(value, includeDetector ? [...fields, 'detector'] : fields, 'session-drop settings');
+    dto(Number.isFinite(value.lower_tail_threshold) && value.lower_tail_threshold >= 1e-9 && value.lower_tail_threshold <= .1 && Number.isInteger(value.minimum_drop_sessions) && value.minimum_drop_sessions >= 1 && value.minimum_drop_sessions <= 1_000_000 && Number.isFinite(value.minimum_drop_percent) && value.minimum_drop_percent >= 1 && value.minimum_drop_percent <= 99 && Number.isInteger(value.baseline_half_life_hours) && value.baseline_half_life_hours >= 24 && value.baseline_half_life_hours <= 8760 && Number.isInteger(value.cooldown_minutes) && value.cooldown_minutes >= 1 && value.cooldown_minutes <= 1440, 'session-drop setting ranges');
+    if (includeDetector) {
+        closed(value.detector, ['slots_per_day', 'confirmation_required', 'confirmation_window', 'slot_maturity_eligible_days', 'fallback_minimum_observations', 'fallback_minimum_span_hours'], 'detector constants');
+        dto(value.detector.slots_per_day === 96 && value.detector.confirmation_required === 2 && value.detector.confirmation_window === 3 && value.detector.slot_maturity_eligible_days === 7 && value.detector.fallback_minimum_observations === 20 && value.detector.fallback_minimum_span_hours === 24, 'detector constants');
+    }
+}
+
+export function validateInvestigationSettings(value) {
+    closed(value, ['provider', 'session_drop'], 'settings');
+    validateProvider(value.provider);
+    validateSessionDropSettings(value.session_drop, true);
+    return value;
+}
+
+export function validateInvestigationStatus(value) {
+    closed(value, ['operational_state', 'provider', 'attempt_counts', 'worker', 'latest_failure'], 'status');
+    dto(['disabled', 'configured', 'ready', 'automatic_enabled', 'degraded', 'failing'].includes(value.operational_state), 'status');
+    validateProvider(value.provider);
+    closed(value.attempt_counts, ['queued', 'running', 'completed', 'insufficient_evidence', 'failed'], 'attempt counts');
+    dto(Object.values(value.attempt_counts).every((count) => Number.isInteger(count) && count >= 0) && value.attempt_counts.queued + value.attempt_counts.running <= 100, 'attempt counts');
+    closed(value.worker, ['workers', 'max_nonterminal_attempts', 'requests_per_minute', 'burst', 'request_timeout_seconds'], 'worker');
+    dto(value.worker.workers === 1 && value.worker.max_nonterminal_attempts === 100 && value.worker.requests_per_minute === 10 && value.worker.burst === 2 && value.worker.request_timeout_seconds === 30, 'worker');
+    if (value.latest_failure !== null) {
+        closed(value.latest_failure, ['reason', 'at'], 'latest failure');
+        dto(TERMINAL_REASONS.has(value.latest_failure.reason) && value.latest_failure.reason !== '', 'latest failure');
+        rfc3339(value.latest_failure.at);
+    }
+    return value;
+}
+
+function validateReport(report) {
+    closed(report, ['result_version', 'summary', 'overall_assessment', 'evidence_sufficiency', 'human_review_required', 'hypotheses', 'missing_evidence', 'recommended_diagnostic_checks'], 'report');
+    dto(report.result_version === 1 && ['insufficient_evidence', 'indeterminate', 'likely_localized_operational_issue', 'likely_fleet_wide_operational_issue', 'likely_expected_or_maintenance_related'].includes(report.overall_assessment) && ['insufficient', 'partial', 'sufficient'].includes(report.evidence_sufficiency) && typeof report.human_review_required === 'boolean', 'report fields');
+    closed(report.summary, ['text_kind', 'text', 'fact_ids'], 'summary');
+    dto(report.summary.text_kind === 'untrusted_summary' && typeof report.summary.text === 'string' && Array.isArray(report.summary.fact_ids), 'summary');
+    dto(Array.isArray(report.hypotheses) && Array.isArray(report.missing_evidence) && Array.isArray(report.recommended_diagnostic_checks), 'report arrays');
+    report.hypotheses.forEach((item, index) => { closed(item, ['rank', 'confidence', 'text_kind', 'text', 'supporting_fact_ids', 'contradicting_fact_ids'], 'hypothesis'); dto(item.rank === index + 1 && ['low', 'medium', 'high'].includes(item.confidence) && item.text_kind === 'untrusted_hypothesis' && Array.isArray(item.supporting_fact_ids) && Array.isArray(item.contradicting_fact_ids), 'hypothesis'); });
+    report.missing_evidence.forEach((item) => { closed(item, ['category', 'text_kind', 'text', 'related_fact_ids'], 'missing evidence'); dto(REPORT_CATEGORIES.has(item.category) && item.text_kind === 'untrusted_missing_evidence' && Array.isArray(item.related_fact_ids), 'missing evidence'); });
+    report.recommended_diagnostic_checks.forEach((item, index) => { closed(item, ['rank', 'check_type', 'text_kind', 'text', 'fact_ids', 'hypothesis_ranks'], 'diagnostic check'); dto(item.rank === index + 1 && CHECK_TYPES.has(item.check_type) && item.text_kind === 'untrusted_diagnostic_check' && Array.isArray(item.fact_ids) && Array.isArray(item.hypothesis_ranks), 'diagnostic check'); });
+}
+
+export async function fetchInvestigationSettings() {
+    return validateInvestigationSettings(await (await apiFetch('/investigation/settings')).json());
+}
+
+function validateInvestigationSettingsRequest(value) {
+    closed(value, ['provider', 'session_drop'], 'settings request');
+    closed(value.provider, ['access_enabled', 'privacy_acknowledgement', 'automatic_enabled', 'credential'].filter((key) => key !== 'privacy_acknowledgement' || Object.hasOwn(value.provider, key)), 'settings provider request');
+    dto(typeof value.provider.access_enabled === 'boolean' && typeof value.provider.automatic_enabled === 'boolean', 'settings provider flags');
+    if (Object.hasOwn(value.provider, 'privacy_acknowledgement')) {
+        closed(value.provider.privacy_acknowledgement, Object.keys(mockPrivacyAcknowledgement()), 'privacy acknowledgement');
+        dto(value.provider.privacy_acknowledgement.version === 'openai_responses_privacy_v1' && Object.entries(value.provider.privacy_acknowledgement).every(([key, entry]) => key === 'version' || entry === true), 'privacy acknowledgement');
+    }
+    closed(value.provider.credential, value.provider.credential.operation === 'replace' ? ['operation', 'value'] : ['operation'], 'credential command');
+    dto(['preserve', 'replace', 'clear'].includes(value.provider.credential.operation) && (value.provider.credential.operation !== 'replace' || typeof value.provider.credential.value === 'string' && value.provider.credential.value.length > 0), 'credential command');
+    validateSessionDropSettings(value.session_drop, false);
+}
+
+function mockPrivacyAcknowledgement() {
+    return { version: true, third_party_subprocessors: true, no_training_without_opt_in: true, default_abuse_monitoring_up_to_30_days: true, store_false_application_state_only: true, temporary_prompt_cache_possible: true, zdr_mam_separate_approval: true, audit_days_local_only: true, global_endpoint_no_regional_guarantee: true };
+}
+
+export async function saveInvestigationSettings(settings) {
+    validateInvestigationSettingsRequest(settings);
+    const res = await apiFetch('/investigation/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+    return validateInvestigationSettings(await res.json());
+}
+
+export async function fetchInvestigationStatus() {
+    return validateInvestigationStatus(await (await apiFetch('/investigation/status')).json());
+}
+
+export async function fetchInvestigationHistory(sourceKind, sourceId, { limit = 100, afterAttemptNumber } = {}) {
+    dto(['event_spike', 'session_drop'].includes(sourceKind) && DECIMAL_ID.test(String(sourceId)), 'source request');
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (afterAttemptNumber != null) params.set('after_attempt_number', String(afterAttemptNumber));
+    const value = await (await apiFetch(`/investigation/sources/${sourceKind}/${sourceId}/attempts?${params}`)).json();
+    closed(value, ['source', 'attempts', 'next_after_attempt_number'], 'attempt history');
+    sourceLink(value.source);
+    dto(Array.isArray(value.attempts) && (value.next_after_attempt_number === null || DECIMAL_ID.test(value.next_after_attempt_number)), 'attempt history');
+    value.attempts.forEach(validateInvestigationAttempt);
+    return { ...value, attempts: value.attempts.map((attempt) => ({ ...attempt, source: value.source })) };
+}
+
+export async function createInvestigation(sourceKind, sourceId) {
+    const value = await (await apiFetch(`/investigation/sources/${sourceKind}/${sourceId}/attempts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    validateInvestigationAttempt(value);
+    return { ...value, source: { source_kind: sourceKind, source_id: String(sourceId) } };
+}
+
+export async function retryInvestigation(attemptId, source) {
+    dto(DECIMAL_ID.test(String(attemptId)), 'retry request');
+    sourceLink(source);
+    const value = await (await apiFetch(`/investigation/attempts/${attemptId}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    validateInvestigationAttempt(value);
+    return { ...value, source };
+}
+
+export async function fetchInvestigationDetail(attemptId) {
+    dto(DECIMAL_ID.test(String(attemptId)), 'attempt request');
+    const value = await (await apiFetch(`/investigation/attempts/${attemptId}`)).json();
+    closed(value, ['attempt'], 'attempt detail');
+    const attempt = value.attempt;
+    closed(attempt, ['attempt_id', 'attempt_number', 'source', 'initiation', 'retry_of_attempt_id', 'state', 'created_at', 'started_at', 'send_authorized_at', 'send_completed_at', 'completed_at', 'terminal_reason', 'evidence_version', 'omission_codes', 'evidence', 'result', 'provenance'], 'attempt detail');
+    sourceLink(attempt.source);
+    const { source, evidence, result, provenance, ...summary } = attempt;
+    validateInvestigationAttempt(summary);
+    closed(attempt.evidence, ['version', 'snapshot_kind', 'snapshot_at', 'window_start', 'window_end', 'fact_ids', 'omission_codes'], 'evidence');
+    dto(attempt.evidence.version === 1 && ['available', 'unavailable'].includes(attempt.evidence.snapshot_kind) && Array.isArray(attempt.evidence.fact_ids) && Array.isArray(attempt.evidence.omission_codes), 'evidence');
+    rfc3339(attempt.evidence.snapshot_at); rfc3339(attempt.evidence.window_start); rfc3339(attempt.evidence.window_end);
+    if (attempt.result !== null) validateReport(attempt.result);
+    if (attempt.provenance !== null) {
+        const p = attempt.provenance;
+        closed(p, ['provider_profile', 'provider_endpoint', 'requested_model', 'response_format', 'store', 'send_authorized_at', 'send_completed_at', 'request_header_bytes', 'request_body_bytes', 'response_header_bytes', 'response_body_bytes', 'validation_outcome'], 'provenance');
+        dto(p.provider_profile === 'openai_responses' && p.provider_endpoint === 'https://api.openai.com/v1/responses' && p.requested_model === 'gpt-6-astra' && p.response_format === 'anomaly_investigation_v1' && p.store === false && ['accepted', 'insufficient_evidence'].includes(p.validation_outcome), 'provenance');
+        rfc3339(p.send_authorized_at); rfc3339(p.send_completed_at);
+    }
+    return value;
+}
+
+export async function fetchSessionDrops({ limit = 50, before } = {}) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (before) params.set('before', before);
+    const value = await (await apiFetch(`/session-drops?${params}`)).json();
+    closed(value, ['items', 'next_before'], 'session-drop list');
+    dto(Array.isArray(value.items) && (value.next_before === null || DECIMAL_ID.test(value.next_before)), 'session-drop list');
+    value.items.forEach((item) => {
+        closed(item, ['id', 'source_kind', 'registered_host', 'confirmed_at', 'classification', 'investigation_eligible', 'observed_total_sessions', 'reference_total_sessions', 'expected_total_sessions', 'absolute_loss_sessions', 'relative_loss', 'tail_probability', 'baseline_model_version', 'baseline_scope', 'slot_index', 'slot_mature_days', 'confirmation_window_size', 'confirmation_count'], 'session-drop item');
+        dto(DECIMAL_ID.test(item.id) && item.source_kind === 'session_drop' && typeof item.registered_host === 'string' && ['unexplained', 'drain_associated', 'unknown_context'].includes(item.classification) && typeof item.investigation_eligible === 'boolean' && item.baseline_model_version === 'gamma_poisson_lower_v1' && ['slot', 'all_hours'].includes(item.baseline_scope), 'session-drop item');
+        rfc3339(item.confirmed_at);
+    });
+    return value;
+}
+
+export async function fetchSessionDropDetail(id) {
+    dto(DECIMAL_ID.test(String(id)), 'session-drop request');
+    const value = await (await apiFetch(`/session-drops/${id}`)).json();
+    closed(value, ['source', 'attempts'], 'session-drop detail');
+    dto(Array.isArray(value.attempts), 'session-drop attempts');
+    const source = value.source;
+    closed(source, ['id', 'source_kind', 'registered_host', 'confirmed_at', 'classification', 'investigation_eligible', 'observed_total_sessions', 'reference_total_sessions', 'expected_total_sessions', 'absolute_loss_sessions', 'relative_loss', 'tail_probability', 'baseline_model_version', 'baseline_scope', 'slot_index', 'slot_mature_days', 'confirmation_window_size', 'confirmation_count', 'confirmation_started_at', 'confirmation_ended_at', 'confirmation_flags', 'freshness_context', 'drain_context', 'confirmation_ended_report_epoch_ms'], 'session-drop source detail');
+    dto(DECIMAL_ID.test(source.id) && source.source_kind === 'session_drop' && ['unexplained', 'drain_associated', 'unknown_context'].includes(source.classification) && typeof source.investigation_eligible === 'boolean' && source.baseline_model_version === 'gamma_poisson_lower_v1' && ['slot', 'all_hours'].includes(source.baseline_scope), 'session-drop source detail');
+    dto(source.confirmation_window_size >= 2 && source.confirmation_window_size <= 3 && Array.isArray(source.confirmation_flags) && source.confirmation_flags.length === source.confirmation_window_size && source.confirmation_flags.every((flag) => typeof flag === 'boolean') && source.confirmation_flags.filter(Boolean).length === source.confirmation_count && source.freshness_context === 'fresh' && ['none', 'overlap', 'post_horizon', 'unknown'].includes(source.drain_context) && /^[0-9]+$/.test(source.confirmation_ended_report_epoch_ms), 'confirmation flags');
+    for (const key of ['confirmed_at', 'confirmation_started_at', 'confirmation_ended_at']) rfc3339(source[key]);
+    value.attempts.forEach(validateInvestigationAttempt);
+    return value;
 }

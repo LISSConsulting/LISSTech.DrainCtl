@@ -110,6 +110,9 @@ func (s *RemovalStore) PermanentRemove(ctx context.Context, hostname, by, reason
 	if _, err := tx.ExecContext(ctx, `DELETE FROM servers WHERE hostname = ? COLLATE NOCASE`, hostname); err != nil {
 		return fmt.Errorf("telemetry: exclusions permanent remove live row: %w", err)
 	}
+	if err := (&SessionDropStore{db: s.db}).removeHostStateTx(ctx, tx, hostname); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_exclusions WHERE hostname = ? COLLATE NOCASE`, hostname); err != nil {
 		return fmt.Errorf("telemetry: exclusions permanent remove clear case variant: %w", err)
 	}

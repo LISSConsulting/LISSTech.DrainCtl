@@ -59,6 +59,23 @@ type sessionQueryReader interface {
 	Detail(context.Context, string, telemetry.SessionDetailQuery) (telemetry.SessionDetail, error)
 }
 
+// acceptedResultWriter is the only dashboard-to-telemetry write seam for an
+// accepted heartbeat. Its implementation commits the server's opaque
+// last-result JSON and the typed session-drop observation in one SQLite writer
+// transaction. The observation is detector input; callers must not reconstruct
+// it later from last-result JSON.
+type acceptedResultWriter interface {
+	UpdateAccepted(ctx context.Context, hostname, lastResultJSON string, observation telemetry.SessionDropObservation) (bool, error)
+}
+
+// sessionDropInboxWaker intentionally has no observation argument. The
+// accepted observation is already durable before WakeSessionDropInbox runs, so
+// this callback can only request a drain and cannot become a correctness
+// handoff or a second observation path.
+type sessionDropInboxWaker interface {
+	WakeSessionDropInbox()
+}
+
 // eventSpikeReader is the subset of *telemetry.EventSpikeStore the dashboard
 // uses. Insert is part of this set because the dashboard owns the ingestion
 // path that funnels SSE events.
