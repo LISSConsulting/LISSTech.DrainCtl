@@ -117,23 +117,45 @@ type SubsystemDependencies struct {
 // NewSubsystem constructs the dashboard subsystem. Nil stores explicitly
 // select degraded endpoint behavior, which is safe during rolling upgrades.
 func NewSubsystem(cfg dc.DashboardConfig, dataDir string, dependencies SubsystemDependencies) *Subsystem {
-	return &Subsystem{
+	subsystem := &Subsystem{
 		cfg:                       cfg,
 		dataDir:                   dataDir,
-		ms:                        dependencies.Metrics,
-		as:                        dependencies.Audit,
-		mnt:                       dependencies.Maintenance,
-		srv:                       dependencies.Servers,
-		sps:                       dependencies.EventSpikes,
-		removals:                  dependencies.Removals,
 		outbox:                    dependencies.ForceUpdateOutbox,
-		sessionSnapshots:          dependencies.SessionSnapshots,
-		sessionQueries:            dependencies.SessionQueries,
-		sessionActions:            dependencies.SessionActions,
 		freshness:                 dependencies.Freshness,
 		localForceUpdateSupported: dependencies.LocalForceUpdateSupported,
 		featureRuntime:            dependencies.FeatureRuntime,
 	}
+	// Assign concrete stores to interfaces only when non-nil. Assigning a
+	// typed nil pointer directly would produce a non-nil interface and panic
+	// when degraded-mode workers call it.
+	if dependencies.Metrics != nil {
+		subsystem.ms = dependencies.Metrics
+	}
+	if dependencies.Audit != nil {
+		subsystem.as = dependencies.Audit
+	}
+	if dependencies.Maintenance != nil {
+		subsystem.mnt = dependencies.Maintenance
+	}
+	if dependencies.Servers != nil {
+		subsystem.srv = dependencies.Servers
+	}
+	if dependencies.EventSpikes != nil {
+		subsystem.sps = dependencies.EventSpikes
+	}
+	if dependencies.Removals != nil {
+		subsystem.removals = dependencies.Removals
+	}
+	if dependencies.SessionSnapshots != nil {
+		subsystem.sessionSnapshots = dependencies.SessionSnapshots
+	}
+	if dependencies.SessionQueries != nil {
+		subsystem.sessionQueries = dependencies.SessionQueries
+	}
+	if dependencies.SessionActions != nil {
+		subsystem.sessionActions = dependencies.SessionActions
+	}
+	return subsystem
 }
 
 // State returns the ServerState created by Start so the service main loop
