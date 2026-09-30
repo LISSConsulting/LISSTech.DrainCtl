@@ -45,6 +45,7 @@
      *   transform?: (v:number)=>number,
      *   noThresholdZones?: boolean,
      *   autoScale?: boolean,
+     *   detailLines?: ((point:MetricPoint)=>string[])|null,
      * }}
      */
     let {
@@ -68,6 +69,7 @@
         autoScale = false,
         helpText = '',
         showHelp = false,
+        detailLines = /** @type {((point:MetricPoint)=>string[])|null} */ (null),
         fmtYTick = /** @type {((v:number)=>string)|null} */ (null),
     } = $props();
 
@@ -304,10 +306,11 @@
             return raw != null ? transform(raw) : null;
         })(),
     );
+    let hoverDetails = $derived(displayIndex !== null && detailLines ? detailLines(history[displayIndex]) : []);
 
     // Tooltip layout constants.
-    const TIP_W = 184;
-    const TIP_H = 66;
+    const TIP_W = 240;
+    let TIP_H = $derived(66 + hoverDetails.length * 14);
     const TIP_PAD = 8;
 </script>
 
@@ -559,8 +562,7 @@
                     {/if}
 
                     {#if hoverValue !== null && displayIndex !== null}
-                        {@const tipX =
-                            crosshairX + 14 + TIP_W + 4 > PL + cw ? crosshairX - TIP_W - 10 : crosshairX + 14}
+                        {@const tipX = Math.max(PL + 2, Math.min(crosshairX + 14, PL + cw - TIP_W - 2))}
                         {@const tipY = Math.max(
                             yChartTop + 2,
                             Math.min(yChartBot - TIP_H - 8, ys(scaleMax / 2, scaleMax) - TIP_H / 2),
@@ -607,6 +609,9 @@
                                 <tspan font-weight="700" fill={secondaryColor}>{fmt(hoverP50Value)}</tspan>
                             </text>
                         {/if}
+                        {#each hoverDetails as detail, detailIndex}
+                            <text x={tipX + TIP_PAD} y={tipY + 67 + detailIndex * 14} class="tip-detail">{detail}</text>
+                        {/each}
                     {/if}
                 {/if}
 
@@ -781,6 +786,13 @@
     .tip-val {
         font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
+        fill: var(--color-muted);
+        pointer-events: none;
+    }
+
+    .tip-detail {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
         fill: var(--color-muted);
         pointer-events: none;
     }

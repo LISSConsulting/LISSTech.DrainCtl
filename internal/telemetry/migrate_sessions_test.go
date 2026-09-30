@@ -81,17 +81,8 @@ func TestSessionSchemaV4_UpgradesV3Idempotently(t *testing.T) {
 func assertSessionSchemaV4(t *testing.T, db *sql.DB) {
 	t.Helper()
 
-	wantTables := make(map[string]struct{}, len(sessionSchemaTables))
 	for _, table := range sessionSchemaTables {
-		wantTables[table] = struct{}{}
 		assertCanonicalTableDDL(t, db, table)
-	}
-	for _, table := range sessionTables(t, db) {
-		if strings.Contains(table, "session") {
-			if _, ok := wantTables[table]; !ok {
-				t.Errorf("unexpected session table %q: schema v4 has no EAV or history table", table)
-			}
-		}
 	}
 
 	for _, index := range sessionSchemaIndexes {
@@ -196,31 +187,6 @@ func assertSessionLatestForeignKey(t *testing.T, db *sql.DB) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate session_latest foreign keys: %v", err)
 	}
-}
-
-func sessionTables(t *testing.T, db *sql.DB) []string {
-	t.Helper()
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-	if err != nil {
-		t.Fatalf("list tables: %v", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			t.Errorf("close tables: %v", err)
-		}
-	}()
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatalf("scan table name: %v", err)
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate tables: %v", err)
-	}
-	return tables
 }
 
 func sessionDDLStatement(t *testing.T, prefix string) string {

@@ -672,8 +672,8 @@ function seedPerfHistory(host, status, initSessions, now) {
             sessionsActive: jitterSessions,
             sessionsDisconnected: sessDisc,
             maxSessions,
-            sessionCpuPeakP95: p.session_cpu_p95_pct,
-            sessionMemPeakP95: p.session_mem_p95_bytes,
+            sessionCpuHostP95: p.session_cpu_p95_pct,
+            sessionMemHostP95: p.session_mem_p95_bytes,
             sessionCpuObserved: p.session_cpu_observed_count,
             sessionCpuAtOrAbove5: p.session_cpu_ge_5_count,
             sessionCpuAtOrAbove20: p.session_cpu_ge_20_count,
@@ -1025,8 +1025,8 @@ function startEvolution() {
                     sessionsActive: s.sessions,
                     sessionsDisconnected: s.sessionsDisconnected ?? 0,
                     maxSessions: def?.maxSessions ?? 100,
-                    sessionCpuPeakP95: s.perf.session_cpu_p95_pct,
-                    sessionMemPeakP95: s.perf.session_mem_p95_bytes,
+                    sessionCpuHostP95: s.perf.session_cpu_p95_pct,
+                    sessionMemHostP95: s.perf.session_mem_p95_bytes,
                     sessionCpuObserved: s.perf.session_cpu_observed_count,
                     sessionCpuAtOrAbove5: s.perf.session_cpu_ge_5_count,
                     sessionCpuAtOrAbove20: s.perf.session_cpu_ge_20_count,
@@ -1395,8 +1395,8 @@ function handleRequest(method, pathname, body, query = {}) {
             sessions_total: (s) => s.sessions,
             sessions_disconnected: (s) => s.sessionsDisconnected,
             sessions_max: (s) => s.maxSessions,
-            session_cpu_p95_pct: (s) => s.sessionCpuPeakP95,
-            session_mem_p95_bytes: (s) => s.sessionMemPeakP95,
+            session_cpu_p95_pct: (s) => s.sessionCpuHostP95,
+            session_mem_p95_bytes: (s) => s.sessionMemHostP95,
             session_cpu_observed_count: (s) => s.sessionCpuObserved,
             session_cpu_ge_5_count: (s) => s.sessionCpuAtOrAbove5,
             session_cpu_ge_20_count: (s) => s.sessionCpuAtOrAbove20,
@@ -1430,10 +1430,12 @@ function handleRequest(method, pathname, body, query = {}) {
         let windowed; // Array<{ time: number, samples: Sample[] }>
         let oldestTime = null;
         let newestTime = null;
+        let expectedHostCount = 1;
         if (isFleet) {
             /** @type {Map<number, any[]>} */
             const byTime = new Map();
             const metricHosts = requestedHosts.length > 0 ? requestedHosts : [...state.keys()];
+            expectedHostCount = metricHosts.length;
             const histories = metricHosts.map((requestedHost) => perfHistory.get(requestedHost) ?? []);
             for (const hist of histories) {
                 for (const s of hist) {
@@ -1505,6 +1507,50 @@ function handleRequest(method, pathname, body, query = {}) {
         const oldest = oldestTime !== null ? new Date(oldestTime).toISOString() : null;
         const newest = newestTime !== null ? new Date(newestTime).toISOString() : null;
         const tier = reqRes === 'auto' ? 'raw' : reqRes;
+        const sessionWorkload = isFleet
+            ? {
+                  points: windowed.map(({ time, samples }) => {
+                      const contributing = samples.filter((s) => Number.isFinite(s.sessionCpuObserved)).length;
+                      const observed = samples.reduce((sum, s) => sum + (s.sessionCpuObserved ?? 0), 0);
+                      const ge5 = samples.reduce((sum, s) => sum + (s.sessionCpuAtOrAbove5 ?? 0), 0);
+                      const ge20 = samples.reduce((sum, s) => sum + (s.sessionCpuAtOrAbove20 ?? 0), 0);
+                      const cpuP95 = Math.max(...samples.map((s) => s.sessionCpuHostP95 ?? 0));
+                      const memoryP95 = Math.max(...samples.map((s) => s.sessionMemHostP95 ?? 0));
+                      return {
+                          t: time,
+                          bucket_ms: 60_000,
+                          cpu: observed
+                              ? {
+                                    p95_pct: cpuP95,
+                                    avg_pct: cpuP95 * 0.38,
+                                    observed_sessions: observed,
+                                    ge_5_avg: ge5,
+                                    ge_5_max: ge5,
+                                    ge_5_rate_pct: (ge5 / observed) * 100,
+                                    ge_20_avg: ge20,
+                                    ge_20_max: ge20,
+                                    ge_20_rate_pct: (ge20 / observed) * 100,
+                                }
+                              : null,
+                          memory: {
+                              p95_bytes: memoryP95,
+                              avg_bytes: memoryP95 * 0.62,
+                              observed_sessions: observed,
+                          },
+                          coverage: {
+                              expected_hosts: expectedHostCount,
+                              contributing_hosts: contributing,
+                              successful_empty_hosts: 0,
+                              error_hosts: 0,
+                              stale_hosts: 0,
+                              offline_hosts: 0,
+                              unsupported_hosts: Math.max(0, expectedHostCount - contributing),
+                              partial: contributing < expectedHostCount,
+                          },
+                      };
+                  }),
+              }
+            : undefined;
         return {
             status: 200,
             body: {
@@ -1515,6 +1561,7 @@ function handleRequest(method, pathname, body, query = {}) {
                 oldest_available: Object.keys(series).length === 0 ? null : oldest,
                 newest_available: Object.keys(series).length === 0 ? null : newest,
                 series,
+                session_workload: sessionWorkload,
             },
         };
     }

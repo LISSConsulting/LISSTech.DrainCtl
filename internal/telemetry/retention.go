@@ -112,6 +112,24 @@ func (r *Retention) RunOnce(ctx context.Context, now time.Time) Result {
 			cutoff: hourlyCutoff,
 		},
 		{
+			label: "session_workload_raw",
+			query: `DELETE FROM session_workload_raw WHERE (canonical_host, bucket_ts) IN (
+                        SELECT canonical_host, bucket_ts FROM session_workload_raw WHERE bucket_ts < ? LIMIT 10000)`,
+			cutoff: rawCutoff,
+		},
+		{
+			label: "session_workload_5min",
+			query: `DELETE FROM session_workload_5min WHERE (canonical_host, bucket_ts) IN (
+                        SELECT canonical_host, bucket_ts FROM session_workload_5min WHERE bucket_ts < ? LIMIT 10000)`,
+			cutoff: fiveMinCutoff,
+		},
+		{
+			label: "session_workload_hourly",
+			query: `DELETE FROM session_workload_hourly WHERE (canonical_host, bucket_ts) IN (
+                        SELECT canonical_host, bucket_ts FROM session_workload_hourly WHERE bucket_ts < ? LIMIT 10000)`,
+			cutoff: hourlyCutoff,
+		},
+		{
 			label: "audit",
 			query: `DELETE FROM audit WHERE (ts, host, new_state) IN (
                         SELECT ts, host, new_state FROM audit WHERE ts < ? LIMIT 10000)`,

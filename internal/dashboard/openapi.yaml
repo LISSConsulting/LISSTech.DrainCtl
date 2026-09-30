@@ -632,6 +632,52 @@ components:
           description: "Exact median of participating host values for each timestamp/bucket."
       required: [t, avg, min, max, p50]
 
+    SessionWorkloadSeries:
+      type: object
+      description: "Anonymous session-weighted workload. CPU is normalized to total host capacity. P95 uses mergeable bounded-error histograms (CPU <=0.5 percentage point; memory <=2% relative); AVG uses pooled sum/count. No session identity is retained."
+      properties:
+        points:
+          type: array
+          items:
+            type: object
+            required: [t, bucket_ms, cpu, memory, coverage]
+            properties:
+              t: { type: integer, format: int64 }
+              bucket_ms: { type: integer, format: int64 }
+              cpu:
+                type: object
+                nullable: true
+                properties:
+                  p95_pct: { type: number, format: double }
+                  avg_pct: { type: number, format: double }
+                  observed_sessions: { type: number, format: double, description: "Average CPU-observed concurrent sessions across represented base slots." }
+                  ge_5_avg: { type: number, format: double }
+                  ge_5_max: { type: integer, format: int64 }
+                  ge_5_rate_pct: { type: number, format: double }
+                  ge_20_avg: { type: number, format: double }
+                  ge_20_max: { type: integer, format: int64 }
+                  ge_20_rate_pct: { type: number, format: double }
+              memory:
+                type: object
+                nullable: true
+                properties:
+                  p95_bytes: { type: number, format: double }
+                  avg_bytes: { type: number, format: double }
+                  observed_sessions: { type: number, format: double, description: "Average memory-observed concurrent sessions across represented base slots." }
+              coverage:
+                type: object
+                required: [expected_hosts, contributing_hosts, successful_empty_hosts, error_hosts, stale_hosts, offline_hosts, unsupported_hosts, partial]
+                properties:
+                  expected_hosts: { type: integer }
+                  contributing_hosts: { type: integer }
+                  successful_empty_hosts: { type: integer }
+                  error_hosts: { type: integer }
+                  stale_hosts: { type: integer }
+                  offline_hosts: { type: integer }
+                  unsupported_hosts: { type: integer }
+                  partial: { type: boolean }
+      required: [points]
+
     MetricsResponse:
       type: object
       properties:
@@ -662,6 +708,9 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/MetricsSeries"
           description: "Per-counter time-series. Empty map when the tier holds no rows for the requested window (empty-state shape — FR-019a)."
+        session_workload:
+          $ref: "#/components/schemas/SessionWorkloadSeries"
+          description: "Present on `_fleet` responses. Empty points preserve pre-feature history as gaps."
       required:
         [host, tier, from, to, oldest_available, newest_available, series]
 

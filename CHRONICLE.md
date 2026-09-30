@@ -1,5 +1,11 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Fleet session operator metrics — 2026-09-29
+
+- Overview Session CPU and Memory now report pooled, session-weighted `Fleet Session P95` and `Fleet Session AVG`. CPU is normalized by logical processor count before thresholds or aggregation; valid zeroes remain observations and missing values remain gaps.
+- SQLite schema v5 retains one anonymous, replaceable per-host workload aggregate per minute and mergeable 5-minute/hourly histogram rollups. Host filtering recomputes pooled distributions; old host-summary history is never relabeled. CPU percentile error is bounded to 0.5 percentage point and memory to 2% relative.
+- CPU-active Sessions now exposes average/max concurrent `≥5%` and `≥20%` counts, rates, CPU-observed denominators, and contributing/expected host coverage. Fatal collection replaces same-minute success so a stale snapshot cannot silently contribute. No username, session ID, client, process, or history episode identity enters the retained aggregates.
+
 ## Fleet Sessions backend foundation — 2026-09-29
 
 - Ported the current-session backend onto the stable trunk without enabling the deferred Sessions dashboard UI. Agents can collect bounded WTS metadata and strict session-ID PDH metrics, send complete machine-authenticated snapshots, and retain only each host's latest successful snapshot with explicit collection-error and freshness state.

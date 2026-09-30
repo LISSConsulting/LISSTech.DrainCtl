@@ -104,6 +104,9 @@ func (s *SessionSnapshotStore) Apply(ctx context.Context, snapshot sessiondata.S
 		if err := s.applyFatal(ctx, tx, snapshot, sequence, received); err != nil {
 			return SnapshotApplyResult{}, err
 		}
+		if err := upsertSessionWorkload(ctx, tx, snapshot, received); err != nil {
+			return SnapshotApplyResult{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return SnapshotApplyResult{}, fmt.Errorf("telemetry: session fatal commit: %w", err)
 		}
@@ -113,6 +116,9 @@ func (s *SessionSnapshotStore) Apply(ctx context.Context, snapshot sessiondata.S
 	projected := sessiondata.ProjectSnapshot(snapshot, privacy)
 
 	if err := s.applySuccess(ctx, tx, projected, sequence, received, aggregates); err != nil {
+		return SnapshotApplyResult{}, err
+	}
+	if err := upsertSessionWorkload(ctx, tx, snapshot, received); err != nil {
 		return SnapshotApplyResult{}, err
 	}
 	if err := tx.Commit(); err != nil {

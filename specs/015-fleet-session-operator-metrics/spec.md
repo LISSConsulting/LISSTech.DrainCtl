@@ -2,7 +2,7 @@
 
 **Feature Branch**: `015-fleet-session-operator-metrics`
 **Created**: 2026-09-29
-**Status**: Draft
+**Status**: Implemented
 **Input**: Replace the Overview Sessions charts' host-summary percentile story with true session-weighted fleet workload metrics: Fleet Session P95, Fleet Session AVG, and Sessions at or above 5% / 20% CPU. Reuse the current-session engine while keeping User Session History identity separate.
 
 ## Problem and Scope

@@ -632,6 +632,27 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
  */
 
 /**
+ * @typedef {Object} SessionWorkloadCoverage
+ * @property {number} expected_hosts
+ * @property {number} contributing_hosts
+ * @property {number} successful_empty_hosts
+ * @property {number} error_hosts
+ * @property {number} stale_hosts
+ * @property {number} offline_hosts
+ * @property {number} unsupported_hosts
+ * @property {boolean} partial
+ */
+
+/**
+ * @typedef {Object} SessionWorkloadPoint
+ * @property {number} t
+ * @property {number} bucket_ms
+ * @property {{p95_pct:number,avg_pct:number,observed_sessions:number,ge_5_avg:number,ge_5_max:number,ge_5_rate_pct:number,ge_20_avg:number,ge_20_max:number,ge_20_rate_pct:number}|null} cpu
+ * @property {{p95_bytes:number,avg_bytes:number,observed_sessions:number}|null} memory
+ * @property {SessionWorkloadCoverage} coverage
+ */
+
+/**
  * MetricsResponse is the shape returned by GET /api/v1/metrics/{host}.
  * Per contracts/http-metrics.md: on empty windows the server returns 200
  * with series === {} and oldest_available/newest_available === null so the
@@ -645,6 +666,7 @@ export async function fetchAllServerMetrics({ from, to, resolution, counters, li
  * @property {string|null} oldest_available        - ISO-8601 UTC; null when the tier holds no rows for this host
  * @property {string|null} newest_available        - ISO-8601 UTC; null when the tier holds no rows for this host
  * @property {Record<string, CounterSeries>} series
+ * @property {{points:SessionWorkloadPoint[]}|undefined} session_workload
  */
 
 /**

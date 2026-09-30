@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS force_update_outbox_pending
     ON force_update_outbox(host, accepted_at_ms, command_id);
 `
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // applySchema runs additive idempotent DDL and advances user_version to the
 // current schema version.
@@ -159,6 +159,9 @@ func applySchema(db *sql.DB) error {
 		return err
 	}
 	if err = migrateSessionsV4(tx); err != nil {
+		return err
+	}
+	if err = migrateSessionWorkloadV5(tx); err != nil {
 		return err
 	}
 	if version < schemaVersion {

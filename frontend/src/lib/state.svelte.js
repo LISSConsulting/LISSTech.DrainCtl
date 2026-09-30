@@ -192,13 +192,19 @@ const persistReduceMotion = (v) => {
  * @property {number} disconnected   - Total disconnected sessions across fleet
  * @property {number} total          - active + disconnected
  * @property {number} utilization    - (total/maxTotal)*100 average utilization %
- * @property {number} [sessionCpuPeakP95]      - Highest host session CPU P95 across fleet
- * @property {number} [sessionCpuTypicalP95]   - Median host session CPU P95 across fleet
- * @property {number} [sessionMemPeakP95]      - Highest host session memory P95 across fleet
- * @property {number} [sessionMemTypicalP95]   - Median host session memory P95 across fleet
- * @property {number} [sessionCpuObserved]     - Active sessions with a CPU sample across fleet
- * @property {number} [sessionCpuAtOrAbove5]   - Active sessions at or above 5% CPU across fleet
- * @property {number} [sessionCpuAtOrAbove20]  - Active sessions at or above 20% CPU across fleet
+ * @property {number} [sessionCpuP95]           - P95 across measured fleet sessions
+ * @property {number} [sessionCpuAvg]           - Average across measured fleet sessions
+ * @property {number} [sessionMemP95]           - Working-set P95 across measured fleet sessions
+ * @property {number} [sessionMemAvg]           - Working-set average across measured fleet sessions
+ * @property {number} [sessionCpuObserved]      - Average CPU-observed concurrent sessions
+ * @property {number} [sessionMemObserved]      - Average memory-observed concurrent sessions
+ * @property {number} [sessionCpuAtOrAbove5]    - Average concurrent sessions at or above 5% CPU
+ * @property {number} [sessionCpuAtOrAbove20]   - Average concurrent sessions at or above 20% CPU
+ * @property {number} [sessionCpuAtOrAbove5Max] - Maximum concurrent sessions at or above 5% CPU
+ * @property {number} [sessionCpuAtOrAbove20Max] - Maximum concurrent sessions at or above 20% CPU
+ * @property {number} [sessionCpuAtOrAbove5Rate] - Percent of CPU-observed sessions at or above 5%
+ * @property {number} [sessionCpuAtOrAbove20Rate] - Percent of CPU-observed sessions at or above 20%
+ * @property {object} [sessionCoverage]          - Host coverage for the point
  */
 
 /**

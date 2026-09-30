@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 )
 
 func newRetention(t *testing.T, metricsDays, auditDays int) (*Retention, *DB) {
@@ -51,6 +53,30 @@ func seedHourly(t *testing.T, db *DB, bucketMs int64, host, counter string) {
 		bucketMs, host, counter, 1.0, 1.0, 1.0, 60,
 	); err != nil {
 		t.Fatalf("seed metrics_hourly bucket=%d: %v", bucketMs, err)
+	}
+}
+
+func seedSessionWorkload(t *testing.T, db *DB, table string, bucketMs int64) {
+	t.Helper()
+	tx, err := db.writer.Begin()
+	if err != nil {
+		t.Fatalf("begin %s seed: %v", table, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	aggregate := sessiondata.SessionWorkloadAggregate{
+		BaseSampleCount: 1,
+		CPUSum:          1,
+		CPUCount:        1,
+	}
+	aggregate.CPUHistogram[2] = 1
+	if err := upsertSessionWorkloadAggregate(
+		context.Background(), tx, table, bucketMs, "SRV01", aggregate,
+		[]uint64{1}, []uint64{0}, []uint64{0},
+	); err != nil {
+		t.Fatalf("seed %s bucket=%d: %v", table, bucketMs, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit %s seed: %v", table, err)
 	}
 }
 
@@ -101,13 +127,16 @@ func TestRetention_DeletesOlderThanThreshold(t *testing.T) {
 	seedHourly(t, db, oldHourly, "SRV01", "cpu.util")
 	seedAudit(t, db, oldAudit, "SRV01", 1)
 	seedEventSpike(t, db, oldSpike, "SRV01", "Application")
+	seedSessionWorkload(t, db, "session_workload_raw", oldRaw)
+	seedSessionWorkload(t, db, "session_workload_5min", old5Min)
+	seedSessionWorkload(t, db, "session_workload_hourly", oldHourly)
 
 	res := r.RunOnce(context.Background(), now)
 	if res.Outcome != "success" {
 		t.Fatalf("outcome=%s reason=%s", res.Outcome, res.Reason)
 	}
-	if res.RowsAffected != 5 {
-		t.Errorf("rows_affected=%d, want 5", res.RowsAffected)
+	if res.RowsAffected != 8 {
+		t.Errorf("rows_affected=%d, want 8", res.RowsAffected)
 	}
 
 	if n := countRows(t, db, `SELECT COUNT(*) FROM metrics_raw`); n != 0 {
@@ -125,6 +154,11 @@ func TestRetention_DeletesOlderThanThreshold(t *testing.T) {
 	if n := countRows(t, db, `SELECT COUNT(*) FROM event_spikes`); n != 0 {
 		t.Errorf("event_spikes remaining=%d, want 0", n)
 	}
+	for _, table := range []string{"session_workload_raw", "session_workload_5min", "session_workload_hourly"} {
+		if n := countRows(t, db, `SELECT COUNT(*) FROM `+table); n != 0 {
+			t.Errorf("%s remaining=%d, want 0", table, n)
+		}
+	}
 }
 
 func TestRetention_LeavesNewerRowsAlone(t *testing.T) {
@@ -136,6 +170,9 @@ func TestRetention_LeavesNewerRowsAlone(t *testing.T) {
 	seedHourly(t, db, now.Add(-15*24*time.Hour).Truncate(time.Hour).UnixMilli(), "SRV01", "cpu.util")
 	seedAudit(t, db, now.Add(-30*24*time.Hour).UnixMilli(), "SRV01", 1)
 
+	seedSessionWorkload(t, db, "session_workload_raw", now.Add(-10*time.Hour).UnixMilli())
+	seedSessionWorkload(t, db, "session_workload_5min", now.Add(-3*24*time.Hour).Truncate(time.Hour).UnixMilli())
+	seedSessionWorkload(t, db, "session_workload_hourly", now.Add(-15*24*time.Hour).Truncate(time.Hour).UnixMilli())
 	res := r.RunOnce(context.Background(), now)
 	if res.Outcome != "success" {
 		t.Fatalf("outcome=%s reason=%s", res.Outcome, res.Reason)
@@ -155,6 +192,11 @@ func TestRetention_LeavesNewerRowsAlone(t *testing.T) {
 	}
 	if n := countRows(t, db, `SELECT COUNT(*) FROM audit`); n != 1 {
 		t.Errorf("audit remaining=%d, want 1", n)
+	}
+	for _, table := range []string{"session_workload_raw", "session_workload_5min", "session_workload_hourly"} {
+		if n := countRows(t, db, `SELECT COUNT(*) FROM `+table); n != 1 {
+			t.Errorf("%s remaining=%d, want 1", table, n)
+		}
 	}
 }
 

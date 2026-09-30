@@ -21,6 +21,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -6570,5 +6571,52 @@ func TestRunStaleHostTransitions_IntervalChangeWakesTimer(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("stale-host worker did not stop")
+	}
+}
+
+func TestFleetMetricsHandlerIncludesAnonymousSessionWorkload(t *testing.T) {
+	db, err := telemetry.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := telemetry.NewMetricsStore(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = metrics.Close(); _ = db.Close() })
+	snapshots, err := telemetry.NewSessionSnapshotStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := &DashboardServer{state: newTestServerState(t), cfg: dc.DashboardConfig{Group: "Domain Admins"}, broker: NewBroker(), ms: metrics}
+	host := "WORKLOAD.EXAMPLE.TEST"
+	ds.state.Register(host)
+	snapshot := testSessionSnapshot(strings.ToLower(host), 1)
+	snapshot.LogicalCPUCount = 2
+	snapshot.Sessions[0].CPUPercent = new(40.0)
+	if _, err := snapshots.Apply(context.Background(), snapshot, sessiondata.PrivacyPolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	url := "/api/v1/metrics/_fleet?from=" + now.Add(-2*time.Minute).Format(time.RFC3339) + "&to=" + now.Add(2*time.Minute).Format(time.RFC3339) + "&resolution=raw"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, url, nil)
+	r.SetPathValue("host", "_fleet")
+	ds.handleMetrics(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var response struct {
+		SessionWorkload telemetry.SessionWorkloadSeries `json:"session_workload"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.SessionWorkload.Points) != 1 {
+		t.Fatalf("workload points = %+v", response.SessionWorkload.Points)
+	}
+	point := response.SessionWorkload.Points[0]
+	if point.CPU == nil || point.CPU.AvgPct != 20 || point.Coverage.ContributingHosts != 1 || point.Coverage.ExpectedHosts != 1 {
+		t.Fatalf("workload point = %+v", point)
 	}
 }
