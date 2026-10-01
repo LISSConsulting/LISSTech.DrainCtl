@@ -13,9 +13,13 @@ frontend/node_modules/
 *.exe
 *.dll
 
-# Generated from cmd/drainctl/drainctl.rc.tmpl + scripts/version.ps1 by `just resource`
+# Generated from cmd/<name>/<name>.rc.tmpl + scripts/version.ps1 by `just resource`
 cmd/drainctl/drainctl.rc
 cmd/drainctl/drainctl.syso
+cmd/drainctld/drainctld.rc
+cmd/drainctld/drainctld.syso
+cmd/cshared/cshared.rc
+cmd/cshared/cshared.syso
 
 # WiX
 installer/obj/

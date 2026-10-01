@@ -86,23 +86,36 @@ man:
     Pop-Location
     Write-Host "   drainctl-msg.dll" -ForegroundColor DarkGray
 
-# Render drainctl.rc from its template with the git-derived version,
-# then compile to drainctl.syso. Both .rc and .syso are build artifacts.
+# Render each binary's .rc from its template with the git-derived version,
+# then compile to a .syso (PE version-resource) so the resulting binary's
+# Windows FileVersion/ProductVersion matches the embedded dc.Version ldflag
+# and the signed release manifest. Each .rc/.syso pair is a build artifact
+# named after the binary it belongs to (drainctl.syso, drainctld.syso,
+# cshared.syso). Keeping these in sync is what makes FileVersionInfo on
+# the service host, the C-shared DLL, and the CLI return the same version
+# string instead of empty.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 resource:
     $ts = Get-Date -Format 'h:mm:ss tt'
-    Write-Host "`n🔨 Compiling Windows resource file  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
+    Write-Host "`n🔨 Compiling Windows resource files  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $csv = & "{{justfile_directory()}}/scripts/version.ps1" -Csv
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $tmpl = Get-Content "cmd/drainctl/drainctl.rc.tmpl" -Raw
-    $rc = $tmpl -replace '\{\{VERSION_CSV\}\}', $csv -replace '\{\{VERSION\}\}', $ver
-    Set-Content "cmd/drainctl/drainctl.rc" -Value $rc -NoNewline
-    & windres cmd/drainctl/drainctl.rc -o cmd/drainctl/drainctl.syso
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "   drainctl.syso — v$ver" -ForegroundColor DarkGray
+    $pairs = @(
+        @{ Tmpl = "cmd/drainctl/drainctl.rc.tmpl";   Rc = "cmd/drainctl/drainctl.rc";   Syso = "cmd/drainctl/drainctl.syso" },
+        @{ Tmpl = "cmd/drainctld/drainctld.rc.tmpl"; Rc = "cmd/drainctld/drainctld.rc"; Syso = "cmd/drainctld/drainctld.syso" },
+        @{ Tmpl = "cmd/cshared/cshared.rc.tmpl";     Rc = "cmd/cshared/cshared.rc";     Syso = "cmd/cshared/cshared.syso" }
+    )
+    foreach ($p in $pairs) {
+        $tmpl = Get-Content $p.Tmpl -Raw
+        $rc  = $tmpl -replace '\{\{VERSION_CSV\}\}', $csv -replace '\{\{VERSION\}\}', $ver
+        Set-Content $p.Rc -Value $rc -NoNewline
+        & windres $p.Rc -o $p.Syso
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host ("   {0} — v{1}" -f (Split-Path $p.Syso -Leaf), $ver) -ForegroundColor DarkGray
+    }
 
 # Test and build the Svelte dashboard
 [script('pwsh', '-NoProfile')]
@@ -148,7 +161,7 @@ cli: frontend-copy resource
 # Build the Windows service host binary.
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-daemon: frontend-copy
+daemon: frontend-copy resource
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building service host  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
@@ -159,10 +172,14 @@ daemon: frontend-copy
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctld.exe").Length / 1MB)
     Write-Host "   drainctld.exe ($size) — v$ver" -ForegroundColor DarkGray
 
-# Build the C-shared DLL (requires CGo + MinGW)
+# Build the C-shared DLL (requires CGo + MinGW). Depends on `resource` so
+# the freshly rendered cshared.syso carries the same FileVersion as the
+# CLI and the service host, instead of leaving the DLL's Windows PE
+# version resource empty (which produced an empty FileVersionInfo on
+# v26.10.4).
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
-dll:
+dll: resource
     $ts = Get-Date -Format 'h:mm:ss tt'
     Write-Host "`n🔨 Building DLL  " -NoNewline -ForegroundColor Cyan; Write-Host "·  $ts" -ForegroundColor DarkGray
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
