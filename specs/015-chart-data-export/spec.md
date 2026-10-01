@@ -5,6 +5,17 @@
 **Status**: Draft
 **Input**: User description: "I want to add Excel and CSV export for DrainCtl's graphs."
 
+## Clarifications
+
+### Session 2026-09-30
+
+- Q: What is the per-row shape of an export — uniform across graph types, or branched by fleet vs per-host? → A: One uniform shape across both graph types. Fleet and per-host exports use the same columns on the Data sheet (host_name on every row). Fleet exports carry per-host rows for the operator-selected cohort (host_filter in Context); per-host exports carry per-host rows for the single host in view (host_name in Context, no host_filter).
+- Q: Should `aggregation` and `resolution` be on the Data sheet or only in Context? → A: On the Data sheet as first-class columns, alongside `timestamp_utc, host_name, series_id, series_label, unit, value`. Same column set in CSV.
+- Q: What field set and order should the Excel Context sheet use? → A: Field/Value layout, frozen header, with the field set branched by export type. Fleet Context includes `host_filter` and `host_filter_count`; per-host Context omits them and includes `host_name`. Other fields are common: graph, export_type, series, time_range_start_utc, time_range_end_utc, display_timezone, aggregation, resolution, coverage, coverage_note, exported_at_utc, generator.
+- Q: What filename pattern should exports use? → A: `drainctl-<fleet|host>[-<host_name>]-<graph-slug>.<ext>`. Captured time range lives in Context, not in the filename.
+- Q: How should `host_filter` be encoded in the fleet Context sheet? → A: One host name per line in a single cell, newline-delimited. Excel renders it with wrap-text; each host name is preserved verbatim without comma-escaping.
+- Q: How should CSV convey context (graph name, range, host filter, etc.) given that CSV has only one tabular shape? → A: CSV does not embed Context. CSV is the Data sheet only (same columns, one header row, no metadata block). Self-description for CSV is carried by the filename. Excel keeps Data + Context.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Export a graph to CSV (Priority: P1)
@@ -78,14 +89,14 @@ As an operator, I want predictable export controls and clear failure messages th
 - **FR-003**: One export MUST represent one selected graph, including all its enabled series. Exporting a page or all graphs together is outside this feature.
 - **FR-004**: Export MUST capture one coherent snapshot of the graph's loaded data, displayed absolute time bounds, host scope, enabled series, and aggregation at invocation. It MUST not add undisplayed history or silently switch to a raw-data resolution.
 - **FR-005**: Export MUST include actual metric values before visual normalization and display rounding, preserving the available source precision. It MUST preserve displayed derived-metric and fleet-aggregation semantics.
-- **FR-006**: Each observation MUST identify its timestamp, stable series identifier, readable series label, unit, value, and host or fleet scope. Rows MUST be ordered chronologically with deterministic series ordering for equal timestamps.
-- **FR-007**: Both formats MUST be self-describing: graph name, export time, requested range, known available coverage, selected host identities, series definitions, units, aggregation, and resolution MUST be recoverable from the file alone. Fleet observations MUST retain fleet identity rather than fabricated per-host rows.
+- **FR-006**: Each observation MUST identify its timestamp, host name, stable series identifier, readable series label, unit, value, aggregation, and resolution. Rows MUST be ordered chronologically with deterministic series ordering for equal timestamps. The per-row column set is identical for fleet and per-host exports: `timestamp_utc, host_name, series_id, series_label, unit, value, aggregation, resolution`.
+- **FR-007**: Excel exports MUST be self-describing via the Context sheet: graph name, export time, requested range, known available coverage, selected host identities, series definitions, units, aggregation, and resolution MUST be recoverable from the workbook alone. Fleet exports encode the selected host cohort in a `host_filter` cell as one host name per line, newline-delimited, with `host_filter_count` recording the count; per-host exports omit `host_filter` and record the single `host_name` instead. CSV is intentionally not self-describing in-file; CSV self-description is carried by the filename, which encodes the graph, export type, and host scope.
 - **FR-008**: Timestamps MUST use an unambiguous UTC convention. CSV MUST use ISO 8601 timestamps with a UTC indicator; Excel MUST retain equivalent timestamps and explicitly label them UTC. The graph's display time zone MUST also be recorded.
-- **FR-009**: CSV MUST be UTF-8, use a comma separator and a single header row, and correctly escape quotes, commas, and newlines. Context MUST be included in named columns rather than a non-tabular preamble. Observation columns MUST include `timestamp_utc`, `scope`, `series_id`, `series_label`, `unit`, and `value`; additional context columns MUST carry FR-007 information.
+- **FR-009**: CSV MUST be UTF-8, use a comma separator and a single header row, and correctly escape quotes, commas, and newlines. CSV contains only the Data columns — no Context block, no preamble. The header row MUST be `timestamp_utc, host_name, series_id, series_label, unit, value, aggregation, resolution`, in that order, matching the Excel Data sheet.
 - **FR-010**: Excel export MUST produce a genuine `.xlsx` workbook with Data and Context sheets. Metric values MUST be numeric cells; identities and labels MUST be text. Data MUST have readable headers, frozen headers, filtering, and readable column widths.
 - **FR-011**: Missing values MUST be empty, genuine zeros MUST remain zero, and invalid non-finite values MUST not become valid numeric measurements. Export MUST not interpolate or fabricate observations.
-- **FR-012**: CSV and Excel generated from the same snapshot MUST preserve equivalent observations and context.
-- **FR-013**: Files MUST have sanitized, descriptive names identifying DrainCtl, graph, scope, and captured time range, with the correct extension.
+- **FR-012**: CSV and Excel generated from the same snapshot MUST preserve equivalent observations (identical rows in the Data columns). Context is Excel-only; the CSV file has no Context block, and the Excel Context sheet is the authoritative self-description. Filenames for the two formats MUST encode the same graph, type, and host scope, differing only in the extension.
+- **FR-013**: Files MUST follow the naming pattern `drainctl-<fleet|host>[-<host_name>]-<graph-slug>.<ext>`. `host_name` is included only for per-host exports. `graph-slug` is a sanitized form of the graph display name (lowercase, ASCII, hyphens for spaces). The captured time range is recorded in the Excel Context sheet, not in the filename. The extension MUST be `.csv` or `.xlsx` and MUST match the file format.
 - **FR-014**: Export MUST be disabled with an understandable reason while graph data is loading, failed, stale for its selected context, empty, or has no enabled series. Progress and failures MUST be visible without blocking ordinary dashboard navigation.
 - **FR-015**: Export MUST preserve existing dashboard authorization and expose only data the operator can view. It MUST require no external upload, third-party export service, Excel installation on the server, or additional operator privileges.
 - **FR-016**: Untrusted labels, host identities, and other text MUST remain inert when opened in spreadsheet software; export MUST prevent formula interpretation and workbook macros or executable content.
@@ -97,7 +108,7 @@ As an operator, I want predictable export controls and clear failure messages th
 
 - **Graph Snapshot**: Immutable export context linking one graph's observations, absolute range, host scope, enabled series, aggregation, resolution, and coverage.
 - **Series Definition**: Stable identifier, readable label, unit, and meaning, including any derivation or fleet statistic.
-- **Observation**: Timestamped value or missing value for a series and scope.
+- **Observation**: Timestamped value or missing value for a series and host_name, with the per-row column set defined in FR-006.
 - **Export Artifact**: CSV or Excel representation of a snapshot, with descriptive filename and self-contained context.
 
 ## Constitution Alignment *(mandatory)*
@@ -121,7 +132,7 @@ As an operator, I want predictable export controls and clear failure messages th
 ### Measurable Outcomes
 
 - **SC-001**: An operator can start either export format from any supported, loaded graph in no more than two interactions.
-- **SC-002**: For fixed acceptance fixtures, 100% of exported observations, selected series, units, scope, aggregation, and time boundaries match the captured graph snapshot, with no invented values or silent truncation.
+- **SC-002**: For fixed acceptance fixtures, 100% of exported observations, selected series, units, host_name (and host_filter in fleet exports), aggregation, resolution, and time boundaries match the captured graph snapshot, with no invented values or silent truncation.
 - **SC-003**: Every acceptance CSV parses into one consistent table, and every acceptance Excel workbook opens without repair warnings and supports numeric sorting/filtering.
 - **SC-004**: A 10,000-observation export completes within five seconds on the agreed supported acceptance environment; larger cases either complete within documented limits or return an explicit limit message.
 - **SC-005**: All supported graph inventory entries pass keyboard-triggered CSV and Excel export checks, and all defined loading, empty, partial, stale, and failed scenarios produce the specified outcome.
@@ -130,9 +141,9 @@ As an operator, I want predictable export controls and clear failure messages th
 ## Assumptions
 
 - "Export graphs" means export their underlying numeric data. PNG/PDF graph images, embedded Excel charts, raw-history bulk extraction, combined page workbooks, scheduled reports, email delivery, and saved export history are outside v1.
-- Export respects the current visible series, displayed window including pan, and host filter. Fleet graphs export their displayed aggregate, not individual host histories.
+- Export respects the current visible series, displayed window including pan, and host filter. Fleet exports carry per-host rows for the operator-selected cohort (one row per host × timestamp × series); per-host exports carry per-host rows for the single host in view.
 - Data is the graph's loaded snapshot at its current aggregation/resolution, rather than a fresh moving query or higher-resolution historical extract.
 - Excel means `.xlsx`, not a CSV renamed to an Excel extension.
 - Existing dashboard access is sufficient; no new role or permission model is introduced.
-- CSV favors a consistent observation table with repeated context columns; Excel separates context for readability.
+- CSV is the Data sheet only — same eight columns as the Excel Data sheet, no Context block. Excel separates Data from Context for self-description. CSV self-description is carried by the filename.
 - The live interface could not be inspected because browser access to the supplied private address was blocked. Graph inventory is based on current `develop` source; visual placement should be verified against the running dashboard during planning.
