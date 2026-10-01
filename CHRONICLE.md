@@ -1,5 +1,9 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## PE version resource asymmetry — 2026-10-01
+
+- v26.10.4 shipped with `drainctl.exe` PE `FileVersion=26.10.4` but `drainctld.exe` and `drainctl.dll` PE `FileVersion` strings empty. The signed release manifest, `release.json`, GitHub tag, and PowerShell module all reported `26.10.4` correctly. Cause: only the CLI build carried a Windows PE version resource (the `drainctl.syso` rendered from `cmd/drainctl/drainctl.rc.tmpl` by `just resource`); the service host and C-shared DLL had no matching `.rc.tmpl`/`.syso`, so the Go linker had nothing to embed. Fixed in the follow-up commit by adding `cmd/drainctld/drainctld.rc.tmpl` and `cmd/cshared/cshared.rc.tmpl`, having `just resource` render all three templates, and having `daemon`/`dll` depend on `resource` so the freshly built `.syso` files exist in the package directory before `go build` runs. The MSI's ProductVersion was already set by `scripts/msi-version.ps1` and intentionally differs from the app CalVer by the schema-epoch major component (`100 + YY`) per the same-script comment, so it was not part of the fix.
+
 ## Draft anomaly investigation rollback — 2026-09-30
 
 - Release 26.9.109 unintentionally included draft AI investigation and deterministic session-drop anomaly work from PR #187. The complete draft feature has been removed: dashboard panels and settings, HTTP/SSE contracts, provider and detector runtimes, configuration, schema creation, retention integration, and supporting tests/docs.
