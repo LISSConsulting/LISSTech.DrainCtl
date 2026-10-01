@@ -1,5 +1,10 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Draft anomaly investigation rollback — 2026-09-30
+
+- Release 26.9.109 unintentionally included draft AI investigation and deterministic session-drop anomaly work from PR #187. The complete draft feature has been removed: dashboard panels and settings, HTTP/SSE contracts, provider and detector runtimes, configuration, schema creation, retention integration, and supporting tests/docs.
+- Fleet Sessions current-state APIs and anonymous operator metrics remain intact. Upgrading from 26.9.109 does not destructively drop any SQLite tables that version may already have created; they remain inert because the corrected runtime neither registers those routes nor starts those workers, performs provider egress, or writes new session-drop observations.
+
 ## Remote EVT detector status — 2026-09-30
 
 - Dashboard-only management servers now resolve each remote host's EVT detector state from the latest heartbeat cache even though no local detector provider is installed. Previously the status endpoint synthesized `disabled` while the independent spike-ingestion path continued to detect, retain, and notify on spikes. Host keys are canonicalized so report and query casing cannot split the status cache.

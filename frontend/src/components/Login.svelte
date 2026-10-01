@@ -13,11 +13,6 @@
     let password = $state('');
     let submitting = $state(false);
     let ssoLoading = $state(false);
-
-    // Bare fixture identities are accepted only when Vite is serving the
-    // repository's explicit mock API. Production keeps domain validation.
-    const mockBareIdentities = new Set(['dashboard', 'stale', 'machine', 'non_dashboard']);
-    const allowsMockBareIdentity = (value) => import.meta.env.DEV && __DRAINCTL_MOCK__ && mockBareIdentities.has(value.toLowerCase());
     let ssoError = $state('');
 
     async function handleWindowsSignIn() {
@@ -40,7 +35,7 @@
             toast.err('Enter your username');
             return;
         }
-        if (!u.includes('\\') && !u.includes('@') && !allowsMockBareIdentity(u)) {
+        if (!u.includes('\\') && !u.includes('@')) {
             toast.err('Include a domain — use DOMAIN\\username or username@domain');
             return;
         }

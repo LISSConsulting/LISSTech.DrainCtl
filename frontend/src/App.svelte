@@ -16,10 +16,8 @@
         dropOverviewSelection,
         pruneOverviewSelectionFor,
         recordForceUpdateCompletion,
-        dispatchFeatureSSE,
-        setSessionDropSummaries,
     } from './lib/state.svelte.js';
-    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, fetchSessionDrops, settingsFromWire } from './lib/api.js';
+    import { fetchServers, fetchHealth, fetchSettings, fetchAllServerMetrics, settingsFromWire } from './lib/api.js';
     import { authState, checkSession } from './lib/auth.svelte.js';
     import { resolveThresholds, getThresholdColor } from './lib/thresholds.js';
     import { formatTime12 } from './lib/utils.js';
@@ -35,7 +33,6 @@
     import ConfigModal from './components/ConfigModal.svelte';
     import HistoryModal from './components/HistoryModal.svelte';
     import Toast from './components/Toast.svelte';
-    import SessionDropPanel from './components/SessionDropPanel.svelte';
 
     // ---------------------------------------------------------------------------
     // Initialise theme once on load
@@ -389,12 +386,7 @@
         es.onmessage = (e) => {
             try {
                 const event = JSON.parse(e.data);
-                if ((event.type === 'investigation_update' || event.type === 'session_drop') && !event.host) {
-                    const featureEvent = dispatchFeatureSSE(event);
-                    if (featureEvent?.kind === 'session_drop') {
-                        fetchSessionDrops().then((value) => setSessionDropSummaries(value.items)).catch(() => {});
-                    }
-                } else if (event.type === 'server_update' && event.host && event.data && !isRecentlyRemoved(event.host)) {
+                if (event.type === 'server_update' && event.host && event.data && !isRecentlyRemoved(event.host)) {
                     const sv = event.data;
                     // Detect status transitions immediately so the event log updates
                     // in real-time rather than waiting for the next 30-second poll.
@@ -570,7 +562,6 @@
                     <CounterGrid />
                     <StateBar />
                     <MetricsChart />
-                    <SessionDropPanel />
                 {:else if appState.currentView === 'servers'}
                     <ServerTable onhistoryclick={(host) => (historyHost = host)} />
                 {:else if appState.currentView === 'events'}

@@ -132,22 +132,19 @@ func (s *performanceSubsystem) closeLocked() {
 func newRetentionProvider(startup *dc.Config) func() telemetry.RetentionSettings {
 	startupMetrics := startup.Retention.MetricsDays
 	startupAudit := startup.Retention.AuditDays
-	startupAcknowledgementID := startup.CurrentInvestigationPrivacyAcknowledgementAuditID()
 	return func() telemetry.RetentionSettings {
 		c, err := dc.LoadConfig()
 		if err != nil {
 			slog.Warn("telemetry: retention provider load config failed, using startup values",
 				"error", err, "metrics_days", startupMetrics, "audit_days", startupAudit)
 			return telemetry.RetentionSettings{
-				MetricsDays:                   startupMetrics,
-				AuditDays:                     startupAudit,
-				CurrentAcknowledgementAuditID: startupAcknowledgementID,
+				MetricsDays: startupMetrics,
+				AuditDays:   startupAudit,
 			}
 		}
 		return telemetry.RetentionSettings{
-			MetricsDays:                   c.Retention.MetricsDays,
-			AuditDays:                     c.Retention.AuditDays,
-			CurrentAcknowledgementAuditID: c.CurrentInvestigationPrivacyAcknowledgementAuditID(),
+			MetricsDays: c.Retention.MetricsDays,
+			AuditDays:   c.Retention.AuditDays,
 		}
 	}
 }

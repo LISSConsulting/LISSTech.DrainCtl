@@ -87,27 +87,6 @@ const (
 	MinEvtSpikeMeanPerBucketPrior           = 0.0
 	MaxEvtSpikeMeanPerBucketPrior           = 1000.0
 
-	InvestigationProviderProfile                       = "openai_responses"
-	InvestigationProviderEndpoint                      = "https://api.openai.com/v1/responses"
-	InvestigationProviderModel                         = "gpt-6-astra"
-	PrivacyAcknowledgementVersion                      = "openai_responses_privacy_v1"
-	InvestigationPrivacyAcknowledgementClauseSetMarker = "openai_responses_privacy_v1_complete_clauses"
-	DefaultSessionDropLowerTailThreshold               = 0.0001
-	DefaultSessionDropMinimumDropSessions              = 3
-	DefaultSessionDropMinimumDropPercent               = 30
-	DefaultSessionDropBaselineHalfLifeHours            = 168
-	DefaultSessionDropCooldownMinutes                  = 60
-	MinSessionDropLowerTailThreshold                   = 0.000000001
-	MaxSessionDropLowerTailThreshold                   = 0.1
-	MinSessionDropMinimumDropSessions                  = 1
-	MaxSessionDropMinimumDropSessions                  = 1000000
-	MinSessionDropMinimumDropPercent                   = 1
-	MaxSessionDropMinimumDropPercent                   = 99
-	MinSessionDropBaselineHalfLifeHours                = 24
-	MaxSessionDropBaselineHalfLifeHours                = 8760
-	MinSessionDropCooldownMinutes                      = 1
-	MaxSessionDropCooldownMinutes                      = 1440
-
 	configMutexName = `Global\DrainCtlConfig`
 
 	// dpapiPrefix marks a secret as DPAPI-encrypted in config.json.
@@ -332,59 +311,6 @@ type EvtSpikeConfig struct {
 	SecurityChannelEnabled   bool           `json:"security_channel_enabled"`
 }
 
-// InvestigationProviderConfig is the central service's provider configuration.
-// CredentialCiphertext is always DPAPI ciphertext; plaintext credentials never
-// enter Config or any runtime configuration projection.
-type InvestigationProviderConfig struct {
-	AccessEnabled                 bool   `json:"access_enabled"`
-	CredentialCiphertext          string `json:"credential,omitempty"`
-	PrivacyAcknowledgementVersion string `json:"privacy_acknowledgement_version,omitempty"`
-	PrivacyAcknowledgementAuditID int64  `json:"privacy_acknowledgement_audit_id,omitempty"`
-	AutomaticEnabled              bool   `json:"automatic_enabled"`
-}
-
-// SessionDropConfig contains the only mutable lower-tail detector settings.
-type SessionDropConfig struct {
-	LowerTailThreshold    float64 `json:"lower_tail_threshold"`
-	MinimumDropSessions   int     `json:"minimum_drop_sessions"`
-	MinimumDropPercent    float64 `json:"minimum_drop_percent"`
-	BaselineHalfLifeHours int     `json:"baseline_half_life_hours"`
-	CooldownMinutes       int     `json:"cooldown_minutes"`
-}
-
-// PrivacyAcknowledgement is the closed, server-verifiable acknowledgement
-// submitted when enabling the fixed provider profile.
-type PrivacyAcknowledgement struct {
-	Version                           string `json:"version"`
-	ThirdPartySubprocessors           bool   `json:"third_party_subprocessors"`
-	NoTrainingWithoutOptIn            bool   `json:"no_training_without_opt_in"`
-	DefaultAbuseMonitoringUpTo30Days  bool   `json:"default_abuse_monitoring_up_to_30_days"`
-	StoreFalseApplicationStateOnly    bool   `json:"store_false_application_state_only"`
-	TemporaryPromptCachePossible      bool   `json:"temporary_prompt_cache_possible"`
-	ZDRMAMSeparateApproval            bool   `json:"zdr_mam_separate_approval"`
-	AuditDaysLocalOnly                bool   `json:"audit_days_local_only"`
-	GlobalEndpointNoRegionalGuarantee bool   `json:"global_endpoint_no_regional_guarantee"`
-}
-
-// InvestigationCredentialCommand changes the protected credential explicitly.
-// Only replace accepts Value; preserve and clear never expose plaintext state.
-type InvestigationCredentialCommand struct {
-	Operation string `json:"operation"`
-	Value     string `json:"value,omitempty"`
-}
-
-// InvestigationSettingsUpdate is the closed scoped replacement surface used by
-// the dashboard. Audit insertion occurs before this update; its immutable ID is
-// supplied in PrivacyAcknowledgementAuditID.
-type InvestigationSettingsUpdate struct {
-	AccessEnabled                 bool
-	AutomaticEnabled              bool
-	PrivacyAcknowledgement        *PrivacyAcknowledgement
-	PrivacyAcknowledgementAuditID int64
-	Credential                    InvestigationCredentialCommand
-	SessionDrop                   SessionDropConfig
-}
-
 // Config is the top-level config file structure (config.json).
 type Config struct {
 	GracePeriod   int    `json:"grace_period"` // minutes
@@ -410,9 +336,6 @@ type Config struct {
 	Sessions    SessionsConfig    `json:"sessions"`
 
 	EvtSpike EvtSpikeConfig `json:"evtspike"`
-
-	InvestigationProvider InvestigationProviderConfig `json:"investigation_provider"`
-	SessionDrop           SessionDropConfig           `json:"session_drop"`
 
 	Update UpdateConfig `json:"update"`
 }
@@ -513,16 +436,8 @@ func DefaultConfig() *Config {
 		Retention:               RetentionConfig{MetricsDays: DefaultMetricsDays, AuditDays: DefaultAuditDays},
 		Telemetry:               TelemetryConfig{AggregatorIntervalSeconds: DefaultAggregatorIntervalSeconds, RetentionIntervalMinutes: DefaultRetentionIntervalMinutes},
 		EvtSpike:                EvtSpikeConfig{ChannelCooldownMinutes: map[string]int{}, DisabledChannels: []string{}, AddedChannels: []string{}},
-		InvestigationProvider:   InvestigationProviderConfig{},
-		SessionDrop: SessionDropConfig{
-			LowerTailThreshold:    DefaultSessionDropLowerTailThreshold,
-			MinimumDropSessions:   DefaultSessionDropMinimumDropSessions,
-			MinimumDropPercent:    DefaultSessionDropMinimumDropPercent,
-			BaselineHalfLifeHours: DefaultSessionDropBaselineHalfLifeHours,
-			CooldownMinutes:       DefaultSessionDropCooldownMinutes,
-		},
-		Update:   UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
-		Sessions: defaultSessionsConfig(),
+		Update:                  UpdateConfig{Enabled: false, Channel: ChannelStable, PollInterval: Duration(DefaultUpdatePollInterval)},
+		Sessions:                defaultSessionsConfig(),
 	}
 }
 
@@ -638,152 +553,10 @@ func validateLogLevel(val, fieldName, fallback string) string {
 	return strings.ToLower(val)
 }
 
-// NormalizeSessionDropConfig applies defaults to omitted persisted settings and
-// fails closed by restoring defaults for invalid direct-file values. Dashboard
-// updates use ValidateSessionDropConfig and are rejected rather than clamped.
-func NormalizeSessionDropConfig(cfg *SessionDropConfig) {
-	if cfg.LowerTailThreshold == 0 {
-		cfg.LowerTailThreshold = DefaultSessionDropLowerTailThreshold
-	} else if err := ValidateSessionDropConfig(*cfg); err != nil {
-		slog.Default().Warn("invalid session-drop configuration reset to defaults", "error", err)
-		*cfg = defaultSessionDropConfig()
-	}
-	if cfg.MinimumDropSessions == 0 {
-		cfg.MinimumDropSessions = DefaultSessionDropMinimumDropSessions
-	}
-	if cfg.MinimumDropPercent == 0 {
-		cfg.MinimumDropPercent = DefaultSessionDropMinimumDropPercent
-	}
-	if cfg.BaselineHalfLifeHours == 0 {
-		cfg.BaselineHalfLifeHours = DefaultSessionDropBaselineHalfLifeHours
-	}
-	if cfg.CooldownMinutes == 0 {
-		cfg.CooldownMinutes = DefaultSessionDropCooldownMinutes
-	}
-	if err := ValidateSessionDropConfig(*cfg); err != nil {
-		slog.Default().Warn("invalid session-drop configuration reset to defaults", "error", err)
-		*cfg = defaultSessionDropConfig()
-	}
-}
-
-func defaultSessionDropConfig() SessionDropConfig {
-	return SessionDropConfig{
-		LowerTailThreshold:    DefaultSessionDropLowerTailThreshold,
-		MinimumDropSessions:   DefaultSessionDropMinimumDropSessions,
-		MinimumDropPercent:    DefaultSessionDropMinimumDropPercent,
-		BaselineHalfLifeHours: DefaultSessionDropBaselineHalfLifeHours,
-		CooldownMinutes:       DefaultSessionDropCooldownMinutes,
-	}
-}
-
-// ValidateSessionDropConfig rejects unsupported detector values without
-// clamping, preserving the fixed lower-tail detector contract.
-func ValidateSessionDropConfig(cfg SessionDropConfig) error {
-	if cfg.LowerTailThreshold != cfg.LowerTailThreshold ||
-		cfg.LowerTailThreshold < MinSessionDropLowerTailThreshold ||
-		cfg.LowerTailThreshold > MaxSessionDropLowerTailThreshold {
-		return fmt.Errorf("lower_tail_threshold must be finite and between %g and %g", MinSessionDropLowerTailThreshold, MaxSessionDropLowerTailThreshold)
-	}
-	if cfg.MinimumDropSessions < MinSessionDropMinimumDropSessions || cfg.MinimumDropSessions > MaxSessionDropMinimumDropSessions {
-		return fmt.Errorf("minimum_drop_sessions must be %d-%d", MinSessionDropMinimumDropSessions, MaxSessionDropMinimumDropSessions)
-	}
-	if cfg.MinimumDropPercent != cfg.MinimumDropPercent ||
-		cfg.MinimumDropPercent < MinSessionDropMinimumDropPercent ||
-		cfg.MinimumDropPercent > MaxSessionDropMinimumDropPercent {
-		return fmt.Errorf("minimum_drop_percent must be finite and between %d and %d", MinSessionDropMinimumDropPercent, MaxSessionDropMinimumDropPercent)
-	}
-	if cfg.BaselineHalfLifeHours < MinSessionDropBaselineHalfLifeHours || cfg.BaselineHalfLifeHours > MaxSessionDropBaselineHalfLifeHours {
-		return fmt.Errorf("baseline_half_life_hours must be %d-%d", MinSessionDropBaselineHalfLifeHours, MaxSessionDropBaselineHalfLifeHours)
-	}
-	if cfg.CooldownMinutes < MinSessionDropCooldownMinutes || cfg.CooldownMinutes > MaxSessionDropCooldownMinutes {
-		return fmt.Errorf("cooldown_minutes must be %d-%d", MinSessionDropCooldownMinutes, MaxSessionDropCooldownMinutes)
-	}
-	return nil
-}
-
-// Valid reports whether acknowledgement is exactly the fixed all-true clause
-// set. The referenced immutable audit row is verified by telemetry separately.
-func (a PrivacyAcknowledgement) Valid() bool {
-	return a.Version == PrivacyAcknowledgementVersion &&
-		a.ThirdPartySubprocessors &&
-		a.NoTrainingWithoutOptIn &&
-		a.DefaultAbuseMonitoringUpTo30Days &&
-		a.StoreFalseApplicationStateOnly &&
-		a.TemporaryPromptCachePossible &&
-		a.ZDRMAMSeparateApproval &&
-		a.AuditDaysLocalOnly &&
-		a.GlobalEndpointNoRegionalGuarantee
-}
-
-// UnmarshalJSON rejects every acknowledgement shape except the complete fixed
-// clause set, including null, missing, and unknown clauses.
-func (a *PrivacyAcknowledgement) UnmarshalJSON(data []byte) error {
-	// Clear before decoding so a rejected replacement cannot retain a prior
-	// valid acknowledgement in a reused request value.
-	*a = PrivacyAcknowledgement{}
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(data, &members); err != nil {
-		return err
-	}
-	if len(members) != 9 {
-		return errors.New("privacy acknowledgement must contain exactly nine members")
-	}
-	const required = "version,third_party_subprocessors,no_training_without_opt_in,default_abuse_monitoring_up_to_30_days,store_false_application_state_only,temporary_prompt_cache_possible,zdr_mam_separate_approval,audit_days_local_only,global_endpoint_no_regional_guarantee"
-	for _, name := range strings.Split(required, ",") {
-		if _, ok := members[name]; !ok {
-			return fmt.Errorf("privacy acknowledgement missing %q", name)
-		}
-	}
-	type acknowledgement PrivacyAcknowledgement
-	var decoded acknowledgement
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	if !PrivacyAcknowledgement(decoded).Valid() {
-		return errors.New("privacy acknowledgement must be the current complete clause set")
-	}
-	*a = PrivacyAcknowledgement(decoded)
-	return nil
-}
-
-// CurrentInvestigationPrivacyAcknowledgementAuditID returns the configured
-// audit reference only when its version is current. Callers must additionally
-// resolve it against the immutable audit table before treating it as acknowledged.
-func (c *Config) CurrentInvestigationPrivacyAcknowledgementAuditID() int64 {
-	if c.InvestigationProvider.PrivacyAcknowledgementVersion != PrivacyAcknowledgementVersion ||
-		c.InvestigationProvider.PrivacyAcknowledgementAuditID <= 0 {
-		return 0
-	}
-	return c.InvestigationProvider.PrivacyAcknowledgementAuditID
-}
-
 // Validate clamps and corrects config values in place.
 func (c *Config) Validate() {
 	c.RetentionDays = ClampRetention(c.RetentionDays)
 	c.Retention.MetricsDays = ClampRetention(c.Retention.MetricsDays)
-	NormalizeSessionDropConfig(&c.SessionDrop)
-	if c.InvestigationProvider.PrivacyAcknowledgementVersion != PrivacyAcknowledgementVersion ||
-		c.InvestigationProvider.PrivacyAcknowledgementAuditID <= 0 {
-		c.InvestigationProvider.PrivacyAcknowledgementVersion = ""
-		c.InvestigationProvider.PrivacyAcknowledgementAuditID = 0
-	}
-	if c.InvestigationProvider.CredentialCiphertext != "" {
-		ciphertext := strings.TrimPrefix(c.InvestigationProvider.CredentialCiphertext, dpapiPrefix)
-		if !strings.HasPrefix(c.InvestigationProvider.CredentialCiphertext, dpapiPrefix) {
-			slog.Default().Warn("plaintext investigation credential ignored")
-			c.InvestigationProvider.CredentialCiphertext = ""
-		} else if _, err := base64.StdEncoding.DecodeString(ciphertext); err != nil {
-			slog.Default().Warn("invalid encrypted investigation credential ignored", "error", err)
-			c.InvestigationProvider.CredentialCiphertext = ""
-		}
-	}
-	if c.CurrentInvestigationPrivacyAcknowledgementAuditID() == 0 ||
-		c.InvestigationProvider.CredentialCiphertext == "" {
-		c.InvestigationProvider.AccessEnabled = false
-	}
-	if !c.InvestigationProvider.AccessEnabled {
-		c.InvestigationProvider.AutomaticEnabled = false
-	}
 	ClampEvtSpike(&c.EvtSpike)
 	if c.EvtSpike.BaselinePath != "" &&
 		!strings.EqualFold(filepath.Clean(c.EvtSpike.BaselinePath), filepath.Clean(DefaultBaselinePath())) {
@@ -1597,124 +1370,8 @@ func UpdateSessionsConfig(sessions *SessionsConfig) error {
 	})
 }
 
-// InvestigationProviderSafeView is safe for dashboard-only settings/status
-// projections. It deliberately contains no audit ID, clauses, or credential.
-type InvestigationProviderSafeView struct {
-	Profile                       string `json:"profile"`
-	Endpoint                      string `json:"endpoint"`
-	Model                         string `json:"model"`
-	AccessEnabled                 bool   `json:"access_enabled"`
-	Acknowledged                  bool   `json:"acknowledged"`
-	PrivacyAcknowledgementVersion string `json:"privacy_acknowledgement_version"`
-	AutomaticEnabled              bool   `json:"automatic_enabled"`
-	HasCredential                 bool   `json:"has_credential"`
-}
-
-// InvestigationProviderSafeView returns a non-secret provider projection.
-// acknowledgedAudit must be true only after telemetry verified the referenced
-// immutable acknowledgement audit row.
-func (c *Config) InvestigationProviderSafeView(acknowledgedAudit bool) InvestigationProviderSafeView {
-	provider := c.InvestigationProvider
-	acknowledged := acknowledgedAudit && c.CurrentInvestigationPrivacyAcknowledgementAuditID() != 0
-	hasCredential := provider.CredentialCiphertext != ""
-	automatic := provider.AutomaticEnabled && provider.AccessEnabled && acknowledged && hasCredential
-	return InvestigationProviderSafeView{
-		Profile:                       InvestigationProviderProfile,
-		Endpoint:                      InvestigationProviderEndpoint,
-		Model:                         InvestigationProviderModel,
-		AccessEnabled:                 provider.AccessEnabled,
-		Acknowledged:                  acknowledged,
-		PrivacyAcknowledgementVersion: provider.PrivacyAcknowledgementVersion,
-		AutomaticEnabled:              automatic,
-		HasCredential:                 hasCredential,
-	}
-}
-
-// DecryptInvestigationCredential decrypts only a valid persisted provider
-// credential. It accepts the root Config ciphertext representation and never
-// stores plaintext in Config or any configuration projection.
-func DecryptInvestigationCredential(ciphertext string) ([]byte, error) {
-	if !strings.HasPrefix(ciphertext, dpapiPrefix) {
-		return nil, errors.New("investigation credential is not DPAPI ciphertext")
-	}
-	encrypted, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ciphertext, dpapiPrefix))
-	if err != nil {
-		return nil, fmt.Errorf("decode investigation credential: %w", err)
-	}
-	plaintext, err := DPAPIDecrypt(encrypted)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt investigation credential: %w", err)
-	}
-	if len(plaintext) == 0 {
-		return nil, errors.New("empty investigation credential")
-	}
-	return plaintext, nil
-}
-
-// UpdateInvestigationSettings validates and atomically persists the complete
-// central provider/session-drop settings replacement. Callers append the
-// immutable acknowledgement audit first and pass its resulting ID here.
-func UpdateInvestigationSettings(update InvestigationSettingsUpdate) error {
-	if err := ValidateSessionDropConfig(update.SessionDrop); err != nil {
-		return err
-	}
-	if update.Credential.Operation != "preserve" &&
-		update.Credential.Operation != "replace" &&
-		update.Credential.Operation != "clear" {
-		return errors.New("credential operation must be preserve, replace, or clear")
-	}
-	if update.Credential.Operation == "replace" {
-		if update.Credential.Value == "" || len(update.Credential.Value) > 4096 {
-			return errors.New("replacement credential must be 1-4096 bytes")
-		}
-	} else if update.Credential.Value != "" {
-		return errors.New("credential value is only valid for replace")
-	}
-	if update.PrivacyAcknowledgement != nil && !update.PrivacyAcknowledgement.Valid() {
-		return errors.New("privacy acknowledgement must be the current complete clause set")
-	}
-	if update.PrivacyAcknowledgement != nil && update.PrivacyAcknowledgementAuditID <= 0 {
-		return errors.New("privacy acknowledgement requires an immutable audit reference")
-	}
-	if (update.AccessEnabled || update.AutomaticEnabled) &&
-		(update.PrivacyAcknowledgement == nil || update.PrivacyAcknowledgementAuditID <= 0) {
-		return errors.New("enabled provider access requires a current acknowledgement audit")
-	}
-	if update.AutomaticEnabled && !update.AccessEnabled {
-		return errors.New("automatic investigation requires provider access")
-	}
-
-	var ciphertext string
-	if update.Credential.Operation == "replace" {
-		encrypted, err := DPAPIEncrypt([]byte(update.Credential.Value))
-		if err != nil {
-			return fmt.Errorf("encrypt investigation credential: %w", err)
-		}
-		ciphertext = dpapiPrefix + base64.StdEncoding.EncodeToString(encrypted)
-	}
-	return readModifyWrite(func(cfg *Config) error {
-		provider := &cfg.InvestigationProvider
-		switch update.Credential.Operation {
-		case "replace":
-			provider.CredentialCiphertext = ciphertext
-		case "clear":
-			provider.CredentialCiphertext = ""
-		}
-		if (update.AccessEnabled || update.AutomaticEnabled) && provider.CredentialCiphertext == "" {
-			return errors.New("enabled provider access requires a credential")
-		}
-		provider.AccessEnabled = update.AccessEnabled
-		provider.AutomaticEnabled = update.AutomaticEnabled
-		if update.PrivacyAcknowledgement != nil {
-			provider.PrivacyAcknowledgementVersion = PrivacyAcknowledgementVersion
-			provider.PrivacyAcknowledgementAuditID = update.PrivacyAcknowledgementAuditID
-		}
-		cfg.SessionDrop = update.SessionDrop
-		return nil
-	})
-}
-
 // ReadModifyWriteNotifications atomically modifies the notifications slice
+
 // under the same cross-process config lock used by every other config writer.
 // The mutate callback receives a copy of the current targets and returns the
 // new slice; returning an error aborts the write. This is the building block

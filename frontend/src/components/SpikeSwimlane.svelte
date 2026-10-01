@@ -417,7 +417,7 @@
     function onDotEnter(spike, evt) {
         hovered = spike;
         hoverX = timeToX(spike._t);
-        hoverY = laneDotY(channels.indexOf(spike.channel));
+        hoverY = laneY(channels.indexOf(spike.channel));
     }
     function onDotLeave() {
         hovered = null;

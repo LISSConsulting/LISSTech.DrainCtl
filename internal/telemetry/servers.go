@@ -102,39 +102,6 @@ func (s *ServerStore) Update(ctx context.Context, hostname, lastResultJSON strin
 	return n > 0, nil
 }
 
-// UpdateAccepted persists an accepted report and its immutable detector input
-// in the same writer transaction. A missing registered host creates neither.
-func (s *ServerStore) UpdateAccepted(ctx context.Context, hostname, lastResultJSON string, observation SessionDropObservation) (bool, error) {
-	hostname = CanonicalHostname(hostname)
-	tx, err := s.db.writer.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("telemetry: servers accepted update begin: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	res, err := tx.ExecContext(ctx,
-		`UPDATE servers SET last_seen_ms = ?, last_result_json = ? WHERE hostname = ? COLLATE NOCASE`,
-		time.Now().UTC().UnixMilli(), lastResultJSON, hostname)
-	if err != nil {
-		return false, fmt.Errorf("telemetry: servers accepted update: %w", err)
-	}
-	updated, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("telemetry: servers accepted update rows_affected: %w", err)
-	}
-	if updated == 0 {
-		return false, nil
-	}
-	observation.CanonicalHost = hostname
-	if err := (&SessionDropStore{db: s.db}).InsertObservationTx(ctx, tx, observation); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("telemetry: servers accepted update commit: %w", err)
-	}
-	return true, nil
-}
-
 // Get returns the row for hostname, or nil when unregistered.
 func (s *ServerStore) Get(ctx context.Context, hostname string) (*ServerInfo, error) {
 	var (

@@ -2116,13 +2116,17 @@ https://dashboard-server:49470</code></pre>
 
             <h3>Configuration modal</h3>
             <p>
-                The gear icon opens six tabs: <strong>Alerts &amp; Performance</strong> (thresholds, percentile,
-                sustain windows, polling, and performance collection), <strong>Event Spikes</strong> (detector,
-                presets, channels, and tuning), <strong>Notifications</strong> (targets, triggers, and repeats),
-                <strong>Servers</strong> (fleet lifecycle controls), <strong>System</strong> (dashboard and update
-                policy), and <strong>AI Investigation</strong> (optional provider access, consent, credentials, status,
-                and session-drop bounds). The dashboard propagates its settings to connected agents, including <em>all</em>
-                operator-safe EventSpike fields; <code>baseline_path</code> is deliberately local-only.
+                The gear icon opens five tabs:
+                <strong>Alerts &amp; Performance</strong> (thresholds,
+                percentile, sustain windows, polling, and performance
+                collection), <strong>Event Spikes</strong> (detector, presets,
+                channels, and tuning), <strong>Notifications</strong> (targets,
+                triggers, and repeats), <strong>Servers</strong> (fleet
+                lifecycle controls), and <strong>System</strong> (dashboard and
+                update policy). The dashboard propagates its settings to
+                connected agents, including <em>all</em> operator-safe
+                EventSpike fields; <code>baseline_path</code> is deliberately
+                local-only.
             </p>
             <p>
                 The <strong>Config &rarr; Servers</strong> tab displays the
@@ -2140,104 +2144,6 @@ https://dashboard-server:49470</code></pre>
                 preserves the PowerShell exception even when non-interactive
                 Windows PowerShell routes it to stdout, and points to the
                 supported elevated <code>broker-setup</code> remediation.
-            </p>
-
-            <h3>Optional AI anomaly investigation</h3>
-            <p>
-                The optional investigator is centrally owned by the dashboard service; it does not run on agents or
-                expose provider access through machine configuration. The supported service identity is
-                <code>LocalSystem</code>. Its write-only provider credential uses the existing atomic,
-                machine-scope DPAPI flow and is never displayed in settings or status, returned by an API, placed in
-                logs, SQLite, SSE, browser storage, or an agent configuration. In the dedicated dashboard-session
-                settings surface, every update explicitly selects <strong>preserve</strong>,
-                <strong>replace</strong> (provision or rotate), or <strong>clear</strong>. Clearing it prevents future
-                sends; completed history remains readable.
-            </p>
-            <p>
-                Provider access and automatic investigation are separate controls and both start disabled. The status
-                surface reports only safe configuration and operating state: <code>disabled</code>, <code>configured</code>,
-                <code>ready</code>, <code>automatic_enabled</code>, <code>degraded</code>, or <code>failing</code>, plus
-                whether a credential is present. It never returns a credential, acknowledgement clauses, audit actor,
-                audit ID, or audit timestamp. The dashboard group is
-                the only administrator/operator boundary. Authorization uses an existing session's login-time stored
-                group snapshot against the atomically current configured dashboard group, not a live directory-membership
-                lookup. The same check occurs before shared live-event subscription and periodically while it is open.
-                Changing <code>Dashboard.Group</code> invalidates every session and closes every stream; sign in again.
-                Directory membership changes apply at logout, expiry, or reauthentication.
-            </p>
-            <p>
-                Enabling provider access requires exactly the closed
-                <code>openai_responses_privacy_v1</code> acknowledgement with all eight clauses true:
-                <code>third_party_subprocessors</code>, <code>no_training_without_opt_in</code>,
-                <code>default_abuse_monitoring_up_to_30_days</code>,
-                <code>store_false_application_state_only</code>,
-                <code>temporary_prompt_cache_possible</code>, <code>zdr_mam_separate_approval</code>,
-                <code>audit_days_local_only</code>, and <code>global_endpoint_no_regional_guarantee</code>.
-                Missing, extra, false, non-boolean, or differently versioned clauses reject enablement. DrainCtl first
-                appends a local immutable acknowledgement audit row containing the fixed version, authenticated actor,
-                acceptance time, and complete-clause marker/hash; it then atomically stores the exact audit reference
-                with the current version in configuration. A missing, stale, cleared, or mismatched reference fails
-                closed. An audit row left unreferenced by a failed configuration write is harmless immutable history.
-                This ACL- and <code>AuditDays</code>-governed local audit is the only investigator record that retains an
-                actor, and it never egresses.
-            </p>
-            <p>
-                The provider path is fixed: one direct TLS request to
-                <code>https://api.openai.com/v1/responses</code> using the fixed <code>openai_responses</code> profile
-                and model. Allow outbound firewall TLS only to <code>https://api.openai.com</code>. Do not configure a
-                proxy, alternate endpoint, model, relay, redirect, or fallback; the client does not inherit environment
-                proxies.
-            </p>
-            <p>
-                An attempt first persists its bounded evidence and has at most one send. Immediately before
-                <code>Client.Do</code>, DrainCtl durably records <code>send_authorized_at</code>: a transmission may
-                have begun, but this is not proof that the provider received it. <code>send_completed_at</code> means
-                only that the local HTTP exchange returned. A claimed attempt has no lease; authorization creates the
-                30-second send lease. Local return clears that lease and creates the mutually exclusive two-minute
-                finalization lease. An active applicable send or finalization lease protects a running row across
-                restart; recovery terminalizes it only after no applicable lease remains active. A same-process
-                finalization retry only retries SQLite persistence and never resends. An unauthorized running attempt
-                then becomes <code>failed/interrupted</code>; an authorized unterminated attempt becomes
-                <code>failed/storage_unavailable</code>. Neither outcome reconstructs results/provenance or resends.
-            </p>
-            <p>
-                Admission is bounded before evidence creation: 100 queued/running attempts across all sources yields
-                <code>429 queue_full</code> for manual or retry work and creates no automatic work; independently, 100
-                retained attempts for a source, including local insufficiency and retries, yields
-                <code>409 attempt_limit_reached</code>. A provider-valid insufficient report is non-conclusive and may
-                be deliberately retried; local unavailable evidence is a separate
-                <code>insufficient_evidence/evidence_unavailable</code> outcome. Failures, refusals, incomplete output,
-                invalid output, timeouts, authentication failures, and storage failures retain only a safe canonical
-                reason, never partial provider prose. Retry is available only for failed or insufficient attempts whose
-                deterministic source remains retained.
-            </p>
-            <p>
-                Public attempt and provenance times are RFC3339. Lifecycle names are
-                <code>created_at</code>, <code>started_at</code>, <code>send_authorized_at</code>,
-                <code>send_completed_at</code>, and <code>completed_at</code>; closed provenance uses only the canonical
-                <code>send_authorized_at</code> and <code>send_completed_at</code> names. Internal SQLite timestamps use
-                the corresponding <code>_ms</code> names.
-            </p>
-            <p>
-                Session-drop detection remains deterministic, per-host, and restart-safe. In the same transaction that
-                accepts a host report, DrainCtl persists an idempotent observation-inbox row. Private
-                <code>accepted_sequence</code>, not acceptance time, is the sole global order. Startup drains pending
-                rows strictly in that sequence before newer reports can affect scoring, atomically applying each
-                watermark, baseline, and source change exactly once. Public confirmation timestamps are RFC3339
-                <code>confirmation_started_at</code> and <code>confirmation_ended_at</code>; they are central acceptance
-                timestamps, not report epochs. All-hours readiness spans <code>first_trained_at</code> through
-                eligible-normal-only <code>last_normal_trained_at</code>; candidates, confirmations, drains, gaps,
-                scoring, and decay do not advance it. Only permanent host removal clears that host's detector state and
-                pending inbox rows.
-            </p>
-            <p>
-                Investigation evidence, attempts, results, provenance, diagnostics, SSE, and browser durable state
-                exclude source/customer/user/session identity and arbitrary or nonfixed URLs. The sole local exceptions
-                are the acknowledgement-audit actor and the fixed endpoint literal in closed provenance; neither
-                egresses. Authorized deterministic source/list/detail views alone resolve a host, while investigation
-                SSE is source-ID-only. Provider report prose is escaped, bounded untrusted guidance, not Markdown,
-                HTML, a command, or remediation. It is never executed, routed to tools, or used to change configuration,
-                drain state, restart services, notify, or access credentials/files.
             </p>
 
             <h3>Validate and save a Connection Broker</h3>

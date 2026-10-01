@@ -48,9 +48,7 @@ func sessionActionRequest(t *testing.T, host, sessionID, token, key, body string
 func seedActionTarget(t *testing.T, ds *DashboardServer, host string) int64 {
 	t.Helper()
 	ds.state.Register(host)
-	if _, err := ds.state.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"}); err != nil {
-		t.Fatalf("update host: %v", err)
-	}
+	ds.state.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"})
 	snapshot := testSessionSnapshot(host, 1)
 	if _, err := ds.ingestSessionSnapshot(context.Background(), snapshot); err != nil {
 		t.Fatal(err)

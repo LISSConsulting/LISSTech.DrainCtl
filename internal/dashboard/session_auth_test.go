@@ -19,9 +19,7 @@ func TestSessionsRead_AdminBoundaryAndFleetProjection(t *testing.T) {
 	ds, _ := newSessionHandlerTestServer(t, cfg)
 	for _, host := range []string{"alpha.example.test", "bravo.example.test", "unknown.example.test"} {
 		ds.state.Register(host)
-		if _, err := ds.state.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"}); err != nil {
-			t.Fatalf("update %s: %v", host, err)
-		}
+		ds.state.Update(host, &dc.CheckResult{Host: host, Status: "Healthy"})
 	}
 	for i, host := range []string{"bravo.example.test", "alpha.example.test"} {
 		snapshot := testSessionSnapshot(host, sessiondata.DecimalUint64(i+1))

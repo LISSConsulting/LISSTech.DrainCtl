@@ -119,42 +119,6 @@ func (s *EventSpikeStore) Recent(ctx context.Context, host string, limit int) ([
 	return scanSpikes(rows, host)
 }
 
-// LookupByID returns a confirmed durable spike source by its positive database
-// ID. It performs no host-range backfill or consumption; event_spikes rows are
-// inserted only after the existing detector has confirmed them.
-func (s *EventSpikeStore) LookupByID(ctx context.Context, id int64) (EventSpike, bool, error) {
-	if id <= 0 {
-		return EventSpike{}, false, nil
-	}
-
-	var (
-		spike                               EventSpike
-		windowStartMs, windowEndMs, firstMs int64
-	)
-	err := s.db.reader.QueryRowContext(ctx,
-		`SELECT host, channel, window_start_ms, window_end_ms, observed, expected,
-		        tail_probability, confirmation_count, first_seen_at_ms
-		 FROM event_spikes
-		 WHERE id = ?`,
-		id,
-	).Scan(
-		&spike.Host, &spike.Channel, &windowStartMs, &windowEndMs,
-		&spike.Observed, &spike.Expected, &spike.TailProbability,
-		&spike.ConfirmationCount, &firstMs,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return EventSpike{}, false, nil
-	}
-	if err != nil {
-		return EventSpike{}, false, fmt.Errorf("telemetry: event_spikes lookup by id: %w", err)
-	}
-	spike.ID = id
-	spike.WindowStart = time.UnixMilli(windowStartMs).UTC()
-	spike.WindowEnd = time.UnixMilli(windowEndMs).UTC()
-	spike.FirstSeenAt = time.UnixMilli(firstMs).UTC()
-	return spike, true, nil
-}
-
 // Range returns newest-first entries for host whose window_start falls in
 // [from, to). The rows, exact count, and ID watermark are read from the same
 // SQLite snapshot.
