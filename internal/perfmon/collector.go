@@ -363,9 +363,14 @@ func (c *Collector) collect() (*dc.PerfSnapshot, error) {
 	// PDH retains disconnected RemoteFX instances (notably an unchanged 400 ms
 	// RTT) and also includes non-user session instances. Those values are not
 	// an active user's experience.
-	var activeSessions map[string]struct{}
+	//
+	// The map also carries the session ID so future per-session PDH readers
+	// (e.g. CollectSessionPDH) can share this matcher instead of drifting
+	// into a different station-name scheme. The legacy aggregate counters
+	// only consult the keys.
+	var activeSessions map[string]uint32
 	if sessionCollectOK && (c.collectPerSession || c.collectRemoteFX) {
-		activeSessions = activeSessionInstances()
+		activeSessions = activeStationSessionMap()
 	}
 
 	// Per-session (V2).
@@ -561,20 +566,24 @@ func (c *Collector) scalar(h syscall.Handle, name string) (float64, bool) {
 	return 0, false
 }
 
-// activeSessionInstances returns normalized WTS station names for currently
-// active sessions. A nil result means WTS enumeration failed, which must not
-// fall back to potentially stale PDH instances.
-func activeSessionInstances() map[string]struct{} {
+// activeStationSessionMap returns station-instance keys → WTS session IDs
+// for currently active sessions. A nil result means WTS enumeration failed,
+// which must not fall back to potentially stale PDH instances. Legacy callers
+// that only care about membership range over the keys and ignore the value;
+// CollectSessionPDH reads the value to route PDH samples back to the
+// originating WTS session. Both readers go through this single helper so they
+// never drift apart.
+func activeStationSessionMap() map[string]uint32 {
 	sessions, err := dc.EnumerateSessions()
 	if err != nil {
 		return nil
 	}
-	active := make(map[string]struct{}, len(sessions))
+	active := make(map[string]uint32, len(sessions))
 	for _, session := range sessions {
 		if session.State != "Active" || session.Station == "" {
 			continue
 		}
-		active[sessionInstanceKey(session.Station)] = struct{}{}
+		active[sessionInstanceKey(session.Station)] = session.SessionID
 	}
 	return active
 }
@@ -587,9 +596,12 @@ func sessionInstanceKey(name string) string {
 
 // activeCounterValues removes values from inactive or non-user PDH instances,
 // then applies the existing numeric validation and inactive-stream rules.
+// The active map is keyed by station-instance name; the session-ID value is
+// unused for aggregate counters but kept so this helper shares the
+// activeStationSessionMap shape used by CollectSessionPDH.
 func activeCounterValues(
 	h syscall.Handle,
-	active map[string]struct{},
+	active map[string]uint32,
 	min, max float64,
 	higherIsBetter bool,
 ) []float64 {
@@ -611,7 +623,7 @@ func activeCounterValues(
 
 func (c *Collector) rfxPercentiles(
 	h syscall.Handle,
-	active map[string]struct{},
+	active map[string]uint32,
 	p95, p50 *float64,
 	places int,
 	min, max float64,

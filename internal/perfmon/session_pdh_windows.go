@@ -33,25 +33,36 @@ type SessionPDHCapabilities struct {
 }
 
 // CollectSessionPDH collects named per-session values for the supplied WTS
-// session IDs. It uses the collector's existing V2 query and dedicated worker;
+// sessions. It uses the collector's existing V2 query and dedicated worker;
 // it neither opens queries nor retains counter handles. PDH failures are
 // deliberately non-fatal: their affected values remain nil and the applicable
 // capability is false.
-func (c *Collector) CollectSessionPDH(sessionIDs []uint32) (map[uint32]SessionPDHMetrics, SessionPDHCapabilities) {
+//
+// The records must include each session's WinStation name (Station) so the
+// collector can correlate PDH instances like "RDP-Tcp 6", "Console", and
+// "Services" back to their session IDs. The legacy Collector.collect() path
+// uses the same stationInstanceKey matcher; consolidating here keeps the
+// two readers from drifting apart again.
+func (c *Collector) CollectSessionPDH(records []sessiondata.SessionRecord) (map[uint32]SessionPDHMetrics, SessionPDHCapabilities) {
 	out := make(map[uint32]SessionPDHMetrics)
-	if c == nil || len(sessionIDs) > maxSessionPDHEntries {
+	if c == nil || len(records) > maxSessionPDHEntries {
 		return out, SessionPDHCapabilities{}
 	}
 
-	ids := make(map[uint32]struct{}, len(sessionIDs))
-	for _, id := range sessionIDs {
-		if id == 0 {
+	// stationKey → sessionID, so we can route PDH instances (named by
+	// station) back to the originating WTS session.
+	stationToID := make(map[string]uint32, len(records))
+	for _, record := range records {
+		if record.SessionID == 0 {
 			continue
 		}
-		ids[id] = struct{}{}
-		out[id] = SessionPDHMetrics{}
+		out[record.SessionID] = SessionPDHMetrics{}
+		if record.Station == nil || *record.Station == "" {
+			continue
+		}
+		stationToID[sessionInstanceKey(*record.Station)] = record.SessionID
 	}
-	if len(ids) == 0 || c.sessionQuery == 0 {
+	if len(stationToID) == 0 || c.sessionQuery == 0 {
 		return out, SessionPDHCapabilities{}
 	}
 
@@ -60,14 +71,14 @@ func (c *Collector) CollectSessionPDH(sessionIDs []uint32) (map[uint32]SessionPD
 		if err := pdhCollectQueryData(c.sessionQuery); err != nil {
 			return
 		}
-		out, capabilities = c.collectSessionPDH(ids, out)
+		out, capabilities = c.collectSessionPDH(stationToID, out)
 	}) {
-		return out, SessionPDHCapabilities{}
+		return out, capabilities
 	}
 	return out, capabilities
 }
 
-func (c *Collector) collectSessionPDH(ids map[uint32]struct{}, out map[uint32]SessionPDHMetrics) (map[uint32]SessionPDHMetrics, SessionPDHCapabilities) {
+func (c *Collector) collectSessionPDH(stationToID map[string]uint32, out map[uint32]SessionPDHMetrics) (map[uint32]SessionPDHMetrics, SessionPDHCapabilities) {
 	read := func(handle syscall.Handle) ([]pdhInstanceValue, bool) {
 		if handle == 0 {
 			return nil, false
@@ -77,10 +88,10 @@ func (c *Collector) collectSessionPDH(ids map[uint32]struct{}, out map[uint32]Se
 	}
 
 	if values, ok := read(c.sessCPUH); ok {
-		c.applySessionCPU(out, ids, values)
+		c.applySessionCPU(out, stationToID, values)
 	}
 	if values, ok := read(c.sessMemH); ok {
-		applySessionFloat(out, ids, values, 0, float64(math.MaxInt64), true, func(metrics *SessionPDHMetrics, value float64) {
+		applySessionFloat(out, stationToID, values, 0, float64(math.MaxInt64), true, func(metrics *SessionPDHMetrics, value float64) {
 			metrics.WorkingSetBytes = new(sessiondata.DecimalUint64(uint64(value)))
 		})
 	}
@@ -88,43 +99,43 @@ func (c *Collector) collectSessionPDH(ids map[uint32]struct{}, out map[uint32]Se
 	var caps SessionPDHCapabilities
 	if values, ok := read(c.inputDelayH); ok {
 		caps.InputDelay = c.inputDelayAvail
-		applySessionFloat(out, ids, values, 0, 600000, true, func(metrics *SessionPDHMetrics, value float64) {
+		applySessionFloat(out, stationToID, values, 0, 600000, true, func(metrics *SessionPDHMetrics, value float64) {
 			metrics.InputDelayMS = new(uint32(value))
 		})
 	}
 
 	rfxOK := c.rfxAvailable
-	if values, ok := read(c.rfxFPSH); !collectRemoteFX(out, ids, values, ok, math.SmallestNonzeroFloat64, 240, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxFPSH); !collectRemoteFX(out, stationToID, values, ok, math.SmallestNonzeroFloat64, 240, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).FPS = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxQualH); !collectRemoteFX(out, ids, values, ok, math.SmallestNonzeroFloat64, 100, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxQualH); !collectRemoteFX(out, stationToID, values, ok, math.SmallestNonzeroFloat64, 100, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).QualityPercent = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxEncH); !collectRemoteFX(out, ids, values, ok, 0, 60000, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxEncH); !collectRemoteFX(out, stationToID, values, ok, 0, 60000, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).EncodeTimeMS = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxRTTH); !collectRemoteFX(out, ids, values, ok, 0, 60000, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxRTTH); !collectRemoteFX(out, stationToID, values, ok, 0, 60000, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).RTTMS = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxLossH); !collectRemoteFX(out, ids, values, ok, 0, 100, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxLossH); !collectRemoteFX(out, stationToID, values, ok, 0, 100, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).LossPercent = new(RoundTo(value, 2))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxSkipSrvH); !collectRemoteFX(out, ids, values, ok, 0, 1000000, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxSkipSrvH); !collectRemoteFX(out, stationToID, values, ok, 0, 1000000, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).ServerSkippedFPS = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
 	}
-	if values, ok := read(c.rfxSkipNetH); !collectRemoteFX(out, ids, values, ok, 0, 1000000, false, func(metrics *SessionPDHMetrics, value float64) {
+	if values, ok := read(c.rfxSkipNetH); !collectRemoteFX(out, stationToID, values, ok, 0, 1000000, false, func(metrics *SessionPDHMetrics, value float64) {
 		ensureRemoteFX(metrics).NetworkSkippedFPS = new(RoundTo(value, 1))
 	}) {
 		rfxOK = false
@@ -133,8 +144,8 @@ func (c *Collector) collectSessionPDH(ids map[uint32]struct{}, out map[uint32]Se
 	return out, caps
 }
 
-func (c *Collector) applySessionCPU(out map[uint32]SessionPDHMetrics, ids map[uint32]struct{}, values []pdhInstanceValue) {
-	applySessionFloat(out, ids, values, 0, c.sessionCPUPercentMax(), false, func(metrics *SessionPDHMetrics, value float64) {
+func (c *Collector) applySessionCPU(out map[uint32]SessionPDHMetrics, stationToID map[string]uint32, values []pdhInstanceValue) {
+	applySessionFloat(out, stationToID, values, 0, c.sessionCPUPercentMax(), false, func(metrics *SessionPDHMetrics, value float64) {
 		metrics.CPUPercent = new(RoundTo(value, 1))
 	})
 }
@@ -143,48 +154,29 @@ func (c *Collector) sessionCPUPercentMax() float64 {
 	return float64(boundedLogicalCPUCount(int(c.logicalCPUCount))) * 100
 }
 
-func collectRemoteFX(out map[uint32]SessionPDHMetrics, ids map[uint32]struct{}, values []pdhInstanceValue, ok bool, min, max float64, integer bool, apply func(*SessionPDHMetrics, float64)) bool {
+func collectRemoteFX(out map[uint32]SessionPDHMetrics, stationToID map[string]uint32, values []pdhInstanceValue, ok bool, min, max float64, integer bool, apply func(*SessionPDHMetrics, float64)) bool {
 	if !ok {
 		return false
 	}
-	applySessionFloat(out, ids, values, min, max, integer, apply)
+	applySessionFloat(out, stationToID, values, min, max, integer, apply)
 	return true
 }
 
-func applySessionFloat(out map[uint32]SessionPDHMetrics, ids map[uint32]struct{}, values []pdhInstanceValue, min, max float64, integer bool, apply func(*SessionPDHMetrics, float64)) {
+// applySessionFloat correlates each PDH sample back to a WTS session via the
+// shared stationInstanceKey matcher (lowercased, trimmed, with '#' and ' '
+// stripped) so the \Terminal Services Session(*)\… instances like
+// "RDP-Tcp 6", "Console", and "Services" resolve correctly. Sessions whose
+// Station is empty or whose PDH instance fails validation are skipped.
+func applySessionFloat(out map[uint32]SessionPDHMetrics, stationToID map[string]uint32, values []pdhInstanceValue, min, max float64, integer bool, apply func(*SessionPDHMetrics, float64)) {
 	for _, item := range values {
-		id, ok := parseSessionInstanceID(item.Instance)
-		if !ok {
-			continue
-		}
-		if _, ok := ids[id]; !ok || !validSessionPDHValue(item.Value, min, max, integer) {
+		id, ok := stationToID[sessionInstanceKey(item.Instance)]
+		if !ok || !validSessionPDHValue(item.Value, min, max, integer) {
 			continue
 		}
 		metrics := out[id]
 		apply(&metrics, item.Value)
 		out[id] = metrics
 	}
-}
-
-// parseSessionInstanceID accepts only the canonical decimal spelling of a
-// uint32 session ID. In particular, display names, suffixes, and leading-zero
-// aliases are never allowed to correlate a PDH sample with a WTS session.
-func parseSessionInstanceID(instance string) (uint32, bool) {
-	if instance == "" || (len(instance) > 1 && instance[0] == '0') {
-		return 0, false
-	}
-	var value uint64
-	for i := range instance {
-		digit := instance[i]
-		if digit < '0' || digit > '9' {
-			return 0, false
-		}
-		value = value*10 + uint64(digit-'0')
-		if value > math.MaxUint32 {
-			return 0, false
-		}
-	}
-	return uint32(value), true
 }
 
 func validSessionPDHValue(value, min, max float64, integer bool) bool {
