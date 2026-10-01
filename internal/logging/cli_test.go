@@ -3,7 +3,6 @@
 package logging
 
 import (
-	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -68,7 +67,7 @@ func TestCLIHandler_LevelTags(t *testing.T) {
 		lv.Set(slog.LevelDebug)
 		h := NewCLIHandler(&buf, lv)
 		r := slog.NewRecord(time.Now(), tc.level, "msg", 0)
-		_ = h.Handle(context.Background(), r)
+		_ = h.Handle(nil, r) //nolint:staticcheck
 		if !strings.Contains(buf.String(), tc.tag) {
 			t.Errorf("level %v: output %q does not contain tag %q", tc.level, buf.String(), tc.tag)
 		}
@@ -99,7 +98,7 @@ func TestCLIHandler_TimestampFormat(t *testing.T) {
 	lv.Set(slog.LevelDebug)
 	h := NewCLIHandler(&buf, lv)
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg", 0)
-	_ = h.Handle(context.Background(), r)
+	_ = h.Handle(nil, r) //nolint:staticcheck
 
 	out := buf.String()
 	// Timestamp should contain a T separator and an offset (+ or -).

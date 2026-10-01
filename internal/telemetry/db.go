@@ -50,8 +50,6 @@ type DB struct {
 // reader pools share the same pragmaConnector so both receive this block.
 // journal_mode and auto_vacuum are file-level/persistent but safe to re-issue;
 // the remaining pragmas are connection-local and must be applied per-connection.
-// In particular, schema v4's normalized evidence/report tables depend on
-// foreign_keys being enabled on every writer and reader connection.
 var connectionPragmas = []string{
 	"PRAGMA journal_mode = WAL",
 	"PRAGMA synchronous = NORMAL",

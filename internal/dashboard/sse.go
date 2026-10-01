@@ -238,25 +238,6 @@ func (ds *DashboardServer) broadcastSettingsUpdate() {
 
 // handleSSE serves the Server-Sent Events stream for real-time dashboard updates.
 func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
-	// Capture the session token before subscribing. The route middleware makes
-	// this mandatory in production; the nil-store/no-cookie path preserves
-	// direct handler tests and development behavior.
-	var sessionToken string
-	if cookie, err := r.Cookie("drainctl_session"); err == nil {
-		sessionToken = cookie.Value
-	}
-	featureAuthorized := GetAuthInfo(r) != nil
-	if featureAuthorized && sessionToken != "" && ds.sessionStore != nil {
-		if _, code := investigationDashboardSession(ds.sessionStore, sessionToken, ds.currentDashboardGroup); code != "" {
-			status := http.StatusUnauthorized
-			if code == "access_denied" {
-				status = http.StatusForbidden
-			}
-			writeInvestigationSessionError(w, status, code)
-			return
-		}
-	}
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -268,6 +249,16 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// causing rapid reconnect cycles that exhaust browser connections.
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{})
+
+	// Capture the session token for periodic revalidation below.
+	// requireSession has already validated it; we keep it so we can
+	// close the stream promptly when the session is deleted or expires
+	// (e.g. logout from another tab, admin session revocation).
+	// Empty string when no cookie is present (tests, dev mode).
+	var sessionToken string
+	if cookie, err := r.Cookie("drainctl_session"); err == nil {
+		sessionToken = cookie.Value
+	}
 
 	id, ch, done, err := ds.broker.Subscribe()
 	if err != nil {
@@ -292,11 +283,11 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
-	// Session revalidation is disabled entirely without a session store/token
-	// (direct handler tests and development mode).
+	// Session revalidation is disabled entirely without a token (tests and
+	// development mode) so those streams do not retain an unused runtime timer.
 	var sessionCheck *time.Ticker
 	var sessionCheckC <-chan time.Time
-	if sessionToken != "" && ds.sessionStore != nil {
+	if sessionToken != "" {
 		sessionCheck = time.NewTicker(sseSessionCheckInterval)
 		sessionCheckC = sessionCheck.C
 		defer sessionCheck.Stop()
@@ -309,12 +300,7 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		case <-sessionCheckC:
-			if featureAuthorized {
-				if _, code := investigationDashboardSession(ds.sessionStore, sessionToken, ds.currentDashboardGroup); code != "" {
-					slog.Info("sse: closing stream — session authorization lost", "id", id, "code", code)
-					return
-				}
-			} else if ds.sessionStore.Get(sessionToken) == nil {
+			if sessionToken != "" && ds.sessionStore.Get(sessionToken) == nil {
 				slog.Info("sse: closing stream — session expired or deleted", "id", id)
 				return
 			}
@@ -325,11 +311,6 @@ func (ds *DashboardServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case msg := <-ch:
-			select {
-			case <-done:
-				return
-			default:
-			}
 			var event SSEEvent
 			if json.Unmarshal(msg, &event) == nil && (event.Type == "session_snapshot" || event.Type == "session_action") {
 				_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)

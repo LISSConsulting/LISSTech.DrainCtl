@@ -4,7 +4,6 @@ package telemetry
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,25 +60,6 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 	}
 	if got := queryPragmaInt(t, db, "user_version"); got != schemaVersion {
 		t.Errorf("user_version = %d, want %d", got, schemaVersion)
-	}
-}
-
-func TestOpen_EnablesForeignKeysOnAllPools(t *testing.T) {
-	db := openTestDB(t)
-
-	for name, pool := range map[string]interface{ QueryRow(string, ...any) *sql.Row }{
-		"writer":     db.writer,
-		"reader":     db.reader,
-		"audit":      db.auditDB,
-		"checkpoint": db.checkpointDB,
-	} {
-		var enabled int
-		if err := pool.QueryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil {
-			t.Fatalf("%s foreign_keys pragma: %v", name, err)
-		}
-		if enabled != 1 {
-			t.Errorf("%s foreign_keys = %d, want 1", name, enabled)
-		}
 	}
 }
 

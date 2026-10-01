@@ -19,9 +19,7 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/investigation"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
 
@@ -55,12 +53,6 @@ type DashboardServer struct {
 	sessionPolicyMu          sync.Mutex
 	heartbeatIntervalNanos   atomic.Int64
 	heartbeatIntervalChanged chan struct{}
-
-	// dashboardGroup is the atomically-read authorization boundary for feature
-	// sessions and shared SSE. Before the first reload, cfg supplies startup.
-	dashboardGroupMu  sync.RWMutex
-	dashboardGroup    string
-	dashboardGroupSet bool
 
 	// now and staleSweepTicks are deterministic test seams. Production uses
 	// time.Now and a timer derived from the current heartbeat interval.
@@ -125,69 +117,6 @@ type DashboardServer struct {
 	// It prevents a stale persisted local server record from advertising an
 	// updater that this process intentionally does not construct.
 	localForceUpdateSupported atomic.Bool
-
-	featureRuntime FeatureRuntime
-}
-
-// currentDashboardGroup returns the configured group as one synchronized
-// authorization snapshot. It never asks the directory for current membership.
-func (ds *DashboardServer) currentDashboardGroup() string {
-	ds.dashboardGroupMu.RLock()
-	group := ds.dashboardGroup
-	set := ds.dashboardGroupSet
-	ds.dashboardGroupMu.RUnlock()
-	if set {
-		return group
-	}
-	return ds.cfg.Group
-}
-
-// SetDashboardGroup applies a configuration-reload group change. Sessions
-// created under the former group are invalid, and every stream is stopped
-// before any subsequent event can be delivered.
-func (ds *DashboardServer) SetDashboardGroup(group string) {
-	group = strings.TrimSpace(group)
-	ds.dashboardGroupMu.Lock()
-	previous := ds.dashboardGroup
-	if !ds.dashboardGroupSet {
-		previous = ds.cfg.Group
-	}
-	if previous == group {
-		ds.dashboardGroupMu.Unlock()
-		return
-	}
-	ds.dashboardGroup = group
-	ds.dashboardGroupSet = true
-	ds.dashboardGroupMu.Unlock()
-
-	if ds.sessionStore != nil {
-		ds.sessionStore.InvalidateAll()
-	}
-	if ds.broker != nil {
-		ds.broker.CloseAll()
-	}
-}
-
-// PublishInvestigationUpdate is the host-free SSE hook for the central
-// investigation runtime. It is intentionally a no-op until the dashboard
-// broker is available.
-func (ds *DashboardServer) PublishInvestigationUpdate(update investigation.Update) bool {
-	return ds.broker != nil && ds.broker.PublishInvestigationUpdate(update)
-}
-
-// PublishSessionDrop is the source-ID-only SSE hook for the deterministic
-// session-drop runtime.
-func (ds *DashboardServer) PublishSessionDrop(event sessiondrop.SSEEvent) bool {
-	return ds.broker != nil && ds.broker.PublishSessionDrop(event)
-}
-
-// setFeatureRuntime binds the post-commit inbox wakeup only after the
-// dashboard state has been constructed. The runtime receives no report data;
-// its durable inbox drain remains the sole session-drop handoff.
-func (ds *DashboardServer) setFeatureRuntime(runtime FeatureRuntime) {
-	if runtime != nil && ds.state != nil {
-		ds.state.SetSessionDropInboxWaker(runtime)
-	}
 }
 
 const missedHeartbeatLimit = 3
@@ -445,9 +374,6 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	// SSPI Negotiate auth for agent routes and session-based auth for UI routes.
 	wa := func(h http.Handler) http.Handler { return wrapAuth(ctx, h, cfg.Group) }
 
-	// The shared event stream has the feature authorization boundary: a
-	// login-time group snapshot must still include the current configured group.
-	investigationSession := requireInvestigationDashboardSession(ds.sessionStore, ds.currentDashboardGroup)
 	// requireSession validates the drainctl_session cookie for dashboard routes.
 	// Dev builds treat this as a no-op.
 	rs := requireSession(ds.sessionStore)
@@ -533,20 +459,8 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("GET /api/v1/session-actions/{actionID}", rlw(ra(http.HandlerFunc(ds.handleSessionActionStatus))))
 	mux.Handle("GET /api/v1/sessions/{host}/{sessionID}/shadow", rlw(ra(http.HandlerFunc(ds.handleSessionShadow))))
 
-	// Feature routes use their own login-snapshot/current-dashboard-group
-	// authorization boundary and are never exposed to machine accounts.
-	mux.Handle("GET /api/v1/session-drops", investigationSession(http.HandlerFunc(ds.handleSessionDropList)))
-	mux.Handle("GET /api/v1/session-drops/{id}", investigationSession(http.HandlerFunc(ds.handleSessionDropDetail)))
-	mux.Handle("GET /api/v1/investigation/settings", investigationSession(http.HandlerFunc(ds.handleGetInvestigationSettings)))
-	mux.Handle("PUT /api/v1/investigation/settings", investigationSession(http.HandlerFunc(ds.handlePutInvestigationSettings)))
-	mux.Handle("GET /api/v1/investigation/status", investigationSession(http.HandlerFunc(ds.handleInvestigationStatus)))
-	mux.Handle("GET /api/v1/investigation/sources/{source_kind}/{source_id}/attempts", investigationSession(http.HandlerFunc(ds.handleInvestigationHistory)))
-	mux.Handle("POST /api/v1/investigation/sources/{source_kind}/{source_id}/attempts", investigationSession(http.HandlerFunc(ds.handleCreateInvestigation)))
-	mux.Handle("GET /api/v1/investigation/attempts/{attempt_id}", investigationSession(http.HandlerFunc(ds.handleInvestigationDetail)))
-	mux.Handle("POST /api/v1/investigation/attempts/{attempt_id}/retry", investigationSession(http.HandlerFunc(ds.handleRetryInvestigation)))
-
-	// SSE event stream — feature session authorization, no rate limit.
-	mux.Handle("GET /api/v1/events", investigationSession(http.HandlerFunc(ds.handleSSE)))
+	// SSE event stream — session auth, no rate limit (long-lived connection).
+	mux.Handle("GET /api/v1/events", rs(http.HandlerFunc(ds.handleSSE)))
 
 	// Agent config pull — machine accounts only. Same data as /settings but
 	// separate route with its own auth model (SSPI machine account, not session).

@@ -15,43 +15,9 @@ import (
 
 	dc "github.com/LISSConsulting/LISSTech.DrainCtl"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/evtspike"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/investigation"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/lifecycle"
-	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondrop"
 	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/telemetry"
 )
-
-// FeatureRuntime owns additive investigation and session-drop work. The
-// subsystem calls its methods in durable restart order before opening the
-// dashboard listener. Stop is called after the subsystem context is cancelled.
-// Wake requests the same durable inbox drain after a committed accepted report.
-type FeatureRuntime interface {
-	Recover(context.Context) error
-	DrainInbox(context.Context) error
-	PruneExpiredQueued(context.Context) error
-	StartWorker(context.Context) error
-	Stop()
-	WakeSessionDropInbox()
-}
-
-func startFeatureRuntime(ctx context.Context, runtime FeatureRuntime) error {
-	if runtime == nil {
-		return nil
-	}
-	if err := runtime.Recover(ctx); err != nil {
-		return fmt.Errorf("recovery: %w", err)
-	}
-	if err := runtime.DrainInbox(ctx); err != nil {
-		return fmt.Errorf("startup inbox drain: %w", err)
-	}
-	if err := runtime.PruneExpiredQueued(ctx); err != nil {
-		return fmt.Errorf("queued attempt prune: %w", err)
-	}
-	if err := runtime.StartWorker(ctx); err != nil {
-		return fmt.Errorf("worker start: %w", err)
-	}
-	return nil
-}
 
 // Compile-time assertion: *Subsystem satisfies lifecycle.Subsystem.
 var _ lifecycle.Subsystem = (*Subsystem)(nil)
@@ -85,7 +51,6 @@ type Subsystem struct {
 	sessionActions            sessionActionStore
 	freshness                 *telemetry.FreshnessStore
 	localForceUpdateSupported bool
-	featureRuntime            FeatureRuntime
 	rdCollections             *rdCollectionResolver
 
 	ds    *DashboardServer
@@ -111,51 +76,27 @@ type SubsystemDependencies struct {
 	SessionActions            *telemetry.SessionActionStore
 	Freshness                 *telemetry.FreshnessStore
 	LocalForceUpdateSupported bool
-	FeatureRuntime            FeatureRuntime
 }
 
 // NewSubsystem constructs the dashboard subsystem. Nil stores explicitly
 // select degraded endpoint behavior, which is safe during rolling upgrades.
 func NewSubsystem(cfg dc.DashboardConfig, dataDir string, dependencies SubsystemDependencies) *Subsystem {
-	subsystem := &Subsystem{
+	return &Subsystem{
 		cfg:                       cfg,
 		dataDir:                   dataDir,
+		ms:                        dependencies.Metrics,
+		as:                        dependencies.Audit,
+		mnt:                       dependencies.Maintenance,
+		srv:                       dependencies.Servers,
+		sps:                       dependencies.EventSpikes,
+		removals:                  dependencies.Removals,
 		outbox:                    dependencies.ForceUpdateOutbox,
+		sessionSnapshots:          dependencies.SessionSnapshots,
+		sessionQueries:            dependencies.SessionQueries,
+		sessionActions:            dependencies.SessionActions,
 		freshness:                 dependencies.Freshness,
 		localForceUpdateSupported: dependencies.LocalForceUpdateSupported,
-		featureRuntime:            dependencies.FeatureRuntime,
 	}
-	// Assign concrete stores to interfaces only when non-nil. Assigning a
-	// typed nil pointer directly would produce a non-nil interface and panic
-	// when degraded-mode workers call it.
-	if dependencies.Metrics != nil {
-		subsystem.ms = dependencies.Metrics
-	}
-	if dependencies.Audit != nil {
-		subsystem.as = dependencies.Audit
-	}
-	if dependencies.Maintenance != nil {
-		subsystem.mnt = dependencies.Maintenance
-	}
-	if dependencies.Servers != nil {
-		subsystem.srv = dependencies.Servers
-	}
-	if dependencies.EventSpikes != nil {
-		subsystem.sps = dependencies.EventSpikes
-	}
-	if dependencies.Removals != nil {
-		subsystem.removals = dependencies.Removals
-	}
-	if dependencies.SessionSnapshots != nil {
-		subsystem.sessionSnapshots = dependencies.SessionSnapshots
-	}
-	if dependencies.SessionQueries != nil {
-		subsystem.sessionQueries = dependencies.SessionQueries
-	}
-	if dependencies.SessionActions != nil {
-		subsystem.sessionActions = dependencies.SessionActions
-	}
-	return subsystem
 }
 
 // State returns the ServerState created by Start so the service main loop
@@ -173,14 +114,6 @@ func (s *Subsystem) SetLocalForceUpdateSupported(supported bool) {
 	s.localForceUpdateSupported = supported
 	if s.ds != nil {
 		s.ds.setLocalForceUpdateSupported(supported)
-	}
-}
-
-// WakeFeatureRuntime prompts an immediate configuration recheck after a
-// reload; Worker validates configuration again before any provider egress.
-func (s *Subsystem) WakeFeatureRuntime() {
-	if s.featureRuntime != nil {
-		s.featureRuntime.WakeSessionDropInbox()
 	}
 }
 
@@ -281,11 +214,6 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	}
 
 	derived, cancel := context.WithCancel(ctx)
-	if err := startFeatureRuntime(derived, s.featureRuntime); err != nil {
-		cancel()
-		s.featureRuntime.Stop()
-		return fmt.Errorf("dashboard feature runtime: %w", err)
-	}
 
 	state := NewServerState(s.srv)
 	state.SetFreshnessStore(s.freshness)
@@ -296,9 +224,6 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	forceUpdates, err := newPersistentForceUpdateState(derived, s.outbox)
 	if err != nil {
 		cancel()
-		if s.featureRuntime != nil {
-			s.featureRuntime.Stop()
-		}
 		return fmt.Errorf("dashboard force-update outbox: %w", err)
 	}
 
@@ -324,17 +249,6 @@ func (s *Subsystem) Start(ctx context.Context) error {
 		heartbeatIntervalChanged: make(chan struct{}, 1),
 		remoteEvtSpikeStatus:     make(map[string]evtspike.DetectorStatus),
 		forceUpdates:             forceUpdates,
-		featureRuntime:           s.featureRuntime,
-	}
-	ds.setFeatureRuntime(s.featureRuntime)
-
-	if runtime, ok := s.featureRuntime.(interface {
-		bindFeaturePublishers(func(investigation.Update), func(sessiondrop.SSEEvent))
-	}); ok {
-		runtime.bindFeaturePublishers(
-			func(update investigation.Update) { _ = ds.PublishInvestigationUpdate(update) },
-			func(event sessiondrop.SSEEvent) { _ = ds.PublishSessionDrop(event) },
-		)
 	}
 	ds.setLocalForceUpdateSupported(s.localForceUpdateSupported)
 	ds.setHeartbeatInterval(s.cfg.HeartbeatInterval)
@@ -346,9 +260,6 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	tlsCfg, fingerprint, err := setupTLS(s.cfg, s.dataDir)
 	if err != nil {
 		cancel()
-		if s.featureRuntime != nil {
-			s.featureRuntime.Stop()
-		}
 		return err
 	}
 	ds.fingerprint = fingerprint
@@ -357,9 +268,6 @@ func (s *Subsystem) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		cancel()
-		if s.featureRuntime != nil {
-			s.featureRuntime.Stop()
-		}
 		return fmt.Errorf("dashboard listen %s: %w", addr, err)
 	}
 	if tlsCfg != nil {
@@ -434,9 +342,6 @@ func (s *Subsystem) Stop() {
 	s.stopOnce.Do(func() {
 		if s.cancel != nil {
 			s.cancel()
-		}
-		if s.featureRuntime != nil {
-			s.featureRuntime.Stop()
 		}
 		s.wg.Wait()
 	})

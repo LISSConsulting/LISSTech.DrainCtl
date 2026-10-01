@@ -25,7 +25,6 @@ import (
 // rollback-on-failure happens from dispatch goroutines for other targets,
 // so every read/write in the event_spike branch must be under SpikeMu.
 type NotifyState struct {
-	DispatchMu            sync.Mutex                       // serializes service notification batches and pruning
 	LastAlertNotify       map[string]time.Time             // key = target URL (alert trigger)
 	LastSessionWarnNotify map[string]time.Time             // key = target URL (session_warning trigger)
 	LastPerfNotify        map[string]map[Trigger]time.Time // key = target URL -> trigger -> last sent
