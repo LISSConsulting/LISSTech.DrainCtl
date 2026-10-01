@@ -43,9 +43,9 @@ func TestSessionRuntimeReportsEnrichedSnapshotsSequentially(t *testing.T) {
 		logicalCPUs:     4,
 		config: dc.SessionsConfig{Enabled: true, CollectProcesses: true, TopProcesses: 2,
 			IdentityVisibility: dc.SessionVisibilityMasked, ClientVisibility: dc.SessionVisibilityHidden, ProcessVisibility: dc.SessionVisibilityMasked},
-		collectPDH: func(ids []uint32) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities) {
-			if len(ids) != 1 || ids[0] != 9 {
-				t.Fatalf("PDH session IDs = %v", ids)
+		collectPDH: func(records []sessiondata.SessionRecord) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities) {
+			if len(records) != 1 || records[0].SessionID != 9 {
+				t.Fatalf("PDH session records = %v", records)
 			}
 			return map[uint32]perfmon.SessionPDHMetrics{9: {CPUPercent: &cpu, WorkingSetBytes: &workingSet}}, perfmon.SessionPDHCapabilities{InputDelay: true}
 		},
@@ -180,7 +180,7 @@ func TestSessionRuntimeReportsFatalStatusForMoreThanMaxSessions(t *testing.T) {
 		host:            "host.example.test",
 		logicalCPUs:     1,
 		config:          dc.SessionsConfig{Enabled: true},
-		collectPDH: func([]uint32) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities) {
+		collectPDH: func([]sessiondata.SessionRecord) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities) {
 			t.Fatal("PDH collection ran for an oversized session set")
 			return nil, perfmon.SessionPDHCapabilities{}
 		},

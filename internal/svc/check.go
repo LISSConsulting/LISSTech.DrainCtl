@@ -443,7 +443,7 @@ type sessionRuntime struct {
 	sequence         uint64
 	config           dc.SessionsConfig
 	processes        *dc.ProcessCollector
-	collectPDH       func([]uint32) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities)
+	collectPDH       func([]sessiondata.SessionRecord) (map[uint32]perfmon.SessionPDHMetrics, perfmon.SessionPDHCapabilities)
 	collectProcesses func([]uint32, uint8) (map[uint32][]sessiondata.SessionProcess, bool)
 	reportRemote     func(context.Context, string, sessiondata.SessionSnapshot)
 	actionLedger     sessionActionRuntimeLedger
@@ -657,9 +657,9 @@ func (r *sessionRuntime) Report(ctx context.Context, records []sessiondata.Sessi
 			var metrics map[uint32]perfmon.SessionPDHMetrics
 			var capabilities perfmon.SessionPDHCapabilities
 			if r.collectPDH != nil {
-				metrics, capabilities = r.collectPDH(ids)
+				metrics, capabilities = r.collectPDH(snapshot.Sessions)
 			} else {
-				metrics, capabilities = perf.CollectSessionPDH(ids)
+				metrics, capabilities = perf.CollectSessionPDH(snapshot.Sessions)
 			}
 			snapshot.Capabilities.InputDelay = capabilities.InputDelay
 			snapshot.Capabilities.RemoteFX = capabilities.RemoteFX

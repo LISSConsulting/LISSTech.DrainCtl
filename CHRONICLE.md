@@ -1,5 +1,9 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## Fleet session per-session PDH correlation — 2026-10-01
+
+- `internal/perfmon.CollectSessionPDH` now correlates `\Terminal Services Session(*)\…` PDH samples to WTS sessions through the WinStation name (lowercase, trimmed, with `#` and ` ` stripped). The legacy helper used the same matcher for the aggregate counters, so the two readers can no longer silently disagree on what "active session" means. The pre-existing `parseSessionInstanceID` rejected every real PDH instance — `RDP-Tcp 6`, `Console`, `Services` — so per-session `CPUPercent`, `WorkingSetBytes`, `InputDelayMS`, and `RemoteFX` were always assigned nil and the dashboard's Session CPU/Memory/Workload charts rendered empty while the session CPU count family continued to work through `Collector.collect()`. The mismatch is gone, the matcher is shared, and both paths consult the same active-session set returned by `activeStationSessionMap`.
+
 ## Draft anomaly investigation rollback — 2026-09-30
 
 - Release 26.9.109 unintentionally included draft AI investigation and deterministic session-drop anomaly work from PR #187. The complete draft feature has been removed: dashboard panels and settings, HTTP/SSE contracts, provider and detector runtimes, configuration, schema creation, retention integration, and supporting tests/docs.
