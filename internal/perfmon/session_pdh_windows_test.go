@@ -6,42 +6,41 @@ import (
 	"math"
 	"syscall"
 	"testing"
+
+	"github.com/LISSConsulting/LISSTech.DrainCtl/internal/sessiondata"
 )
 
-func TestParseSessionInstanceID(t *testing.T) {
+func TestSessionInstanceKey(t *testing.T) {
 	tests := []struct {
-		instance string
-		wantID   uint32
-		wantOK   bool
+		input string
+		want  string
 	}{
-		{instance: "0", wantID: 0, wantOK: true},
-		{instance: "12", wantID: 12, wantOK: true},
-		{instance: "4294967295", wantID: ^uint32(0), wantOK: true},
-		{instance: "012"},
-		{instance: ""},
-		{instance: "4294967296"},
-		{instance: "12#1"},
-		{instance: "rdp-tcp#12"},
-		{instance: "_Total"},
-		{instance: "12 "},
+		{input: "RDP-Tcp 6", want: "rdp-tcp6"},
+		{input: "rdp-tcp#12", want: "rdp-tcp12"},
+		{input: "Console", want: "console"},
+		{input: "  Services ", want: "services"},
+		{input: "", want: ""},
 	}
 	for _, test := range tests {
-		gotID, gotOK := parseSessionInstanceID(test.instance)
-		if gotID != test.wantID || gotOK != test.wantOK {
-			t.Errorf("parseSessionInstanceID(%q) = (%d, %t), want (%d, %t)", test.instance, gotID, gotOK, test.wantID, test.wantOK)
+		if got := sessionInstanceKey(test.input); got != test.want {
+			t.Errorf("sessionInstanceKey(%q) = %q, want %q", test.input, got, test.want)
 		}
 	}
 }
 
-func TestApplySessionFloatCorrelatesOnlyExactCanonicalInstance(t *testing.T) {
+func TestApplySessionFloatCorrelatesOnlyActiveStationInstance(t *testing.T) {
 	out := map[uint32]SessionPDHMetrics{12: {}, 112: {}}
-	ids := map[uint32]struct{}{12: {}, 112: {}}
-	applySessionFloat(out, ids, []pdhInstanceValue{
-		{Instance: "12", Value: 7.25},
-		{Instance: "112", Value: 9.5},
-		{Instance: "012", Value: 44},
+	stations := map[string]uint32{
+		"rdp-tcp6":   12,
+		"rdp-tcp112": 112,
+	}
+	applySessionFloat(out, stations, []pdhInstanceValue{
+		{Instance: "RDP-Tcp 6", Value: 7.25},
+		{Instance: "RDP-Tcp 112", Value: 9.5},
+		{Instance: "Console", Value: 44},
 		{Instance: "session-12", Value: 55},
-		{Instance: "12#1", Value: 66},
+		{Instance: "Services", Value: 66},
+		{Instance: "RDP-Tcp 9999", Value: 88},
 	}, 0, 100, false, func(metrics *SessionPDHMetrics, value float64) {
 		metrics.CPUPercent = new(value)
 	})
@@ -72,8 +71,8 @@ func TestApplySessionCPUHonorsLogicalCPUWireBounds(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			out := map[uint32]SessionPDHMetrics{12: {}}
-			ids := map[uint32]struct{}{12: {}}
-			(&Collector{logicalCPUCount: test.logicalCPUCount}).applySessionCPU(out, ids, []pdhInstanceValue{{Instance: "12", Value: test.value}})
+			stations := map[string]uint32{"rdp-tcp6": 12}
+			(&Collector{logicalCPUCount: test.logicalCPUCount}).applySessionCPU(out, stations, []pdhInstanceValue{{Instance: "RDP-Tcp 6", Value: test.value}})
 
 			got := out[12].CPUPercent
 			if test.wantNil {
@@ -107,8 +106,8 @@ func TestBoundedLogicalCPUCount(t *testing.T) {
 
 func TestOptionalCounterFailureLeavesValuesNil(t *testing.T) {
 	out := map[uint32]SessionPDHMetrics{12: {}}
-	ids := map[uint32]struct{}{12: {}}
-	if collectRemoteFX(out, ids, nil, false, 0, 240, false, func(metrics *SessionPDHMetrics, value float64) {
+	stations := map[string]uint32{"rdptcp6": 12}
+	if collectRemoteFX(out, stations, nil, false, 0, 240, false, func(metrics *SessionPDHMetrics, value float64) {
 		metrics.RemoteFX = &SessionRemoteFXMetrics{FPS: new(value)}
 	}) {
 		t.Fatal("unavailable RemoteFX counter reported success")
@@ -119,13 +118,22 @@ func TestOptionalCounterFailureLeavesValuesNil(t *testing.T) {
 }
 
 func TestCollectSessionPDHRejectsOversizedSessionSet(t *testing.T) {
-	ids := make([]uint32, maxSessionPDHEntries+1)
-	for i := range ids {
-		ids[i] = uint32(i + 1)
+	records := make([]sessiondata.SessionRecord, maxSessionPDHEntries+1)
+	for i := range records {
+		records[i] = sessiondata.SessionRecord{SessionID: uint32(i + 1)}
 	}
-	metrics, capabilities := (&Collector{}).CollectSessionPDH(ids)
+	metrics, capabilities := (&Collector{}).CollectSessionPDH(records)
 	if len(metrics) != 0 || capabilities.InputDelay || capabilities.RemoteFX {
 		t.Fatalf("oversized collection = (%v, %+v), want no metrics and no capabilities", metrics, capabilities)
+	}
+}
+
+func TestCollectSessionPDHNoSessionQueryReturnsEmpty(t *testing.T) {
+	station := "RDP-Tcp 6"
+	records := []sessiondata.SessionRecord{{SessionID: 12, Station: &station}}
+	metrics, capabilities := (&Collector{}).CollectSessionPDH(records)
+	if len(metrics) != 1 || capabilities.InputDelay || capabilities.RemoteFX {
+		t.Fatalf("missing-query collection = (%v, %+v), want one empty entry and no capabilities", metrics, capabilities)
 	}
 }
 
