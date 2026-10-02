@@ -722,6 +722,44 @@ export async function fetchFleetMetrics(from, to, resolution = 'auto', counters,
     return /** @type {MetricsResponse} */ (await res.json());
 }
 
+/**
+ * GET /api/v1/metrics/{host|_fleet}/export.
+ *
+ * @param {{host?:string|null, from:Date|string, to:Date|string, resolution?:'auto'|'raw'|'1min'|'5min'|'hourly', counters?:string[], format:'csv'|'xlsx', graph:string, cohort?:Iterable<string>}} request
+ * @returns {Promise<Blob>}
+ */
+export async function fetchExportMetrics({ host, from, to, resolution = 'auto', counters, format, graph, cohort }) {
+    const params = new URLSearchParams({
+        from: from instanceof Date ? from.toISOString() : from,
+        to: to instanceof Date ? to.toISOString() : to,
+        resolution,
+        format,
+        graph,
+    });
+    if (counters?.length) params.set('counters', counters.join(','));
+    if (!host && cohort) {
+        for (const member of cohort) params.append('host', member);
+    }
+
+    const route = host ? `/metrics/${encodeURIComponent(host)}/export` : '/metrics/_fleet/export';
+    const response = await fetch(`${BASE}${route}?${params}`, { credentials: 'include' });
+    if (response.ok) return response.blob();
+
+    if (response.status === 401) {
+        authState.username = null;
+        authState.error = 'session_expired';
+    }
+    let envelope = {};
+    try {
+        envelope = await response.json();
+    } catch {
+        envelope = { error: 'request_failed', message: await response.text().catch(() => '') };
+    }
+    const error = new Error(envelope.message ?? envelope.error ?? response.statusText);
+    Object.assign(error, envelope, { status: response.status });
+    throw error;
+}
+
 // ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------

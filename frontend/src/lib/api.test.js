@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchExportMetrics } from './api.js';
+
+globalThis.$state = (value) => value;
+const { fetchExportMetrics } = await import('./api.js');
 
 const request = {
     host: null,
@@ -12,7 +14,7 @@ const request = {
 };
 
 for (const [format, mime] of [
-    ['csv', 'text/csv; charset=utf-8'],
+    ['csv', 'text/csv;charset=utf-8'],
     ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
 ]) {
     test(`fetchExportMetrics returns a ${format} Blob`, async () => {
