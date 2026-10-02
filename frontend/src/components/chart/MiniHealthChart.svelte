@@ -24,6 +24,7 @@
         SECONDARY_METRIC_FILL_OPACITY,
         SINGLE_METRIC_FILL_OPACITY,
     } from '../../lib/chart-contracts.js';
+    import ExportControl from '../ExportControl.svelte';
 
     /**
      * @type {{
@@ -46,7 +47,9 @@
      *   noThresholdZones?: boolean,
      *   autoScale?: boolean,
      *   detailLines?: ((point:MetricPoint)=>string[])|null,
-     * }}
+     *   exportConfig?: {label:string},
+     *   exportState?: {loading:boolean, failed:boolean, empty:boolean, hasEnabledSeries:boolean, isStale:boolean},
+     *   onExport?: (format:'csv'|'xlsx')=>Promise<void>,
      */
     let {
         history,
@@ -71,7 +74,9 @@
         showHelp = false,
         detailLines = /** @type {((point:MetricPoint)=>string[])|null} */ (null),
         fmtYTick = /** @type {((v:number)=>string)|null} */ (null),
-    } = $props();
+        exportConfig = null,
+        exportState = null,
+        onExport = async () => {},
 
     // ── SVG geometry ──────────────────────────────────────────────────────────
     const CH = 180; // chart inner height (px)
@@ -325,6 +330,9 @@
         <div class="hic-current" style="color: {valueColor}; padding-right: {PR}px">
             {currentValue === null ? '—' : fmt(currentValue)}
         </div>
+        {#if exportConfig && exportState}
+            <ExportControl {exportConfig} state={exportState} {onExport} />
+        {/if}
     </div>
     {#if p50Key}
         <div class="hic-series-key" style="padding-right: {PR}px">
