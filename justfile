@@ -426,6 +426,12 @@ release-preflight:
         & git checkout -- docs/install.ps1
         if ($LASTEXITCODE -ne 0) { Write-Error "git checkout docs/install.ps1 failed"; exit $LASTEXITCODE }
     }
+    # Refuse to ship a release when a protected shared branch (develop,
+    # trunk) is missing from origin. Background: gh pr merge
+    # --delete-branch deletes the PR's source branch, which on a
+    # develop -> trunk PR is develop itself. See CHRONICLE.md 2026-10-02.
+    & "{{justfile_directory()}}/scripts/protect-shared-branches.ps1" -Remote origin
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Build and sign everything: binaries → sign → MSI → sign MSI → sign manifest
 [script('pwsh', '-NoProfile')]
@@ -449,6 +455,11 @@ release: (header "release") release-preflight gotest psmodule sign-binaries msi 
 [script('pwsh', '-NoProfile')]
 [extension('.ps1')]
 publish: (header "publish")
+    # Refuse to tag/push when a protected shared branch is missing from
+    # origin (develop, trunk). Belt-and-suspenders alongside
+    # release-preflight; one of the two recipes may be invoked alone.
+    & "{{justfile_directory()}}/scripts/protect-shared-branches.ps1" -Remote origin
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     # Force UTF-8 for native-command stdout capture. PowerShell's default
     # [Console]::OutputEncoding on Windows is the OEM codepage (CP437 / CP850
     # on US-English), so a `git log` whose commit messages contain UTF-8
