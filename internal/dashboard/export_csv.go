@@ -2,44 +2,65 @@
 
 package dashboard
 
-import "io"
+import (
+	"encoding/csv"
+	"io"
+	"sort"
+	"strconv"
+)
 
-// WriteCSV serializes the snapshot's data rows to w as CSV (UTF-8, comma
-// separator, single header row). The fixed header and column order match
-// the Excel Data sheet so cross-format parity holds (per FR-012).
-//
-// T015 lands the real implementation; this stub keeps the dispatcher
-// (T011) buildable during Phase 2.
+var csvHeader = []string{
+	"timestamp_utc",
+	"host_name",
+	"series_id",
+	"series_label",
+	"unit",
+	"value",
+	"aggregation",
+	"resolution",
+}
+
+// WriteCSV serializes the snapshot's data rows to w as UTF-8 CSV with one
+// fixed header row. The column order matches the Excel Data sheet so the two
+// export formats preserve equivalent observations (FR-006 and FR-012).
 func WriteCSV(w io.Writer, snap Snapshot) error {
-	// Real implementation lives in T015 (Phase 3 / US1).
-	return writeCSVScaffold(w, snap)
-}
+	rows := append([]Observation(nil), snap.Rows...)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if !rows[i].Timestamp.Equal(rows[j].Timestamp) {
+			return rows[i].Timestamp.Before(rows[j].Timestamp)
+		}
+		if rows[i].SeriesID != rows[j].SeriesID {
+			return rows[i].SeriesID < rows[j].SeriesID
+		}
+		return rows[i].HostName < rows[j].HostName
+	})
 
-func writeCSVScaffold(w io.Writer, snap Snapshot) error {
-	_, err := w.Write([]byte("snapshot_rows=" + itoa(len(snap.Rows)) + "\n"))
-	return err
-}
-
-// itoa is a tiny int-to-string helper kept inline to avoid an import that
-// gets dropped by `go mod tidy` until the real writer lands.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
+	writer := csv.NewWriter(w)
+	if err := writer.Write(csvHeader); err != nil {
+		return err
 	}
-	neg := n < 0
-	if neg {
-		n = -n
+	for _, row := range rows {
+		hostName := row.HostName
+		if hostName == hostFleetPlaceholder {
+			hostName = ""
+		}
+		value := ""
+		if row.Value != nil {
+			value = strconv.FormatFloat(*row.Value, 'f', -1, 64)
+		}
+		if err := writer.Write([]string{
+			row.Timestamp.UTC().Format("2006-01-02T15:04:05Z"),
+			hostName,
+			row.SeriesID,
+			row.SeriesLabel,
+			row.Unit,
+			value,
+			row.Aggregation,
+			row.Resolution,
+		}); err != nil {
+			return err
+		}
 	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
+	writer.Flush()
+	return writer.Error()
 }

@@ -16,7 +16,7 @@ type FilenameExportType string
 
 const (
 	FilenameFleet   FilenameExportType = "fleet"
-	FilenamePerHost FilenameExportType = "per_host"
+	FilenamePerHost FilenameExportType = "host"
 )
 
 // ErrInvalidFilenameInput indicates BuildFilename received an input that
