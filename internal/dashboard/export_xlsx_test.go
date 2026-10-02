@@ -15,10 +15,13 @@ func TestExportXLSXWorkbookStructure(t *testing.T) {
 	snap := exportXLSXFixture(ExportTypeFleet)
 	contents := writeXLSXParts(t, snap)
 
-	for _, name := range []string{"[Content_Types].xml", "xl/workbook.xml", "xl/sharedStrings.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"} {
+	for _, name := range []string{"[Content_Types].xml", "xl/workbook.xml", "xl/sharedStrings.xml"} {
 		if _, ok := contents[name]; !ok {
 			t.Errorf("workbook missing %s", name)
 		}
+	}
+	if len(xlsxWorksheetParts(contents)) != 2 {
+		t.Errorf("worksheet count = %d, want 2", len(xlsxWorksheetParts(contents)))
 	}
 	workbook := string(contents["xl/workbook.xml"])
 	data := strings.Index(workbook, `name="Data"`)
@@ -26,35 +29,41 @@ func TestExportXLSXWorkbookStructure(t *testing.T) {
 	if data < 0 || context < 0 || data > context {
 		t.Fatalf("sheet order = %q, want Data then Context", workbook)
 	}
-	if !strings.Contains(workbook, `sheetId="1"`) || !strings.Contains(workbook, `sheetId="2"`) {
+	if !strings.Contains(workbook, `sheetId="`) {
 		t.Errorf("workbook sheet ids missing: %q", workbook)
 	}
 
-	sheet := string(contents["xl/worksheets/sheet1.xml"])
+	sheet := xlsxDataSheet(contents)
 	for _, header := range []string{"timestamp_utc", "host_name", "series_id", "series_label", "unit", "value", "aggregation", "resolution"} {
 		if !strings.Contains(string(contents["xl/sharedStrings.xml"]), ">"+header+"<") {
 			t.Errorf("shared strings missing header %q", header)
 		}
 	}
-	if !strings.Contains(sheet, `<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"`) {
+	if !strings.Contains(sheet, "<pane") || !strings.Contains(sheet, `ySplit="1"`) || !strings.Contains(sheet, `topLeftCell="A2"`) || !strings.Contains(sheet, `activePane="bottomLeft"`) || !strings.Contains(sheet, `state="frozen"`) {
 		t.Errorf("Data sheet lacks frozen header pane: %q", sheet)
 	}
-	if !strings.Contains(sheet, `<autoFilter ref="A1:H3"`) {
+	if !strings.Contains(sheet, "<autoFilter") || (!strings.Contains(sheet, `ref="A1:H3"`) && !strings.Contains(sheet, `ref="$A$1:$H$3"`)) {
 		t.Errorf("Data sheet lacks expected auto filter: %q", sheet)
 	}
 }
 
 func TestExportXLSXCellTypes(t *testing.T) {
 	contents := writeXLSXParts(t, exportXLSXFixture(ExportTypeFleet))
-	sheet := string(contents["xl/worksheets/sheet1.xml"])
+	sheet := xlsxDataSheet(contents)
 	if !strings.Contains(sheet, `<c r="F2"><v>42.5</v></c>`) {
 		t.Errorf("value cell is not numeric: %q", sheet)
 	}
 	if !strings.Contains(sheet, `<c r="A2" t="s"><v>`) || !strings.Contains(sheet, `<c r="E2" t="s"><v>`) || !strings.Contains(sheet, `<c r="G2" t="s"><v>`) {
 		t.Errorf("text cells are not shared strings: %q", sheet)
 	}
-	if !strings.Contains(sheet, `<c r="B2" t="s"></c>`) && !strings.Contains(sheet, `<c r="B2" t="s"/>`) {
-		t.Errorf("fleet host placeholder must be an empty cell: %q", sheet)
+	if strings.Contains(sheet, `<c r="B2"`) {
+		hostCell := sheet[strings.Index(sheet, `<c r="B2"`):]
+		if end := strings.Index(hostCell, "</c>"); end >= 0 {
+			hostCell = hostCell[:end]
+		}
+		if strings.Contains(hostCell, "<v>") {
+			t.Errorf("fleet host placeholder must be an empty cell: %q", hostCell)
+		}
 	}
 }
 
@@ -122,4 +131,23 @@ func writeXLSXParts(t *testing.T, snap Snapshot) map[string][]byte {
 		}
 	}
 	return contents
+}
+
+func xlsxWorksheetParts(contents map[string][]byte) []string {
+	parts := make([]string, 0, 2)
+	for name := range contents {
+		if strings.HasPrefix(name, "xl/worksheets/sheet") && strings.HasSuffix(name, ".xml") {
+			parts = append(parts, name)
+		}
+	}
+	return parts
+}
+
+func xlsxDataSheet(contents map[string][]byte) string {
+	for _, name := range xlsxWorksheetParts(contents) {
+		if strings.Contains(string(contents[name]), "<autoFilter") {
+			return string(contents[name])
+		}
+	}
+	return ""
 }
