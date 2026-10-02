@@ -1,5 +1,20 @@
 # CHRONICLE — Gotchas, Quirks & Lessons Learned
 
+## develop branch deleted by `gh pr merge --delete-branch` on trunk PR — 2026-10-02
+
+**Incident.** Shipping v26.10.48 of 015-chart-data-export: opened PR #195 with `develop` as the source and `trunk` as the target, then ran `gh pr merge 195 --merge --delete-branch`. `--delete-branch` deletes the PR's source branch — on a `develop → trunk` PR, the source IS develop. The flag has no warning and is correct for one-shot feature branches (`release/XX`, `chore/XX`, `fix/XX`) but is wrong for shared integration branches. develop vanished from origin and had to be restored by hand. The tag and release were already published, so the damage was recoverable but real.
+
+**Fixes (in the same release).**
+
+- `scripts/protect-shared-branches.ps1` — hardcoded list of branches that must exist on origin (`develop`, `trunk`, `main`). Exits 1 if any is missing.
+- `justfile release-preflight` calls it before any release build.
+- `justfile publish` calls it before any tag push or `gh release create`. Belt-and-suspenders: either recipe can be invoked alone.
+- `branch-protection-check.md` documents what GitHub-side protection still needs to be verified (no GitHub API access in this environment to confirm — repo admin should ensure "Allow deletions" is OFF for develop and trunk and that the Lint + Test + Vulncheck required check is wired).
+
+**The rule for any future agent or operator.** The release pipeline (`just release`, `just publish`) is guarded. Hand-invoked `gh pr merge` is NOT — when merging into trunk from a non-feature branch, do not pass `--delete-branch`. Default to "merge without delete", then delete the source branch explicitly only after verifying it is a one-shot feature branch and not a shared integration branch (develop, trunk, main).
+
+**Code review rule.** Any new `gh pr merge` invocation in scripts, CI, or agent workflows must come with a `Source != $PROTECTED_BRANCHES` check or explicit `gh branch --delete <source>` after a positive identity assertion. Foot-gun: GitHub's API will not refuse a `gh pr merge --delete-branch` even when the source is a protected branch — the refusal has to come from the caller.
+
 ## Excel and CSV graph data export — 2026-10-01
 
 - **Fleet exports have empty `host_name` per row.** The dashboard's `telemetry.QueryRangeFleet` returns one cross-host aggregate per bucket (`Avg`/`Min`/`Max`/`P50`), not per-host observations. Replicating the aggregate under each cohort member would label a fleet median as a per-host number and violate FR-005 ("preserve displayed fleet-aggregation semantics"). The cohort lives in `Snapshot.HostFilter` for the Excel Context sheet; the per-row `host_name` column stays empty so an analyst sees at-a-glance that fleet rows are fleet-level, not per-host.
