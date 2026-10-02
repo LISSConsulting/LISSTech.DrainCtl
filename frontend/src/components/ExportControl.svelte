@@ -3,11 +3,11 @@
     import { shouldDisableExport } from '../lib/export-graph-config.js';
 
     /** @type {{label:string}} */
-    let { exportConfig, state, onExport = async () => {} } = $props();
+    let { exportConfig, state: exportState, onExport = async () => {} } = $props();
     let open = $state(false);
-    let disabled = $derived(shouldDisableExport(state));
+    let disabled = $derived(shouldDisableExport(exportState));
     let reason = $derived(
-        state.loading ? 'Chart is loading' : state.failed ? 'Chart failed to load' : state.isStale ? 'Chart data is stale' : state.empty ? 'No retained history for this window' : !state.hasEnabledSeries ? 'No series are enabled' : '',
+        exportState.loading ? 'Chart is loading' : exportState.failed ? 'Chart failed to load' : exportState.isStale ? 'Chart data is stale' : exportState.empty ? 'No retained history for this window' : !exportState.hasEnabledSeries ? 'No series are enabled' : '',
     );
     let graphLabel = $derived(exportConfig.label);
 

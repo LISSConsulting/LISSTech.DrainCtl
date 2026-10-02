@@ -77,7 +77,7 @@
         exportConfig = null,
         exportState = null,
         onExport = async () => {},
-
+    } = $props();
     // ── SVG geometry ──────────────────────────────────────────────────────────
     const CH = 180; // chart inner height (px)
     let PL = $derived(axisRight ? 8 : 44); // left padding
