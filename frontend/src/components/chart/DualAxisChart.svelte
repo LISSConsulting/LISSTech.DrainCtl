@@ -2,7 +2,7 @@
     import { getContext } from 'svelte';
     import { appState } from '../../lib/state.svelte.js';
     import { formatTime12, formatTs } from '../../lib/utils.js';
-
+    import ExportControl from '../ExportControl.svelte';
     /**
      * @typedef {{ i: number, time: number, cpu: number, mem: number, sessions: number,
      *             raw: { cpu: number, mem: number, sessions: number } }} NormPoint
@@ -12,9 +12,9 @@
 
     /**
      * @typedef {{ pct: number, opacity: number, label: string, show: () => boolean }} ThresholdLine
-     * @type {{ normData: NormPoint[], SERIES: SeriesDef[], rightTicks: RightTick[], history: any[], visible: Record<string,boolean>, showXAxis?: boolean, thresholds?: ThresholdLine[] }}
+     * @type {{ normData: NormPoint[], SERIES: SeriesDef[], rightTicks: RightTick[], history: any[], visible: Record<string,boolean>, showXAxis?: boolean, thresholds?: ThresholdLine[], exportConfig?: {label:string}, exportState?: {loading:boolean, failed:boolean, empty:boolean, hasEnabledSeries:boolean, isStale:boolean}, onExport?: (format:'csv'|'xlsx')=>Promise<void> }}
      */
-    let { normData, SERIES, rightTicks, history, visible, showXAxis = true, thresholds = [] } = $props();
+    let { normData, SERIES, rightTicks, history, visible, showXAxis = true, thresholds = [], exportConfig = null, exportState = null, onExport = async () => {} } = $props();
 
     const { xScale, yScale, width, height } = getContext('LayerCake');
 
@@ -337,6 +337,7 @@
     {/if}
 {/if}
 
+
 <!-- ── Transparent overlay — captures mouse events, rendered last (topmost) ── -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <rect
@@ -355,6 +356,13 @@
         if (e.key === 'Escape') appState.pinnedChartIndex = null;
     }}
 />
+{#if exportConfig && exportState}
+    <foreignObject x={$width - 80} y={4} width="78" height="28">
+        <div xmlns="http://www.w3.org/1999/xhtml">
+            <ExportControl {exportConfig} state={exportState} {onExport} />
+        </div>
+    </foreignObject>
+{/if}
 
 <style>
     .ax {
