@@ -146,7 +146,7 @@ func TestExportFleetXLSX_Contract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("invalid XLSX response: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if got := f.GetSheetList(); len(got) != 2 || got[0] != "Data" || got[1] != "Context" {
 		t.Errorf("sheet list = %v, want [Data Context]", got)
 	}
@@ -173,7 +173,7 @@ func TestExportPerHostXLSX_Contract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	rows, err := f.GetRows("Data")
 	if err != nil {
 		t.Fatal(err)

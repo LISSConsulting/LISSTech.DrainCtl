@@ -125,7 +125,7 @@ func writeXLSXParts(t *testing.T, snap Snapshot) map[string][]byte {
 			t.Fatalf("open %s: %v", file.Name, err)
 		}
 		contents[file.Name], err = io.ReadAll(r)
-		r.Close()
+		_ = r.Close()
 		if err != nil {
 			t.Fatalf("read %s: %v", file.Name, err)
 		}

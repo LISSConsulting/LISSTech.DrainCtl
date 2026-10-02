@@ -27,7 +27,7 @@ func TestExportCrossFormatParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open XLSX: %v", err)
 	}
-	defer workbook.Close()
+	defer func() { _ = workbook.Close() }()
 	xlsxRows, err := workbook.GetRows("Data")
 	if err != nil {
 		t.Fatalf("read XLSX Data: %v", err)

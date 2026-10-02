@@ -21,7 +21,7 @@ var xlsxDataHeaders = []string{
 // shared strings and metric values are written as numeric cells.
 func WriteXLSX(w io.Writer, snap Snapshot) error {
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.NewSheet("Data"); err != nil {
 		return err
