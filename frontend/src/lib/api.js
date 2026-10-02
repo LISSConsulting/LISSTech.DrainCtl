@@ -248,13 +248,17 @@ async function apiFetch(path, options = {}) {
             authState.error = 'session_expired';
         }
         let detail = '';
+        let envelope = null;
         try {
             const body = await response.json();
-            detail = body.error ?? body.message ?? JSON.stringify(body);
+            envelope = body && typeof body === 'object' ? body : null;
+            detail = envelope?.error ?? envelope?.message ?? JSON.stringify(body);
         } catch {
             detail = await response.text().catch(() => '');
         }
-        throw new ApiError(response.status, response.statusText, detail, path);
+        const error = new ApiError(response.status, response.statusText, detail, path);
+        if (envelope) Object.assign(error, envelope);
+        throw error;
     }
 
     return response;
@@ -720,6 +724,30 @@ export async function fetchFleetMetrics(from, to, resolution = 'auto', counters,
     }
     const res = await apiFetch(`/metrics/_fleet?${params}`, { signal });
     return /** @type {MetricsResponse} */ (await res.json());
+}
+
+/**
+ * GET /api/v1/metrics/{host|_fleet}/export.
+ *
+ * @param {{host?:string|null, from:Date|string, to:Date|string, resolution?:'auto'|'raw'|'1min'|'5min'|'hourly', counters?:string[], format:'csv'|'xlsx', graph:string, cohort?:Iterable<string>}} request
+ * @returns {Promise<Blob>}
+ */
+export async function fetchExportMetrics({ host, from, to, resolution = 'auto', counters, format, graph, cohort }) {
+    const params = new URLSearchParams({
+        from: from instanceof Date ? from.toISOString() : from,
+        to: to instanceof Date ? to.toISOString() : to,
+        resolution,
+        format,
+        graph,
+    });
+    if (counters?.length) params.set('counters', counters.join(','));
+    if (!host && cohort) {
+        for (const member of cohort) params.append('host', member);
+    }
+
+    const route = host ? `/metrics/${encodeURIComponent(host)}/export` : '/metrics/_fleet/export';
+    const response = await apiFetch(`${route}?${params}`);
+    return response.blob();
 }
 
 // ---------------------------------------------------------------------------

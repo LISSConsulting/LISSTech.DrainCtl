@@ -13,7 +13,7 @@
     import { untrack } from 'svelte';
     import { LayerCake, Svg } from 'layercake';
     import { OVERVIEW_WINDOW_PRESETS } from '../lib/state.svelte.js';
-    import { fetchMetrics } from '../lib/api.js';
+    import { fetchExportMetrics, fetchMetrics } from '../lib/api.js';
     import { resolveThresholds } from '../lib/thresholds.js';
     import { appState } from '../lib/state.svelte.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
@@ -23,6 +23,8 @@
         readLoadVisibility,
         writeLoadVisibility,
     } from '../lib/chart-contracts.js';
+    import { EXPORT_GRAPHS } from '../lib/export-graph-config.js';
+    import { toast } from '../lib/toast.svelte.js';
     import { Cpu, MemoryStick, Users, Gauge, HelpCircle } from '@lucide/svelte';
 
     /** @type {{ host: string }} */
@@ -325,6 +327,36 @@
 
     const Y_DOMAIN = [0, 100];
     let lcData = $derived(history.map((_, i) => ({ x: i, y: 50 })));
+
+    let exportState = $derived({
+        loading,
+        failed: error,
+        empty: history.length < 2,
+        hasEnabledSeries: Object.values(loadVisible).some(Boolean),
+        isStale: false,
+    });
+    async function exportHost(format) {
+        const to = new Date(Date.now() - panOffsetMs);
+        const from = new Date(to.getTime() - windowMs);
+        try {
+            const blob = await fetchExportMetrics({
+                host,
+                from,
+                to,
+                counters: EXPORT_GRAPHS['host.load'].defaultCounters,
+                format,
+                graph: 'host.load',
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `drainctl-host-${host}-${EXPORT_GRAPHS['host.load'].slug}.${format}`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            toast.err(error);
+        }
+    }
 </script>
 
 <div class="h-load">
@@ -451,6 +483,9 @@
                             {history}
                             visible={loadVisible}
                             showXAxis={true}
+                            exportConfig={EXPORT_GRAPHS['host.load']}
+                            exportState={exportState}
+                            onExport={exportHost}
                         />
                     </Svg>
                 </LayerCake>

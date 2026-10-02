@@ -423,6 +423,8 @@ func registerRoutes(ctx context.Context, ds *DashboardServer, mux *http.ServeMux
 	mux.Handle("GET /api/v1/health", rlw(rs(http.HandlerFunc(ds.handleHealth))))
 	mux.Handle("GET /api/v1/metrics", rlw(rs(http.HandlerFunc(ds.handleSeedMetrics))))
 	mux.Handle("GET /api/v1/metrics/{host}", rlw(rs(http.HandlerFunc(ds.handleMetrics))))
+	mux.Handle("GET /api/v1/metrics/{host}/export", rlw(rs(http.HandlerFunc(ds.handleExport))))
+	mux.Handle("GET /api/v1/metrics/_fleet/export", rlw(rs(http.HandlerFunc(ds.handleExport))))
 	mux.Handle("GET /api/v1/audit", rlw(rs(http.HandlerFunc(ds.handleAudit))))
 	mux.Handle("GET /api/v1/history/{host}", rlw(rs(http.HandlerFunc(ds.handleHistory))))
 	mux.Handle("GET /api/v1/servers", rlw(rs(http.HandlerFunc(ds.handleServers))))
