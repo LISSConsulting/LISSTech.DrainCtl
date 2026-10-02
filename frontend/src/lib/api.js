@@ -248,13 +248,17 @@ async function apiFetch(path, options = {}) {
             authState.error = 'session_expired';
         }
         let detail = '';
+        let envelope = null;
         try {
             const body = await response.json();
-            detail = body.error ?? body.message ?? JSON.stringify(body);
+            envelope = body && typeof body === 'object' ? body : null;
+            detail = envelope?.error ?? envelope?.message ?? JSON.stringify(body);
         } catch {
             detail = await response.text().catch(() => '');
         }
-        throw new ApiError(response.status, response.statusText, detail, path);
+        const error = new ApiError(response.status, response.statusText, detail, path);
+        if (envelope) Object.assign(error, envelope);
+        throw error;
     }
 
     return response;
@@ -742,22 +746,8 @@ export async function fetchExportMetrics({ host, from, to, resolution = 'auto', 
     }
 
     const route = host ? `/metrics/${encodeURIComponent(host)}/export` : '/metrics/_fleet/export';
-    const response = await fetch(`${BASE}${route}?${params}`, { credentials: 'include' });
-    if (response.ok) return response.blob();
-
-    if (response.status === 401) {
-        authState.username = null;
-        authState.error = 'session_expired';
-    }
-    let envelope = {};
-    try {
-        envelope = await response.json();
-    } catch {
-        envelope = { error: 'request_failed', message: await response.text().catch(() => '') };
-    }
-    const error = new Error(envelope.message ?? envelope.error ?? response.statusText);
-    Object.assign(error, envelope, { status: response.status });
-    throw error;
+    const response = await apiFetch(`${route}?${params}`);
+    return response.blob();
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.$state = (value) => value;
-const { fetchExportMetrics } = await import('./api.js');
+const { ApiError, fetchExportMetrics } = await import('./api.js');
 
 const request = {
     host: null,
@@ -18,8 +18,10 @@ for (const [format, mime] of [
     ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
 ]) {
     test(`fetchExportMetrics returns a ${format} Blob`, async () => {
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = async () => new Response('file bytes', { status: 200, headers: { 'Content-Type': mime } });
+        globalThis.fetch = async (url) => {
+            assert.match(String(url), new RegExp(`format=${format}`));
+            return new Response('file bytes', { status: 200, headers: { 'Content-Type': mime } });
+        };
         try {
             const blob = await fetchExportMetrics({ ...request, format });
             assert.ok(blob instanceof Blob);
@@ -39,13 +41,27 @@ test('fetchExportMetrics preserves the API error envelope', async () => {
         });
     try {
         await assert.rejects(fetchExportMetrics({ ...request, format: 'csv' }), (error) => {
-            assert.equal(error.status, 413);
+            assert.ok(error instanceof ApiError);
             assert.equal(error.error, 'payload_too_large');
             assert.equal(error.message, 'Narrow the time range.');
             assert.equal(error.limit_rows, 50000);
             assert.equal(error.rows, 50001);
             return true;
         });
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('fetchExportMetrics serializes every fleet cohort member as host', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+        const parsed = new URL(url);
+        assert.deepEqual(parsed.searchParams.getAll('host'), ['srv-a', 'srv-b']);
+        return new Response('file bytes', { status: 200, headers: { 'Content-Type': 'text/csv;charset=utf-8' } });
+    };
+    try {
+        await fetchExportMetrics({ ...request, format: 'csv', cohort: ['srv-a', 'srv-b'] });
     } finally {
         globalThis.fetch = originalFetch;
     }
