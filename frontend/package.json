@@ -6,7 +6,7 @@
     "packageManager": "pnpm@11.25.0",
     "scripts": {
         "dev": "vite",
-        "test": "node --test src/lib/chart-contracts.test.js src/lib/chart-data.test.js src/lib/remotefx.test.js src/lib/thresholds.test.js",
+        "test": "node --test src/lib/chart-contracts.test.js src/lib/chart-data.test.js src/lib/remotefx.test.js src/lib/thresholds.test.js src/lib/api.test.js src/components/export-control.test.js",
         "build": "vite build",
         "preview": "vite preview"
     },
