@@ -20,10 +20,11 @@ let items = $state([]);
 
 /**
  * Show a toast notification.
- * @param {string} msg
+ * @param {string|{error?:string, message?:string, status?:number}} msg
  * @param {'ok'|'err'|'info'} type
  */
 function show(msg, type = 'info') {
+    const text = typeof msg === 'string' ? msg : msg.message ?? msg.error ?? 'Request failed';
     const tid = ++id;
     const duration = DURATION[type] ?? 6000;
     // untrack the read of items so callers inside $effect don't accidentally
@@ -35,7 +36,7 @@ function show(msg, type = 'info') {
         const oldest = current.find((t) => !t.dismissing);
         if (oldest) dismiss(oldest.id);
     }
-    items = [...untrack(() => items), { id: tid, msg, type, dismissing: false, duration }];
+    items = [...untrack(() => items), { id: tid, msg: text, type, dismissing: false, duration }];
     setTimeout(() => dismiss(tid), duration);
 }
 
@@ -54,8 +55,8 @@ export const toast = {
     get items() {
         return items;
     },
-    ok: (/** @type {string} */ msg) => show(msg, 'ok'),
-    err: (/** @type {string} */ msg) => show(msg, 'err'),
-    info: (/** @type {string} */ msg) => show(msg, 'info'),
+    ok: (/** @type {string|{error?:string, message?:string, status?:number}} */ msg) => show(msg, 'ok'),
+    err: (/** @type {string|{error?:string, message?:string, status?:number}} */ msg) => show(msg, 'err'),
+    info: (/** @type {string|{error?:string, message?:string, status?:number}} */ msg) => show(msg, 'info'),
     dismiss,
 };

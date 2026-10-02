@@ -354,7 +354,7 @@
             link.click();
             URL.revokeObjectURL(url);
         } catch (error) {
-            toast.err(error.message ?? error.error ?? 'Export failed');
+            toast.err(error);
         }
     }
 </script>
