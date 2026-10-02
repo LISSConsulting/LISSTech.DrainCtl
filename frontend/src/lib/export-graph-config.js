@@ -39,7 +39,7 @@ export function shouldDisableExport({ loading, failed, empty, hasEnabledSeries, 
     return loading || failed || empty || !hasEnabledSeries || isStale;
 }
 
-/** @param {{loading:boolean, failed:boolean, empty:boolean, hasEnabledSeries:boolean, isStale:boolean}} state */
-export function disabledState(state) {
-    return state;
+/** @param {{label:string}} graph */
+export function exportAriaLabel(graph) {
+    return `Export ${graph.label}`;
 }

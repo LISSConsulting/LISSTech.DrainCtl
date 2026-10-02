@@ -1,6 +1,6 @@
 <script>
     import { Download } from '@lucide/svelte';
-    import { shouldDisableExport } from '../lib/export-graph-config.js';
+    import { exportAriaLabel, shouldDisableExport } from '../lib/export-graph-config.js';
 
     /** @type {{label:string}} */
     let { exportConfig, state: exportState, onExport = async () => {} } = $props();
@@ -10,6 +10,7 @@
         exportState.loading ? 'Chart is loading' : exportState.failed ? 'Chart failed to load' : exportState.isStale ? 'Chart data is stale' : exportState.empty ? 'No retained history for this window' : !exportState.hasEnabledSeries ? 'No series are enabled' : '',
     );
     let graphLabel = $derived(exportConfig.label);
+    let ariaLabel = $derived(exportAriaLabel(exportConfig));
 
     async function select(format) {
         open = false;
@@ -22,7 +23,7 @@
         class="export-trigger"
         disabled={disabled}
         title={reason || `Export ${graphLabel}`}
-        aria-label={`Export ${graphLabel}`}
+        aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         onclick={() => (open = !open)}
