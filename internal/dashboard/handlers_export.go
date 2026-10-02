@@ -174,7 +174,7 @@ func (ds *DashboardServer) handleExport(w http.ResponseWriter, r *http.Request) 
 	if exportType == ExportTypePerHost {
 		tier, err := ds.resolveMetricsTier(ctx, hostName, from, to, resStr)
 		if err != nil {
-			slog.Error("export: tier resolution failed", "host", hostName, "error", err) //nolint:gosec // host is validated against registered server list
+			logExportFailure(hostName, format, graph.ID, "storage_error")
 			writeExportError(w, "storage_error", http.StatusInternalServerError, exportErrorBody{})
 			return
 		}
@@ -182,14 +182,14 @@ func (ds *DashboardServer) handleExport(w http.ResponseWriter, r *http.Request) 
 	} else {
 		tier, err := ds.resolveFleetMetricsTier(ctx, hostFilter, from, to, resStr)
 		if err != nil {
-			slog.Error("export: fleet tier resolution failed", "error", err)
+			logExportFailure("", format, graph.ID, "storage_error")
 			writeExportError(w, "storage_error", http.StatusInternalServerError, exportErrorBody{})
 			return
 		}
 		series, tErr = ds.ms.QueryRangeFleet(ctx, hostFilter, from, to, tier, counters, int64(telemetry.DefaultRawFleetBucketMs))
 	}
 	if tErr != nil {
-		slog.Error("export: query failed", "error", tErr)
+		logExportFailure(hostName, format, graph.ID, "storage_error")
 		writeExportError(w, "storage_error", http.StatusInternalServerError, exportErrorBody{})
 		return
 	}
@@ -224,7 +224,7 @@ func (ds *DashboardServer) handleExport(w http.ResponseWriter, r *http.Request) 
 	}
 	filename, fnameErr := BuildFilename(filenameType, hostName, graph.Label, format)
 	if fnameErr != nil {
-		slog.Error("export: filename build failed", "error", fnameErr, "graph", graph.ID)
+		logExportFailure(hostName, format, graph.ID, "storage_error")
 		writeExportError(w, "storage_error", http.StatusInternalServerError, exportErrorBody{})
 		return
 	}
@@ -236,16 +236,27 @@ func (ds *DashboardServer) handleExport(w http.ResponseWriter, r *http.Request) 
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		if err := WriteCSV(w, snap); err != nil {
-			slog.Error("export: csv write failed", "error", err)
+			logExportFailure(hostName, format, graph.ID, "write_failed")
 			return
 		}
 	case "xlsx":
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		if err := WriteXLSX(w, snap); err != nil {
-			slog.Error("export: xlsx write failed", "error", err)
+			logExportFailure(hostName, format, graph.ID, "write_failed")
 			return
 		}
 	}
+}
+
+// logExportFailure records only request metadata safe for operational logs.
+// Exported observations, writer errors, credentials, and response bodies are
+// intentionally omitted.
+func logExportFailure(host, format, graphID, code string) {
+	if host == "" {
+		slog.Error("export request failed", "format", format, "graph", graphID, "error_code", code)
+		return
+	}
+	slog.Error("export request failed", "host", host, "format", format, "graph", graphID, "error_code", code) //nolint:gosec // host is validated against the registered server list
 }
 
 // deriveCoverage mirrors the existing /api/v1/metrics coverage labels so
