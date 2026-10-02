@@ -58,6 +58,24 @@ func TestExportXLSXCellTypes(t *testing.T) {
 	}
 }
 
+func TestExportXLSXFormulaSafety(t *testing.T) {
+	contents := writeXLSXParts(t, exportXLSXFixture(ExportTypeFleet))
+	for name, content := range contents {
+		if name == "xl/vbaProject.bin" {
+			t.Error("workbook includes a VBA project")
+		}
+		if strings.HasPrefix(name, "xl/worksheets/") && strings.HasSuffix(name, ".xml") {
+			xml := string(content)
+			if strings.Contains(xml, "<f") {
+				t.Errorf("%s contains a formula element", name)
+			}
+			if strings.Contains(xml, `t="str"`) {
+				t.Errorf("%s contains a formula-result string cell", name)
+			}
+		}
+	}
+}
+
 func exportXLSXFixture(exportType ExportType) Snapshot {
 	value := 42.5
 	host := ""
