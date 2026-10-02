@@ -140,7 +140,7 @@ cli: frontend-copy resource
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $env:CGO_ENABLED = "1"
-    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
+    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver -X github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard.packageVersion=$ver" -o "{{bin_dir}}/drainctl.exe" ./cmd/drainctl/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.exe").Length / 1MB)
     Write-Host "   drainctl.exe ($size) — v$ver" -ForegroundColor DarkGray
@@ -154,7 +154,7 @@ daemon: frontend-copy
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $env:CGO_ENABLED = "1"
-    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctld.exe" ./cmd/drainctld/
+    & go build -trimpath -buildvcs=false -ldflags "-linkmode=external -s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver -X github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard.packageVersion=$ver" -o "{{bin_dir}}/drainctld.exe" ./cmd/drainctld/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctld.exe").Length / 1MB)
     Write-Host "   drainctld.exe ($size) — v$ver" -ForegroundColor DarkGray
@@ -168,7 +168,7 @@ dll:
     $ver = & "{{justfile_directory()}}/scripts/version.ps1" -Full
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $env:CGO_ENABLED = "1"
-    & go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
+    & go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags "-s -w -X github.com/LISSConsulting/LISSTech.DrainCtl.Version=$ver -X github.com/LISSConsulting/LISSTech.DrainCtl/internal/dashboard.packageVersion=$ver" -o "{{bin_dir}}/drainctl.dll" ./cmd/cshared/
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Remove-Item -ErrorAction SilentlyContinue "{{bin_dir}}/drainctl.h"
     $size = "{0:N1} MB" -f ((Get-Item "{{bin_dir}}/drainctl.dll").Length / 1MB)
