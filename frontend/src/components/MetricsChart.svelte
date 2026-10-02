@@ -9,7 +9,7 @@
         toggleOverviewSelection,
     } from '../lib/state.svelte.js';
     import { DEFAULTS, resolveThresholds } from '../lib/thresholds.js';
-    import { fetchFleetMetrics } from '../lib/api.js';
+    import { fetchExportMetrics, fetchFleetMetrics } from '../lib/api.js';
     import { adaptFleetToRfxSamples, processRfxHistory } from '../lib/remotefx.js';
     import { adaptFleetToMetricsSamples, adaptFleetToSessionSamples } from '../lib/chart-data.js';
     import {
@@ -21,6 +21,9 @@
     } from '../lib/chart-contracts.js';
     import DualAxisChart from './chart/DualAxisChart.svelte';
     import HealthIndicatorChart from './chart/MiniHealthChart.svelte';
+    import ExportControl from './ExportControl.svelte';
+    import { EXPORT_GRAPHS } from '../lib/export-graph-config.js';
+    import { toast } from '../lib/toast.svelte.js';
     import {
         Gauge,
         Timer,
@@ -86,6 +89,7 @@
             icon: Timer,
             helpText:
                 "Delay between user input and screen response. The filled series is the highest participating host's per-session P95; P50 is the exact median reporting host. Higher values are worse.",
+            exportGraph: 'humanic.input_delay',
         },
         {
             key: 'pagesPerSec',
@@ -100,6 +104,7 @@
             icon: FileText,
             helpText:
                 'Pages read from or written to disk each second, including pagefile, memory-mapped file, and prefetch activity. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Correlate sustained rises with available memory.',
+            exportGraph: 'humanic.pages_sec',
         },
         {
             key: 'tcpRetrans',
@@ -114,6 +119,7 @@
             icon: Network,
             helpText:
                 'TCP segments retransmitted each second. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Sudden or sustained increases indicate congestion or link problems.',
+            exportGraph: 'humanic.tcp_retrans_sec',
         },
         {
             key: 'diskQueue',
@@ -128,6 +134,7 @@
             icon: HardDrive,
             helpText:
                 'I/O requests waiting for disk. The outer area is the fleet average; the median host nests inside it while ordered, then switches to a dotted line if retained cohorts cross. Correlate spikes with storage latency, memory pressure, CPU scheduling, and workload.',
+            exportGraph: 'humanic.disk_queue',
         },
     ];
 
@@ -704,6 +711,38 @@
 
     const Y_DOMAIN = [0, 100];
     let lcData = $derived(history.map((_, i) => ({ x: i, y: 50 })));
+
+    let fleetExportState = $derived({
+        loading: fleetLoading,
+        failed: fleetError,
+        empty: history.length < 2,
+        hasEnabledSeries: Object.values(loadVisible).some(Boolean),
+        isStale: fleetResponseKey !== fleetQueryKey,
+    });
+
+    async function exportFleet(graph, format) {
+        const to = new Date(Date.now() - panOffsetMs);
+        const from = new Date(to.getTime() - windowMs);
+        try {
+            const blob = await fetchExportMetrics({
+                from,
+                to,
+                resolution: 'auto',
+                counters: EXPORT_GRAPHS[graph].defaultCounters,
+                format,
+                graph,
+                cohort: overviewFiltering ? appState.overviewSelectedHosts : undefined,
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `drainctl-fleet-${EXPORT_GRAPHS[graph].slug}.${format}`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            toast.err(error);
+        }
+    }
 </script>
 
 <!-- ── Sub-tab bar ── -->
@@ -933,6 +972,9 @@
                                             {history}
                                             visible={loadVisible}
                                             showXAxis={true}
+                                            exportConfig={EXPORT_GRAPHS['overview.load']}
+                                            exportState={fleetExportState}
+                                            onExport={(format) => exportFleet('overview.load', format)}
                                         />
                                     </Svg>
                                 </LayerCake>
@@ -1015,6 +1057,9 @@
                                     axisRight={i % 2 === 1 && !isMobile && gridLayout}
                                     helpText={mc.helpText ?? ''}
                                     showHelp={showHicHelp}
+                                    exportConfig={EXPORT_GRAPHS[mc.exportGraph]}
+                                    exportState={{ ...fleetExportState, hasEnabledSeries: true }}
+                                    onExport={(format) => exportFleet(mc.exportGraph, format)}
                                 />
                             {/each}
                         </div>
@@ -1057,6 +1102,11 @@
                             <HelpCircle size={11} strokeWidth={2.2} />
                         </button>
                     </div>
+                    <ExportControl
+                        exportConfig={EXPORT_GRAPHS['overview.sessions']}
+                        state={{ ...fleetExportState, empty: sessionHistory.length < 2, hasEnabledSeries: true }}
+                        onExport={(format) => exportFleet('overview.sessions', format)}
+                    />
                     {#if showSessionHelp}
                         <p class="chart-desc">
                             Session count and utilization describe connected demand and capacity. Session CPU and memory
@@ -1139,6 +1189,11 @@
                             <HelpCircle size={11} strokeWidth={2.2} />
                         </button>
                     </div>
+                    <ExportControl
+                        exportConfig={EXPORT_GRAPHS['overview.remotefx']}
+                        state={{ ...fleetExportState, empty: rfxHistoryProcessed.length < 2, hasEnabledSeries: true }}
+                        onExport={(format) => exportFleet('overview.remotefx', format)}
+                    />
                     {#if showRfxHelp}
                         <p class="chart-desc">
                             FPS and Frame Quality show the lowest participating-host service floor; conventional metrics
