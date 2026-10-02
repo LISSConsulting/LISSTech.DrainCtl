@@ -18,6 +18,7 @@ for (const [format, mime] of [
     ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
 ]) {
     test(`fetchExportMetrics returns a ${format} Blob`, async () => {
+        const originalFetch = globalThis.fetch;
         globalThis.fetch = async (url) => {
             assert.match(String(url), new RegExp(`format=${format}`));
             return new Response('file bytes', { status: 200, headers: { 'Content-Type': mime } });
@@ -56,7 +57,7 @@ test('fetchExportMetrics preserves the API error envelope', async () => {
 test('fetchExportMetrics serializes every fleet cohort member as host', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
-        const parsed = new URL(url);
+        const parsed = new URL(url, 'http://localhost');
         assert.deepEqual(parsed.searchParams.getAll('host'), ['srv-a', 'srv-b']);
         return new Response('file bytes', { status: 200, headers: { 'Content-Type': 'text/csv;charset=utf-8' } });
     };
